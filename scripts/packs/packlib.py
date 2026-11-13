@@ -59,3 +59,12 @@ def fetch_pinned(url, dst, sha256):
         raise SystemExit(f"{url}: SHA-256 {got}, expected {sha256}")
     part.rename(dst)
     return dst
+
+
+def write_plugin(out, name, kind, about, licence, source, files, params=None, inputs=None, outputs=None):
+    """out/plugin.json (mojoui.plugins, goal 68): the pack as a model plugin with runner max."""
+    from pathlib import Path
+
+    spec = {"format": "omx-plugin/1", "name": name, "kind": kind, "runner": "max", "about": about, "licence": licence, "source": source,
+            "inputs": inputs or [], "outputs": outputs or [], "files": files, "params": params or {}, "trust_remote_code": False}
+    (Path(out) / "plugin.json").write_text(json.dumps(spec, indent=1) + "\n")

@@ -13,6 +13,7 @@
 
 from std.math import exp
 from std.memory import Pointer
+from mojoui.plugins import Plugin
 from mojoui.maxrt import MaxModel, TensorIn, shared_model
 from mojoui.shared import at
 
@@ -175,3 +176,11 @@ def letterbox[step: Int, R: Int, G: Int, B: Int](address: Int, w: Int, h: Int, r
                 var v = (a * (1 - wx) + b * wx) * (1 - wy) + (cc * (1 - wx) + d * wx) * wy
                 out[o + c] = Float32(Int(v + 0.5))  # (OpenCV rounds the resized bytes)
     return out^
+
+
+def max_detector(p: Plugin) raises -> Detector:
+    """A MAX detect plugin's detector (mojoui.plugins): its params say how its outputs decode; this version decodes
+    YOLOX's (85 numbers a box) and refuses another by name."""
+    if p.param("decode") != "yolox":
+        raise Error(p.name + ": a MAX detector whose outputs decode as '" + p.param("decode") + "' (this version decodes yolox)")
+    return Detector(p.dir)

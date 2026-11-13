@@ -175,6 +175,12 @@ def main():
         worst = max(worst, float(d[:, 4:].max()))
     if worst > 0.02:
         raise SystemExit(f"the graph differs from torch: score difference {worst}")
+    from packlib import write_plugin  # (goal 68: the pack is a model plugin, called detect)
+
+    write_plugin(out, "detect", "detect", "YOLOX-Tiny: COCO's 80 kinds of thing, with boxes", "Apache-2.0", "github:Megvii-BaseDetection/YOLOX 0.3.0",
+                 {"graph": "yolox.mef", "weights": "yolox.safetensors"}, {"decode": "yolox", "size": SIZE, "labels": "coco"},
+                 [{"name": "frame", "type": "image"}],
+                 [{"name": n, "type": t} for n, t in (("kind", "text"), ("score", "number"), ("x", "number"), ("y", "number"), ("w", "number"), ("h", "number"))])
     print(f"yolox pack: {out} (worst score difference {worst:.5f})")
 
 

@@ -12,6 +12,8 @@
 
 from std.math import exp, floor
 from mojoui.json import Json
+from mojoui.plugins import Plugin
+from std.os.path import exists as file_exists
 from mojoui.maxrt import MaxModel, TensorIn, shared_model
 from mojoui.shared import at
 
@@ -29,19 +31,35 @@ struct ImageModel(Movable):
     var function: String  # what a script calls it (model.json)
 
     def __init__(out self, pack: String) raises:
+        """A MAX classify-image plugin's folder (mojoui.plugins: its plugin.json names the graph, weights, labels and
+        size); a pack built before plugins (only model.json, kind image-labels) reads the same."""
         var dir = String(pack.rstrip("/"))
         var name = String(dir[byte = dir.rfind("/") + 1 :])
-        var j = Json.parse(open(dir + "/model.json", "r").read())
-        if j.text(j.get(0, "kind")) != "image-labels":
-            raise Error(dir + "/model.json: kind isn't image-labels")
-        self.function = j.text(j.get(0, "function"), name)
-        self.size = j.number(j.get(j.get(0, "input"), "size"), 224)
+        var graph = dir + "/" + name + ".mef"
+        var weights = dir + "/" + name + ".safetensors"
+        var labels = dir + "/labels.txt"
+        if file_exists(dir + "/plugin.json"):
+            var p = Plugin.read(dir)
+            if p.kind != "classify-image" or p.runner != "max":
+                raise Error(dir + "/plugin.json: not a MAX picture classifier (" + p.kind + ", " + p.runner + ")")
+            self.function = p.name
+            self.size = Int(p.param_number("size", 224.0))
+            graph = p.file("graph")
+            weights = p.file("weights")
+            labels = p.file("labels")
+        else:
+            var j = Json.parse(open(dir + "/model.json", "r").read())
+            if j.text(j.get(0, "kind")) != "image-labels":
+                raise Error(dir + "/model.json: kind isn't image-labels")
+            self.function = j.text(j.get(0, "function"), name)
+            self.size = j.number(j.get(j.get(0, "input"), "size"), 224)
+            labels = dir + "/" + j.text(j.get(0, "labels"), "labels.txt")
         self.labels = List[String]()
-        for line in open(dir + "/" + j.text(j.get(0, "labels"), "labels.txt"), "r").read().split("\n"):
+        for line in open(labels, "r").read().split("\n"):
             var l = String(line.strip())
             if l != "":
                 self.labels.append(l)
-        self.model = shared_model(dir + "/" + name + ".mef", dir + "/" + name + ".safetensors", gpu=True)
+        self.model = shared_model(graph, weights, gpu=True)
 
     def logits_rgba(mut self, frame: List[UInt32], w: Int, h: Int) raises -> List[Float32]:
         var ins = List[TensorIn]()

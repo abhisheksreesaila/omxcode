@@ -34,7 +34,7 @@ from mojoui.timeseries import TimeSeries
 from mojoui.trackcard import is_track, series_from_sheet
 from mojoui.script import run_script, strip_comments
 from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS, applied_marks
-from mojoui.models import ModelFunctions, FRAME_MODELS
+from mojoui.models import ModelFunctions, box_models
 from mojoui.player import Mark
 from mojoui.maxrt import prepare_max
 
@@ -279,7 +279,7 @@ struct ScriptJob(JobBody):
             cards.append(card^)
         var answer = ScriptAnswer(cards^, run.log.copy(), run.problem, run.line, Float64(now_ns() - t0) / 1e6)
         var on_frames = materialize[VIDEO_FUNCTIONS]()
-        for f in materialize[FRAME_MODELS]():  # (the functions that make boxes: an image-labels pack's rows are labels, not marks)
+        for f in box_models():  # (the functions that make boxes: a picture classifier's rows are labels, not marks)
             on_frames.append(f)
         var m = applied_marks(self.text, run.names, run.tables, on_frames)
         answer.marked = m[0]

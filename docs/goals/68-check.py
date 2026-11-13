@@ -58,8 +58,87 @@ def bag_dirs():
 # ------------------------------------------------------------------------------------------------------------- M0
 
 
+PACKS = ROOT / "build/packs"
+HUB_PLUGINS = OUT / "hub-plugins"
+
+
+def hub_plugin(repo, folder_root):
+    """A Hub model as a torch plugin folder (mojoui/plugin_py.py's preflight, download and write_plugin), once."""
+    code = ("import importlib.util, json, os, sys, time\n"
+            "spec = importlib.util.spec_from_file_location('pp', 'mojoui/plugin_py.py'); pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)\n"
+            "root = os.path.abspath(sys.argv[2]); os.makedirs(root, exist_ok=True); repo = sys.argv[1]\n"
+            "p = json.loads(pp.preflight(repo)); folder = os.path.join(root, pp.plugin_name(repo)); os.makedirs(folder, exist_ok=True)\n"
+            "pp.download(repo, folder, json.dumps(p['files']), p['sha'], False, json.dumps(p['sizes']))\n"
+            "while json.loads(pp.job('dl:' + folder))['state'] == 'running': time.sleep(0.5)\n"
+            "j = json.loads(pp.job('dl:' + folder)); assert j['state'] == 'done', j\n"
+            "print(pp.write_plugin(folder, json.dumps(p), False))\n")
+    r = run(["pixi", "run", "-e", "models", "python", "-I", "-c", code, repo, str(folder_root)], 3600)
+    if r.returncode:
+        raise RuntimeError(f"{repo}: " + (r.stdout + r.stderr)[-600:])
+    return r.stdout.strip().splitlines()[-1]
+
+
+def ensure_packs():
+    """The MAX packs as plugins (their builders write plugin.json): e5small, yolox (detect), scene."""
+    for name, cmd in (("e5small", ["scripts/packs/e5small.py", str(PACKS / "e5small")]), ("yolox", ["scripts/packs/yolox.py", str(PACKS / "yolox")]),
+                      ("scene", ["scripts/packs/from_torch.py", "torchvision:resnet18", str(PACKS / "scene"), "--function", "scene"])):
+        if not (PACKS / name / "plugin.json").exists():
+            r = run(["pixi", "run", "python", *cmd], 3600)
+            if r.returncode:
+                raise RuntimeError(f"pack {name}: " + (r.stdout + r.stderr)[-600:])
+
+
 def m0():
-    return None, "not built yet"
+    """One plugin format: decision files evaluated in Mojo match their libraries; plugin folders found at run time,
+    unsafe ones refused; the MAX packs (YOLOX, e5, ResNet-18) and OWLv2 (torch) all run as plugin functions with no
+    model named in mojoui/models.mojo; a plugin folder copied in after the build is a function."""
+    probs = []
+    r = run(["pixi", "run", "-e", "models", "python", "-I", "docs/goals/68/tree_fixtures.py", str(OUT / "trees")], 900)
+    if r.returncode:
+        return False, "tree fixtures: " + (r.stdout + r.stderr)[-500:]
+    ok, why = mojo_test("tests/test_treefile.mojo", ["treefile-xgboost-lightgbm", "treefile-refuses"], 1800)
+    if not ok:
+        return False, "test_treefile: " + why
+    worst = re.search(r"treefile-xgboost-lightgbm: ok (\S+)", why).group(1)
+    run(["pixi", "run", "python", "-I", "docs/goals/68/make_plugins.py", str(OUT / "trees"), str(OUT / "plugins")])
+    ok, why = mojo_test("tests/test_plugins.mojo", ["plugins-found", "plugins-tabular", "plugins-mismatch"], 1800, env_name="models")
+    if not ok:
+        return False, "test_plugins: " + why
+    ensure_packs()
+    owl = hub_plugin("google/owlv2-base-patch16-ensemble", HUB_PLUGINS) if not (HUB_PLUGINS / "owlv2_base_patch16_ensemble/plugin.json").exists() else "owlv2_base_patch16_ensemble"
+    exe = BIN / "test_plugin_script"
+    ok, why = mojo_build("tests/test_plugin_script.mojo", exe)
+    if not ok:
+        return False, "test_plugin_script: " + why
+    late = OUT / "late-plugins"
+    shutil.rmtree(late, ignore_errors=True)
+    late.mkdir(parents=True)
+    shutil.copytree(OUT / "plugins/stops_lgb", late / "late_stops")  # (after the build: found at run time)
+    spec = json.loads((late / "late_stops/plugin.json").read_text())
+    spec["name"] = "late_stops"
+    (late / "late_stops/plugin.json").write_text(json.dumps(spec))
+    videos = OUT / "videos/nav15_front.avi"
+    if not videos.exists():
+        return False, "no NavWareSet video (M3's test_bag writes it)"
+    r = run(["pixi", "run", "-e", "models", str(exe)], 1800, {"OMX_PACKS": str(PACKS), "OMX_PLUGINS": f"{HUB_PLUGINS}:{late}", "SCRIPT_VIDEO": str(videos),
+                                                        "MOMENTS": str(OUT / "learn/moments.csv"), "OWL": owl, "LATE": "late_stops"})
+    out = r.stdout + r.stderr
+    (OUT / "m0-script.txt").write_text(out)
+    for label in ["plugin-detect", "plugin-scene", f"plugin-{owl}", "plugin-classify", "plugin-late-drop"]:
+        if not re.search(rf"^{re.escape(label)}: ok", out, re.M):
+            probs.append(f"{label} missing: " + out[-500:])
+    # (no model named in the registry: its functions come from plugins; the classify default is a plugin's name)
+    src = (ROOT / "mojoui/models.mojo").read_text()
+    code = "\n".join(l.split("#")[0] for l in src.splitlines() if not l.lstrip().startswith("#"))
+    named = [w for w in ("yolox", "resnet", "owl", "scene\"", "\"/yolox", "Detector(packs_dir", "CLASSIFY_PACK") if w in code]
+    if named or 'MODEL_FUNCTIONS: List[String] = ["classify"]' not in src:
+        probs.append(f"models.mojo still names models: {named}")
+    rows = dict(re.findall(r"^  (\S+): (\d+) rows", out, re.M))
+    return (not probs), ("; ".join(probs) if probs else
+                         f"XGBoost JSON + LightGBM text in Mojo match their libraries (worst {worst}); ONNX + skops in process; 3 unsafe folders refused "
+                         f"(a pickle, a ../ path, a link out: test_plugins checks each); mismatched columns said; as plugin functions: detect (YOLOX, MAX) {rows.get('detect')} boxes, scene (ResNet-18, MAX) "
+                         f"{rows.get('scene')} frames, OWLv2 (torch, Hub) {rows.get(owl)} boxes, classify() via e5small; late_stops copied in after the build answered "
+                         f"{rows.get('late_stops')} rows; models.mojo names no model")
 
 
 def build_app(platform="linux"):

@@ -105,6 +105,11 @@ def main(repo=REPO, name="minilm", prefix=""):
     e = model.execute(driver.Buffer.from_numpy(a).to(gpu), driver.Buffer.from_numpy(m).to(gpu))[0].to(driver.CPU()).to_numpy()
     e = (e / np.linalg.norm(e, axis=1, keepdims=True)).astype(np.float32)
     e.tofile(out / "ref_vectors.f32")
+    from packlib import write_plugin  # (goal 68: the pack is a model plugin)
+
+    write_plugin(out, name, "embed-text", f"{repo}: text to 384 numbers that compare by meaning (mean pooled)", "MIT" if "e5" in repo else "Apache-2.0",
+                 "hf:" + repo, {"graph": f"{name}.mef", "weights": f"{name}.safetensors", "vocab": "vocab.txt"},
+                 {"prefix": prefix, "pooling": "mean", "dim": 384}, [{"name": "text", "type": "text"}], [{"name": "vector", "type": "vector"}])
     print(f"{name} pack: {out}; {len(texts)} references, longest {L} tokens, vectors {e.shape}")
 
 

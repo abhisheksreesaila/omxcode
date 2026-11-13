@@ -314,6 +314,12 @@ def build(args):
                 "input": {"size": size, "fit": "centre-square", "pixels": "RGB 0-255 NHWC float32"},
                 "labels": "labels.txt", "model": args.model}
     (out / "model.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    from packlib import write_plugin  # (goal 68: the pack is a model plugin; model.json stays for older readers)
+
+    write_plugin(out, args.function, "classify-image", manifest["about"], "see " + args.model + "'s licence", args.model,
+                 {"graph": f"{name}.mef", "weights": f"{name}.safetensors", "labels": "labels.txt"},
+                 {"size": size, "fit": "centre-square"}, [{"name": "frame", "type": "image"}],
+                 [{"name": "label", "type": "text"}, {"name": "score", "type": "number"}])
     print(f"   {name}: MAX matches torch on {same}/{n} pictures (top label), logits within {worst:.4f}; {len(labels)} labels")
     if same != n or worst > args.tolerance:
         raise SystemExit(f"from_torch: MAX's outputs differ from torch's (top label {same}/{n}, logits within {worst:.4f} > {args.tolerance})")
