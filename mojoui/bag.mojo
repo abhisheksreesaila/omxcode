@@ -552,7 +552,7 @@ def _count_columns(types: MsgTypes, t: Int, depth: Int) -> Int:
         return 20001
     var n = 0
     for f in types.types[t].fields:
-        var each = _count_columns(types, f.type, depth + 1) if f.prim == P_MSG else 1
+        var each = max(_count_columns(types, f.type, depth + 1), 1) if f.prim == P_MSG else 1  # (an empty type still counts: no diamond of empty types multiplies unseen)
         var times = f.arr if f.arr > 0 else 1
         if each > 20000 // times:
             return 20001

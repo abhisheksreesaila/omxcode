@@ -99,4 +99,15 @@ def main() raises:
     except e:
         many = "20,000 columns" in String(e)
     check(many, "a schema of billions of columns")
+    var diamond = String("a/T0 a\na/T0 b")  # (30 levels, each holding the next twice, the last empty: 2^30 paths)
+    for k in range(30):
+        diamond += "\n================================================================================\nMSG: a/T" + String(k) + "\n"
+        if k < 29:
+            diamond += "a/T" + String(k + 1) + " a\na/T" + String(k + 1) + " b"
+    var wide = False
+    try:
+        _ = MsgTypes("a/Root", diamond)
+    except e:
+        wide = "20,000 columns" in String(e)
+    check(wide, "a diamond of empty types")
     print("bag-errors: ok")

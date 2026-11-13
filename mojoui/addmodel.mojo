@@ -330,7 +330,7 @@ struct AddModel(Movable):
             self.why = self.pf.why
             self.needs_consent = self.pf.can_run and self.pf.remote_code
             self.stage = S_SAID
-            self._say("checked " + self.pf.repo + " in " + _secs(Int(perf_counter_ns()) - self.t_paste) + ": " + self.line)
+            self._say("checked " + self.pf.repo + " in " + _secs(Int(perf_counter_ns()) - self.t_paste) + ": " + self.line + (" · " + self.why if self.why != "" else ""))
             return AM_NONE
         if self.stage == S_DOWNLOADING:
             self.job = py_job("dl:" + self.folder)
@@ -627,15 +627,15 @@ struct AddModel(Movable):
         var b = self.msg_base
         var parts = List[View]()
         parts.append(Text("A model from the Hugging Face Hub, a model file or folder, or ask the agent. It says what it is before anything downloads.", CAPTION).max_width(560))
-        if self.stage == S_EMPTY or (self.stage == S_SAID and not self.pf.can_run):
-            parts.append(Text("Try hustvl/yolos-tiny (finds people and things on a video frame), google/vit-base-patch16-224 (names what a frame shows), "
-                              + "BAAI/bge-small-en-v1.5 (finds rows that mean the same), or a decision tree file (XGBoost JSON, LightGBM text).", CAPTION).max_width(560).tag("add-examples"))
         parts.append(HStack(TextField(self.text, "Paste a model: owner/name, or its huggingface.co link", on_change=b + AM_TEXT_MSG, on_submit=b + AM_CHECK_MSG)
                                 .width(330).tag("add-model").label("Model").tooltip("A Hugging Face model's name or link; Return checks it"),
                             Button("Check", b + AM_CHECK_MSG, PROMINENT if self.stage == S_EMPTY else SUBTLE, icon="search").tag("add-check"),
                             FilePicker("File or folder…", b + AM_FILE_MSG, style=SUBTLE, icon="open", accept="folder,.json,.txt,.onnx,.skops").tag("add-model-file")
                                 .tooltip("An XGBoost JSON, LightGBM text, ONNX or skops file, Learn's tree, or a model folder"),
                             spacing=8).fill().align(CENTER))
+        if self.stage == S_EMPTY or (self.stage == S_SAID and not self.pf.can_run):
+            parts.append(Text("Try hustvl/yolos-tiny (finds people and things on a video frame), google/vit-base-patch16-224 (names what a frame shows), "
+                              + "BAAI/bge-small-en-v1.5 (finds rows that mean the same), or a decision tree file (XGBoost JSON, LightGBM text).", CAPTION).max_width(560).tag("add-examples"))
         if self.stage == S_CHECKING:
             parts.append(Text("Asking the Hub what " + self.text + " is… " + _secs(Int(perf_counter_ns()) - self.t_paste), CAPTION).tag("add-progress"))
         if self.line != "" and self.stage != S_CHECKING:
