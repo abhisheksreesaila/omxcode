@@ -79,6 +79,7 @@ soundfile = "*"
 models = { features = ["models"], solve-group = "models" }
 speech = { features = ["speech"], solve-group = "speech" }
 fhsaas = { features = ["fhsaas"], solve-group = "fhsaas" }
+bagcheck = { features = ["bagcheck"], solve-group = "bagcheck" }
 
 # Goal 60 M10 (D-6006): the fh-saas baseline for scripts/saas_bench.py, in its own feature + environment so the default
 # environment (and the Mojo server, which has no Python in it) stay unchanged. Run with `pixi run -e fhsaas ...`.
@@ -91,3 +92,18 @@ uvicorn = "*"
 
 [feature.fhsaas.pypi-dependencies]
 fh-saas = "*"
+
+# Goal 68 M3 (D-6810): the official MCAP and rosbag2 readers, only to check mojoui.bag field for field and to write a
+# rosbag2 sqlite3 test bag; the app never imports them. A separate feature + environment so the default stays as is.
+# Run with `pixi run -e bagcheck ...`. Linux only.
+[feature.bagcheck]
+platforms = ["linux-glibc-234"]
+
+[feature.bagcheck.dependencies]
+zstandard = "*"
+lz4 = "*"
+
+[feature.bagcheck.pypi-dependencies]
+mcap = "*"
+mcap-ros2-support = "*"
+rosbags = "*"

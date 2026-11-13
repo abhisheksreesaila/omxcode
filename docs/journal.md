@@ -1383,3 +1383,9 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Review round 2: code reviewer PASS, security auditor PASS (one LOW: re-runs re-adding deleted rows, fixed with an import record; M7 proves it).
 - M9 examples/finance_min: PASS on its first full run and again after the review fixes (bank links by one-time token).
 - M10: the full run read goal 64's "PASS  M0" lines as nothing (my parser expected "M0: PASS"): a checker bug, fixed; rerun PASS (goal 60 M1–M12 PASS; 57 as allowed; 64 M0–M4 PASS, M5 BLOCKED).
+
+## 2026-11-12 (goal 68)
+- r2b 2024 on NGC: the API lists files anonymously (`api.ngc.nvidia.com/v2/resources/nvidia/isaac/r2bdataset2024/versions/1/files`), each sequence one MCAP; r2b_galileo 493 MB, whitetunnel 527 MB. NavWareSet on the Hub (Voxel51/navwareset): 7 scenes, 4.1–4.4 GB each, Jackal only, 250 s per scene, /robot/camera/color/image_raw is a JPEG CompressedImage despite its name, /annotations/* are protobuf (foxglove.SceneUpdate), /telemetry/positions is JSON with robot_x/y/yaw and participant1..5_x/y.
+- Slicing a 4 GB MCAP over HTTP: footer (last 37 bytes) → summary (schemas, channels, chunk index) → a byte range of chunks → header + schemas + channels + chunks + DataEnd + Footer(0) is a valid summary-less MCAP; the mcap NonSeekingReader reads it and the writer re-chunks it.
+- The Mojo reader matched mcap_ros2 and rosbags on the first full run (0 differences, 919k fields). Compile errors on the way: String(x) of a slice of x ("aliasing"), FileHandle.seek takes Int, `_` can't be read in a loop.
+- r2b's cameras are H.264 ("h264" in CompressedImage.format, Annex B): the first video attempt raised; they now go through `ffmpeg -c copy`.

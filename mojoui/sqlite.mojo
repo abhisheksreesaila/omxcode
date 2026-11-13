@@ -116,6 +116,7 @@ struct _Lib(ImplicitlyCopyable, Movable):
     var last_insert_rowid: Int
     var changes: Int
     var busy_timeout: Int
+    var column_blob: Int
 
     @staticmethod
     def load() raises -> _Lib:
@@ -128,6 +129,7 @@ struct _Lib(ImplicitlyCopyable, Movable):
             _dlsym(h, "sqlite3_column_type"), _dlsym(h, "sqlite3_column_int64"), _dlsym(h, "sqlite3_column_double"),
             _dlsym(h, "sqlite3_column_text"), _dlsym(h, "sqlite3_column_bytes"), _dlsym(h, "sqlite3_errmsg"), _dlsym(h, "sqlite3_exec"),
             _dlsym(h, "sqlite3_last_insert_rowid"), _dlsym(h, "sqlite3_changes"), _dlsym(h, "sqlite3_busy_timeout"),
+            _dlsym(h, "sqlite3_column_blob"),
         )
         if lib.open_v2 == 0 or lib.column_bytes == 0 or lib.prepare_v2 == 0 or lib.bind_double == 0 or lib.busy_timeout == 0:
             raise Error("sqlite: the SQLite library is missing functions")
@@ -295,6 +297,18 @@ struct Statement(Movable):
             return String(from_utf8=Span(out))
         except:
             return String(from_utf8_lossy=Span(out))
+
+    def blob(self, col: Int) -> List[UInt8]:
+        """The column's bytes as they are (a BLOB: a ROS 2 bag's message; empty for NULL)."""
+        var addr = _fn[_F_PI_P](self.lib.column_blob)(self.st, c_int(col))  # (the bytes first, then their length)
+        var n = Int(_fn[_F_PI](self.lib.column_bytes)(self.st, c_int(col)))
+        var out = List[UInt8](capacity=max(n, 0))
+        if addr == 0 or n <= 0:
+            return out^
+        var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+        for i in range(n):
+            out.append(p.unsafe_offset(i)[])
+        return out^
 
 
 struct Database(Copyable, Movable):
