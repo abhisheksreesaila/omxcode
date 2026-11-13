@@ -154,7 +154,7 @@ def preflight(text):
         why = "segmenters from the Hub aren't run yet (SAM 2.1 runs as a built-in)"
     out["can_run"] = not why
     out["why"] = (why[0].upper() + why[1:] + ". Nothing downloaded.") if why else ""
-    out["line"] = f"{head} · {out['fits']} · licence {lic}" + (f" · {out['why']}" if why else "")
+    out["line"] = f"{head} · {out['fits']} · licence {lic}"  # (why it can't run is said once, under it)
     if remote and not why:
         out["line"] += f" · it runs its own code ({', '.join(code[:3]) or 'auto_map in config.json'}) inside this app: only after you allow it"
     return json.dumps(out)

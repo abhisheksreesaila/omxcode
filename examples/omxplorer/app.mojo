@@ -109,6 +109,10 @@ from mojoui.script import is_script
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
+from mojoui.addmodel import AddModel, AM_ANSWER, AM_RUN, AM_RAN, ADD_MESSAGES
+from mojoui.plugins import find_plugins
+from mojoui.fleetjobs import FleetOpened, FleetCamera, fleet_job, camera_file
+from mojoui.video import VideoSource
 from mojoui.learn import LearnPanel, LP_ADD, LP_LEARN, LP_PICK, LP_ROWS, with_label_column, learn_sheet, label_rows
 from mojoui.draw import rect as draw_rect, with_alpha
 from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
@@ -316,6 +320,9 @@ comptime STORY_READY = 4
 comptime LINKS_TOGGLE = 7682  # the toolbar's Links: the inspector shows the sheet's links
 comptime LEARN_MSG = 7900  # Learn from my labels (mojoui.learn: LEARN_MESSAGES, 7900–7939)
 comptime LEARN_TOGGLE = 7940  # the toolbar's Learn: the inspector shows the Learn page
+comptime ADD_MODEL_MSG = 7950  # Add a model (mojoui.addmodel: ADD_MESSAGES, 7950–7961)
+comptime ADD_MODEL_OPEN = 7962  # the toolbar's Add a model
+comptime FLEET_PICK = 7963  # Open bags: a folder of ROS 2 bags as a fleet (mojoui.fleet, goal 68 M4)
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
 comptime EDITOR_CANVAS = 300
@@ -482,6 +489,13 @@ struct Main(App):
     var peek: Peek  # a card held: what it's linked to
     var links_open: Bool  # the inspector shows the Links panel
     var learn: LearnPanel  # Learn from my labels (goal 68): its page in the inspector
+    var addm: AddModel  # Add a model (goal 68): its dialog, downloads and answers
+    var addm_col: Int  # the text column a text model ran on (its row: addm_row)
+    var addm_row: Int
+    var fleet_job: Optional[Job[FleetOpened]]  # Open bags: the folder being read (mojoui.fleetjobs)
+    var fleet_path: String
+    var fleet_cams: List[FleetCamera]  # the fleet's cameras as videos; the story's hero run's open as cards once it's ready
+    var fleet_hero: String
     var starter: Starter  # the starter the Start screen offers (OMX_STARTER; none: no folder)
     var story_step: Int  # 0, or how far the starter's story has got (STORY_SHEET … STORY_READY)
     var story_tables: Int  # the starter's tables landed so far
@@ -625,6 +639,13 @@ struct Main(App):
         self.peek = Peek(PEEK_CANVAS, PEEK_FRAME)
         self.links_open = False
         self.learn = LearnPanel(LEARN_MSG)
+        self.addm = AddModel(ADD_MODEL_MSG, self.trace)
+        self.addm_col = -1
+        self.addm_row = 0
+        self.fleet_job = None
+        self.fleet_path = ""
+        self.fleet_cams = List[FleetCamera]()
+        self.fleet_hero = ""
         self.starter = Starter()
         if environment("OMX_STARTER") != "":
             try:
@@ -1373,6 +1394,9 @@ struct Main(App):
     def story_tables_read(mut self):
         """Its tables are cards: its links, typed as a person would; its featured row followed; its documents opened."""
         self.story_step = STORY_DOCS
+        for v in self.starter.videos:  # (a story's videos: a fleet's cameras, each time-linked below)
+            var path = self.starter.path(v)
+            self.open_media(path, 420)
         self.know_tables()
         for text in self.starter.links:
             try:
@@ -1406,6 +1430,8 @@ struct Main(App):
 
     def story_ready(mut self):
         self.story_step = STORY_READY
+        if self.tables.find("stops") >= 0 and self.tables.find("moments") >= 0:  # (a fleet's story: its stops offer Label and learn)
+            self.fleet_ready()
         if self.trace:
             print("STORY: ready · " + String(len(self.links)) + " links · " + String(len(self.tables)) + " table cards", flush=True)
         self.say(Activity.done(self.starter.title, "ready: run a question"))
@@ -3142,6 +3168,190 @@ struct Main(App):
             self.grid.redraw()
             self.labels_changed()
 
+    # ---------- a fleet of robot bags (mojoui.fleet, goal 68 M4) ----------
+
+    def open_fleet(mut self, path: String):
+        if self.fleet_job:
+            self.message = "Still reading " + self.fleet_path
+            return
+        self.fleet_path = path
+        self.fleet_job = fleet_job(path)
+        self.say(Activity.running("Reading the bags in " + file_name(path), 0.0, "every topic of every run"))
+        if self.trace:
+            print("FLEET: open " + path, flush=True)
+
+    def poll_fleet(mut self):
+        var state = self.fleet_job.value().poll()
+        if state == JOB_RUNNING:
+            var p = self.fleet_job.value().progress()
+            var share = Float64(p.done) / Float64(p.total) if p.total > 0 else 0.0
+            self.island.progress(min(share, 1.0), String(Int(min(share, 1.0) * 100)) + "% · reading bags", self.font, now_ns())
+            return
+        var job = self.fleet_job.take()
+        try:
+            var f = job.result()
+            self.fleet_cams = f.cameras.copy()
+            self.fleet_hero = f.hero
+            for p in f.problems:
+                print("FLEET: problem " + p, flush=True)
+            if self.trace:
+                print("FLEET: read " + String(f.runs) + " runs, " + String(len(f.cameras)) + " cameras in " + fixed(f.ms / 1000.0, 1) + " s; story " + f.out, flush=True)
+            self.starter = Starter.read(f.out)
+            self.start_story()
+        except e:
+            self.say(Activity.error("Couldn't read the bags", String(e)))
+            self.message = String(e) + " (choose a folder of ROS 2 bags: folders holding .mcap or .db3 files)"
+            if self.trace:
+                print("FLEET: failed " + String(e), flush=True)
+        self.version += 1
+
+    def fleet_ready(mut self):
+        """A fleet's story is open (its hero run's cameras are cards, each linked by time to the moments: a moment picked
+        seeks every camera to it): the stops card offers Label and learn."""
+        var opened = 0
+        for c in self.fleet_cams:
+            opened += 1 if c.run == self.fleet_hero else 0
+        var k = self.tables.find("stops")
+        if k >= 0:
+            self.tables.cards[k].act_with("Label and learn", "sparkles", "label-stops", "Make the stops the sheet, label why some stopped, and Learn names the rest")
+        if self.trace:
+            print("FLEET: ready · " + String(opened) + " cameras of " + self.fleet_hero + " on the moments' cursor", flush=True)
+
+    def stops_to_sheet(mut self, k: Int):
+        """The stops card becomes the sheet (the runs a card in its place), with a label column `cause` and the Learn
+        page open: label why some robots stopped, press Learn."""
+        try:
+            var stops = self.tables.cards[k].sheet.frame.bake()
+            var runs = self.frame.frame.bake()
+            var runs_name = self.name
+            var x = self.tables.cards[k].x
+            var y = self.tables.cards[k].y
+            var w = self.tables.cards[k].w
+            var h = self.tables.cards[k].h
+            self.tables.remove(k)
+            _ = self.tables.add(runs_name, Sheet(runs^.share(), False), x, y, w, h, self.font, self.pal)
+            self.swap_table(stops^, 0, 0)
+            self.name = "stops"
+            self.sheet_name = "stops"
+            self.learn.reset()
+            self.learn.open = True
+            self.inspector_open = True
+            self.story_open = False
+            self.learn.name_text = "cause"
+            self.learn.label = "cause"
+            var t = with_label_column(self.frame, "cause")
+            self.swap_table(t^, self.frame.columns(), 0)
+            self.learn.count_labels(self.frame)
+            self.message = "The stops are the sheet: label why some robots stopped in cause, then Learn"
+            if self.trace:
+                print("FLEET: stops are the sheet (" + String(self.frame.rows()) + " rows)", flush=True)
+        except e:
+            self.message = String(e)
+
+    # ---------- Add a model (mojoui.addmodel, goal 68) ----------
+
+    def addm_event(mut self, did: Int):
+        if did == AM_ANSWER:
+            self.answer_here()
+        elif did == AM_RUN:
+            self.run_on_all()
+        elif did == AM_RAN:
+            try:
+                if self.addm.run_what == "texts":
+                    var t = self.addm.text_table(self.frame, self.addm_col, self.addm_row)
+                    self.swap_table(t^, self.frame.columns(), self.addm_row)
+                else:
+                    var t = self.addm.video_table()
+                    var name = self.addm.name + "_frames"
+                    var sheet = Sheet(t^.share(), False)
+                    var w = self.card_width(sheet.columns())
+                    var at = self.tables.find(name)
+                    var spot = self.free_place(w, 320) if at < 0 else (self.tables.cards[at].x, self.tables.cards[at].y)
+                    var k = self.tables.add(name, sheet^, spot[0], spot[1], w, 320, self.font, self.pal)
+                    self.reveal_table(k)
+                self.message = self.addm.ran_said
+                if self.trace:
+                    print("MODEL: " + self.addm.ran_said, flush=True)
+            except e:
+                self.addm.fail(String(e))
+
+    def video_here(self) -> Int:
+        """The video card being looked at (the first one on the sheet)."""
+        for k in range(len(self.media.cards)):
+            if self.media.cards[k].kind == OBJ_VIDEO and self.media.cards[k].player:
+                return k
+        return -1
+
+    def text_column(self) -> Int:
+        if 0 <= self.grid.cur_col < self.frame.columns() and self.frame.kind(self.grid.cur_col) == TEXT:
+            return self.grid.cur_col
+        var best = -1  # (else the text column with the most words a value: a task's words, not an id)
+        var most = -1.0
+        for c in range(self.frame.columns()):
+            if self.frame.kind(c) != TEXT:
+                continue
+            var words = 0
+            var n = min(self.frame.rows(), 200)
+            for r in range(n):
+                words += len(self.frame.plain_text(c, r).split(" "))
+            var avg = Float64(words) / Float64(max(n, 1))
+            if avg > most:
+                most = avg
+                best = c
+        return best
+
+    def answer_here(mut self):
+        """The new model's first answer: on the row (a table's model, a text model) or the frame (a picture model) you're on."""
+        var kind = self.addm.kind
+        if kind == "tabular":
+            if not self.has_table:
+                self.addm.needs("Open a table: it answers on the row you're on")
+                return
+            self.addm.answer_table(self.frame, max(self.grid.cur_row, 0))
+        elif kind == "embed-text":
+            var col = self.text_column()
+            if not self.has_table or col < 0:
+                self.addm.needs("Open a table with a text column: it answers on the row you're on")
+                return
+            self.addm_col = col
+            self.addm_row = max(self.grid.cur_row, 0)
+            self.addm.answer_text(self.frame, col, self.addm_row)
+        else:
+            var k = self.video_here()
+            if k < 0:
+                self.addm.needs("Open a video (Insert › Video, or a bag's camera): it answers on the frame you're looking at")
+                return
+            try:
+                var t = self.media.cards[k].player.value().state.t()
+                var v = VideoSource(self.media.cards[k].path)
+                v.seek(t)
+                var px = v.next()
+                self.addm.answer_picture(px^, v.width, v.height, "the frame at " + fixed(t, 1) + " s of " + self.media.cards[k].title(), v.frames)
+            except e:
+                self.addm.needs("Couldn't read that frame: " + String(e))
+        self.version += 1
+
+    def run_on_all(mut self):
+        var kind = self.addm.kind
+        if kind == "tabular":
+            try:
+                var t = self.addm.run_table(self.frame)
+                self.swap_table(t^, self.frame.columns(), max(self.grid.cur_row, 0))
+                for c in range(self.frame.columns() - 2, self.frame.columns()):
+                    self.grid.fit(c, self.frame, self.font, self.pal)
+                self.message = self.addm.ran_said
+                if self.trace:
+                    print("MODEL: " + self.addm.ran_said, flush=True)
+            except e:
+                self.addm.fail(String(e))
+        elif kind == "embed-text":
+            if self.addm_col >= 0:
+                self.addm.start_texts(self.frame, self.addm_col)
+        else:
+            var k = self.video_here()
+            if k >= 0:
+                self.addm.start_video(self.media.cards[k].path, 1)
+
     def labels_changed(mut self):
         """A label written: count them (the chips, "n labelled"), and once it has learned, learn again."""
         self.learn.count_labels(self.frame)
@@ -3302,6 +3512,11 @@ struct Main(App):
         island follows (progress, then the time it took)."""
         self.take_table_work()
         self.take_recipe()
+        if self.fleet_job:
+            self.poll_fleet()
+        if self.addm.busy():  # (Add a model: its download, loading or run moves on; Python's threads report)
+            self.addm_event(self.addm.poll())
+            self.version += 1
         self.poll_documents()
         self.poll_pack()
         if self.poll_media():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
@@ -3443,6 +3658,18 @@ struct Main(App):
             self.run_question(m - STORY_RUN)
             self.version += 1
             return
+        if m == FLEET_PICK:
+            self.open_fleet(event.text)
+            self.version += 1
+            return
+        if m == ADD_MODEL_OPEN:
+            self.addm.open = not self.addm.open
+            self.version += 1
+            return
+        if self.addm.owns(m):
+            self.addm_event(self.addm.update(event))
+            self.version += 1
+            return
         if m == LEARN_TOGGLE:
             self.learn.open = not self.learn.open
             if self.learn.open:
@@ -3552,6 +3779,8 @@ struct Main(App):
             elif self.tables.acted >= 0:
                 if self.tables.cards[self.tables.acted].action_tag == "export-pack":
                     self.pack_rows(self.tables.acted)
+                elif self.tables.cards[self.tables.acted].action_tag == "label-stops":
+                    self.stops_to_sheet(self.tables.acted)
                 else:
                     self.write_plan(self.tables.acted)
             elif self.tables.selected >= 0:  # (a row picked, by hand or set by an agent: followed through the links)
@@ -4419,6 +4648,8 @@ struct Main(App):
         side.append(Button("Start", NO_MSG, SUBTLE, icon="file").fill().align(START))  # (rows read from their leading edge, one icon set)
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
         side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=self.open_types()).fill().align(START))
+        side.append(FilePicker("Open robot bags…", FLEET_PICK, style=SUBTLE, icon="route", accept="folder").fill().align(START).tag("open-bags")
+                    .tooltip("A folder of ROS 2 bags (MCAP or sqlite3): one row per run, every topic joined on time, the cameras as videos"))
         side.append(FilePicker("Table", PICK_TABLE, style=SUBTLE, icon="table", accept=".csv,.tsv,.txt,.parquet").fill().align(START).tooltip("A CSV or Parquet file as a table card on a new sheet (read in the background)").tag("insert-table"))
         if not self.public:  # (the public copy shows only what a visitor can use there, goal 62)
             side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
@@ -4568,7 +4799,7 @@ struct Main(App):
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
         _ = doc
         var t = now_ns()
-        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job)
+        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job) or self.addm.busy() or Bool(self.fleet_job)
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
         return AppBar("omxplorer", bar^, island^)
@@ -4666,6 +4897,9 @@ struct Main(App):
     def overlays(self) -> List[View]:
         """What floats over the screen right now: a dialog, the toast, ƒx's popover (each is in the view only while open)."""
         var out = List[View]()
+        if self.addm.open:  # (Add a model: paste, the line before any download, progress, the answer, run on all)
+            out.append(Dialog("Add a model", VStack(self.addm.view(find_plugins(), self.frame.rows(), 0), spacing=12).fill().align(START),
+                              on_close=ADD_MODEL_MSG + 7, width=640))
         if self.settings_open:
             var at = 0 if self.skin == LIQUID else (1 if self.skin == LEDGER else (2 if self.skin == GRAPHITE else 3))
             out.append(Dialog("Settings", VStack(
@@ -4775,6 +5009,7 @@ struct Main(App):
         var left: List[Tool] = [Tool("Save", "save", SAVE, False, "Save the document (Ctrl+S)"), Tool("Undo", "undo", UNDO, False, "Undo the last change (Ctrl+Z)")]
         var right: List[Tool] = [Tool("Links", "share", LINKS_TOGGLE, self.links_open, "The links on this sheet (" + String(len(self.links)) + "): see, unlink, set a time offset"),
                                  Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open and not self.story_open and not self.learn.open, "Show or hide the inspector (Ctrl+Shift+I)")]
+        right.insert(0, Tool("Add a model", "brain", ADD_MODEL_OPEN, self.addm.open, "A model from the Hugging Face Hub, a file or a folder: it answers on the row or frame you're on"))
         right.insert(0, Tool("Learn from labels", "sparkles", LEARN_TOGGLE, self.learn.open, "Teach a column by example: label about 20 rows, a decision tree fills the rest and says its rule"))
         if self.story_step > 0:
             right.insert(0, Tool("Story", "book-open", STORY_TOGGLE, self.story_open, "The story's questions, each with its SQL: Run one"))
@@ -4782,6 +5017,7 @@ struct Main(App):
         if streamed:
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
         extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=self.open_types()).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
+        extra.append(FilePicker("Bags", FLEET_PICK, style=TOOL_INLINE, icon="route", accept="folder").tooltip("Open a folder of ROS 2 bags as a fleet: runs, moments, stops, cameras").tag("open-bags-tool"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
         if not self.public:  # (the public copy's host opens CSV, Parquet and video only)
             extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))

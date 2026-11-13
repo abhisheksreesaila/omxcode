@@ -140,6 +140,8 @@ def skin_css(p: Palette, cls: String) -> String:
         + ".mui-dialog-head { padding: 14px 16px 14px 20px; border-bottom: 1px solid " + line + "; }\n"
         + ".mui-dialog-body { padding: 16px 20px; }\n"
         + ".mui-dialog label { color: " + ink2 + "; } .mui-dialog label.title-4 { color: " + ink + "; font-weight: 600; font-size: 15px; }\n"
+        # (a dialog's prominent button keeps its label on the accent: the rule above recoloured it, goal 68's Run it on all)
+        + ".mui-dialog button.suggested-action label, .mui-dialog button.suggested-action image { color: " + on_accent + "; }\n"
         + "popover.mui-popover-surface > contents { padding: 12px 14px; min-width: 260px; }\n"
         + "toast { background: " + ink + "; color: " + card + "; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 12.5px; }\n"
         + "toast label, toast button { color: " + card + "; } toast button.flat { color: " + hex_of(mix(p.accent, p.card, 0.55)) + "; font-weight: 600; }\n"

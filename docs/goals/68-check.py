@@ -226,8 +226,114 @@ def m1():
                          f"({held.group(1)}/{held.group(2)}); shots build/g68/shots/m1-*.png")
 
 
+M2_PLUGINS = OUT / "m2-plugins"
+STOPWATCH = re.compile(r"^MODEL: (\S+) \((\S+), (\S+)\): paste→first answer ([\d.]+) s; after the download ([\d.]+) s(?: \(([\d.]+ [MG]B) downloaded in ([\d.]+) s\))?(?: \(nothing downloaded\))? · answer on (.+?): (.*)$", re.M)
+
+
 def m2():
-    return None, "not built yet"
+    """Add a model, like magic: 4 models of 4 kinds the app hasn't seen (a tree file, an image classifier, a detector,
+    a text embedder), each answering where you're looking, timed; one that can't run and one with its own code say so
+    before anything downloads; Run it on all fills a column or a table; the agent adds one with add-model."""
+    sys.path.insert(0, str(ROOT / "docs/goals/68"))
+    from gtk import gtk
+
+    probs = []
+    shutil.rmtree(M2_PLUGINS, ignore_errors=True)
+    M2_PLUGINS.mkdir(parents=True)
+    build_app("linux")
+    build_app("web")  # (both first: nothing later rebuilds from a tree being edited)
+    # (a decision model nobody has seen: XGBoost trained now on the moments' first 20,000 rows, saved as its JSON)
+    r = run(["pixi", "run", "-e", "models", "python", "-I", "-c",
+             "import xgboost as xgb, numpy as np, csv, json, sys\n"
+             "rows=list(csv.DictReader(open(sys.argv[1]))); truth=json.load(open(sys.argv[2]))\n"
+             "names=['speed','person_m','turn_rate']; cls=['moving','person ahead','waiting']\n"
+             "X=np.array([[float(r[n]) for n in names] for r in rows[:20000]]); y=np.array([cls.index(t) for t in truth[:20000]])\n"
+             "b=xgb.train({'objective':'multi:softprob','num_class':3,'max_depth':3}, xgb.DMatrix(X,label=y,feature_names=names), 20)\n"
+             "b.set_attr(classes=','.join(cls)); b.save_model(sys.argv[3])\n",
+             str(OUT / "learn/moments.csv"), str(OUT / "learn/truth.json"), str(OUT / "stops.xgb.json")], 600)
+    if r.returncode:
+        return False, "training the tree file: " + r.stderr[-400:]
+    env = {"OMX_PLUGINS": str(M2_PLUGINS), "OMX_PACKS": str(PACKS)}
+    field = "enter:Paste a model: owner/name, or its huggingface.co link="
+    open_moments = [f"pick:Choose a file={OUT / 'learn/moments.csv'}", "waitfor:Create table=60000", "tap:Create table", "wait:1500"]
+    video = [ "tap:Video", "wait:300", f"pick:Choose a video…={OUT / 'videos/nav15_front.avi'}", "wait:2500"]
+    runs = {
+        "m2-tree": open_moments + ["tap:Add a model", "grab:m2-0-empty", f"pick:File or folder…={OUT / 'stops.xgb.json'}", "wait:800", "grab:m2-tree-1-answer",
+                                   "tap:run-all", "waitfor:show-result=60000", "grab:m2-tree-2-ran", "tap:show-result", "wait:800", "grab:m2-tree-3-column"],
+        "m2-image": open_moments + video + ["tap:Add a model", "wait:300", field + "openai-community/gpt2", "waitfor:add-another=60000", "grab:m2-cant-run",
+                                            field + "nomic-ai/nomic-embed-text-v1.5", "waitfor:allow-code=60000", "grab:m2-consent", "tap:add-cancel", "wait:300",
+                                            field + "google/vit-base-patch16-224", "waitfor:add-it=60000", "grab:m2-image-1-line", "tap:add-it", "wait:1500",
+                                            "grab:m2-image-2-downloading", "waitfor:run-all=1500000", "grab:m2-image-3-answer"],
+        "m2-detect": open_moments + video + ["tap:Add a model", "wait:300", field + "hustvl/yolos-tiny", "waitfor:add-it=60000", "tap:add-it",
+                                             "waitfor:run-all=1500000", "grab:m2-detect-1-answer", "tap:run-all", "wait:1500", "grab:m2-detect-2-running",
+                                             "waitfor:show-result=900000", "grab:m2-detect-3-ran", "tap:show-result", "wait:800", "grab:m2-detect-4-table"],
+    }
+    timings = []
+    for name, steps in runs.items():
+        code, out, _ = gtk(steps, name, OUT, env=env, timeout=3600, pixi_env="models")
+        bad = [l for l in out.splitlines() if l.startswith("TEST:")]
+        if code != 0 or bad:
+            probs.append(f"{name}: exit {code} {bad[:3]}")
+        timings += STOPWATCH.findall(out)
+        if name == "m2-image":
+            if "Nothing downloaded" not in out or (M2_PLUGINS / "gpt2").exists() or (M2_PLUGINS / "nomic_embed_text_v1_5").exists():
+                probs.append("gpt2 / nomic: something downloaded, or no reason said")
+        if name == "m2-tree" and "MODEL: Filled stops" not in out:
+            probs.append("the tree file's Run it on all didn't fill the column")
+        if name == "m2-detect" and not re.search(r"MODEL: \d+ boxes in", out):
+            probs.append("YOLOS's Run it on all made no table")
+    # (the agent, on the web build in the models environment: open a table with text, add-model, add-it, the answer)
+    from agent_client import Client, open_through_picker
+
+    c = Client(ROOT / "build/omxplorer/web", env=env, python=ROOT / ".pixi/envs/models/bin/python")
+    agent = ""
+    try:
+        open_through_picker(c, ROOT / "build/g47/full/fleet.csv")
+        for _ in range(120):
+            if "create-table" in c.names():
+                break
+            time.sleep(0.5)
+        c.call("create-table")
+        c.call("add-a-model")
+        c.call("add-model", text="BAAI/bge-small-en-v1.5", submit=True)
+        for _ in range(240):
+            if "add-it" in c.names():
+                break
+            time.sleep(0.5)
+        said = c.call("add-it")[0]  # (the agent host settles until the island's work lands: the download, loading, the answer)
+        for _ in range(600):
+            if "run-all" in c.names() or "add-another" in c.names():
+                break
+            time.sleep(1)
+            said += c.call("screen")[0]
+        agent = said
+        m = re.search(r"Answered ([\d.]+) s after you asked: ([\d.]+) s downloading ([\d.]+ [MG]B), then ([\d.]+) s", said)
+        if not m:
+            probs.append("agent: no answer: " + said[-600:])
+        else:
+            ans = re.findall(r"add-answer: (.+)", said)
+            timings.append(("bge_small_en_v1_5", "embed-text", "torch", m.group(1), m.group(4), m.group(3), m.group(2), "row 1 (task)", " | ".join(ans)[:200]))
+        said = c.call("run-all")[0]
+        for _ in range(600):
+            if "show-result" in c.names():
+                break
+            time.sleep(1)
+        said += c.call("screen")[0]
+        (OUT / "m2-agent.txt").write_text(agent + "\n----\n" + said)
+        if "like row 1" not in said:
+            probs.append("agent: Run it on all didn't fill the similarity column: " + said[-300:])
+    finally:
+        c.close()
+    (OUT / "m2-timings.json").write_text(json.dumps(timings, indent=1))
+    kinds = {t[1] for t in timings}
+    if kinds != {"tabular", "classify-image", "detect", "embed-text"}:
+        probs.append(f"stopwatch for kinds {sorted(kinds)}")
+    slow = [t[0] for t in timings if float(t[4]) >= 120]
+    if slow:
+        probs.append(f"over 2 minutes after the download: {slow}")
+    table = "; ".join(f"{t[0]} ({t[1]}): paste→answer {t[3]} s, after download {t[4]} s" + (f" ({t[5]} in {t[6]} s)" if t[5] else "") for t in timings)
+    return (not probs), ("; ".join(probs) if probs else table + "; gpt2 refused and nomic's own code asked for, nothing downloaded; Run it on all: a column "
+                         "(tree), a table (YOLOS), a similarity column (BGE, by the agent)")
 
 
 # ------------------------------------------------------------------------------------------------------------- M3
@@ -237,7 +343,7 @@ def m3():
     """mojoui.bag: every fetched bag (3–6, MCAP and sqlite3), the first 1,000 messages per topic field for field against
     the official readers (mcap + mcap_ros2, and rosbags), a planted difference caught, camera topics as videos."""
     got = fetch_bags()
-    total = sum(p.stat().st_size for p in BAGS.rglob("*") if p.is_file())
+    total = sum(p.stat().st_size for p in BAGS.rglob("*") if p.is_file() and "fleet" not in p.relative_to(BAGS).parts[:1])  # (the data, not M4's fleet/)
     attribution = (BAGS / "ATTRIBUTION.txt").read_text()
     if "CC BY 4.0" not in attribution or total > 2e9:
         return False, f"data {total / 1e9:.2f} GB, attribution {attribution[:80]!r}"
@@ -291,15 +397,188 @@ def m3():
 
 
 def m4():
-    return None, "not built yet"
+    """A fleet in one sheet: build/bags opened in omxplorer (GTK) as runs + moments (every topic joined on time) + stops,
+    the hero run's cameras on the moments' cursor, a story.json with questions; then 20 stops labelled and Learn names
+    the rest (component: by a stated rule; app: the same labels through label-rows)."""
+    sys.path.insert(0, str(ROOT / "docs/goals/68"))
+    from gtk import gtk
+
+    probs = []
+    fetch_bags()
+    ok, why = mojo_test("tests/test_fleet.mojo", ["fleet-read", "fleet-story", "fleet-learn"], 1800)
+    if not ok:
+        return False, "test_fleet: " + why
+    fleet = re.search(r"FLEET: (\d+) runs, (\d+) moments x (\d+) columns, (\d+) stop rows, read in ([\d.]+) ms", why)
+    learnt = re.search(r"STOPS_LEARN: (\d+) of (\d+) unlabelled stops right; held out (\d+) of (\d+)", why)
+    rule = re.search(r"STOPS_RULE: (.*)", why).group(1)
+    build_app("linux")
+    shutil.rmtree(BAGS / "fleet", ignore_errors=True)
+    # (the app: open the folder; the story lands; a moment picked moves every camera; stops become the sheet; labels; Learn)
+    rows = [l for l in (OUT / "fleet/stops.csv").read_text().splitlines()[1:]]
+    import csv as _csv
+
+    stops = list(_csv.DictReader((OUT / "fleet/stops.csv").open()))
+
+    def cause(r):
+        if r["person_m"] and float(r["person_m"]) < 1.5:
+            return "person ahead"
+        return "not started" if float(r["moved_m"] or 0) < 0.2 else "waiting"
+
+    step = max(len(stops) // 20, 1)
+    labels = ", ".join(f"{i + 1} {cause(stops[i])}" for i in range(0, len(stops), step)[:20])
+    steps = ["tap:Start", "wait:500", "grab:m4-0-start", f"pick:Open robot bags…={BAGS}", "wait:400", "grab:m4-1-reading", "waitfor:question-1=600000",
+             "wait:2500", "grab:m4-2-fleet", "tapat:table-moments=60,95", "wait:1500", "grab:m4-3-one-cursor", "tap:label-stops", "wait:1500",
+             "grab:m4-4-stops-sheet", "enter:12 person ahead, 40 waiting=" + labels, "wait:800", "tap:learn", "wait:1500", "grab:m4-5-learned"]
+    code, out, _ = gtk(steps, "m4-fleet", OUT, timeout=3600)
+    bad = [l for l in out.splitlines() if l.startswith("TEST:")]
+    if code != 0 or bad:
+        probs.append(f"GTK exit {code} {bad[:4]}")
+    read = re.search(r"FLEET: read (\d+) runs, (\d+) cameras in ([\d.]+) s", out)
+    follows = [l for l in out.splitlines() if l.startswith("FOLLOW:") and ("seek" in l.lower() or " at " in l)]
+    learn = re.search(r"^LEARN: (.+) \| held (\d+)/(\d+) \| (\d+) rows \| (\d+) ms", out, re.M)
+    story = BAGS / "fleet/story.json"
+    if not read or not story.exists():
+        probs.append("the fleet wasn't read / no story.json: " + " | ".join(l for l in out.splitlines() if l.startswith(("FLEET", "STORY")))[-500:])
+    else:
+        sj = json.loads(story.read_text())
+        if len(sj.get("questions", [])) < 3 or not sj.get("videos"):
+            probs.append(f"story.json: {len(sj.get('questions', []))} questions, videos {sj.get('videos')}")
+    cams = len(json.loads(story.read_text()).get("videos", [])) if story.exists() else 0
+    if len(follows) < cams or cams == 0:
+        probs.append(f"one cursor: {len(follows)} cameras followed the moment, {cams} cameras: " + " | ".join(l for l in out.splitlines() if l.startswith("FOLLOW"))[-400:])
+    if not learn or "person_m" not in learn.group(1):
+        probs.append("Learn on the stops: " + (learn.group(0) if learn else "no LEARN line"))
+    return (not probs), ("; ".join(probs) if probs else
+                         f"{fleet.group(1)} runs (MCAP + sqlite3), {fleet.group(2)} moments × {fleet.group(3)} columns (every topic joined at 10 Hz), {fleet.group(4)} stop rows, "
+                         f"read in {float(fleet.group(5)) / 1000:.1f} s; story.json with {len(json.loads(story.read_text())['questions'])} questions; app: "
+                         f"{read.group(2)} cameras made videos in {read.group(3)} s, a picked moment moved all {len(follows)} of the hero run's cameras; "
+                         f"20 stops labelled → \"{learn.group(1)}\" ({learn.group(2)}/{learn.group(3)} held out); component: {learnt.group(1)}/{learnt.group(2)} of the "
+                         f"unlabelled stops right (\"{rule}\")")
+
+
+def _rects(text):
+    """drive.py's RECTS lines → {tag: (x, y, w, h)} (the first of each tag)."""
+    out = {}
+    for m in re.finditer(r"^\S+ #(\S+) @ (-?\d+),(-?\d+) (\d+)x(\d+)", text, re.M):
+        out.setdefault(m.group(1), tuple(int(v) for v in m.groups()[1:]))
+    return out
 
 
 def m5():
-    return None, "not built yet"
+    """Polish: the four flows (learn, add a model, open bags, the fleet) in headless Chromium on the web host, a
+    screenshot of every state (empty, loading, done, error), what's already on screen doesn't move when an answer
+    arrives, and each flow by the agent over MCP."""
+    import drive
+
+    probs, shots = [], []
+    build_app("web")
+    web = ROOT / "build/omxplorer/web"
+    S = OUT / "shots"
+    S.mkdir(exist_ok=True)
+    lines, _ = twenty_labels()
+    moments = OUT / "learn/moments.csv"
+    open_moments = f"pick:Choose a file={moments};wait:Create table;tap:Create table;wait:1500"
+    env = {"OMX_PLUGINS": str(OUT / "m5-plugins"), "OMX_PACKS": str(PACKS)}
+    shutil.rmtree(OUT / "m5-plugins", ignore_errors=True)
+
+    def web_run(name, steps, rects=False, extra_env=None):
+        r, out = drive.web_run(web, steps, shot=str(S / f"{name}.png"), viewport=(1440, 900), rects=str(OUT / f"{name}.rects") if rects else None,
+                               env=dict(env, **(extra_env or {})))
+        (OUT / f"{name}.web.txt").write_text(out)
+        bad = [l for l in out.splitlines() if l.startswith(("TEST:", "PAGE ERRORS", "CONSOLE ERRORS")) or (l.startswith("CSP:") and not l.startswith("CSP: 0"))]
+        if r.returncode or bad:
+            probs.append(f"{name}: {bad[:3] or out[-300:]}")
+        shots.append(name)
+        return out, (_rects((OUT / f"{name}.rects").read_text()) if rects and (OUT / f"{name}.rects").exists() else {})
+
+    # 1. Learn: empty, error (Learn with one kind of label), labelled (before), learned (after: nothing above moved)
+    web_run("m5-learn-1-empty", f"{open_moments};tap:Learn from labels;wait:500")
+    out, _ = web_run("m5-learn-2-error", f"{open_moments};tap:Learn from labels;enter:Label column, e.g. cause=cause;wait:500;"
+                                          "enter:12 person ahead, 40 waiting=1 moving, 2 moving;tap:learn;wait:500")
+    if "at least two different labels" not in out:
+        probs.append("Learn with one kind of label didn't say what to do")
+    base = f"{open_moments};tap:Learn from labels;enter:Label column, e.g. cause=cause;wait:500;enter:12 person ahead, 40 waiting=" + ", ".join(lines) + ";wait:500"
+    _, before = web_run("m5-learn-3-labelled", base, rects=True)
+    out, after = web_run("m5-learn-4-learned", base + ";tap:learn;wait:1500", rects=True)
+    moved = [t for t in ("label-rows", "label-count", "learn") if t in before and t in after and before[t][:2] != after[t][:2]]
+    if moved or "learn-rule" not in after:
+        probs.append(f"Learn's answer moved {moved} (or no rule shown)")
+    # 2. Add a model: empty, error (can't run, said before anything downloads), checking, the answer + run on all
+    xgb = OUT / "stops.xgb.json"
+    web_run("m5-add-1-empty", f"{open_moments};tap:Add a model;wait:500")
+    out, _ = web_run("m5-add-2-error", f"{open_moments};tap:Add a model;enter:Paste a model: owner/name, or its huggingface.co link=openai-community/gpt2;wait:add-model-close;wait:4000")
+    if "Nothing downloaded" not in out:
+        probs.append("Add a model: a model that can't run didn't say why")
+    _, before = web_run("m5-add-3-before", f"{open_moments};tap:Add a model;wait:500", rects=True)
+    out, after = web_run("m5-add-4-answer", f"{open_moments};tap:Add a model;pick:File or folder…={xgb};wait:1500;tap:run-all;wait:1500", rects=True)
+    moved = [t for t in ("add-model",) if t in before and t in after and before[t][:2] != after[t][:2]]
+    if moved or "add-answer" not in after or "Filled" not in out:
+        probs.append(f"Add a model's answer: moved {moved}, answer {'add-answer' in after}, filled {'Filled' in out}")
+    # 3. Open bags (the fleet's story in the browser: OMX_STARTER) and 4. the fleet: label stops, Learn
+    fleet = BAGS / "fleet"
+    if not (fleet / "story.json").exists():
+        probs.append("no fleet story (M4 writes build/bags/fleet)")
+    else:
+        story = {"OMX_STARTER": str(fleet)}
+        web_run("m5-bags-1-start", "wait:1000", extra_env=story)
+        out, _ = web_run("m5-bags-2-fleet", "tap:story-start;wait:question-1;wait:3000", extra_env=story)
+        if "label-stops" not in out:
+            probs.append("the fleet's story didn't offer Label and learn on the stops")
+        out, _ = web_run("m5-fleet-1-stops", "tap:story-start;wait:question-1;wait:3000;tap:label-stops;wait:1500", extra_env=story)
+        stops = list(__import__("csv").DictReader((fleet / "stops.csv").open()))
+        cause = lambda r: "person ahead" if r["person_m"] and float(r["person_m"]) < 1.5 else ("not started" if float(r["moved_m"] or 0) < 0.2 else "waiting")  # noqa: E731
+        step = max(len(stops) // 20, 1)
+        labels = ", ".join(f"{i + 1} {cause(stops[i])}" for i in range(0, len(stops), step)[:20])
+        out, _ = web_run("m5-fleet-2-learned", "tap:story-start;wait:question-1;wait:3000;tap:label-stops;wait:1500;"
+                                               f"enter:12 person ahead, 40 waiting={labels};wait:600;tap:learn;wait:1500", extra_env=story)
+        if "person_m" not in out:
+            probs.append("the fleet's Learn didn't name person_m")
+    # (the agent over MCP: open bags by path, label the stops, learn)
+    from agent_client import Client
+
+    c = Client(web, env=env)
+    agent = ""
+    try:
+        c.call("open-bags", path=str(BAGS))
+        said = ""
+        for _ in range(600):
+            said = c.call("screen")[0]
+            if "label-stops" in said:
+                break
+            time.sleep(1)
+        c.call("label-stops")
+        c.call("label-rows", text=labels, submit=True)
+        said = c.call("learn")[0]
+        agent = " | ".join(re.findall(r"learn-rule: (.+)", said))
+    finally:
+        c.close()
+    if "person_m" not in agent:
+        probs.append("agent: open-bags → label-stops → learn: " + said[-400:])
+    return (not probs), ("; ".join(probs) if probs else
+                         f"{len(shots)} Chromium screenshots (build/g68/shots/m5-*.png): Learn empty/error/labelled/learned, Add a model empty/can't-run/"
+                         f"answer + run on all, the fleet's start/open/stops/learned; what was on screen stayed put when answers arrived; the agent opened "
+                         f"the bags by path, labelled 20 stops and Learn said \"{agent}\"")
 
 
 def m6():
-    return None, "not built yet"
+    """Nothing regressed: goal 47's check, goal 59's packs (M1, M2), goal 62's starter (M1), the component matrix, the
+    message ranges and the seek lint (scripts/seek_lint.py)."""
+    probs, said = [], []
+    for goal, ms in (("47", [f"M{i}" for i in range(0, 9)]), ("59", ["M1", "M2"]), ("62", ["M1"])):
+        r = run(["pixi", "run", "python", "docs/goals/68/regress.py", goal, *ms], 7200)
+        (OUT / f"m6-{goal}.txt").write_text(r.stdout + r.stderr)
+        res = dict(re.findall(r"^(M\d+): (PASS|FAIL|BLOCKED)", r.stdout, re.M))
+        bad = {k: v for k, v in res.items() if v != "PASS"}
+        if len(res) < len(ms) or bad:
+            probs.append(f"goal {goal}: {res} " + " | ".join(l for l in r.stdout.splitlines() if re.match(r"^M\d+: (FAIL|BLOCKED)", l))[:600])
+        said.append(f"goal {goal} {'/'.join(ms) if len(ms) < 4 else 'M0–M8'} PASS" if not bad and len(res) == len(ms) else f"goal {goal} {res}")
+    for name, cmd in (("components", ["pixi", "run", "python", "scripts/components.py", "--check"]), ("msgs", ["pixi", "run", "python", "scripts/msgs.py"]),
+                      ("seek lint", ["pixi", "run", "python", "scripts/seek_lint.py"])):
+        r = run(cmd, 1800)
+        if r.returncode:
+            probs.append(f"{name}: " + (r.stdout + r.stderr)[-400:])
+        said.append(f"{name} ok" if not r.returncode else f"{name} FAIL")
+    return (not probs), ("; ".join(probs) if probs else "; ".join(said))
 
 
 MILESTONES = {f"M{i}": f for i, f in enumerate([m0, m1, m2, m3, m4, m5, m6])}
