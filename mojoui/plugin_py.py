@@ -314,7 +314,7 @@ def _load(folder, j):
     runner, kind = spec["runner"], spec["kind"]
     params = spec.get("params") or {}
     files = spec.get("files") or {}
-    remote = bool(spec.get("trust_remote_code")) and allowed(spec.get("source", ""))  # (plugin.json's word and the person's recorded yes)
+    remote = code_allowed(spec)  # (plugin.json's word and the person's recorded yes)
     m = {"spec": spec, "kind": kind, "runner": runner}
     if runner == "onnx":
         import onnxruntime as ort
@@ -600,6 +600,13 @@ def _consents():
     ($OMX_CONFIG, else ~/.config/omxcode). plugin.json's trust_remote_code alone never runs code (a folder could say so)."""
     base = os.environ.get("OMX_CONFIG") or os.path.join(os.path.expanduser("~"), ".config", "omxcode")
     return os.path.join(base, "allowed-model-code.txt")
+
+
+def code_allowed(spec):
+    """A model's own code runs only when plugin.json says so AND the app recorded a person's yes for that repo at that
+    commit (a source without a commit is never allowed: the yes would cover every later push)."""
+    source = spec.get("source", "")
+    return bool(spec.get("trust_remote_code")) and "@" in source and allowed(source)
 
 
 def allowed(source):

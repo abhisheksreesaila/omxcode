@@ -243,6 +243,9 @@ def m2():
                         1800, env={"OMX_PLUGINS": str(OUT / "addmodel-plugins"), "OMX_CONFIG": str(OUT / "addmodel-config")}, env_name="models")
     if not ok:
         return False, "test_addmodel: " + why
+    r = run(["pixi", "run", "python", "-I", "docs/goals/68/consent_test.py"], 300)
+    if "consent: ok" not in r.stdout:
+        return False, "consent_test: " + (r.stdout + r.stderr)[-500:]
     shutil.rmtree(M2_PLUGINS, ignore_errors=True)
     M2_PLUGINS.mkdir(parents=True)
     build_app("linux")

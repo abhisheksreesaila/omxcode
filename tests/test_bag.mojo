@@ -91,4 +91,12 @@ def main() raises:
     except e:
         huge = "4,096" in String(e)
     check(huge, "a huge fixed array")
+    var many = False  # (lists of messages count by their element: 4,096 × 4,096 × 4,096 columns, said up front)
+    try:
+        _ = MsgTypes("a/Big", "a/C[] items\n================================================================================\nMSG: a/C\na/D[4096] d\n"
+                     + "================================================================================\nMSG: a/D\na/E[4096] e\n"
+                     + "================================================================================\nMSG: a/E\nfloat64[4096] v")
+    except e:
+        many = "20,000 columns" in String(e)
+    check(many, "a schema of billions of columns")
     print("bag-errors: ok")

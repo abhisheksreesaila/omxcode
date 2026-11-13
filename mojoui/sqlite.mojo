@@ -319,20 +319,24 @@ struct Database(Copyable, Movable):
     var path: String
     var conn: ArcPointer[_Conn]
 
-    def __init__(out self, path: String, busy_ms: Int = 5000) raises:
+    def __init__(out self, path: String, busy_ms: Int = 5000, read_only: Bool = False) raises:
+        """read_only: a file someone else made (a ROS 2 bag): opened read-only, never created, its schema untrusted, no
+        writes (query_only)."""
         self.lib = _Lib.load()
         self.path = path
         self.db = 0
         var p = path
         var out = List[Int](length=1, fill=0)
         var f = _fn[def(Int, Int, c_int, Int) thin abi("C") -> c_int](self.lib.open_v2)
-        var rc = f(Int(p.as_c_string_span().unsafe_ptr()), Int(out.unsafe_ptr()), c_int(_OPEN_READWRITE | _OPEN_CREATE), 0)
+        var rc = f(Int(p.as_c_string_span().unsafe_ptr()), Int(out.unsafe_ptr()), c_int(0x1 if read_only else (_OPEN_READWRITE | _OPEN_CREATE)), 0)
         self.db = out[0]
         self.conn = ArcPointer(_Conn(self.db, self.lib))  # (closes it, failed opens too: SQLite wants a close either way)
         if Int(rc) != SQLITE_OK:
             var why = _c_text(_fn[_F_PP](self.lib.errmsg)(self.db)) if self.db != 0 else String("out of memory")
             raise Error("sqlite: can't open " + path + ": " + why)
         _ = _fn[_F_PI](self.lib.busy_timeout)(self.db, c_int(busy_ms))  # (another connection writing: wait, don't fail)
+        if read_only:
+            self.exec("PRAGMA trusted_schema = OFF; PRAGMA query_only = 1")
 
     def error(self) -> String:
         """SQLite's message for the last thing that failed on this connection."""

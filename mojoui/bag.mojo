@@ -311,10 +311,15 @@ struct MsgTypes(Movable):
                     if k < 0:
                         raise Error("bag: the schema of " + root + " doesn't define " + self.types[i].fields[j].type_name)
                     self.types[i].fields[j].type = k
-        # (a type that holds itself, directly or not, would recurse without end: a damaged or crafted schema)
+        # (a type that holds itself, directly or not, would recurse without end; a schema of thousands of types or
+        # millions of columns would recurse deep or fill memory: a damaged or crafted file either way)
+        if len(self.types) > 2000:
+            raise Error("bag: the schema of " + root + " has more than 2,000 types (not read)")
         var state = List[Int](length=len(self.types), fill=0)
         for i in range(len(self.types)):
             self._acyclic(i, state)
+        if _count_columns(self, 0, 0) > 20000:
+            raise Error("bag: " + root + " would make more than 20,000 columns, or nests deeper than 32 (not read)")
 
     def _acyclic(self, t: Int, mut state: List[Int]) raises:
         if state[t] == 2:
@@ -541,13 +546,19 @@ def _plan(types: MsgTypes, t: Int, prefix: String, mut table: BagTable, top: Boo
 
 
 def _count_columns(types: MsgTypes, t: Int, depth: Int) -> Int:
-    """How many columns type t makes (counting stops past 20,001: the caller refuses)."""
+    """At least how many columns (and scratch cells) type t makes: every message field by its element type, lists
+    too; saturates at 20,001 (the caller refuses), and so does nesting deeper than 32."""
+    if depth > 32:
+        return 20001
     var n = 0
     for f in types.types[t].fields:
-        var each = _count_columns(types, f.type, depth + 1) if f.prim == P_MSG and f.arr >= 0 else 1
-        n += each * (f.arr if f.arr > 0 else 1)
+        var each = _count_columns(types, f.type, depth + 1) if f.prim == P_MSG else 1
+        var times = f.arr if f.arr > 0 else 1
+        if each > 20000 // times:
+            return 20001
+        n += each * times
         if n > 20000:
-            return n
+            return 20001
     return n
 
 
@@ -900,8 +911,6 @@ struct _Tables(BagVisitor, Movable):
                 if root < 0:
                     raise Error("bag: " + tp.name + "'s schema doesn't define " + tp.type)
                 table.explode = _explode_field(types, root)
-                if _count_columns(types, root, 0) > 20000:
-                    raise Error("bag: " + tp.name + " would make more than 20,000 columns (not read)")
                 _plan(types, root, "", table, True)
                 dec = _Decoder(types^, root, table.explode)
                 ok = True
@@ -1226,7 +1235,7 @@ def _chunk_records(b: List[UInt8], var r: _Rec) raises -> List[UInt8]:
     var comp = r.text(b)
     var n = r.u64(b)
     r._need(n)
-    if size < 0 or size > (1 << 31) or (comp == "" and size != n) or (comp != "" and size > n * 1024 + (1 << 20)):
+    if size < 0 or size > (1 << 29) or (comp == "" and size != n) or (comp != "" and size > n * 255 + (1 << 20)):  # (≤ 512 MiB, ≤ 255× its bytes)
         raise Error("bag: a chunk says it holds " + String(size) + " bytes: a damaged file")
     return decompress(comp, b, r.p, n, size)
 
@@ -1332,7 +1341,13 @@ def _scan_mcap[V: BagVisitor](bag: Bag, wanted: List[Bool], mut v: V) raises:
 
 def _open_sqlite(path: String) raises -> Bag:
     var bag = Bag(path, "sqlite3")
-    var db = Database(path)
+    var db = Database(path, read_only=True)
+    var tables = 0
+    var kinds = db.prepare("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('topics', 'messages')")
+    while kinds.step():
+        tables = kinds.int(0)
+    if tables != 2:
+        raise Error(path + " isn't a rosbag2 sqlite3 bag (no topics and messages tables)")
     var has_defs = False
     var q0 = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_definitions'")
     while q0.step():
@@ -1355,7 +1370,7 @@ def _open_sqlite(path: String) raises -> Bag:
 
 
 def _scan_sqlite[V: BagVisitor](bag: Bag, wanted: List[Bool], mut v: V) raises:
-    var db = Database(bag.path)
+    var db = Database(bag.path, read_only=True)
     for k in range(len(bag.topics)):
         if not wanted[k]:
             continue
