@@ -62,8 +62,89 @@ def m0():
     return None, "not built yet"
 
 
+def build_app(platform="linux"):
+    b = run(["scripts/build.sh", "omxplorer", platform], 2400)
+    if b.returncode:
+        raise RuntimeError(f"build omxplorer {platform}: " + (b.stdout + b.stderr)[-800:])
+
+
+def twenty_labels():
+    """The first rows a person scrolling would label: up to 7 of each kind, 20 in all, by truth.json's rule."""
+    truth = json.loads((OUT / "learn/truth.json").read_text())
+    have, lines = {}, []
+    for i, t in enumerate(truth):
+        if have.get(t, 0) < 7 and len(lines) < 20:
+            have[t] = have.get(t, 0) + 1
+            lines.append(f"{i + 1} {t}")
+    return lines, truth
+
+
 def m1():
-    return None, "not built yet"
+    """Learn from my labels: the tree and the sheet glue (100k rows), then omxplorer on GTK (label, Learn, a changed
+    label relearns) and the agent over MCP (label-rows, learn) on the web build."""
+    from importlib import import_module
+
+    sys.path.insert(0, str(ROOT / "docs/goals/68"))
+    probs = []
+    ok, why = mojo_test("tests/test_tree.mojo", ["tree-round", "tree-learn", "tree-words"], 1800)
+    if not ok:
+        return False, "test_tree: " + why
+    ok, why = mojo_test("tests/test_learn.mojo", ["learn-add", "learn-fill", "learn-relearn", "learn-panel"], 1800)
+    if not ok:
+        return False, "test_learn: " + why
+    relearn_ms = float(re.search(r"RELEARN_MS: ([\d.]+)", why).group(1))
+    run(["pixi", "run", "python", "-I", "docs/goals/68/make_stops.py", str(OUT / "learn")])
+    build_app("linux")
+    lines, truth = twenty_labels()
+    gtk = import_module("gtk").gtk
+    shots = OUT / "shots"
+    shots.mkdir(exist_ok=True)
+    steps = [f"pick:Choose a file={OUT / 'learn/moments.csv'}", "waitfor:Create table=60000", "tap:Create table", "wait:1500", "tap:Learn from labels",
+             "wait:500", f"shot:{shots / 'm1-1-empty.png'}", "enter:Label column, e.g. cause=cause", "wait:800",
+             f"shot:{shots / 'm1-2-label-column.png'}", "enter:12 person ahead, 40 waiting=" + ", ".join(lines), "wait:600",
+             f"shot:{shots / 'm1-3-labelled.png'}", "tap:learn", "wait:1500", f"shot:{shots / 'm1-4-learned.png'}",
+             "tap:label-pick-2", "wait:1500", f"shot:{shots / 'm1-5-relearned.png'}"]
+    code, out, shot = gtk(steps, "m1-learn", OUT)
+    learns = re.findall(r"^LEARN: (.+) \| held (\d+)/(\d+) \| (\d+) rows \| (\d+) ms", out, re.M)
+    bad_steps = [l for l in out.splitlines() if l.startswith("TEST:")]
+    if code != 0 or bad_steps or len(learns) < 2:
+        return False, f"GTK exit {code}, {len(learns)} learns, {bad_steps[:4]}"
+    rule, right, tried, rows, ms = learns[0]
+    if not ("speed <" in rule and "person_m" in rule) or int(tried) != 20 or int(right) < 15 or int(rows) != 100_000:
+        probs.append(f"first learn: {learns[0]}")
+    worst_ms = max(int(l[4]) for l in learns)
+    if worst_ms >= 1000:
+        probs.append(f"a learn took {worst_ms} ms")
+    for k in range(1, 6):
+        if not list(shots.glob(f"m1-{k}-*.png")):
+            probs.append(f"no screenshot m1-{k}")
+    # (the agent: the same over MCP on the web build)
+    build_app("web")
+    from agent_client import Client, open_through_picker
+
+    c = Client(ROOT / "build/omxplorer/web")
+    try:
+        open_through_picker(c, OUT / "learn/moments.csv")
+        for _ in range(60):
+            if "create-table" in c.names():
+                break
+            time.sleep(0.5)
+        c.call("create-table")
+        c.call("learn-from-labels")
+        c.call("label-name", text="cause", submit=True)
+        c.call("label-rows", text=", ".join(lines), submit=True)
+        said, _, err = c.call("learn")
+        agent_rule = " | ".join(re.findall(r"learn-rule: (.+)", said))
+        held = re.search(r"Right on (\d+) of (\d+)", said)
+    finally:
+        c.close()
+    if err or "speed <" not in agent_rule or not held:
+        probs.append(f"agent: {said[-400:]}")
+    (OUT / "m1.json").write_text(json.dumps({"gtk": learns, "agent_rule": agent_rule, "relearn_ms_100k": relearn_ms}, indent=1))
+    return (not probs), ("; ".join(probs) if probs else
+                         f"GTK: 20 labels → \"{rule}\", right on {right}/{tried} held out, 100,000 rows filled in {ms} ms; a changed label relearned in "
+                         f"{learns[-1][4]} ms (component: {relearn_ms:.0f} ms on 100k); agent over MCP: label-rows + learn → \"{agent_rule}\" "
+                         f"({held.group(1)}/{held.group(2)}); shots build/g68/shots/m1-*.png")
 
 
 def m2():

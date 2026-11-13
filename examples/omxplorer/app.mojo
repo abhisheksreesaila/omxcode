@@ -73,6 +73,7 @@ def money2(x: Float64) -> String:
 from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GRID_READ_ONLY, GRID_REDRAW, GRID_FITTED, GRID_RESIZED,
                              GRID_TYPED, GRID_CLEAR, GRID_CANCEL, GRID_COMMIT)
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
+from omxcore import Table
 from mojoui.shared import environment, make_dir
 from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok, export_path, media_path_ok
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
@@ -108,6 +109,7 @@ from mojoui.script import is_script
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
+from mojoui.learn import LearnPanel, LP_ADD, LP_LEARN, LP_PICK, LP_ROWS, with_label_column, learn_sheet, label_rows
 from mojoui.draw import rect as draw_rect, with_alpha
 from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
 from mojoui.tablecard import TableCards, sql_name, ACTION_MIN_W
@@ -312,6 +314,8 @@ comptime STORY_TABLES = 2
 comptime STORY_DOCS = 3
 comptime STORY_READY = 4
 comptime LINKS_TOGGLE = 7682  # the toolbar's Links: the inspector shows the sheet's links
+comptime LEARN_MSG = 7900  # Learn from my labels (mojoui.learn: LEARN_MESSAGES, 7900–7939)
+comptime LEARN_TOGGLE = 7940  # the toolbar's Learn: the inspector shows the Learn page
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
 comptime EDITOR_CANVAS = 300
@@ -477,6 +481,7 @@ struct Main(App):
     var ld: LinkDrag  # a column being dragged onto a card, and the panel that confirms the link
     var peek: Peek  # a card held: what it's linked to
     var links_open: Bool  # the inspector shows the Links panel
+    var learn: LearnPanel  # Learn from my labels (goal 68): its page in the inspector
     var starter: Starter  # the starter the Start screen offers (OMX_STARTER; none: no folder)
     var story_step: Int  # 0, or how far the starter's story has got (STORY_SHEET … STORY_READY)
     var story_tables: Int  # the starter's tables landed so far
@@ -619,6 +624,7 @@ struct Main(App):
         self.ld = LinkDrag(LINKDRAG_MSG)
         self.peek = Peek(PEEK_CANVAS, PEEK_FRAME)
         self.links_open = False
+        self.learn = LearnPanel(LEARN_MSG)
         self.starter = Starter()
         if environment("OMX_STARTER") != "":
             try:
@@ -2535,6 +2541,7 @@ struct Main(App):
 
     def to_sheet(mut self):
         self.screen = SHEET
+        self.learn.reset()  # (a new sheet: no label column yet)
         self.charts.forget()  # (the objects go: their jobs would land on the new ones)
         self.held = List[Tuple[Int, SheetObject]]()
         self.objects = List[SheetObject]()
@@ -3077,10 +3084,110 @@ struct Main(App):
                 self.message = self.frame.name(col) + " on row " + grouped(row + 1) + ": " + before + " → " + self.frame.display(col, row)
                 self.grid.committed(self.frame)
                 self.select_cell(self.grid.cur_row, self.grid.cur_col)
+                if self.learn.label != "" and self.frame.name(col) == self.learn.label:  # (a label changed: count, and learn again)
+                    self.labels_changed()
             except e:
                 self.edit_text = text
                 self.message = String(e) + " (fix it and press Enter)"
         self.version += 1
+
+    # ---------- Learn from my labels (mojoui.learn, goal 68) ----------
+
+    def learn_event(mut self, event: Event):
+        var did = self.learn.update(event)
+        if did == LP_ADD:
+            try:
+                var t = with_label_column(self.frame, self.learn.label)
+                self.swap_table(t^, self.frame.columns(), max(self.grid.cur_row, 0))
+                self.learn.count_labels(self.frame)
+                self.message = "Added " + self.learn.label + ": type a label in a cell, or pick one in the Learn panel"
+                if self.trace:
+                    print("LEARN: column " + self.learn.label, flush=True)
+            except e:
+                self.learn.said = String(e)
+                self.learn.label = ""
+        elif did == LP_LEARN:
+            self.learn_now()
+        elif did == LP_PICK:
+            var lc = self.frame.index(self.learn.label)
+            var row = self.grid.cur_row
+            if lc < 0 or row < 0:
+                self.learn.said = "Select a row first (any cell of it), then pick its label"
+                return
+            try:
+                self.frame.set_text(lc, row, self.learn.picked)
+                self.message = self.learn.label + " on row " + grouped(row + 1) + ": " + self.learn.picked
+                var next = min(row + 1, self.frame.rows() - 1)
+                self.grid.select(next, lc)
+                self.select_cell(next, lc)
+                self.grid.redraw()
+                self.labels_changed()
+            except e:
+                self.learn.said = String(e)
+        elif did == LP_ROWS:
+            var lc = self.frame.index(self.learn.label)
+            if lc < 0:
+                self.learn.said = "Add a label column first (name it above)"
+                return
+            var wrote = 0
+            for pair in label_rows(self.learn.rows_text):
+                if 0 <= pair[0] < self.frame.rows():
+                    try:
+                        self.frame.set_text(lc, pair[0], pair[1])
+                        wrote += 1
+                    except e:
+                        self.learn.said = String(e)
+            self.learn.rows_text = ""
+            self.message = "Labelled " + String(wrote) + " rows in " + self.learn.label
+            self.grid.redraw()
+            self.labels_changed()
+
+    def labels_changed(mut self):
+        """A label written: count them (the chips, "n labelled"), and once it has learned, learn again."""
+        self.learn.count_labels(self.frame)
+        if self.learn.learned_once:
+            self.learn_now()
+
+    def learn_now(mut self):
+        var t0 = now_ns()
+        try:
+            var l = learn_sheet(self.frame, self.learn.label)
+            self.learn.learned(l)
+            var col = self.grid.cur_col
+            var row = max(self.grid.cur_row, 0)
+            self.swap_table(l.take_table(), col, row)
+            for c in range(self.frame.columns() - 2, self.frame.columns()):  # (the learned columns fit their words and title)
+                self.grid.fit(c, self.frame, self.font, self.pal)
+            self.learn.ms = Float64(now_ns() - t0) / 1e6
+            self.message = "Learned: " + self.learn.rule
+            if self.trace:
+                print("LEARN: " + self.learn.rule + " | held " + String(self.learn.held.right) + "/" + String(self.learn.held.tried)
+                      + " | " + String(self.frame.rows()) + " rows | " + String(Int(self.learn.ms)) + " ms", flush=True)
+        except e:
+            self.learn.said = String(e)
+            self.message = String(e)
+
+    def swap_table(mut self, var t: Table, col: Int, row: Int):
+        """The sheet's table replaced by t (the same columns, maybe more) where it stood: scroll, widths, selection kept."""
+        var top = self.grid.top
+        var left = self.grid.left
+        var widths = self.grid.widths.copy()
+        self.use_table(Sheet(t^.share()))
+        self.seen_edits = self.frame.edits()
+        self.grid = DataGrid()
+        self.grid.prepare(self.frame, self.font, self.pal)
+        for c in range(self.frame.stored()):
+            if c < len(widths) and c < len(self.grid.widths) and widths[c] > 0:
+                self.grid.widths[c] = widths[c]
+            elif self.frame.kind(c) == TEXT:
+                self.grid.fit(c, self.frame, self.font, self.pal)
+        self.grid.top = top
+        self.grid.left = left
+        var c2 = min(max(col, 0), self.frame.columns() - 1)
+        var r2 = min(max(row, 0), self.frame.rows() - 1)
+        self.grid.select(r2, c2)
+        self.select_cell(r2, c2)
+        self.refresh()
 
     def update(mut self, event: Event):
         self.handle(event)
@@ -3336,8 +3443,22 @@ struct Main(App):
             self.run_question(m - STORY_RUN)
             self.version += 1
             return
-        if m == INSERT_PIVOT or m == INSERT_CHART or m == LINKS_TOGGLE or m == TOGGLE_INSPECTOR:
-            self.story_open = False  # (the inspector turns to what was asked for)
+        if m == LEARN_TOGGLE:
+            self.learn.open = not self.learn.open
+            if self.learn.open:
+                self.inspector_open = True
+                self.links_open = False
+                self.story_open = False
+                self.learn.count_labels(self.frame)
+            self.version += 1
+            return
+        if self.learn.owns(m):
+            self.learn_event(event)
+            self.version += 1
+            return
+        if m == INSERT_PIVOT or m == INSERT_CHART or m == LINKS_TOGGLE or m == TOGGLE_INSPECTOR or m == STORY_TOGGLE:
+            self.story_open = self.story_open and m == STORY_TOGGLE  # (the inspector turns to what was asked for)
+            self.learn.open = False
         if self.editor and self.editor.value().owns(m):  # (the editor over the window: its own messages)
             _ = self.editor.value().update(event)
             self.feed.poll(self.editor.value())
@@ -4653,7 +4774,8 @@ struct Main(App):
         var streamed = self.frame.streamed()  # (from disk, editable: D-213)
         var left: List[Tool] = [Tool("Save", "save", SAVE, False, "Save the document (Ctrl+S)"), Tool("Undo", "undo", UNDO, False, "Undo the last change (Ctrl+Z)")]
         var right: List[Tool] = [Tool("Links", "share", LINKS_TOGGLE, self.links_open, "The links on this sheet (" + String(len(self.links)) + "): see, unlink, set a time offset"),
-                                 Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open and not self.story_open, "Show or hide the inspector (Ctrl+Shift+I)")]
+                                 Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open and not self.story_open and not self.learn.open, "Show or hide the inspector (Ctrl+Shift+I)")]
+        right.insert(0, Tool("Learn from labels", "sparkles", LEARN_TOGGLE, self.learn.open, "Teach a column by example: label about 20 rows, a decision tree fills the rest and says its rule"))
         if self.story_step > 0:
             right.insert(0, Tool("Story", "book-open", STORY_TOGGLE, self.story_open, "The story's questions, each with its SQL: Run one"))
         var extra = List[View]()
@@ -4838,6 +4960,8 @@ struct Main(App):
         return sections^
 
     def inspector(self) -> View:
+        if self.learn.open:  # (the toolbar's Learn: label rows, Learn, the rule)
+            return Inspector(["Learn"], 0, LEARN_TOGGLE, self.learn.view(self.frame.rows(), max(self.grid.cur_row, 0)), INSPECTOR_W)
         if self.story_open and self.starter.has():  # (the starter's story: its questions, each with its SQL and a Run)
             return Inspector(["Story"], 0, STORY_TOGGLE, self.story_panel(), INSPECTOR_W)
         if self.links_open:  # (the toolbar's Links: the sheet's links, their offsets, Unlink)
