@@ -394,7 +394,7 @@ struct LearnPanel(Movable):
                                 TextField(self.rows_text, "12 person ahead, 40 waiting", on_change=b + LP_ROWS_TEXT, on_submit=b + LP_ROWS_MSG).fill()
                                 .tag("label-rows").label("Label rows"),
                                 spacing=4).fill().align(START))
-            parts.append(HStack(Spacer(), Button("Learn" if not self.learned_once else "Learn again", b + LP_LEARN_MSG, PROMINENT, icon="sparkles")
+            parts.append(HStack(Spacer(), Button("Learn", b + LP_LEARN_MSG, PROMINENT, icon="sparkles")
                                 .tag("learn").tooltip("A decision tree learns from the labelled rows and fills the rest"), spacing=8).fill())
             if self.learned_once:
                 parts.append(Text("It learned", HEADLINE))

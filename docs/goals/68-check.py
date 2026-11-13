@@ -506,7 +506,7 @@ def m5():
     # 2. Add a model: empty, error (can't run, said before anything downloads), checking, the answer + run on all
     xgb = OUT / "stops.xgb.json"
     web_run("m5-add-1-empty", f"{open_moments};tap:Add a model;wait:500")
-    out, _ = web_run("m5-add-2-error", f"{open_moments};tap:Add a model;enter:Paste a model: owner/name, or its huggingface.co link=openai-community/gpt2;wait:add-model-close;wait:4000")
+    out, _ = web_run("m5-add-2-error", f"{open_moments};tap:Add a model;enter:Paste a model: owner/name, or its huggingface.co link=openai-community/gpt2;wait:Try another;wait:500")
     if "Nothing downloaded" not in out:
         probs.append("Add a model: a model that can't run didn't say why")
     _, before = web_run("m5-add-3-before", f"{open_moments};tap:Add a model;wait:500", rects=True)
