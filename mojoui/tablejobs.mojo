@@ -27,7 +27,7 @@ from mojoui.csvio import read_table
 from mojoui.files import file_name, file_stem
 from mojoui.sheet import Sheet
 from mojoui.sheetjobs import stopped
-from mojoui.tablecard import TableCard, TableCards, query_table, sql_name
+from mojoui.tablecard import TableCard, TableCards, query_table, sql_name, add_sheet
 from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.timeseries import TimeSeries
@@ -152,7 +152,7 @@ struct QueryJob(JobBody):
         var t0 = now_ns()
         var catalog = Catalog()
         for i in range(len(self.sheets)):
-            catalog.add_frame(self.names[i], self.sheets[i].frame)
+            add_sheet(catalog, self.names[i], self.sheets[i].frame)
         var cap = public_rows()
         var sources = List[Int]()  # the dictionaries the question reads (an answer that projects them shares, not copies)
         var maxword = 0
@@ -267,7 +267,7 @@ struct ScriptJob(JobBody):
         var t0 = now_ns()
         var catalog = Catalog()
         for i in range(len(self.sheets)):
-            catalog.add_frame(self.names[i], self.sheets[i].frame)
+            add_sheet(catalog, self.names[i], self.sheets[i].frame)
         self.videos.add_to(catalog)
         var fns = ModelFunctions(self.videos.copy())  # (the videos' functions and the models: mojoui.models)
         var run = run_script(self.text, catalog, fns, self.taken)

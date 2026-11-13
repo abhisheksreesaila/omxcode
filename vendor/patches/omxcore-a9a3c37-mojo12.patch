@@ -1,5 +1,5 @@
 diff --git a/kernels_aot/kernels_aot_gpu.mojo b/kernels_aot/kernels_aot_gpu.mojo
-index 484e76c..ca91e23 100644
+index 484e76cf..ca91e237 100644
 --- a/kernels_aot/kernels_aot_gpu.mojo
 +++ b/kernels_aot/kernels_aot_gpu.mojo
 @@ -7,7 +7,7 @@ from max.gpu.primitives.id import lane_id
@@ -21,7 +21,7 @@ index 484e76c..ca91e23 100644
  comptime SM_SHARED_BYTES: Int = 96 * 1024     # usable per SM on sm_80/86
  comptime MAX_BLOCKS_PER_SM: Int = 6           # global path: 1536 threads / 256
 diff --git a/kernels_aot/pipeline_gpu.mojo b/kernels_aot/pipeline_gpu.mojo
-index fb21ea0..25dafa7 100644
+index fb21ea08..25dafa7d 100644
 --- a/kernels_aot/pipeline_gpu.mojo
 +++ b/kernels_aot/pipeline_gpu.mojo
 @@ -56,7 +56,7 @@ from max.gpu import thread_idx, block_idx, grid_dim, barrier
@@ -44,7 +44,7 @@ index fb21ea0..25dafa7 100644
  comptime BLOCK: Int = 256
 diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
 new file mode 100644
-index 0000000..2db5901
+index 00000000..2db5901d
 --- /dev/null
 +++ b/mojo/omxcore/_libc.mojo
 @@ -0,0 +1,101 @@
@@ -150,7 +150,7 @@ index 0000000..2db5901
 +    _ = p^
 +    return rc
 diff --git a/mojo/omxcore/csv.mojo b/mojo/omxcore/csv.mojo
-index 126a719..090c259 100644
+index 126a7198..090c2596 100644
 --- a/mojo/omxcore/csv.mojo
 +++ b/mojo/omxcore/csv.mojo
 @@ -64,6 +64,7 @@ File format decisions:
@@ -201,7 +201,7 @@ index 126a719..090c259 100644
          file.close()
      result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
 diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
-index e7db175..815c0ec 100644
+index de06243c..8f4663b5 100644
 --- a/mojo/omxcore/fan.mojo
 +++ b/mojo/omxcore/fan.mojo
 @@ -12,6 +12,7 @@ Which threads:
@@ -233,7 +233,7 @@ index e7db175..815c0ec 100644
          _ = fan.take_pointee()
          fan.free()
 diff --git a/mojo/omxcore/gpu.mojo b/mojo/omxcore/gpu.mojo
-index 8acded2..f4ebdc4 100644
+index 3825dc63..b632d989 100644
 --- a/mojo/omxcore/gpu.mojo
 +++ b/mojo/omxcore/gpu.mojo
 @@ -26,12 +26,12 @@ Why it looks like this:
@@ -252,7 +252,7 @@ index 8acded2..f4ebdc4 100644
  
  
 diff --git a/mojo/omxcore/job.mojo b/mojo/omxcore/job.mojo
-index 3dafcb2..9493d2c 100644
+index e48f49a1..f1f4b7fa 100644
 --- a/mojo/omxcore/job.mojo
 +++ b/mojo/omxcore/job.mojo
 @@ -27,6 +27,7 @@ dropped first.
@@ -293,7 +293,7 @@ index 3dafcb2..9493d2c 100644
          attr.free()
          if rc != 0:                                # no thread to be had: run it here
 diff --git a/mojo/omxcore/mapped.mojo b/mojo/omxcore/mapped.mojo
-index b64eb93..f2c9a3d 100644
+index b64eb93f..f2c9a3d1 100644
 --- a/mojo/omxcore/mapped.mojo
 +++ b/mojo/omxcore/mapped.mojo
 @@ -1,5 +1,6 @@
@@ -325,7 +325,7 @@ index b64eb93..f2c9a3d 100644
 -            _ = external_call["munmap", Int32](self.addr, self.span)
 +            _ = _libc_munmap(self.addr, self.span)
 diff --git a/mojo/omxcore/parquet.mojo b/mojo/omxcore/parquet.mojo
-index bc8f854..3ac4248 100644
+index e35986c2..81b6ef36 100644
 --- a/mojo/omxcore/parquet.mojo
 +++ b/mojo/omxcore/parquet.mojo
 @@ -30,6 +30,7 @@ from std.atomic import Atomic
@@ -336,7 +336,7 @@ index bc8f854..3ac4248 100644
  from std.sys import is_defined, CompilationTarget
  from std.bit import pop_count, byte_swap
  from .codec import zstd_compress, zstd_decompress, snappy_compress, snappy_decompress
-@@ -720,7 +721,7 @@ struct ParquetWriter(Movable):
+@@ -729,7 +730,7 @@ struct ParquetWriter(Movable):
              self.file.close()
          except:
              pass
@@ -345,7 +345,7 @@ index bc8f854..3ac4248 100644
  
      def finish(mut self, metadata: String, extra: List[String] = List[String]()) raises:
          """Writes the footer and moves the file into place. `extra`: other key-value metadata to keep, key then value,
-@@ -735,7 +736,7 @@ struct ParquetWriter(Movable):
+@@ -744,7 +745,7 @@ struct ParquetWriter(Movable):
          self.file.close()
          var dest = self.path
          if external_call["rename", Int32](self.tmp.as_c_string_span().ptr(), dest.as_c_string_span().ptr()) != 0:
@@ -354,7 +354,7 @@ index bc8f854..3ac4248 100644
              raise Error("could not move `" + self.tmp + "` to `" + self.path + "`")
  
  
-@@ -3238,7 +3239,7 @@ def scan_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+@@ -3254,7 +3255,7 @@ def scan_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
      var file = _open_file(path)
      var fd = file._get_raw_fd()
      var one = List[UInt8](length=1, fill=0)
@@ -364,7 +364,7 @@ index bc8f854..3ac4248 100644
      if got < 0:                                                       # a directory opens, but cannot be read
          raise Error("couldn't read `" + path + "`: not a regular file")
 diff --git a/mojo/omxcore/sortspill.mojo b/mojo/omxcore/sortspill.mojo
-index 0d417cf..7104b79 100644
+index 0d417cf3..7104b79c 100644
 --- a/mojo/omxcore/sortspill.mojo
 +++ b/mojo/omxcore/sortspill.mojo
 @@ -16,6 +16,7 @@ Run file layout: run after run, each column by column: n values (Int64), then n

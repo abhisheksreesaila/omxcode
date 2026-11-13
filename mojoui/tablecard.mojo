@@ -26,7 +26,7 @@ from mojoui.sheet import Sheet, TEXT
 from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, TONE_ACCENT, SET_TO
-from omxcore import Catalog, Table, sql, PlannerOptions, JobCtl
+from omxcore import Catalog, Table, sql, PlannerOptions, JobCtl, Frame as MxFrame
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
 comptime COMPACT_W = 560  # a card narrower than this shows its buttons as icons (goal 62)
@@ -41,6 +41,18 @@ comptime TC_ACTION = 3
 comptime TABLE_HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
 comptime GRID_LEFT = 16  # where a card's grid starts inside it (the card's padding; the title bar and its gap above)
 comptime GRID_TOP = 16 + TABLE_HEAD_H + 4
+
+
+def add_sheet(mut catalog: Catalog, name: String, frame: MxFrame) raises:
+    """A sheet's frame as the catalog's table `name`. A frame in memory that nothing has touched (no edits, appended or
+    removed rows, merges or formulas) goes in as its shared table, any other as the frame. omxcore a9a3c37 streams a
+    frame through a join without counting its filter first (F-158), so a selective filter on a big sheet no longer
+    made it the build side: goal 47's fleet ⨝ telemetry questions ran 5–12× slower than on 834ef9a. A plain table's
+    filter is counted first (D-7006)."""
+    if not frame.scan and len(frame.cells) == 0 and len(frame.added) == 0 and len(frame.removed) == 0 and len(frame.aliases) == 0 and len(frame.formulas) == 0:
+        catalog.add_table(name, frame.base)
+    else:
+        catalog.add_frame(name, frame)
 
 
 def query_table(mut catalog: Catalog, text: String, ctl: JobCtl = JobCtl(), join_budget: Int = 0, threads: Int = 0,
@@ -247,7 +259,7 @@ struct TableCards(Movable, Sized):
     def add_to(self, mut catalog: Catalog, page_name: String = "") raises:
         """Every card's table as a SQL source, by its unique SQL name (sql_name_of; edits included)."""
         for k in range(len(self.cards)):
-            catalog.add_frame(self.sql_name_of(k, page_name), self.cards[k].sheet.frame)
+            add_sheet(catalog, self.sql_name_of(k, page_name), self.cards[k].sheet.frame)
 
     def query(self, text: String, page_name: String, page: Sheet) raises -> Sheet:
         """A SQL query over every card's table and the page's own table (`page`, as `page_name`; "": left out): its
@@ -256,7 +268,7 @@ struct TableCards(Movable, Sized):
         var page_sql = String("")
         if page_name != "" and self.find(page_name) < 0:
             page_sql = page_name
-            catalog.add_frame(sql_name(page_name), page.frame)
+            add_sheet(catalog, sql_name(page_name), page.frame)
         self.add_to(catalog, page_sql)
         return Sheet(query_table(catalog, text).share(), False)
 

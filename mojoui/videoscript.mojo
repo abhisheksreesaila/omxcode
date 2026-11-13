@@ -16,7 +16,7 @@
 #                                  x, y, w, h … as mojoui.videojobs.detections_table has them
 # Models arrive the same way (goal 50: detect, segment): a name here, frames in, a table out.
 
-from omxcore import Catalog, Table, SharedTable, Frame as MxFrame, INT as MX_INT, DECIMAL as MX_DECIMAL
+from omxcore import Catalog, Table, SharedTable, INT as MX_INT, DECIMAL as MX_DECIMAL
 from mojoui.script import ScriptFunctions, last_call
 from mojoui.video import VideoSource
 from mojoui.videotable import RegionsAnalyzer, ColourRange, scan
@@ -87,7 +87,7 @@ struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
     def add_to(self, mut catalog: Catalog) raises:
         """Every video as a table of its frames, by its name."""
         for k in range(len(self.names)):
-            catalog.add_frame(self.names[k], MxFrame(frames_table(self.fps[k], self.frames[k]).share()))
+            catalog.add_table(self.names[k], frames_table(self.fps[k], self.frames[k]).share())  # (a plain table: D-7006)
 
     def has(self, name: String) -> Bool:
         return name in materialize[VIDEO_FUNCTIONS]()

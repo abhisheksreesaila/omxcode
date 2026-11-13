@@ -143,7 +143,9 @@ build_android() {  # a signed APK: the app + mojoui as libmojoui.so (arm64 phone
 
 apple_objects() {  # apple_objects <dir> <triple> <host-main> [Mojo flags, e.g. -D MOJOUI_DEBUG]
   rm -f "$1"/*.o
-  mojo_build "$3" ${4+"${@:4}"} --target-triple "$2" --emit object -o "$1/app.o"  # (${4+…}: macOS's bash 3.2 under set -u)
+  # -D MXFRAME_SERIAL: these objects link no Mojo async runtime (only mojo_rt's stand-ins), so the engine's kernels run
+  # in a loop; since omxcore F-210 (goal 70, D-7003) every core is its default on macOS, which needs AsyncRT_*
+  mojo_build "$3" -D MXFRAME_SERIAL ${4+"${@:4}"} --target-triple "$2" --emit object -o "$1/app.o"  # (${4+…}: macOS's bash 3.2 under set -u)
   mojo_build mojoui/hosts/mojo_rt.mojo --target-triple "$2" --emit object -o "$1/mojo_rt.o"
 }
 

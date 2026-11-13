@@ -19,7 +19,7 @@
 # another person reruns on their own data.
 
 from std.time import perf_counter_ns
-from omxcore import Catalog, Table, SharedTable, Frame as MxFrame, sql
+from omxcore import Catalog, Table, SharedTable, sql
 
 comptime STMT_SQL = 0
 comptime STMT_FN = 1
@@ -301,7 +301,7 @@ def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut funct
                 t = answer.take_table()
             var rows = t.rows()
             var shared = t^.share()
-            catalog.add_frame(name, MxFrame(shared))
+            catalog.add_table(name, shared)  # (a fresh answer: a plain table, its filters counted before a join, D-7006)
             run.names.append(name)
             run.tables.append(shared)
             var ms = Float64(perf_counter_ns() - t0) / 1e6
