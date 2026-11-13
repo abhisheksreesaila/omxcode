@@ -952,13 +952,48 @@ def _cols_of(types: MsgTypes, t: Int) -> Int:
 comptime _MAGIC_LEN = 8
 
 
+comptime _OPEN = def(Int, c_int) thin abi("C") -> c_int  # open(path, flags)
+comptime _PREAD = def(c_int, Int, Int, Int) thin abi("C") -> Int  # pread(fd, buf, n, offset)
+comptime _CLOSE = def(c_int) thin abi("C") -> c_int
+
+
+struct _File(Movable):
+    """A file read at offsets (pread, looked up by address: the standard library's seek and omxcore's parquet declare
+    lseek two ways, and a program may declare a C function only once)."""
+    var fd: c_int
+    var path: String
+
+    def __init__(out self, path: String) raises:
+        self.path = path
+        var p = path
+        self.fd = _fn[_OPEN](_dlsym(0, "open"))(Int(p.as_c_string_span().unsafe_ptr()), c_int(0))
+        if Int(self.fd) < 0:
+            raise Error(path + ": can't be opened")
+
+    def read(self, offset: Int, n: Int) raises -> List[UInt8]:
+        """n bytes from offset (fewer at the file's end)."""
+        var out = List[UInt8](length=max(n, 0), fill=0)
+        var done = 0
+        var pread = _fn[_PREAD](_dlsym(0, "pread"))
+        while done < n:
+            var got = pread(self.fd, Int(out.unsafe_ptr()) + done, n - done, offset + done)
+            if got <= 0:
+                break
+            done += got
+        while len(out) > done:
+            _ = out.pop()
+        return out^
+
+    def __deinit__(deinit self):
+        _ = _fn[_CLOSE](_dlsym(0, "close"))(self.fd)
+
+
 def _read_at(path: String, offset: Int, n: Int) raises -> List[UInt8]:
-    with open(path, "r") as f:
-        _ = f.seek(offset)
-        var b = f.read_bytes(n)
-        if len(b) != n:
-            raise Error(path + ": the file ends early (a cut download?)")
-        return b^
+    var f = _File(path)
+    var b = f.read(offset, n)
+    if len(b) != n:
+        raise Error(path + ": the file ends early (a cut download?)")
+    return b^
 
 
 def _is_magic(b: List[UInt8], p: Int) -> Bool:
@@ -1158,32 +1193,29 @@ def _chunk_records(b: List[UInt8], var r: _Rec) raises -> List[UInt8]:
 
 def _walk_mcap(path: String, start: Int, end: Int, mut walk: _Walk) raises:
     """The data section's records, read in turn (schemas, channels, counts and times; chunks opened)."""
-    with open(path, "r") as f:
-        var p = start
-        _ = f.seek(p)
-        while p + 9 <= end:
-            var head = f.read_bytes(9)
-            if len(head) < 9:
-                break
-            var op = Int(head[0])
-            var n = u64le(head, 1)
-            if op == 0x0F or op == 0x02:  # DataEnd, Footer
-                break
-            if op == 0x03 or op == 0x04 or op == 0x05 or op == 0x06:
-                var body = f.read_bytes(n)
-                if len(body) != n:
-                    raise Error(path + ": the file ends inside a record (a cut download?)")
-                if op == 0x06:
-                    var inner = _chunk_records(body, _Rec(0, n))
-                    walk.records(inner, 0, len(inner))
-                else:
-                    var whole = List[UInt8](capacity=9 + n)
-                    whole.extend(head.copy())
-                    whole.extend(body^)
-                    walk.records(whole, 0, len(whole))
+    var f = _File(path)
+    var p = start
+    while p + 9 <= end:
+        var head = f.read(p, 9)
+        if len(head) < 9:
+            break
+        var op = Int(head[0])
+        var n = u64le(head, 1)
+        if op == 0x0F or op == 0x02:  # DataEnd, Footer
+            break
+        if op == 0x03 or op == 0x04 or op == 0x05 or op == 0x06:
+            var body = f.read(p + 9, n)
+            if len(body) != n:
+                raise Error(path + ": the file ends inside a record (a cut download?)")
+            if op == 0x06:
+                var inner = _chunk_records(body, _Rec(0, n))
+                walk.records(inner, 0, len(inner))
             else:
-                _ = f.seek(p + 9 + n)
-            p += 9 + n
+                var whole = List[UInt8](capacity=9 + n)
+                whole.extend(head.copy())
+                whole.extend(body^)
+                walk.records(whole, 0, len(whole))
+        p += 9 + n
 
 
 def _visit_records[V: BagVisitor](bag: Bag, b: List[UInt8], start: Int, end: Int, wanted: List[Bool], ids: List[Int], mut v: V) raises:
@@ -1211,46 +1243,42 @@ def _scan_mcap[V: BagVisitor](bag: Bag, wanted: List[Bool], mut v: V) raises:
         ids.append(bag.topics[i].id)
         if wanted[i]:
             want_ids.append(bag.topics[i].id)
-    with open(bag.path, "r") as f:
-        if len(bag.chunks) > 0:
-            for c in bag.chunks:
-                var any = len(c.channels) == 0
-                for id in c.channels:
-                    any = any or (id in want_ids)
-                if not any:
-                    continue
-                _ = f.seek(c.offset)
-                var rec = f.read_bytes(c.length)
-                if len(rec) != c.length or Int(rec[0]) != 0x06:
-                    raise Error(bag.path + ": its chunk index points at something that isn't a chunk")
-                var inner = _chunk_records(rec, _Rec(9, c.length))
+    var f = _File(bag.path)
+    if len(bag.chunks) > 0:
+        for c in bag.chunks:
+            var any = len(c.channels) == 0
+            for id in c.channels:
+                any = any or (id in want_ids)
+            if not any:
+                continue
+            var rec = f.read(c.offset, c.length)
+            if len(rec) != c.length or Int(rec[0]) != 0x06:
+                raise Error(bag.path + ": its chunk index points at something that isn't a chunk")
+            var inner = _chunk_records(rec, _Rec(9, c.length))
+            _visit_records(bag, inner, 0, len(inner), wanted, ids, v)
+        return
+    var p = 8
+    while p + 9 <= bag.data_end:
+        var head = f.read(p, 9)
+        if len(head) < 9:
+            break
+        var op = Int(head[0])
+        var n = u64le(head, 1)
+        if op == 0x0F or op == 0x02:
+            break
+        if op == 0x05 or op == 0x06:
+            var body = f.read(p + 9, n)
+            if len(body) != n:
+                raise Error(bag.path + ": the file ends inside a record (a cut download?)")
+            if op == 0x06:
+                var inner = _chunk_records(body, _Rec(0, n))
                 _visit_records(bag, inner, 0, len(inner), wanted, ids, v)
-            return
-        var p = 8
-        _ = f.seek(p)
-        while p + 9 <= bag.data_end:
-            var head = f.read_bytes(9)
-            if len(head) < 9:
-                break
-            var op = Int(head[0])
-            var n = u64le(head, 1)
-            if op == 0x0F or op == 0x02:
-                break
-            if op == 0x05 or op == 0x06:
-                var body = f.read_bytes(n)
-                if len(body) != n:
-                    raise Error(bag.path + ": the file ends inside a record (a cut download?)")
-                if op == 0x06:
-                    var inner = _chunk_records(body, _Rec(0, n))
-                    _visit_records(bag, inner, 0, len(inner), wanted, ids, v)
-                else:
-                    var whole = List[UInt8](capacity=9 + n)
-                    whole.extend(head.copy())
-                    whole.extend(body^)
-                    _visit_records(bag, whole, 0, len(whole), wanted, ids, v)
             else:
-                _ = f.seek(p + 9 + n)
-            p += 9 + n
+                var whole = List[UInt8](capacity=9 + n)
+                whole.extend(head.copy())
+                whole.extend(body^)
+                _visit_records(bag, whole, 0, len(whole), wanted, ids, v)
+        p += 9 + n
 
 
 # -------------------------------------------------------------------------------------------------------- sqlite3
@@ -1367,22 +1395,32 @@ def camera_video(bag: Bag, k: Int, path: String) raises -> CameraVideo:
             raise Error(bag.topics[k].name + ": pictures out of time order (can't be a video yet)")
     var span = Float64(cam.times[len(cam.times) - 1] - cam.times[0]) / 1e9
     out.fps = Float64(len(cam.times) - 1) / span if span > 0 else 1.0
+    # (the file's name says what it holds: JPEGs make an .avi, H.264/H.265 an .mp4, whatever path asked for)
+    if path.endswith(".avi") or path.endswith(".mp4"):
+        var stem = String(path[byte = : path.byte_length() - 4])
+        out.path = stem + (".avi" if cam.avi.count() > 0 else ".mp4")
+    var dest = out.path
     if cam.avi.count() > 0:
-        cam.avi.write(path, out.fps)
+        cam.avi.write(dest, out.fps)
         out.width = cam.avi.width
         out.height = cam.avi.height
     else:
         # (H.264/H.265: the stream as it is, put in an .mp4 by ffmpeg without re-encoding; mojoui.video reads it)
-        var raw = path + "." + cam.formats
+        var raw = dest + "." + cam.formats
         with open(raw, "w") as f:
             f.write_bytes(Span(cam.stream))
         var p = Process.start(["ffmpeg", "-y", "-loglevel", "error", "-r", String(out.fps), "-f", "hevc" if cam.formats != "h264" else "h264",
-                               "-i", raw, "-c", "copy", "-f", "mp4", path], log=path + ".log")
+                               "-i", raw, "-c", "copy", "-f", "mp4", dest], log=dest + ".log")
         while p.running():
             _ = libc.usleep(20_000)
         _ = libc.unlink(raw)
         if p.exit_code() != 0:
-            raise Error(bag.topics[k].name + ": ffmpeg couldn't put its " + cam.formats + " pictures in a video: " + p.log_tail(400))
+            var said = String("")
+            try:
+                said = open(dest + ".log", "r").read()  # (not Process.log_tail: its seek clashes with omxcore's lseek in one program)
+            except:
+                pass
+            raise Error(bag.topics[k].name + ": ffmpeg couldn't put its " + cam.formats + " pictures in a video: " + said)
     out.times_ns = cam.times.copy()
     return out^
 

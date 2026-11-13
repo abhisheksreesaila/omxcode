@@ -12,7 +12,7 @@
 #
 # Tags (an agent's tools): label-name, add-label, label-pick-<k>, label-new, label-rows, learn, learn-close.
 # The tree reads every column but the label's own, its outputs, times and ids (t, t_ns, *_ns, id, *_id, frame, row,
-# episode) and text columns that are nearly all different (names, paths).
+# episode, run) and text columns that are nearly all different (names, paths).
 
 from std.time import perf_counter_ns
 from omxcore import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, INT as MX_INT, DATE as MX_DATE, BOOL as MX_BOOL
@@ -58,7 +58,7 @@ def _skipped(name: String, label: String) -> Bool:
         return True
     if n == "t" or n == "t_ns" or n.endswith("_ns") or n == "time" or n == "timestamp" or n == "id" or n.endswith("_id"):
         return True
-    return n == "frame" or n == "row" or n == "episode" or n == "item"
+    return n == "frame" or n == "row" or n == "episode" or n == "run" or n == "item"
 
 
 def features_of(sheet: Sheet, label: String) -> Features:
@@ -390,6 +390,10 @@ struct LearnPanel(Movable):
                     line = List[View]()
             parts.append(TextField(self.new_text, "A new label (Return writes it)", on_change=b + LP_NEW, on_submit=b + LP_NEW_SUBMIT).fill()
                          .tag("label-new").label("New label"))
+            parts.append(VStack(Text("Or label rows by number (an agent's way): 12 person ahead, 40 waiting", CAPTION).max_width(300),
+                                TextField(self.rows_text, "12 person ahead, 40 waiting", on_change=b + LP_ROWS_TEXT, on_submit=b + LP_ROWS_MSG).fill()
+                                .tag("label-rows").label("Label rows"),
+                                spacing=4).fill().align(START))
             parts.append(HStack(Spacer(), Button("Learn" if not self.learned_once else "Learn again", b + LP_LEARN_MSG, PROMINENT, icon="sparkles")
                                 .tag("learn").tooltip("A decision tree learns from the labelled rows and fills the rest"), spacing=8).fill())
             if self.learned_once:
@@ -407,11 +411,6 @@ struct LearnPanel(Movable):
                     parts.append(Text("Read " + ", ".join(self.used), CAPTION).max_width(300))
         if self.said != "":
             parts.append(Text(self.said, CAPTION).tone(TONE_WARN).max_width(300).tag("learn-said"))
-        if self.label != "":
-            parts.append(VStack(Text("Or label rows by number (an agent's way): 12 person ahead, 40 waiting", CAPTION).max_width(300),
-                                TextField(self.rows_text, "12 person ahead, 40 waiting", on_change=b + LP_ROWS_TEXT, on_submit=b + LP_ROWS_MSG).fill()
-                                .tag("label-rows").label("Label rows"),
-                                spacing=4).fill().align(START))
         var out = List[View]()
         out.append(VStack(parts^, spacing=12).fill().align(START).tag("learn-panel"))
         return out^

@@ -281,3 +281,14 @@ def main() raises:
     assert_true(links.update(Event(7600 + LINKS_OPEN, "", 0)))
     assert_true(links.open)
     print("tools: ok")
+
+    # (goal 68: a table's row follows a time link from its own time cell: a fleet's moments.time_s ~ a camera's t)
+    var rowlinks = Links(7600)
+    _ = rowlinks.add(Link.time(End("moments", "time_s"), End("cam.avi", "t"), -1000.0))
+    var row_names: List[String] = ["run", "time_s"]
+    var row_cells: List[String] = ["nav_15", "1,012.5"]
+    var row_fs = rowlinks.follow(Selection("moments", "moments", 3, "run", "nav_15").with_row(row_names, row_cells))
+    assert_equal(len(row_fs), 1)
+    assert_equal(row_fs[0].card, "cam.avi")
+    assert_true(abs(row_fs[0].time - 12.5) < 1e-9)
+    print("row-time: ok")

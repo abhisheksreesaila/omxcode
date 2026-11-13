@@ -130,8 +130,8 @@ scripts/setup --no-models    <span class="c"># everything but the packs</span></
     </div>
     <div class="step">
       <div class="say rv">
-        <p>A pack is a folder: the compiled graph (<code>scene.mef</code>), its weights (<code>scene.safetensors</code>), <code>labels.txt</code>, and <code>model.json</code>, which the converter writes.</p>
-        <p>The framework reads every <code>model.json</code> in the packs folder (<code>build/packs</code>, or <code>$OMX_PACKS</code>). A folder there is a function. Take the folder away and the function is gone. No list to edit, no Mojo to rebuild.</p>
+        <p>A pack is a folder: the compiled graph (<code>scene.mef</code>), its weights (<code>scene.safetensors</code>), <code>labels.txt</code>, and <code>plugin.json</code> (with the older <code>model.json</code> beside it), which the converter writes.</p>
+        <p>The framework reads every <code>plugin.json</code> in the plugins folders (<code>$OMX_PLUGINS</code>, else <code>~/.local/share/omxcode/plugins</code>) and the packs folder (<code>build/packs</code>, or <code>$OMX_PACKS</code>): <code>mojoui/plugins.mojo</code>. A folder there is a function. Take the folder away and the function is gone. No list to edit, no Mojo to rebuild.</p>
         <p>For an <code>image-labels</code> pack, the framework itself crops each frame to its centre square, resizes it to the pack's size, and reads back the best label, the same way the converter's check did. Mojo and PyTorch pick the same label on every test picture.</p>
       </div>
       <div>
@@ -181,6 +181,36 @@ per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
   </div>
 </section>
 
+<!-- 4. Add a model in the app -->
+<section id="add">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Or</div>
+      <h2 class="rv">Add a model from the app. <span class="two">Paste a name, drop a file, or ask the agent.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>omxplorer's <b>Add a model</b> takes a Hugging Face name, a model file (XGBoost JSON, LightGBM text, ONNX, skops) or a folder. Before anything downloads it says, in one line, what the model does, whether it fits the GPU, and its licence; a model it can't run says why, and nothing downloads.</p>
+        <p>It answers on the row or the video frame you were looking at as soon as it lands, then <b>Run it on all</b> fills a column or a table. A table's columns are matched to the model's inputs by name and type, never guessed. A model that runs its own Python code asks first. Pickles are refused. The agent's <code>add-model</code> tool does the same (<code>mojoui/addmodel.mojo</code>).</p>
+        <p><b>Learn from labels</b> is the other way in: label about twenty rows of any table and a decision tree, written in Mojo, fills the rest and says its rule in words (<code>mojoui/tree.mojo</code>, <code>mojoui/learn.mojo</code>).</p>
+      </div>
+      <div class="pane rv"><div class="file"><b>a plugin.json</b> · what Add a model writes for a Hub detector</div>
+<pre class="code">{
+  "format": "omx-plugin/1",
+  "name": "yolos_tiny",
+  "kind": "detect",
+  "runner": "torch",
+  "licence": "apache-2.0",
+  "source": "hf:hustvl/yolos-tiny@…",
+  "inputs": [{"name": "frame", "type": "image"}],
+  "outputs": [{"name": "kind", "type": "text"}, …],
+  "files": {"model": "model"},
+  "trust_remote_code": false
+}</pre></div>
+    </div>
+  </div>
+</section>
+
 <!-- Limits -->
 <section id="limits">
   <div class="wrap">
@@ -190,7 +220,7 @@ per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
     </div>
     <div class="facts3">
       <div class="rv"><div class="t">Layers</div><h3>Convolutional networks</h3><p>It converts Conv2d (groups 1), BatchNorm2d, Linear, the common activations, max and average pooling, add, mul, cat and flatten. Anything else stops it with the layer's name, for example an <code>Upsample</code>. Then that part's MAX graph is written by hand, as <code>scripts/packs/yolox.py</code> does.</p></div>
-      <div class="rv"><div class="t">Kinds</div><h3>Pictures to labels</h3><p>A pack the framework runs by itself takes a picture and returns labels. Text models (<code>classify()</code>, e5) and detectors (<code>detect()</code>, YOLOX) work too, but each needs its own Mojo for what goes in and comes out: a tokenizer, box decoding.</p></div>
+      <div class="rv"><div class="t">Kinds</div><h3>Five kinds, by plugin.json</h3><p>A plugin says its kind: <code>tabular</code>, <code>detect</code>, <code>segment</code>, <code>classify-image</code> or <code>embed-text</code>, and its runner: a MAX pack, a decision tree file read in Mojo, or PyTorch, ONNX or skops in the app's process (<code>mojoui/models.mojo</code> names no model). Segmenters from the Hub don't run yet; a MAX detector decodes YOLOX's outputs only.</p></div>
       <div class="rv"><div class="t">Where</div><h3>Linux with an NVIDIA GPU</h3><p>Packs are compiled by MAX for the GPU in the machine, on Linux. The converter checks every pack on that GPU before writing it. Macs run omxplorer and its video, but not packs yet.</p></div>
     </div>
   </div>

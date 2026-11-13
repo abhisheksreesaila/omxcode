@@ -632,8 +632,19 @@ struct Links(Movable, Sized):
                     q_table.append(there.table_name())
                     q_col.append(there.column)
                     q_val.append(v)
-                elif l.kind == LINK_TIME and first and sel.time >= 0:
-                    var t = l.to_b(sel.time) if mine_a else l.to_a(sel.time)
+                elif l.kind == LINK_TIME and first:
+                    var at = sel.time
+                    if at < 0:  # (a table's row carries its time in the link's column: goal 68's moments.time_s ~ a camera)
+                        var here = l.a if mine_a else l.b
+                        var cell = String(sel.value_of(here.column).replace(",", "").strip())
+                        if cell != "" and here.column in sel.names:
+                            try:
+                                at = atof(cell)
+                            except:
+                                at = -1.0
+                    if at < 0:
+                        continue
+                    var t = l.to_b(at) if mine_a else l.to_a(at)
                     out.append(Follow(there.card, there.table_name(), LINK_TIME, there.column, "", -1, t, l.label()))
             first = False
         return out^

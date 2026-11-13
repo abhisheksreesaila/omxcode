@@ -962,6 +962,8 @@ struct Main(App):
                     self.story_tables += 1
             if self.story_tables >= len(self.starter.tables):
                 self.story_tables_read()
+            else:
+                self.add_table_file(self.starter.path(self.starter.tables[self.story_tables]))
 
     def take_index(mut self):
         """A log's key index that finished building: kept; the slice asked for meanwhile runs now."""
@@ -1386,8 +1388,8 @@ struct Main(App):
         self.to_sheet()
         self.story_step = STORY_TABLES
         self.inspector_open = True
-        for t in self.starter.tables:
-            self.add_table_file(self.starter.path(t))
+        if len(self.starter.tables) > 0:  # (one at a time: the table work reads one file at once; each landing starts the next)
+            self.add_table_file(self.starter.path(self.starter.tables[0]))
         if len(self.starter.tables) == 0:
             self.story_tables_read()
 

@@ -207,6 +207,20 @@ omxconsole, the second app, runs models on your own GPU through [MAX](https://ww
 
 Not yet: `consoled port-try`, the agent's own "see it run" loop, which the Python version had.
 
+### omxplorer: models as plugins, and Learn
+
+In omxplorer (not omxconsole) a model is a plugin: a folder with `plugin.json` (`mojoui/plugins.mojo`), found at run time and run beside the data, in the app's process. **Add a model** takes a Hugging Face name, a file or a folder, or the agent's `add-model` tool (`mojoui/addmodel.mojo`).
+
+| Kind of model | Status |
+|---|---|
+| **Decision models** (XGBoost JSON, LightGBM text read in Mojo; ONNX; scikit-learn saved with skops) | ✅ A table's columns matched by name and type; answers on a row, then fills a column. Pickles are refused |
+| **Picture classifiers and detectors** from the Hub (safetensors, PyTorch in process) | ✅ Answers on the video frame you're on, then runs on every frame. Linux with the `models` environment |
+| **Text embedders** from the Hub | ✅ The rows most like the one you're on; a similarity column for every row |
+| **MAX packs** (YOLOX, e5, ResNet-18 from `scripts/packs`) | ✅ The same plugins: script functions |
+| **Learn from labels** (a decision tree in Mojo, `mojoui/tree.mojo`) | ✅ Label about 20 rows of any table: it fills the rest, says its rule in words and how often it was right on rows it never saw |
+| **Segmenters from the Hub, LLMs** | ❌ Not in Add a model (LLMs: omxconsole) |
+
+
 ### omxconsole: notebooks and tools for agents (new)
 
 - **📓 Run in Jupyter.** Every model has a notebook: its architecture from `config.json`, its model card, and cells that call your endpoint. The Notebook tab's Run in Jupyter writes it to `~/.mxc/notebooks/<model>.ipynb` (never overwriting your edits) and starts JupyterLab on 127.0.0.1 with its own token. The kernels get `MXC_BASE_URL` and a key that lasts as long as the app, so the cells just run. Without `jupyter` on your PATH it runs one through `pixi exec`, installing nothing; `MXC_JUPYTER` picks your own. Jupyter stops when the app closes.

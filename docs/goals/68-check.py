@@ -426,15 +426,15 @@ def m4():
 
     step = max(len(stops) // 20, 1)
     labels = ", ".join(f"{i + 1} {cause(stops[i])}" for i in range(0, len(stops), step)[:20])
-    steps = ["tap:Start", "wait:500", "grab:m4-0-start", f"pick:Open robot bags…={BAGS}", "wait:400", "grab:m4-1-reading", "waitfor:question-1=600000",
-             "wait:2500", "grab:m4-2-fleet", "tapat:table-moments=60,95", "wait:1500", "grab:m4-3-one-cursor", "tap:label-stops", "wait:1500",
+    steps = ["tap:Start", "wait:500", "grab:m4-0-start", f"pick:Open robot bags…={BAGS}", "wait:400", "grab:m4-1-reading", "waitfor:label-stops=600000",
+             "wait:2500", "grab:m4-2-fleet", "tapat:table-moments=300,300", "wait:1500", "grab:m4-3-one-cursor", "tap:label-stops", "wait:1500",
              "grab:m4-4-stops-sheet", "enter:12 person ahead, 40 waiting=" + labels, "wait:800", "tap:learn", "wait:1500", "grab:m4-5-learned"]
     code, out, _ = gtk(steps, "m4-fleet", OUT, timeout=3600)
     bad = [l for l in out.splitlines() if l.startswith("TEST:")]
     if code != 0 or bad:
         probs.append(f"GTK exit {code} {bad[:4]}")
     read = re.search(r"FLEET: read (\d+) runs, (\d+) cameras in ([\d.]+) s", out)
-    follows = [l for l in out.splitlines() if l.startswith("FOLLOW:") and ("seek" in l.lower() or " at " in l)]
+    follows = sorted({l.split()[1] for l in out.splitlines() if l.startswith("FOLLOW:") and " seek " in l})  # (the cameras that moved)
     learn = re.search(r"^LEARN: (.+) \| held (\d+)/(\d+) \| (\d+) rows \| (\d+) ms", out, re.M)
     story = BAGS / "fleet/story.json"
     if not read or not story.exists():
@@ -521,15 +521,15 @@ def m5():
     else:
         story = {"OMX_STARTER": str(fleet)}
         web_run("m5-bags-1-start", "wait:1000", extra_env=story)
-        out, _ = web_run("m5-bags-2-fleet", "tap:story-start;wait:question-1;wait:3000", extra_env=story)
+        out, _ = web_run("m5-bags-2-fleet", "tap:story-start;wait:Label and learn;wait:1500", extra_env=story)
         if "label-stops" not in out:
             probs.append("the fleet's story didn't offer Label and learn on the stops")
-        out, _ = web_run("m5-fleet-1-stops", "tap:story-start;wait:question-1;wait:3000;tap:label-stops;wait:1500", extra_env=story)
+        out, _ = web_run("m5-fleet-1-stops", "tap:story-start;wait:Label and learn;wait:1500;tap:label-stops;wait:1500", extra_env=story)
         stops = list(__import__("csv").DictReader((fleet / "stops.csv").open()))
         cause = lambda r: "person ahead" if r["person_m"] and float(r["person_m"]) < 1.5 else ("not started" if float(r["moved_m"] or 0) < 0.2 else "waiting")  # noqa: E731
         step = max(len(stops) // 20, 1)
         labels = ", ".join(f"{i + 1} {cause(stops[i])}" for i in range(0, len(stops), step)[:20])
-        out, _ = web_run("m5-fleet-2-learned", "tap:story-start;wait:question-1;wait:3000;tap:label-stops;wait:1500;"
+        out, _ = web_run("m5-fleet-2-learned", "tap:story-start;wait:Label and learn;wait:1500;tap:label-stops;wait:1500;"
                                                f"enter:12 person ahead, 40 waiting={labels};wait:600;tap:learn;wait:1500", extra_env=story)
         if "person_m" not in out:
             probs.append("the fleet's Learn didn't name person_m")

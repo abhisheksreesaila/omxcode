@@ -211,6 +211,16 @@ COMPOSITES = [
     ("TextTable (words as rows: page, text, box, confidence; CSV in and out)", "mojoui/texttable.mojo", [], "TextTable("),
     ("Form fields (a label's value by geometry: right on its line or under it; the labels are data)", "mojoui/formfields.mojo", [], "find_fields("),
     ("Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)", "mojoui/documentjobs.mojo", [], "DocumentFeed("),
+    # models and robot bags (goal 68)
+    ("Model plugins (a folder with plugin.json: kind, runner tree/max/torch/onnx/skops, inputs, outputs; found at run time; pickles, ../ paths and links out refused)", "mojoui/plugins.mojo", [], "find_plugins("),
+    ("Decision model files in Mojo (XGBoost JSON, LightGBM text, Learn's own tree: the libraries' predictions to 4e-7)", "mojoui/treefile.mojo", [], "Forest.load("),
+    ("Plugin runs (a tabular model's columns matched by name and type, never guessed; torch, ONNX and skops in the app's process)", "mojoui/pluginrun.mojo", [], "match_columns("),
+    ("Add a model (paste a Hugging Face name, drop a file or folder, or the agent: one line before any download, consent for a model's own code, progress, an answer where you're looking, run on all)", "mojoui/addmodel.mojo", ["TextField", "File picker", "ProgressBar", "Image", "Button", "Text"], "AddModel("),
+    ("Decision tree that says its rule (CART in Mojo, depth-limited, round thresholds, held-out accuracy)", "mojoui/tree.mojo", [], "learn_tree("),
+    ("Learn from my labels (a label column, picks, label-rows, Learn: learned and sure columns, the rule in words, relearn on edit)", "mojoui/learn.mojo", ["TextField", "Button", "Text", "VStack"], "LearnPanel("),
+    ("ROS 2 bags (MCAP with zstd/lz4 chunks, rosbag2 sqlite3, CDR from the file's own schemas, JSON channels; topics as tables; cameras as videos)", "mojoui/bag.mojo", [], "Bag.open("),
+    ("Motion JPEG AVI writer (JPEGs into a video, not re-encoded)", "mojoui/avi.mojo", [], "MjpegAvi("),
+    ("A fleet of bags (runs, every topic joined on time at 10 Hz, stops, story.json; read off the UI thread)", "mojoui/fleet.mojo", [], "read_fleet("),
     # links (goal 41)
     ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
     ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_job("),

@@ -40,6 +40,7 @@ struct Starter(Copyable, Movable):
     var tables: List[String]  # files that become table cards
     var documents: String  # a folder of documents ("": none)
     var links: List[String]  # typed links (mojoui.links), in order
+    var videos: List[String]  # videos opened as cards before the links (relative to the folder; goal 68: a fleet's cameras)
     var hero: String  # the row the story opens on: the first cell that equals it, in the sheet's first column
     var questions: List[Question]
 
@@ -55,6 +56,7 @@ struct Starter(Copyable, Movable):
         self.tables = List[String]()
         self.documents = ""
         self.links = List[String]()
+        self.videos = List[String]()
         self.hero = ""
         self.questions = List[Question]()
 
@@ -76,6 +78,9 @@ struct Starter(Copyable, Movable):
         var t = j.get(0, "tables")
         for k in range(j.size(t) if t >= 0 else 0):
             s.tables.append(j.text(j.at(t, k)))
+        var vs = j.get(0, "videos")
+        for k in range(j.size(vs) if vs >= 0 else 0):
+            s.videos.append(j.text(j.at(vs, k)))
         var l = j.get(0, "links")
         for k in range(j.size(l) if l >= 0 else 0):
             s.links.append(j.text(j.at(l, k)))
@@ -98,6 +103,8 @@ struct Starter(Copyable, Movable):
             out.append(t)
         if self.documents != "":
             out.append(self.documents)
+        for v in self.videos:
+            out.append(v)
         return out^
 
     def has(self) -> Bool:

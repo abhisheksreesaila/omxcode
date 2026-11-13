@@ -13,6 +13,8 @@
 from std.os import getenv
 from std.os.path import exists, getsize
 from std.memory.alloc import unsafe_alloc
+from std.memory import Pointer
+from std.ffi import external_call, c_int
 from mojoui import libc
 from mojoui.http import Request
 from mojoui.http_socket import SocketTransport
@@ -258,22 +260,42 @@ def healthy(url: String, timeout_ms: Int = 1000) -> Bool:
 
 
 def file_tail(path: String, max_bytes: Int = 4000) -> String:
-    """The last `max_bytes` of a text file ("" when it isn't there), starting at a whole line."""
+    """The last `max_bytes` of a text file ("" when it isn't there), starting at a whole line. Read with pread found by
+    address, not FileHandle.seek: its lseek clashes with omxcore's in one program (scripts/seek_lint.py, goal 68)."""
     try:
         if not exists(path):
             return ""
         var size = getsize(path)
-        with open(path, "r") as f:
-            if size > max_bytes:
-                _ = f.seek(size - max_bytes)
-            var text = f.read()
-            if size > max_bytes:
-                var nl = text.find("\n")
-                if nl >= 0:
-                    return String(text[byte = nl + 1 :])
-            return text
+        var start = size - max_bytes if size > max_bytes else 0
+        var n = size - start
+        var p = path
+        var n_open = String("open")
+        var n_pread = String("pread")
+        var n_close = String("close")
+        var openf = external_call["dlsym", Int](0, n_open.as_c_string_span())
+        var preadf = external_call["dlsym", Int](0, n_pread.as_c_string_span())
+        var closef = external_call["dlsym", Int](0, n_close.as_c_string_span())
+        var fd = _by_address[def(Int, c_int) thin abi("C") -> c_int](openf)(Int(p.as_c_string_span().unsafe_ptr()), c_int(0))
+        if Int(fd) < 0:
+            return ""
+        var buf = List[UInt8](length=Int(n), fill=0)
+        var got = _by_address[def(c_int, Int, Int, Int) thin abi("C") -> Int](preadf)(fd, Int(buf.unsafe_ptr()), Int(n), Int(start))
+        _ = _by_address[def(c_int) thin abi("C") -> c_int](closef)(fd)
+        while len(buf) > max(got, 0):
+            _ = buf.pop()
+        var text = String(from_utf8_lossy=Span(buf))
+        if start > 0:
+            var nl = text.find("\n")
+            if nl >= 0:
+                return String(text[byte = nl + 1 :])
+        return text
     except:
         return ""
+
+
+def _by_address[T: ImplicitlyCopyable](addr: Int) -> T:
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=addr)
+    return Pointer(to=raw).unsafe_bitcast[T]()[]
 
 
 def output(argv: List[String], timeout_ms: Int = 5000, env: List[String] = List[String]()) -> String:
