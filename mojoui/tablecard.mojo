@@ -48,7 +48,8 @@ def add_sheet(mut catalog: Catalog, name: String, frame: MxFrame) raises:
     removed rows, merges or formulas) goes in as its shared table, any other as the frame. omxcore a9a3c37 streams a
     frame through a join without counting its filter first (F-158), so a selective filter on a big sheet no longer
     made it the build side: goal 47's fleet ⨝ telemetry questions ran 5–12× slower than on 834ef9a. A plain table's
-    filter is counted first (D-7006)."""
+    filter is counted first (D-7006). A column of 128-bit totals is refused either way, as add_frame refuses it."""
+    frame.refuse_wide()
     if not frame.scan and len(frame.cells) == 0 and len(frame.added) == 0 and len(frame.removed) == 0 and len(frame.aliases) == 0 and len(frame.formulas) == 0:
         catalog.add_table(name, frame.base)
     else:

@@ -69,7 +69,7 @@ def ensure_g47():
 def ensure_fleet68():
     """build/g68/fleet (runs, moments, stops): tests/test_fleet over build/bags, as goal 68's M4 writes it."""
     if not (ROOT / "build/g68/fleet/moments.csv").exists():
-        ok, why = test_one("test_fleet", "build/eng-after")
+        ok, why = test_one("test_fleet")
         if not ok:
             raise RuntimeError("test_fleet: " + why)
 
@@ -126,8 +126,8 @@ def patch_files():
 def minimal_patch_conflicts():
     """The engine with only the patch's accelerator hunks (kernels_aot_gpu, pipeline_gpu, gpu.mojo) beside Flare:
     tests/test_engine_flare must fail with "conflicting signature" (why the libc hunks stay, D-7002)."""
-    src = OUT / "omxcore-min"
-    pkg = OUT / "eng-min/omxcore.mojoc"
+    src = OUT / f"omxcore-min-{COMMIT}"
+    pkg = OUT / f"eng-min-{COMMIT}/omxcore.mojoc"
     if not pkg.exists():
         parts = re.split(r"(?m)^(?=diff --git )", PATCH.read_text())
         keep = "".join(p for p in parts if re.match(r"diff --git a/(kernels_aot/kernels_aot_gpu|kernels_aot/pipeline_gpu|mojo/omxcore/gpu)\.mojo", p))
@@ -238,7 +238,7 @@ def m1():
     ensure_bags()
     ensure_g47()
     ensure_fleet68()
-    r = run(["pixi", "run", "python", "-I", "docs/goals/70/bench_m1.py", "2"], 7200)
+    r = run(["pixi", "run", "python", "-I", "docs/goals/70/bench_m1.py", "3"], 3 * 3600)
     (OUT / "m1.log").write_text(r.stdout + r.stderr)
     res = json.loads((OUT / "m1.json").read_text()) if (OUT / "m1.json").exists() else None
     if r.returncode or not res:
@@ -262,7 +262,7 @@ def m1():
     ef, es, egm = summary("engine_ratio")
     bf, bs, bgm = summary("branch_ratio")
     worst = sorted(bs, key=lambda x: x["branch_ratio"])[:3]
-    return True, (f"{res['answers']} answers byte-equal on all three builds, no refusals; the engine alone: {ef} steps faster, {len(es)} slower, "
+    return True, (f"{res['answers']} answers byte-equal on all three builds, no refusals; noise seen {res['noise']:.2f}×; the engine alone: {ef} steps faster, {len(es)} slower, "
                   f"{egm:.2f}× over steps of 10 ms or more; the branch vs main: {bf} faster, {len(bs)} slower, {bgm:.2f}× "
                   f"(slowest: {', '.join(f'{x['step']} {x['branch_ratio']:.2f}×' for x in worst)}; docs/goals/70-bench.md)")
 
@@ -310,6 +310,17 @@ def m2():
         m = re.search(rf"^\| {re.escape(p)} \|.*\| (moved|stays) \|", report, re.M)
         if not m or (m.group(1) == "moved") != wins:
             probs.append(f"{p}: the report's row doesn't say {'moved' if wins else 'stays'}")
+    lines = ["# Goal 70 M2: goal 68's robotics compute, the app's way vs the engine's", "",
+             "Written by docs/goals/70-check.py M2 from its own run (tests/bench_robotics.mojo, docs/goals/70/similarity.py; medians of 5). "
+             "The app's similarity is numpy float32 as mojoui/plugin_py.py's similar(); answers are compared with float64 (the engine has no float32).", "",
+             "| path | app ms | engine ms | engine / app | answers | decision |", "|---|---:|---:|---:|---|---|"]
+    for p in PATHS:
+        t = times.get(p, {})
+        app, eng = t.get("app", t.get("numpy_f32")), t.get("engine")
+        if app and eng:
+            ok = same.get(p.split("_")[0] if p.startswith("similarity") else p) == "yes"
+            lines.append(f"| {p} | {app:.1f} | {eng:.1f} | {eng / app:.1f}× | {'equal' if ok else 'DIFFER'} | {'moved' if eng < app else 'stays'} |")
+    (ROOT / "docs/goals/70-robotics.md").write_text("\n".join(lines) + "\n")
     if "## Asks for omxcore" not in report:
         probs.append("the report has no '## Asks for omxcore'")
     # the code: a path that stays keeps the app's own code (mojoui.fleet's _asof and stop loop, learn's features_of, plugin_py.similar)
@@ -326,7 +337,9 @@ def m3():
     """Nothing regressed: goal 68's checker M0–M6 (its M6 runs goal 47 M0–M8, 59 M1–M2, 62 M1, the component matrix, the
     message ranges and the seek lint), then the decisions and libc lints."""
     probs, said = [], []
-    r = run(["pixi", "run", "python", "docs/goals/68/regress.py", "68", *[f"M{i}" for i in range(7)]], 6 * 3600)
+    # (M3 first: its test_bag writes build/g68/videos/nav15_front.avi, which goal 68's M0 and M2 open; on a fresh tree
+    # its own order fails M0 with "no NavWareSet video")
+    r = run(["pixi", "run", "python", "docs/goals/68/regress.py", "68", "M3", "M0", "M1", "M2", "M4", "M5", "M6"], 8 * 3600)
     (OUT / "m3-68.txt").write_text(r.stdout + r.stderr)
     res = dict(re.findall(r"^(M\d+): (PASS|FAIL|BLOCKED)", r.stdout, re.M))
     bad = {k: v for k, v in res.items() if v != "PASS"}
