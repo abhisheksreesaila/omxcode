@@ -234,7 +234,10 @@ def download(repo, folder, files_json, sha, allow_code, sizes_json="{}", shas_js
                     raise IOError(f"{f}: {e} (after 5 tries)")
                 time.sleep(1.5 * (attempt + 1))
         if sizes.get(f) and os.path.getsize(part) != sizes[f]:
-            raise IOError(f"{f}: got {os.path.getsize(part)} bytes of {sizes[f]}")
+            got = os.path.getsize(part)
+            if got > sizes[f]:
+                os.remove(part)  # (more than the Hub says: start over next time)
+            raise IOError(f"{f}: got {got} bytes of {sizes[f]}")
         if shas.get(f):  # (an LFS file: its sha256 as the Hub lists it)
             import hashlib
 
@@ -294,15 +297,16 @@ def _safe_skops_type(name):
     import importlib
     import inspect
 
+    import sys
+
     root = name.split(".")[0]
     if root not in ("sklearn", "numpy", "scipy") or "Function" in name:
         return False
+    importlib.import_module(root)  # (the package itself; never a submodule the file names: importing one runs its code)
     mod, _, attr = name.rpartition(".")
-    try:
-        obj = getattr(importlib.import_module(mod), attr)
-    except Exception:
-        return False
-    return inspect.isclass(obj)
+    m = sys.modules.get(mod)
+    obj = getattr(m, attr, None) if m is not None else None
+    return obj is not None and inspect.isclass(obj)
 
 
 def _load(folder, j):
@@ -310,7 +314,7 @@ def _load(folder, j):
     runner, kind = spec["runner"], spec["kind"]
     params = spec.get("params") or {}
     files = spec.get("files") or {}
-    remote = bool(spec.get("trust_remote_code"))
+    remote = bool(spec.get("trust_remote_code")) and allowed(spec.get("source", ""))  # (plugin.json's word and the person's recorded yes)
     m = {"spec": spec, "kind": kind, "runner": runner}
     if runner == "onnx":
         import onnxruntime as ort
@@ -591,6 +595,21 @@ def plugin_name(repo):
     return ("m_" + n) if n[0].isdigit() else n
 
 
+def _consents():
+    """The app's own record of a person's yes to a model's code: <config>/allowed-model-code.txt, a line per hf:repo@sha
+    ($OMX_CONFIG, else ~/.config/omxcode). plugin.json's trust_remote_code alone never runs code (a folder could say so)."""
+    base = os.environ.get("OMX_CONFIG") or os.path.join(os.path.expanduser("~"), ".config", "omxcode")
+    return os.path.join(base, "allowed-model-code.txt")
+
+
+def allowed(source):
+    try:
+        with open(_consents()) as f:
+            return source in {l.strip() for l in f}
+    except OSError:
+        return False
+
+
 def write_plugin(folder, preflight_json, allow_code):
     """folder/plugin.json for a downloaded Hub model (runner torch), from what preflight said and the files it got."""
     p = json.loads(preflight_json)
@@ -614,6 +633,10 @@ def write_plugin(folder, preflight_json, allow_code):
             "trust_remote_code": bool(allow_code and p["remote_code"])}
     with open(os.path.join(folder, "plugin.json"), "w") as f:
         json.dump(spec, f, indent=2)
+    if spec["trust_remote_code"]:  # (the person's yes, for this repo at this commit only)
+        os.makedirs(os.path.dirname(_consents()), exist_ok=True)
+        with open(_consents(), "a") as f:
+            f.write(spec["source"] + "\n")
     return spec["name"]
 
 
@@ -670,6 +693,12 @@ def file_plugin(path, plugins_dir):
             shutil.copytree(path, dest, symlinks=False, ignore=_skip_unsafe)
             with open(os.path.join(dest, "plugin.json")) as f:
                 s = json.load(f)
+            if s.get("runner") not in ("tree", "onnx", "skops", "torch"):
+                shutil.rmtree(dest)
+                out["why"] = (f"{base}: a {s.get('runner')} plugin: compiled packs (MAX) are added only by scripts/packs into the packs folder, "
+                              "never by a drop. Nothing added.")
+                out["line"] = out["why"]
+                return json.dumps(out)
             s["name"] = name
             s["trust_remote_code"] = False  # (a dropped folder never brings its own yes: only the Hub path's Allow writes it)
             with open(os.path.join(dest, "plugin.json"), "w") as f:

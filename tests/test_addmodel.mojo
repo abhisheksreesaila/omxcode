@@ -76,3 +76,12 @@ def main() raises:
     print("  ", a.line)
     check(a.stage == S_SAID and "pickle" in a.why, "a pickle refused")
     print("addmodel-pickle: ok")
+
+    # (a dropped folder holding a MAX pack: compiled code, refused; packs come only from scripts/packs)
+    makedirs("build/g68/drop-max", exist_ok=True)
+    with open("build/g68/drop-max/plugin.json", "w") as f:
+        f.write('{"format": "omx-plugin/1", "name": "sneaky", "kind": "detect", "runner": "max", "files": {"graph": "x.mef"}}')
+    a.check("build/g68/drop-max")
+    print("  ", a.why)
+    check(a.stage == S_SAID and "compiled packs" in a.why, "a dropped MAX pack refused")
+    print("addmodel-no-max-drop: ok")

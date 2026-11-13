@@ -1,7 +1,7 @@
 # mojoui.bag (goal 68 M3): cameras become videos mojoui.video plays, a topic becomes a sheet table, bad files say why.
 #   pixi run mojo build -I . tests/test_bag.mojo -o build/g68/bin/test_bag && build/g68/bin/test_bag   (needs build/bags)
 from std.os import makedirs
-from mojoui.bag import Bag, camera_video, sheet_table
+from mojoui.bag import Bag, camera_video, sheet_table, MsgTypes
 from mojoui.video import VideoSource
 
 
@@ -78,4 +78,17 @@ def main() raises:
     with open("build/g68/damaged.mcap", "w") as g:
         g.write_bytes(Span(bad))
     check(fails("build/g68/damaged.mcap", "damaged"), "a damaged record length")
+    # (a schema whose type holds itself, and a huge fixed array: refused, never a stack overflow or a hang)
+    var cyc = False
+    try:
+        _ = MsgTypes("a/Foo", "int32 x\na/Foo next")
+    except e:
+        cyc = "holds itself" in String(e)
+    check(cyc, "a type that holds itself")
+    var huge = False
+    try:
+        _ = MsgTypes("a/Big", "float64[1000000000] x")
+    except e:
+        huge = "4,096" in String(e)
+    check(huge, "a huge fixed array")
     print("bag-errors: ok")

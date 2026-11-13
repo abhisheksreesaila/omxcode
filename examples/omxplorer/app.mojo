@@ -3267,7 +3267,7 @@ struct Main(App):
         elif did == AM_RAN:
             try:
                 if self.addm.run_what == "texts":
-                    if self.name != self.addm_sheet or self.frame.index(self.addm_col_name) != self.addm_col:
+                    if self.name != self.addm_sheet or self.frame.index(self.addm_col_name) != self.addm_col or self.addm_row >= self.frame.rows():
                         self.addm.fail("The sheet changed while it ran: run it again on " + self.addm_sheet)
                         return
                     var t = self.addm.text_table(self.frame, self.addm_col, self.addm_row)

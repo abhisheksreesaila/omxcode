@@ -97,9 +97,14 @@ struct Forest(Movable):
         raise Error(path + ": not an XGBoost JSON, LightGBM text or omx-tree model")
 
     def validate(self, path: String) raises:
-        """Every child inside its tree and after its parent (no loops), every split on a feature the model has."""
+        """Every tree has nodes and its arrays agree; every child inside its tree and after its parent (no loops), every
+        split on a feature the model has; at least one output."""
+        if len(self.base) < 1 or self.classes < 1:
+            raise Error(path + ": a model with no outputs")
         for t in self.trees:
             var n = len(t.feature)
+            if n == 0 or len(t.left) != n or len(t.right) != n or len(t.threshold) != n or len(t.value) != n or len(t.default_left) != n or len(t.missing) != n:
+                raise Error(path + ": a damaged tree (no nodes, or arrays of different lengths)")
             for i in range(n):
                 if t.feature[i] >= 0:
                     if t.feature[i] >= max(len(self.features), 1) and len(self.features) > 0:
@@ -108,6 +113,14 @@ struct Forest(Movable):
                         raise Error(path + ": a damaged tree (a node pointing outside its tree, or back)")
             if t.cls < 0 or t.cls >= len(self.base):
                 raise Error(path + ": a tree for an output the model doesn't have")
+
+    def widest(self) -> Int:
+        """How many inputs its splits need (the largest feature index + 1)."""
+        var w = len(self.features)
+        for t in self.trees:
+            for f in t.feature:
+                w = max(w, f + 1)
+        return w
 
     def margins(self, row: List[Float64]) -> List[Float64]:
         var m = self.base.copy()
@@ -193,6 +206,8 @@ def _xgboost(j: Json, path: String) raises -> Forest:
         var rc = j.get(tn, "right_children")
         var dl = j.get(tn, "default_left")
         var n = j.size(si)
+        if j.size(sc) != n or j.size(lc) != n or j.size(rc) != n or j.size(dl) != n:
+            raise Error(path + ": a damaged XGBoost tree (arrays of different lengths)")
         var tree = _Tree(List[Int](), List[Float64](), List[Int](), List[Int](), List[Bool](), List[Int](), List[Float64](), False,
                          Int(j.real(j.at(info, t))) if info >= 0 and f.kind == "multiclass" else 0)
         for i in range(n):
@@ -255,6 +270,8 @@ def _lightgbm(text: String, path: String) raises -> Forest:
         f.kind = "regression"
     else:
         raise Error(path + ": LightGBM objective " + obj + " isn't read yet (binary, multiclass, regression)")
+    if num_class < 1:
+        raise Error(path + ": num_class " + String(num_class))
     f.classes = num_class if f.kind == "multiclass" else 1
     for _ in range(f.classes):
         f.base.append(0.0)
@@ -291,6 +308,8 @@ def _lightgbm(text: String, path: String) raises -> Forest:
             var lc = _ints(fields.get("left_child", ""))
             var rc = _ints(fields.get("right_child", ""))
             var n_in = len(sf)
+            if len(th) != n_in or len(dt) != n_in or len(lc) != n_in or len(rc) != n_in or len(leaves) != n_in + 1:
+                raise Error(path + ": a damaged LightGBM tree (arrays of different lengths)")
             # (inner nodes 0..n_in-1, then leaves n_in + k; a child < 0 is leaf -child - 1)
             for k in range(n_in):
                 if dt[k] & 1:

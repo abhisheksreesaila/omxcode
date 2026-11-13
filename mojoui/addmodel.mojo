@@ -270,7 +270,8 @@ struct AddModel(Movable):
             while exists(folder + "/plugin.json"):  # (another repo with the same last name: a folder of its own)
                 var same = False
                 try:
-                    same = Plugin.read(folder).source.startswith("hf:" + self.pf.repo + "@")
+                    var src = Plugin.read(folder).source
+                    same = src == "hf:" + self.pf.repo or src.startswith("hf:" + self.pf.repo + "@")
                 except:
                     pass
                 if same:

@@ -401,8 +401,8 @@ def tabular_rows(p: Plugin, sheet: Sheet, m: Match, rows: List[Int]) raises -> T
     var a = TabularAnswer()
     if p.runner == "tree":
         var f = Forest.load(p.file("model"))
-        if len(f.features) > 0 and len(m.cols) != len(f.features):
-            raise Error(p.name + " reads " + String(len(f.features)) + " columns; its plugin.json names " + String(len(m.cols)))
+        if (len(f.features) > 0 and len(m.cols) != len(f.features)) or f.widest() > len(m.cols):
+            raise Error(p.name + " reads " + String(f.widest()) + " columns; its plugin.json names " + String(len(m.cols)))
         var k = max(f.classes, 2) if f.kind != "regression" else 1
         a.regression = f.kind == "regression"
         if not a.regression:

@@ -238,6 +238,11 @@ def m2():
     from gtk import gtk
 
     probs = []
+    shutil.rmtree(OUT / "addmodel-plugins", ignore_errors=True)
+    ok, why = mojo_test("tests/test_addmodel.mojo", ["addmodel-cant-run", "addmodel-consent", "addmodel-tree-file", "addmodel-pickle", "addmodel-no-max-drop"],
+                        1800, env={"OMX_PLUGINS": str(OUT / "addmodel-plugins"), "OMX_CONFIG": str(OUT / "addmodel-config")}, env_name="models")
+    if not ok:
+        return False, "test_addmodel: " + why
     shutil.rmtree(M2_PLUGINS, ignore_errors=True)
     M2_PLUGINS.mkdir(parents=True)
     build_app("linux")
@@ -253,7 +258,7 @@ def m2():
              str(OUT / "learn/moments.csv"), str(OUT / "learn/truth.json"), str(OUT / "stops.xgb.json")], 600)
     if r.returncode:
         return False, "training the tree file: " + r.stderr[-400:]
-    env = {"OMX_PLUGINS": str(M2_PLUGINS), "OMX_PACKS": str(PACKS)}
+    env = {"OMX_PLUGINS": str(M2_PLUGINS), "OMX_PACKS": str(PACKS), "OMX_CONFIG": str(OUT / "m2-config")}
     field = "enter:Paste a model: owner/name, or its huggingface.co link="
     open_moments = [f"pick:Choose a file={OUT / 'learn/moments.csv'}", "waitfor:Create table=60000", "tap:Create table", "wait:1500"]
     video = [ "tap:Video", "wait:300", f"pick:Choose a video…={OUT / 'videos/nav15_front.avi'}", "wait:2500"]

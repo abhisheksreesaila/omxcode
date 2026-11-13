@@ -295,6 +295,8 @@ struct MsgTypes(Movable):
                     arr = -1
                 else:
                     arr = Int(inside)
+                    if arr < 0 or arr > 4096:
+                        raise Error("bag: a fixed array of " + inside + " items (more than 4,096: not read)")
             var p = _prim(t)
             if t == "wstring" or t.startswith("wstring<="):
                 raise Error("bag: wstring fields can't be read yet (" + name + "." + words[1] + ")")
@@ -309,6 +311,21 @@ struct MsgTypes(Movable):
                     if k < 0:
                         raise Error("bag: the schema of " + root + " doesn't define " + self.types[i].fields[j].type_name)
                     self.types[i].fields[j].type = k
+        # (a type that holds itself, directly or not, would recurse without end: a damaged or crafted schema)
+        var state = List[Int](length=len(self.types), fill=0)
+        for i in range(len(self.types)):
+            self._acyclic(i, state)
+
+    def _acyclic(self, t: Int, mut state: List[Int]) raises:
+        if state[t] == 2:
+            return
+        if state[t] == 1:
+            raise Error("bag: the schema's " + self.types[t].name + " holds itself (a damaged file)")
+        state[t] = 1
+        for f in self.types[t].fields:
+            if f.prim == P_MSG:
+                self._acyclic(f.type, state)
+        state[t] = 2
 
     def _builtins(mut self):
         """builtin_interfaces' Time and Duration, when a schema leaves them out."""
@@ -521,6 +538,17 @@ def _plan(types: MsgTypes, t: Int, prefix: String, mut table: BagTable, top: Boo
             table.add(name + ".bytes", BAG_INT)
         else:
             table.add(name, BAG_TEXT)
+
+
+def _count_columns(types: MsgTypes, t: Int, depth: Int) -> Int:
+    """How many columns type t makes (counting stops past 20,001: the caller refuses)."""
+    var n = 0
+    for f in types.types[t].fields:
+        var each = _count_columns(types, f.type, depth + 1) if f.prim == P_MSG and f.arr >= 0 else 1
+        n += each * (f.arr if f.arr > 0 else 1)
+        if n > 20000:
+            return n
+    return n
 
 
 def _explode_field(types: MsgTypes, t: Int) -> Int:
@@ -872,6 +900,8 @@ struct _Tables(BagVisitor, Movable):
                 if root < 0:
                     raise Error("bag: " + tp.name + "'s schema doesn't define " + tp.type)
                 table.explode = _explode_field(types, root)
+                if _count_columns(types, root, 0) > 20000:
+                    raise Error("bag: " + tp.name + " would make more than 20,000 columns (not read)")
                 _plan(types, root, "", table, True)
                 dec = _Decoder(types^, root, table.explode)
                 ok = True
@@ -1039,6 +1069,7 @@ def _open_mcap(path: String) raises -> Bag:
                 var off = r.u64(s)
                 var length = r.u64(s)
                 var mlen = r.u32(s)
+                r._need(mlen)
                 var ids = List[Int]()
                 var q = _Rec(r.p, r.p + mlen)
                 while q.p < q.end:
@@ -1062,6 +1093,7 @@ def _open_mcap(path: String) raises -> Bag:
                 bag.start_ns = t0
                 bag.end_ns = t1
                 var mlen = r.u32(s)
+                r._need(mlen)
                 var q = _Rec(r.p, r.p + mlen)
                 while q.p < q.end:
                     counts_id.append(q.u16(s))
@@ -1376,6 +1408,8 @@ struct _Camera(BagVisitor, Movable):
         for field in range(2):
             cur.align(b, 4, o)
             var n = Int(cur.raw(b, 4))
+            if n < 0 or cur.p + n > end:
+                raise Error("bag: a picture's header runs past its message (a damaged file)")
             if self.formats == "" and field == 1:
                 self.formats = _str(b, cur.p, max(n - 1, 0))
             cur.p += n

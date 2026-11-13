@@ -24,7 +24,9 @@
 # Safety (code and weights from outside, run in this process): a plugin's files must be inside its folder (no
 # absolute paths, no "..", no link pointing out), never a pickle (.pkl .pickle .joblib .pt .pth .bin .ckpt .npy with
 # objects), and a model's own code (transformers' trust_remote_code) runs only when plugin.json says
-# "trust_remote_code": true, which only a person's yes for that model writes (mojoui.addmodel).
+# "trust_remote_code": true AND the app's own record holds a person's yes for that repo at that commit
+# (<config>/allowed-model-code.txt, written only by mojoui.addmodel's person-only Allow). MAX packs (compiled code) load
+# only from the packs folder, never from a plugins folder or a drop.
 
 from std.os import getenv, listdir
 from std.os.path import isdir, exists, realpath
@@ -238,6 +240,8 @@ def find_plugins(dirs: List[String] = List[String]()) -> List[Plugin]:
             except e:
                 p.name = n
                 p.problem = String(e)
+            if p.ok() and p.runner == "max" and d != getenv("OMX_PACKS", "build/packs"):
+                p.problem = "a MAX pack outside the packs folder: compiled packs load only from " + getenv("OMX_PACKS", "build/packs")
             var taken = False
             for q in out:
                 taken = taken or q.name == p.name
