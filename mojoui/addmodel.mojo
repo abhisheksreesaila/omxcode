@@ -12,8 +12,9 @@
 #   answers:  add.answer_table(sheet, row) · add.answer_picture(px, w, h, what) · add.answer_text(sheet, col, row)
 #   run all:  add.run_table(sheet) → a Table to swap in · add.start_video(path) · add.start_texts(sheet, col) → poll
 #
-# Tags (an agent's tools): add-model (paste + submit), add-model-file (a path), add-it, allow-code, add-cancel,
-# run-all, add-model-close. Trace lines (MOJOUI_TRACE): "MODEL: <name> …" with the stopwatch.
+# Tags (an agent's tools): add-model (paste + submit), add-model-file (a path), add-it, add-cancel, run-all, show-result,
+# add-another, add-model-close. "Allow its code and add" is tagged person-only-…: the agent host makes no tool of it, so
+# only a person's click lets a model run its own code (goal 68's review). Trace lines (MOJOUI_TRACE): "MODEL: <name> …" with the stopwatch.
 
 from std.time import perf_counter_ns
 from std.os import makedirs
@@ -117,6 +118,7 @@ struct AddModel(Movable):
     var t_answer: Int
     var downloaded: Int  # bytes
     var timings: List[String]  # every model added this session: its stopwatch line
+    var checks: Int  # checks started (each its own job key: a second Check never shows the first's answer)
     var stopwatch: String  # the last one, in words, under its answer
 
     def __init__(out self, msg_base: Int, trace: Bool = False):
@@ -151,6 +153,7 @@ struct AddModel(Movable):
         self.downloaded = 0
         self.timings = List[String]()
         self.stopwatch = ""
+        self.checks = 0
 
     def owns(self, m: Int) -> Bool:
         return self.msg_base <= m < self.msg_base + ADD_MESSAGES
@@ -209,13 +212,17 @@ struct AddModel(Movable):
             self.adopt(t)
             return
         try:
+            self.checks += 1
             var g = python_enter()
-            _ = _py().preflight_start("pf", t)
+            _ = _py().preflight_start(self._pf_key(), t)
             python_exit(g)
             self.stage = S_CHECKING
             self._lend()
         except e:
             self.fail("Couldn't start the check: " + String(e))
+
+    def _pf_key(self) -> String:
+        return "pf" + String(self.checks)
 
     def adopt(mut self, path: String):
         """A dropped file or folder → a plugin folder (copied into the plugins folder), checked, loaded."""
@@ -259,6 +266,18 @@ struct AddModel(Movable):
         try:
             var name = py_plugin_name(self.pf.repo)
             var folder = user_plugin_dir() + "/" + name
+            var k = 2
+            while exists(folder + "/plugin.json"):  # (another repo with the same last name: a folder of its own)
+                var same = False
+                try:
+                    same = Plugin.read(folder).source.startswith("hf:" + self.pf.repo + "@")
+                except:
+                    pass
+                if same:
+                    break
+                name = py_plugin_name(self.pf.repo) + "_" + String(k)
+                folder = user_plugin_dir() + "/" + name
+                k += 1
             makedirs(folder, exist_ok=True)
             self.folder = folder
             self.name = name
@@ -291,7 +310,7 @@ struct AddModel(Movable):
     def poll(mut self) -> Int:
         """Moves the flow on (a frame while busy()); AM_ANSWER when it's ready to answer, AM_RAN when a run is done."""
         if self.stage == S_CHECKING:
-            var j = py_job("pf")
+            var j = py_job(self._pf_key())
             if j.state == "running":
                 return AM_NONE
             self._reclaim()
@@ -300,7 +319,7 @@ struct AddModel(Movable):
                 return AM_NONE
             try:
                 var g = python_enter()
-                var s = String(py=_py().result_text("pf"))
+                var s = String(py=_py().result_text(self._pf_key()))
                 python_exit(g)
                 self.pf = _preflight_of(s)
             except e:
@@ -379,6 +398,7 @@ struct AddModel(Movable):
                 return AM_NONE
             var asked = self.text
             self.check(asked)
+            return AM_ANSWER if self.stage == S_READY else AM_NONE  # (a pasted path to a tree file is ready at once)
         elif m == AM_FILE_MSG:
             self.text = event.text
             self.check(event.text)
@@ -606,6 +626,9 @@ struct AddModel(Movable):
         var b = self.msg_base
         var parts = List[View]()
         parts.append(Text("A model from the Hugging Face Hub, a model file or folder, or ask the agent. It says what it is before anything downloads.", CAPTION).max_width(560))
+        if self.stage == S_EMPTY or (self.stage == S_SAID and not self.pf.can_run):
+            parts.append(Text("Try hustvl/yolos-tiny (finds people and things on a video frame), google/vit-base-patch16-224 (names what a frame shows), "
+                              + "BAAI/bge-small-en-v1.5 (finds rows that mean the same), or a decision tree file (XGBoost JSON, LightGBM text).", CAPTION).max_width(560).tag("add-examples"))
         parts.append(HStack(TextField(self.text, "Paste a model: owner/name, or its huggingface.co link", on_change=b + AM_TEXT_MSG, on_submit=b + AM_CHECK_MSG)
                                 .width(330).tag("add-model").label("Model").tooltip("A Hugging Face model's name or link; Return checks it"),
                             Button("Check", b + AM_CHECK_MSG, PROMINENT if self.stage == S_EMPTY else SUBTLE, icon="search").tag("add-check"),
@@ -625,7 +648,8 @@ struct AddModel(Movable):
                 parts.append(Text("It runs its own Python code from its repo inside this app, with your files and network: allow it only if you trust " + self.pf.repo + ".", CAPTION)
                              .tone(TONE_WARN).max_width(560).tag("add-consent"))
                 parts.append(HStack(Spacer(), Button("Cancel", b + AM_CANCEL_MSG).tag("add-cancel"),
-                                    Button("Allow its code and add", b + AM_ALLOW_MSG, PROMINENT, icon="unlock").tag("allow-code"), spacing=8).fill())
+                                    Button("Allow its code and add", b + AM_ALLOW_MSG, PROMINENT, icon="unlock").tag("person-only-allow-code")
+                                    .tooltip("Only a person can allow this: an agent has no tool for it"), spacing=8).fill())
             else:
                 parts.append(HStack(Spacer(), Button("Add it (" + _mb(self.pf.bytes) + ")", b + AM_ADD_MSG, PROMINENT, icon="download").tag("add-it"), spacing=8).fill())
         if self.stage == S_DOWNLOADING:
@@ -660,7 +684,7 @@ struct AddModel(Movable):
             var have = List[View]()
             for p in installed:
                 if p.ok():
-                    have.append(Text(p.name + " · " + p.kind + " · " + p.runner + (" · " + p.about if p.about != "" else ""), CAPTION).max_width(560))
+                    have.append(Text(p.name + " · " + (p.about if p.about != "" else p.kind), CAPTION).max_width(560))
             if len(have) > 0:
                 parts.append(Text("Your models (each is also a script function)", HEADLINE))
                 parts.append(VStack(have^, spacing=2).fill().align(START).tag("add-installed"))
@@ -684,6 +708,7 @@ def _preflight_of(s: String) raises -> Preflight:
     p.bytes = j.number(j.get(0, "bytes"))
     p.files = j.dump(j.get(0, "files")) if j.get(0, "files") >= 0 else "[]"
     p.sizes = j.dump(j.get(0, "sizes")) if j.get(0, "sizes") >= 0 else "{}"
+    p.shas = j.dump(j.get(0, "shas")) if j.get(0, "shas") >= 0 else "{}"
     p.sha = j.text(j.get(0, "sha"))
     return p^
 

@@ -32,6 +32,7 @@ plugin("stops_lgb", "tree", "model.txt", "lgb_bin.txt", [num("speed"), num("pers
        "LightGBM: a person in the way")
 plugin("stops_onnx", "onnx", "model.onnx", "lr.onnx", [num("speed"), num("person_m"), num("turn_rate")], {"classes": classes}, "ONNX logistic regression")
 plugin("stops_skops", "skops", "model.skops", "rf.skops", [num("speed"), num("person_m"), num("turn_rate")], {"classes": classes}, "scikit-learn forest (skops)")
+plugin("bad_skops", "skops", "model.skops", "function.skops", [num("speed"), num("person_m"), num("turn_rate")], {}, "a function inside: refused at load")
 bad = plugin("bad_pickle", "skops", "model.pkl", None, [num("speed")], {}, "a pickle: refused")
 (bad / "model.pkl").write_bytes(b"\x80\x04K\x01.")
 plugin("bad_climb", "tree", "../stops_xgb/model.json", None, [], {}, "a path out of its folder: refused")

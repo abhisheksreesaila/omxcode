@@ -50,4 +50,15 @@ def main() raises:
         check(False, "a text file loaded as a model")
     except e:
         check("not an XGBoost JSON" in String(e), String(e))
+    # (a tree whose node points back at itself: refused at load, never a loop)
+    var x = open(dir + "xgb_bin.json", "r").read()
+    var at = x.find("\"left_children\":[")
+    var loop = String(x[byte = : at + 17]) + "0" + String(x[byte = x.find(",", at + 17) :])
+    with open("build/g68/trees/looping.json", "w") as out2:
+        out2.write(loop)
+    try:
+        _ = Forest.load("build/g68/trees/looping.json")
+        check(False, "a looping tree loaded")
+    except e:
+        check("damaged tree" in String(e), String(e))
     print("treefile-refuses: ok")

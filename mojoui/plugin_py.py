@@ -41,7 +41,7 @@ KEEP = re.compile(r"^(config\.json|preprocessor_config\.json|image_processor_con
                   r"tokenizer_config\.json|special_tokens_map\.json|vocab\.txt|vocab\.json|merges\.txt|added_tokens\.json|"
                   r"spiece\.model|sentencepiece\.bpe\.model|modules\.json|sentence_bert_config\.json|config_sentence_transformers\.json|"
                   r"1_Pooling/config\.json|generation_config\.json|[^/]*\.safetensors|model\.safetensors\.index\.json|README\.md)$")
-PICKLE = re.compile(r"\.(bin|pt|pth|pkl|pickle|joblib|ckpt|h5|msgpack|npy|npz)$", re.I)
+PICKLE = re.compile(r"\.(bin|pt|pth|pkl|pickle|joblib|ckpt|h5|msgpack|npy|npz|dill|sav)$", re.I)  # (mojoui/plugins.mojo's PICKLES too)
 
 
 def _get(url, timeout=30):
@@ -127,7 +127,8 @@ def preflight(text):
     arch = (cfg.get("architectures") or [cfg.get("model_type") or ""])[0]
     out.update(task=task, licence=lic, bytes=size, remote_code=remote, code_files=code, sha=info.get("sha", ""),
                files=[f for f, _ in keep] + (code if remote else []),
-               sizes={f: n for f, n in files if (f, n) in keep or (remote and f.endswith(".py"))})
+               sizes={f: n for f, n in files if (f, n) in keep or (remote and f.endswith(".py"))},
+               shas={s["rfilename"]: (s.get("lfs") or {}).get("sha256", "") for s in info.get("siblings", [])})
     kind, does = TASKS.get(task, ("", ""))
     out["kind"] = kind
     out["about"] = does
@@ -192,11 +193,12 @@ def _start(key, total, fn):
     threading.Thread(target=body, daemon=True).start()
 
 
-def download(repo, folder, files_json, sha, allow_code, sizes_json="{}"):
+def download(repo, folder, files_json, sha, allow_code, sizes_json="{}", shas_json="{}"):
     """The files preflight kept into folder/model (resumable .part files, each tried up to 5 times), on a thread:
     job "dl:<folder>". sizes_json: preflight's sizes (the Hub's), checked against what arrives."""
     files = [f for f in json.loads(files_json) if (allow_code or not f.endswith(".py")) and not PICKLE.search(f)]
     sizes = json.loads(sizes_json)
+    shas = {k: v for k, v in json.loads(shas_json).items() if v}
     dest = os.path.join(folder, "model")
 
     def one(j, f, url, path, done0):
@@ -212,7 +214,9 @@ def download(repo, folder, files_json, sha, allow_code, sizes_json="{}"):
             if have:
                 req.add_header("Range", f"bytes={have}-")
             try:
-                with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab") as out:
+                with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab" if (have and r.status == 206) else "wb") as out:
+                    if have and r.status != 206:  # (the server sent the whole file, not the rest: start over)
+                        have = 0
                     while True:
                         if j["cancel"]:
                             return False
@@ -231,6 +235,16 @@ def download(repo, folder, files_json, sha, allow_code, sizes_json="{}"):
                 time.sleep(1.5 * (attempt + 1))
         if sizes.get(f) and os.path.getsize(part) != sizes[f]:
             raise IOError(f"{f}: got {os.path.getsize(part)} bytes of {sizes[f]}")
+        if shas.get(f):  # (an LFS file: its sha256 as the Hub lists it)
+            import hashlib
+
+            h = hashlib.sha256()
+            with open(part, "rb") as got:
+                for b in iter(lambda: got.read(1 << 20), b""):
+                    h.update(b)
+            if h.hexdigest() != shas[f]:
+                os.remove(part)
+                raise IOError(f"{f}: its sha256 isn't the Hub's: removed")
         os.replace(part, path)
         return True
 
@@ -269,7 +283,26 @@ def _inside(folder, rel):
     return full
 
 
-SAFE_PREFIXES = ("sklearn.", "numpy.", "scipy.", "builtins.")
+def _skip_unsafe(folder, names):
+    """shutil.copytree's ignore: pickles and partial downloads are never copied in."""
+    return [n for n in names if PICKLE.search(n) or n.endswith(".part")]
+
+
+def _safe_skops_type(name):
+    """A type a skops file may hold: a class (never a function) from scikit-learn, NumPy or SciPy, and never one that
+    calls a function it was given (FunctionTransformer)."""
+    import importlib
+    import inspect
+
+    root = name.split(".")[0]
+    if root not in ("sklearn", "numpy", "scipy") or "Function" in name:
+        return False
+    mod, _, attr = name.rpartition(".")
+    try:
+        obj = getattr(importlib.import_module(mod), attr)
+    except Exception:
+        return False
+    return inspect.isclass(obj)
 
 
 def _load(folder, j):
@@ -289,9 +322,9 @@ def _load(folder, j):
 
         path = _inside(folder, files["model"])
         untrusted = sio.get_untrusted_types(file=path)
-        bad = [t for t in untrusted if not t.startswith(SAFE_PREFIXES)]
+        bad = [t for t in untrusted if not _safe_skops_type(t)]
         if bad:
-            raise ValueError(f"the skops file holds types that aren't scikit-learn's: {', '.join(bad[:4])}: not loaded")
+            raise ValueError(f"the skops file holds types that aren't scikit-learn, NumPy or SciPy classes: {', '.join(bad[:4])}: not loaded")
         m["model"] = sio.load(path, trusted=untrusted)
     elif runner == "torch":
         import torch
@@ -634,10 +667,11 @@ def file_plugin(path, plugins_dir):
                     out["line"] = out["why"]
                     return json.dumps(out)
         if os.path.exists(os.path.join(path, "plugin.json")):
-            shutil.copytree(path, dest, symlinks=True, ignore=shutil.ignore_patterns("*.part"))
+            shutil.copytree(path, dest, symlinks=False, ignore=_skip_unsafe)
             with open(os.path.join(dest, "plugin.json")) as f:
                 s = json.load(f)
             s["name"] = name
+            s["trust_remote_code"] = False  # (a dropped folder never brings its own yes: only the Hub path's Allow writes it)
             with open(os.path.join(dest, "plugin.json"), "w") as f:
                 json.dump(s, f, indent=1)
             out.update(folder=dest, name=name, kind=s.get("kind", ""), line=f"{base}: a model plugin ({s.get('kind')}, {s.get('runner')}) · {s.get('about', '')}")
@@ -655,7 +689,7 @@ def file_plugin(path, plugins_dir):
             out["line"] = out["why"]
             return json.dumps(out)
         os.makedirs(dest)
-        shutil.copytree(path, os.path.join(dest, "model"), symlinks=True, ignore=shutil.ignore_patterns("*.bin", "*.pt", "*.pth", "*.pkl", "*.ckpt", "*.h5", "*.msgpack"))
+        shutil.copytree(path, os.path.join(dest, "model"), symlinks=False, ignore=_skip_unsafe)
         spec.update(kind=kind, runner="torch", inputs=[{"name": "text", "type": "text"}] if kind == "embed-text" else [{"name": "frame", "type": "image"}],
                     outputs=OUTPUTS[kind], files={"model": "model"}, about=f"{arch} from {base}")
         if "ZeroShot" in arch or "Owl" in arch:
@@ -708,7 +742,7 @@ def file_plugin(path, plugins_dir):
                 import skops.io as sio
 
                 untrusted = sio.get_untrusted_types(file=os.path.join(dest, target))
-                if all(t.startswith(SAFE_PREFIXES) for t in untrusted):
+                if all(_safe_skops_type(t) for t in untrusted):
                     m = sio.load(os.path.join(dest, target), trusted=untrusted)
                     names = list(getattr(m, "feature_names_in_", []))
                     spec["inputs"] = [{"name": str(n), "type": "number"} for n in names]

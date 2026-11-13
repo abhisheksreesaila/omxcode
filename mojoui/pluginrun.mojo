@@ -100,6 +100,7 @@ struct Preflight(Copyable, Movable):
     var bytes: Int
     var files: String  # JSON list
     var sizes: String  # JSON object
+    var shas: String  # JSON object: an LFS file's sha256
     var sha: String
 
     def __init__(out self):
@@ -114,6 +115,7 @@ struct Preflight(Copyable, Movable):
         self.bytes = 0
         self.files = "[]"
         self.sizes = "{}"
+        self.shas = "{}"
         self.sha = ""
 
 
@@ -134,6 +136,7 @@ def py_preflight(text: String) raises -> Preflight:
     p.bytes = j.number(j.get(0, "bytes"))
     p.files = j.dump(j.get(0, "files")) if j.get(0, "files") >= 0 else "[]"
     p.sizes = j.dump(j.get(0, "sizes")) if j.get(0, "sizes") >= 0 else "{}"
+    p.shas = j.dump(j.get(0, "shas")) if j.get(0, "shas") >= 0 else "{}"
     p.sha = j.text(j.get(0, "sha"))
     return p^
 
@@ -147,7 +150,7 @@ def py_plugin_name(repo: String) raises -> String:
 
 def py_download(pf: Preflight, folder: String, allow_code: Bool) raises:
     var g = python_enter()
-    _ = _py().download(pf.repo, folder, pf.files, pf.sha, allow_code, pf.sizes)
+    _ = _py().download(pf.repo, folder, pf.files, pf.sha, allow_code, pf.sizes, pf.shas)
     python_exit(g)
 
 
@@ -328,11 +331,15 @@ def match_columns(p: Plugin, sheet: Sheet) -> Match:
     for io in ins:
         m.inputs.append(io.name)
         m.types.append(io.type)
-        var found = -1
-        for c in range(sheet.columns()):
-            if sheet.name(c).lower() == io.name.lower():
-                found = c
+        var found = sheet.index(io.name)  # (its exact name first, then any case: the first such column)
         if found < 0:
+            for c in range(sheet.columns()):
+                if found < 0 and sheet.name(c).lower() == io.name.lower():
+                    found = c
+        if io.type == "text" and p.kind == "tabular":
+            m.problems.append("needs " + io.name + " as text: this version's decision models read number columns only")
+            found = -1
+        elif found < 0:
             m.problems.append("needs " + io.name + " (" + io.type + "): no column called " + io.name)
         elif (io.type == "text") != (sheet.kind(found) == SHEET_TEXT):
             m.problems.append("needs " + io.name + " as " + io.type + ": the sheet's " + sheet.name(found) + " is " + ("text" if sheet.kind(found) == SHEET_TEXT else "a number"))
@@ -394,6 +401,8 @@ def tabular_rows(p: Plugin, sheet: Sheet, m: Match, rows: List[Int]) raises -> T
     var a = TabularAnswer()
     if p.runner == "tree":
         var f = Forest.load(p.file("model"))
+        if len(f.features) > 0 and len(m.cols) != len(f.features):
+            raise Error(p.name + " reads " + String(len(f.features)) + " columns; its plugin.json names " + String(len(m.cols)))
         var k = max(f.classes, 2) if f.kind != "regression" else 1
         a.regression = f.kind == "regression"
         if not a.regression:

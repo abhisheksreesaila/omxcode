@@ -44,7 +44,7 @@ def main() raises:
         print("  ", p.name, p.kind, p.runner, "ok" if p.ok() else "REFUSED: " + p.problem)
         if p.ok():
             ok.append(p.name)
-    check(ok == ["stops_lgb", "stops_onnx", "stops_skops", "stops_xgb"], "the four good plugins: " + ", ".join(ok))
+    check(ok == ["bad_skops", "stops_lgb", "stops_onnx", "stops_skops", "stops_xgb"], "the good folders (and bad_skops, refused when it loads): " + ", ".join(ok))
     for p in found:
         if p.name == "bad_pickle":
             check("pickle" in p.problem, "pickle refused")
@@ -61,6 +61,14 @@ def main() raises:
     var e = Json.parse(open("build/g68/trees/lr_expect.json", "r").read())
     var rf = Json.parse(open("build/g68/trees/rf_expect.json", "r").read())
     for p in found:
+        if p.name == "bad_skops":  # (a FunctionTransformer: a function inside; refused when it loads)
+            py_load(p.dir)
+            while py_job("load:" + p.dir).state == "running":
+                pass
+            var j = py_job("load:" + p.dir)
+            print("  ", p.name, "→", j.state, j.error)
+            check(j.state == "failed" and "aren't scikit-learn" in j.error, "a skops file holding a function")
+            continue
         if not p.ok():
             continue
         var m = match_columns(p, sheet)

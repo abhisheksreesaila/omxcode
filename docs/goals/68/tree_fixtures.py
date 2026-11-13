@@ -54,6 +54,10 @@ rf = RandomForestClassifier(n_estimators=10, max_depth=4, random_state=0).fit(Xf
 import skops.io as sio
 
 sio.dump(rf, out / "rf.skops")
+# (a skops file holding a function: FunctionTransformer(eval) would call it at predict time; it must be refused)
+from sklearn.preprocessing import FunctionTransformer
+
+sio.dump(FunctionTransformer(eval), out / "function.skops")  # (builtins.eval: an untrusted function)
 (out / "rf_expect.json").write_text(json.dumps({"rows": Xf[:50].tolist(), "labels": rf.predict(Xf[:50]).tolist(), "proba": rf.predict_proba(Xf[:50]).tolist()}))
 
 # (an ONNX model built with onnx's own helper: a logistic regression from scikit-learn's coefficients, inputs "input"

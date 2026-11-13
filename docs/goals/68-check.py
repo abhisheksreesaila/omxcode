@@ -261,7 +261,7 @@ def m2():
         "m2-tree": open_moments + ["tap:Add a model", "grab:m2-0-empty", f"pick:File or folder…={OUT / 'stops.xgb.json'}", "wait:800", "grab:m2-tree-1-answer",
                                    "tap:run-all", "waitfor:show-result=60000", "grab:m2-tree-2-ran", "tap:show-result", "wait:800", "grab:m2-tree-3-column"],
         "m2-image": open_moments + video + ["tap:Add a model", "wait:300", field + "openai-community/gpt2", "waitfor:add-another=60000", "grab:m2-cant-run",
-                                            field + "nomic-ai/nomic-embed-text-v1.5", "waitfor:allow-code=60000", "grab:m2-consent", "tap:add-cancel", "wait:300",
+                                            field + "nomic-ai/nomic-embed-text-v1.5", "waitfor:person-only-allow-code=60000", "grab:m2-consent", "tap:add-cancel", "wait:300",
                                             field + "google/vit-base-patch16-224", "waitfor:add-it=60000", "grab:m2-image-1-line", "tap:add-it", "wait:1500",
                                             "grab:m2-image-2-downloading", "waitfor:run-all=1500000", "grab:m2-image-3-answer"],
         "m2-detect": open_moments + video + ["tap:Add a model", "wait:300", field + "hustvl/yolos-tiny", "waitfor:add-it=60000", "tap:add-it",
@@ -295,6 +295,14 @@ def m2():
             time.sleep(0.5)
         c.call("create-table")
         c.call("add-a-model")
+        c.call("add-model", text="nomic-ai/nomic-embed-text-v1.5", submit=True)  # (its own code: a yes only a person gives)
+        for _ in range(60):
+            if "add-cancel" in c.names():
+                break
+            time.sleep(0.5)
+        if any("allow" in n for n in c.names()) or "add-cancel" not in c.names():
+            probs.append("agent: the consent for a model's own code is an agent tool: " + str([n for n in c.names() if "allow" in n or "add-" in n]))
+        c.call("add-cancel")
         c.call("add-model", text="BAAI/bge-small-en-v1.5", submit=True)
         for _ in range(240):
             if "add-it" in c.names():

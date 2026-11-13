@@ -390,7 +390,7 @@ struct LearnPanel(Movable):
                     line = List[View]()
             parts.append(TextField(self.new_text, "A new label (Return writes it)", on_change=b + LP_NEW, on_submit=b + LP_NEW_SUBMIT).fill()
                          .tag("label-new").label("New label"))
-            parts.append(VStack(Text("Or label rows by number (an agent's way): 12 person ahead, 40 waiting", CAPTION).max_width(300),
+            parts.append(VStack(Text("Or label rows by number: 12 person ahead, 40 waiting", CAPTION).max_width(300),
                                 TextField(self.rows_text, "12 person ahead, 40 waiting", on_change=b + LP_ROWS_TEXT, on_submit=b + LP_ROWS_MSG).fill()
                                 .tag("label-rows").label("Label rows"),
                                 spacing=4).fill().align(START))

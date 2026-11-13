@@ -625,6 +625,8 @@ struct _Decoder(Movable):
             if top and k == self.explode:
                 cur.align(b, 4, self.origin)
                 var count = Int(cur.raw(b, 4))
+                if count > cur.end - cur.p:
+                    raise Error("bag: a CDR list longer than its message (a damaged file)")
                 var start_c = c + 1  # (after `item`)
                 item_c = c
                 var end_c = start_c
@@ -665,6 +667,8 @@ struct _Decoder(Movable):
             else:
                 cur.align(b, 4, self.origin)
                 var count = Int(cur.raw(b, 4))
+                if count > cur.end - cur.p:
+                    raise Error("bag: a CDR list longer than its message (a damaged file)")
                 if f.prim == P_MSG:
                     var scratch = _Row(_cols_of(self.types, f.type))
                     for _ in range(count):
@@ -1022,9 +1026,9 @@ def _open_mcap(path: String) raises -> Bag:
         while p + 9 <= len(s):
             var op = Int(s[p])
             var n = u64le(s, p + 1)
+            if n < 0 or n > len(s) - p - 9:
+                raise Error(path + ": a damaged summary (a record longer than the file)")
             var r = _Rec(p + 9, p + 9 + n)
-            if r.end > len(s):
-                raise Error(path + ": its summary ends early")
             if op == 0x03:
                 _schema(s, r, schemas_id, schemas)
             elif op == 0x04:
@@ -1040,6 +1044,8 @@ def _open_mcap(path: String) raises -> Bag:
                 while q.p < q.end:
                     ids.append(q.u16(s))
                     _ = q.u64(s)
+                if off < 8 or length < 9 or length > size or off > size - length:
+                    raise Error(path + ": a damaged chunk index (a chunk outside the file)")
                 bag.chunks.append(_Chunk(off, length, ids^))
                 if bag.start_ns == 0 or t0 < bag.start_ns:
                     bag.start_ns = t0
@@ -1153,9 +1159,9 @@ struct _Walk(Movable):
         while p + 9 <= end:
             var op = Int(b[p])
             var n = u64le(b, p + 1)
+            if n < 0 or n > end - p - 9:
+                raise Error("bag: a record runs past its chunk (a damaged file)")
             var r = _Rec(p + 9, p + 9 + n)
-            if r.end > end:
-                raise Error("bag: a record runs past its chunk")
             if op == 0x03:
                 _schema(b, r, self.schemas_id, self.schemas)
             elif op == 0x04:
@@ -1188,6 +1194,8 @@ def _chunk_records(b: List[UInt8], var r: _Rec) raises -> List[UInt8]:
     var comp = r.text(b)
     var n = r.u64(b)
     r._need(n)
+    if size < 0 or size > (1 << 31) or (comp == "" and size != n) or (comp != "" and size > n * 1024 + (1 << 20)):
+        raise Error("bag: a chunk says it holds " + String(size) + " bytes: a damaged file")
     return decompress(comp, b, r.p, n, size)
 
 
@@ -1203,6 +1211,8 @@ def _walk_mcap(path: String, start: Int, end: Int, mut walk: _Walk) raises:
         var n = u64le(head, 1)
         if op == 0x0F or op == 0x02:  # DataEnd, Footer
             break
+        if n < 0 or n > end - p - 9:
+            raise Error(path + ": a record runs past the file's end (a cut download, or a damaged file)")
         if op == 0x03 or op == 0x04 or op == 0x05 or op == 0x06:
             var body = f.read(p + 9, n)
             if len(body) != n:
@@ -1223,6 +1233,8 @@ def _visit_records[V: BagVisitor](bag: Bag, b: List[UInt8], start: Int, end: Int
     while p + 9 <= end:
         var op = Int(b[p])
         var n = u64le(b, p + 1)
+        if n < 0 or n > end - p - 9 or (op == 0x05 and n < 22):
+            raise Error(bag.path + ": a record runs past its chunk (a damaged file)")
         if op == 0x05:
             var ch = u16le(b, p + 9)
             var k = -1
@@ -1266,6 +1278,8 @@ def _scan_mcap[V: BagVisitor](bag: Bag, wanted: List[Bool], mut v: V) raises:
         var n = u64le(head, 1)
         if op == 0x0F or op == 0x02:
             break
+        if n < 0 or n > bag.data_end - p - 9:
+            raise Error(bag.path + ": a record runs past the file's end (a cut download, or a damaged file)")
         if op == 0x05 or op == 0x06:
             var body = f.read(p + 9, n)
             if len(body) != n:

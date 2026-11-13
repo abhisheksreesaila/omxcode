@@ -194,6 +194,8 @@ class Host:
                 for c in n["children"]:
                     self.item(c, slug(text) + "-", [text])
         elif k == BUTTON:
+            if tag.startswith("person-only"):  # (a yes only a person gives: a model running its own code, goal 68; no tool for it)
+                return
             if n["msg2"] and n["options"]:  # a file picker
                 self.add(tag or slug(text), i, (tip or f'"{text}": choose a file') + f" (accepts {n['options'][0] or 'any file'})",
                          {"path": prop("string", "the file's path on this machine")}, how="pick", required=("path",), prefix=prefix)

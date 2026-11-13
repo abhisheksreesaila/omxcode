@@ -263,28 +263,28 @@ def _read_run(path: String) raises -> _RunData:
     for i in range(len(d.tables)):
         ref tb = d.tables[i]
         var vx = tb.index("twist.twist.linear.x")
-        if vx > 0 and not have_speed:
+        if vx > 0 and tb.index("twist.twist.angular.z") > 0 and not have_speed:
             d.speed = _asof(tb, vx, d.times)
             d.turn = _asof(tb, tb.index("twist.twist.angular.z"), d.times)
             have_speed = True
         var px = tb.index("pose.pose.position.x")
-        if px > 0 and not have_xy and "Odometry" in tb.type:
+        if px > 0 and tb.index("pose.pose.position.y") > 0 and not have_xy and "Odometry" in tb.type:
             d.x = _asof(tb, px, d.times)
             d.y = _asof(tb, tb.index("pose.pose.position.y"), d.times)
             have_xy = True
     for i in range(len(d.tables)):
         ref tb = d.tables[i]
-        if not have_speed and tb.index("linear.x") > 0 and "Twist" in tb.type:
+        if not have_speed and tb.index("linear.x") > 0 and tb.index("angular.z") > 0 and "Twist" in tb.type:
             d.speed = _asof(tb, tb.index("linear.x"), d.times)
             d.turn = _asof(tb, tb.index("angular.z"), d.times)
             have_speed = True
-        if not have_xy and tb.index("robot_x") > 0:
+        if not have_xy and tb.index("robot_x") > 0 and tb.index("robot_y") > 0:
             d.x = _asof(tb, tb.index("robot_x"), d.times)
             d.y = _asof(tb, tb.index("robot_y"), d.times)
             have_xy = True
     for i in range(len(d.tables)):
         ref tb = d.tables[i]
-        if not have_xy and tb.index("pose.pose.position.x") > 0:
+        if not have_xy and tb.index("pose.pose.position.x") > 0 and tb.index("pose.pose.position.y") > 0:
             d.x = _asof(tb, tb.index("pose.pose.position.x"), d.times)
             d.y = _asof(tb, tb.index("pose.pose.position.y"), d.times)
             have_xy = True
@@ -301,7 +301,7 @@ def _read_run(path: String) raises -> _RunData:
     for i in range(len(d.tables)):
         ref tb = d.tables[i]
         var k = 1
-        while tb.index("participant" + String(k) + "_x") > 0:
+        while tb.index("participant" + String(k) + "_x") > 0 and tb.index("participant" + String(k) + "_y") > 0:
             var px = _asof(tb, tb.index("participant" + String(k) + "_x"), d.times)
             var py = _asof(tb, tb.index("participant" + String(k) + "_y"), d.times)
             for j in range(n):

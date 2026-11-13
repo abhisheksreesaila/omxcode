@@ -33,7 +33,9 @@ struct _Tree(Copyable, Movable):
 
     def leaf(self, row: List[Float64]) -> Float64:
         var n = 0
-        while self.feature[n] >= 0:
+        var steps = 0
+        while self.feature[n] >= 0 and steps <= len(self.feature):  # (validated at load; the bound is belt and braces)
+            steps += 1
             var x = row[self.feature[n]]
             var go_left: Bool
             var m = self.missing[n]
@@ -80,13 +82,32 @@ struct Forest(Movable):
         if s.startswith("{"):
             var j = Json.parse(text)
             if j.get(0, "learner") >= 0:
-                return _xgboost(j, path)
+                var f = _xgboost(j, path)
+                f.validate(path)
+                return f^
             if j.text(j.get(0, "format")) == "omx-tree/1":
-                return _omx_tree(j, path)
+                var f = _omx_tree(j, path)
+                f.validate(path)
+                return f^
             raise Error(path + ": a JSON model this app can't read (XGBoost's JSON or omx-tree/1)")
         if s.startswith("tree") or "\nTree=" in s:
-            return _lightgbm(text, path)
+            var f = _lightgbm(text, path)
+            f.validate(path)
+            return f^
         raise Error(path + ": not an XGBoost JSON, LightGBM text or omx-tree model")
+
+    def validate(self, path: String) raises:
+        """Every child inside its tree and after its parent (no loops), every split on a feature the model has."""
+        for t in self.trees:
+            var n = len(t.feature)
+            for i in range(n):
+                if t.feature[i] >= 0:
+                    if t.feature[i] >= max(len(self.features), 1) and len(self.features) > 0:
+                        raise Error(path + ": a split on feature " + String(t.feature[i]) + " of " + String(len(self.features)))
+                    if t.left[i] <= i or t.right[i] <= i or t.left[i] >= n or t.right[i] >= n:
+                        raise Error(path + ": a damaged tree (a node pointing outside its tree, or back)")
+            if t.cls < 0 or t.cls >= len(self.base):
+                raise Error(path + ": a tree for an output the model doesn't have")
 
     def margins(self, row: List[Float64]) -> List[Float64]:
         var m = self.base.copy()

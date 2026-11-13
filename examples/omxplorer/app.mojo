@@ -492,6 +492,8 @@ struct Main(App):
     var addm: AddModel  # Add a model (goal 68): its dialog, downloads and answers
     var addm_col: Int  # the text column a text model ran on (its row: addm_row)
     var addm_row: Int
+    var addm_col_name: String  # … and its column's name and the sheet's: a run that lands on another sheet is refused
+    var addm_sheet: String
     var fleet_job: Optional[Job[FleetOpened]]  # Open bags: the folder being read (mojoui.fleetjobs)
     var fleet_path: String
     var fleet_cams: List[FleetCamera]  # the fleet's cameras as videos; the story's hero run's open as cards once it's ready
@@ -642,6 +644,8 @@ struct Main(App):
         self.addm = AddModel(ADD_MODEL_MSG, self.trace)
         self.addm_col = -1
         self.addm_row = 0
+        self.addm_col_name = ""
+        self.addm_sheet = ""
         self.fleet_job = None
         self.fleet_path = ""
         self.fleet_cams = List[FleetCamera]()
@@ -1807,7 +1811,8 @@ struct Main(App):
                 if not (self.media.cards[v].title() == f.card or (vt != "" and vt == f.table)):
                     continue
                 var r = self.video_rows(v, f.column).react(f)
-                if r.action == REACT_SEEK and r.time >= 0 and r.time < 1e299:
+                var length = self.media.cards[v].player.value().state.duration
+                if r.action == REACT_SEEK and r.time >= 0 and r.time < 1e299 and (length <= 0 or r.time <= length + 1.0):  # (another run's moment: not this camera's)
                     var at = r.time
                     var fps = self.media.cards[v].player.value().state.fps
                     if r.frame >= 0 and fps > 0:  # (the row's own frame, not its time rounded to text: mid-frame, so it lands on it)
@@ -3127,6 +3132,7 @@ struct Main(App):
             try:
                 var t = with_label_column(self.frame, self.learn.label)
                 self.swap_table(t^, self.frame.columns(), max(self.grid.cur_row, 0))
+                self.grid.reveal_cell(max(self.grid.cur_row, 0), self.frame.columns() - 1, self.frame)
                 self.learn.count_labels(self.frame)
                 self.message = "Added " + self.learn.label + ": type a label in a cell, or pick one in the Learn panel"
                 if self.trace:
@@ -3243,6 +3249,7 @@ struct Main(App):
             self.learn.label = "cause"
             var t = with_label_column(self.frame, "cause")
             self.swap_table(t^, self.frame.columns(), 0)
+            self.grid.reveal_cell(0, self.frame.columns() - 1, self.frame)  # (the column to label, on screen)
             self.learn.count_labels(self.frame)
             self.message = "The stops are the sheet: label why some robots stopped in cause, then Learn"
             if self.trace:
@@ -3260,6 +3267,9 @@ struct Main(App):
         elif did == AM_RAN:
             try:
                 if self.addm.run_what == "texts":
+                    if self.name != self.addm_sheet or self.frame.index(self.addm_col_name) != self.addm_col:
+                        self.addm.fail("The sheet changed while it ran: run it again on " + self.addm_sheet)
+                        return
                     var t = self.addm.text_table(self.frame, self.addm_col, self.addm_row)
                     self.swap_table(t^, self.frame.columns(), self.addm_row)
                 else:
@@ -3348,6 +3358,8 @@ struct Main(App):
                 self.addm.fail(String(e))
         elif kind == "embed-text":
             if self.addm_col >= 0:
+                self.addm_col_name = self.frame.name(self.addm_col)
+                self.addm_sheet = self.name
                 self.addm.start_texts(self.frame, self.addm_col)
         else:
             var k = self.video_here()
@@ -3370,6 +3382,7 @@ struct Main(App):
             self.swap_table(l.take_table(), col, row)
             for c in range(self.frame.columns() - 2, self.frame.columns()):  # (the learned columns fit their words and title)
                 self.grid.fit(c, self.frame, self.font, self.pal)
+            self.grid.reveal_cell(max(self.grid.cur_row, 0), self.frame.columns() - 1, self.frame)  # (what it filled, on screen)
             self.learn.ms = Float64(now_ns() - t0) / 1e6
             self.message = "Learned: " + self.learn.rule
             if self.trace:

@@ -66,4 +66,16 @@ def main() raises:
         print("   cut.mcap →", String(e))
         cut_ok = "ends" in String(e) or "cut" in String(e)
     check(cut_ok, "a cut file")
+    # (a damaged file: a record whose length runs past the file, read without a summary: an error, never a hang or a crash)
+    var bad = List[UInt8]()
+    for b in [0x89, 0x4D, 0x43, 0x41, 0x50, 0x30, 0x0D, 0x0A]:
+        bad.append(UInt8(b))
+    bad.append(0x03)
+    for _ in range(8):
+        bad.append(0xFF)  # (a length of 2^64 - 1)
+    for _ in range(64):
+        bad.append(0)
+    with open("build/g68/damaged.mcap", "w") as g:
+        g.write_bytes(Span(bad))
+    check(fails("build/g68/damaged.mcap", "damaged"), "a damaged record length")
     print("bag-errors: ok")
