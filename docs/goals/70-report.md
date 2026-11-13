@@ -2,19 +2,19 @@
 
 Branch `goal-70-omxcore-engine` (worktree ../mojo-ui-g70) off main 9e3e9d0f. The owner's ask: "check with omxcore to see
 if you can pull the engine and snap it to your backend for fast compute." Checker: `docs/goals/70-check.py`
-(`scripts/check` runs it). Decisions D-7001..D-7007.
+(`scripts/check` runs it). Decisions D-7001..D-7008.
 
 ## In one paragraph
 The app now runs on omxcore **a9a3c37** (the owner's local main: F-216..F-223 are **not on GitHub yet**; origin/main is
 f8dbf9e, and the same patch applies there). The Mojo 1.2 patch needed no change but its line offsets. On the app's own
 query paths all 47 answers are byte-equal between main (834ef9a) and this branch. Over the steps of 10 ms or more, the
-branch is 2.4× faster than main (geometric mean) and the engine alone 1.7×; TPC-H SF1 through the app is up to 14.9×
+branch is 2.5× faster than main (geometric mean) and the engine alone 1.8×; TPC-H SF1 through the app is up to 16.6×
 faster, goal 47's charts and pivots 1.1–1.3×. The new engine had one real regression for this app: a sheet is a
 Frame, and since F-158 a Frame is streamed through a join before its filter is counted, so goal 47's "fleet ⨝ 16.8M
 telemetry rows" questions ran 5–12× slower. The app now puts an untouched sheet in a query as a plain table (D-7006),
-which leaves them 3.5× (Q1) and 1.5× (Q2) slower than main; the rest of that gap is inside the engine and is an ask
+which leaves them 3.5× (Q1) and 1.7× (Q2) slower than main; the rest of that gap is inside the engine and is an ask
 below. None of goal 68's robotics computations moved to the engine: on the same data with equal answers, the app's own
-Mojo loops (and numpy for similarity) are 2–76× faster, and omxcore lacks the operations that would make it a win
+Mojo loops (and numpy for similarity) are 2–82× faster, and omxcore lacks the operations that would make it a win
 (asks below).
 
 ## M0: the re-vendor
@@ -63,27 +63,28 @@ job do) three times, so the engine's change and the app's are told apart (review
 sheet a Frame), **old+sheet** (834ef9a with add_sheet, D-7006; its refuse_wide line left out, a no-op on an engine
 without 128-bit columns) and **new** (a9a3c37 with add_sheet: this branch). Data: goal 68's fleet (build/g68/fleet),
 goal 47's DROID fleet (63,344 episodes, 16.8M telemetry rows) and TPC-H SF1 (DuckDB dbgen, D-7005). Three interleaved
-rounds of 5 runs per build, each round starting with another build; load average 3.7–5.7 on 24 cores (other sessions).
-The noise floor is measured, not assumed: charts and pivots never touch the catalog, so main and old+sheet run identical
-code there, and they landed up to 1.23× apart. **47 answers, 0 differ across the three builds, 0 refused.** Over steps
-of 10 ms or more: the engine alone 1.70× faster, the branch vs main 2.41×. The full table: `docs/goals/70-bench.md`
-(written by the run 70-check's M1 passed). The ones that matter:
+rounds of 5 runs per build, each round starting with another build; load average 4.4–9.0 on 24 cores (other
+sessions). The noise floor is measured, not assumed: charts and pivots never touch the catalog, so main and old+sheet
+run identical code there, and on steps of 1 ms or more they landed at most 1.03× apart (sub-millisecond steps jitter
+more: goal 68's 0.03–0.7 ms steps scatter 0.7–1.1×). **47 answers, 0 differ across the three builds, 0 refused.** Over
+steps of 10 ms or more: the engine alone 1.77× faster, the branch vs main 2.48×. The full table:
+`docs/goals/70-bench.md` (written by the run 70-check's M1 passed). The ones that matter:
 
 | Query (the app's path) | main ms | old+sheet ms | new ms | engine | branch |
 |---|---:|---:|---:|---:|---:|
-| TPC-H Q20 | 232.0 | 54.1 | 15.6 | 3.5× | 14.9× |
-| TPC-H Q22 | 84.8 | 113.9 | 8.4 | 13.5× | 10.1× |
-| TPC-H Q18 | 362.9 | 320.6 | 46.2 | 6.9× | 7.9× |
-| TPC-H Q10 | 145.1 | 79.6 | 19.0 | 4.2× | 7.6× |
-| TPC-H Q17 | 66.8 | 29.6 | 11.6 | 2.6× | 5.8× |
-| TPC-H Q21 | 252.0 | 262.3 | 48.0 | 5.5× | 5.3× |
-| TPC-H Q5, Q7 | 93.8 / 74.3 | 37.5 / 70.2 | 22.4 / 17.9 | 1.7× / 3.9× | 4.2× / 4.2× |
-| TPC-H Q8, Q16 | 87.0 / 25.3 | 27.2 / 22.4 | 29.7 / 22.5 | 0.92× / 1.00× (noise) | 2.9× / 1.1× |
-| goal 47: average speed by lab, failures (fleet ⨝ telemetry) | 253.7 | 75.5 | 74.6 | 1.0× | 3.4× |
-| goal 47: charts and pivots over the fleet | 0.7–19.2 | 0.7–19.7 | 0.5–16.6 | 1.2–1.3× | 1.2–1.3× |
-| goal 68's fleet (920 moments): every step | 0.03–0.74 | 0.03–0.64 | 0.03–0.70 | within noise (all under 1 ms) | |
-| goal 47 Q2, "within 30% of the arm's speed limit" (JOIN LINKED) | 17.6 | 11.1 | 26.0 | **0.43×** | **0.68×** |
-| goal 47 Q1, "failures where the gripper closed, let go and closed again" (JOIN LINKED) | 24.2 | 29.5 | 83.7 | **0.35×** | **0.29×** |
+| TPC-H Q20 | 257.3 | 54.4 | 15.5 | 3.5× | 16.6× |
+| TPC-H Q22 | 88.6 | 115.5 | 9.5 | 12.2× | 9.4× |
+| TPC-H Q10 | 151.4 | 79.5 | 18.4 | 4.3× | 8.2× |
+| TPC-H Q18 | 376.8 | 321.6 | 46.7 | 6.9× | 8.1× |
+| TPC-H Q17 | 67.9 | 30.8 | 12.0 | 2.6× | 5.7× |
+| TPC-H Q21 | 267.6 | 265.2 | 47.6 | 5.6× | 5.6× |
+| TPC-H Q5, Q7 | 100.0 / 78.3 | 38.8 / 71.9 | 21.7 / 17.1 | 1.8× / 4.2× | 4.6× / 4.6× |
+| TPC-H Q8, Q16 | 85.4 / 25.7 | 28.6 / 23.7 | 28.4 / 22.7 | 1.0× / 1.05× | 3.0× / 1.1× |
+| goal 47: average speed by lab, failures (fleet ⨝ telemetry) | 260.2 | 78.2 | 74.6 | 1.05× | 3.5× |
+| goal 47: charts and pivots over the fleet (1–20 ms ones) | 1.7–19.7 | 1.7–19.4 | 1.4–17.0 | 1.14–1.26× | 1.16–1.30× |
+| goal 68's fleet (920 moments): every step | 0.03–0.70 | 0.03–0.65 | 0.03–0.70 | within jitter (all under 1 ms) | |
+| goal 47 Q2, "within 30% of the arm's speed limit" (JOIN LINKED) | 16.1 | 11.1 | 27.1 | **0.41×** | **0.60×** |
+| goal 47 Q1, "failures where the gripper closed, let go and closed again" (JOIN LINKED) | 24.1 | 29.4 | 85.3 | **0.34×** | **0.28×** |
 
 So add_sheet alone already helps the old engine on several joins (Q20, Q10, Q2, the lab-speed join): a plain table's
 filter is counted before the join on 834ef9a too. Inside goal 47's own checker (M7, the app on GTK) Q1 took 218 ms and
@@ -107,15 +108,15 @@ A path moves only if the engine is faster with equal answers. **Nothing moved.**
 
 | path | data | app ms | engine ms | answers | decision |
 |---|---|---:|---:|---|---|
-| asof | the fleet's every-topic time join at 10 Hz: 6 bags, 21 topics, 115,890 moment cells | 1.6 | 22.2 | equal | stays |
-| asof_1m | the same join, one topic of 1,000,000 messages × 3 fields, 100,000 moments | 9.2 | 305.1 | equal | stays |
-| stops | stop rows (half-seconds standing still) over 1,000,000 moments | 1.3 | 94.9 | equal | stays |
-| learn_reads | Learn's column reads, 100,000 rows × 5 columns | 7.9 | 16.3 | equal | stays |
-| similarity_all | every row's cosine to row 0, 100,000 × 384 (app: numpy float32, as plugin_py; answers compared with float64, the engine's) | 15.5 | 62.7 | equal (1e-16) | stays |
-| similarity_top10 | its top 10 | 10.0 | 67.4 | equal | stays |
+| asof | the fleet's every-topic time join at 10 Hz: 6 bags, 21 topics, 115,890 moment cells | 1.5 | 20.7 | equal | stays |
+| asof_1m | the same join, one topic of 1,000,000 messages × 3 fields, 100,000 moments | 8.2 | 285.4 | equal | stays |
+| stops | stop rows (half-seconds standing still) over 1,000,000 moments | 1.2 | 98.5 | equal | stays |
+| learn_reads | Learn's column reads, 100,000 rows × 5 columns | 7.9 | 16.5 | equal | stays |
+| similarity_all | every row's cosine to row 0, 100,000 × 384 (app: numpy float32, as plugin_py; answers compared with float64, the engine's) | 11.0 | 60.9 | equal (1e-16) | stays |
+| similarity_top10 | its top 10 | 8.9 | 65.5 | equal | stays |
 
 The numbers are the final run 70-check's M2 passed (docs/goals/70-robotics.md, which every M2 run rewrites; the
-log is build/g70/m2.log). Across runs the ratios moved (as-of 13–14×, stops 70–76×, similarity 4–6×), never the decisions.
+log is build/g70/m2.log). Across runs the ratios moved (as-of 13–14×, stops 70–82×, similarity 4–10×), never the decisions.
 
 Why each stays:
 - **asof**: omxcore has no ASOF JOIN (refused by name) and no `IGNORE NULLS`; the engine way is a UNION of the topic's
@@ -145,14 +146,14 @@ brief's LeRobot/DROID scale is 10–1,000× more.
    100k–10M rows × 384–768. Today: numpy, 10–16 ms for 100k × 384 on the CPU. Without it, also: more than 64 constants a
    query, and CROSS JOIN (refused).
 4. **Run-length / sessionization**: "stretches where a condition holds for at least N rows" (`stops`) as one pass
-   (MATCH_RECOGNIZE-like, or a `runs(cond)` window). 1M moments: the app's loop takes 1 ms, the window way 78–95 ms.
+   (MATCH_RECOGNIZE-like, or a `runs(cond)` window). 1M moments: the app's loop takes 1 ms, the window way 78–99 ms.
 5. **`IGNORE NULLS`** in `LAST_VALUE` / `LAG` (forward fill): refused by name; it is the plain-SQL as-of join.
 6. **A Frame's selective filter is counted before the build side is chosen** (F-158): an in-memory Frame that probes a
    join is streamed uncounted, so a 0.0001%-selective filter on 16.8M rows made it the probe side (Q2 18 → 207 ms). The
    app works around it for untouched sheets (D-7006); an edited sheet still pays.
 7. **The deferred probe filter (F-161) keys only the rows that pass**: goal 47's Q1 spends 190 ms mapping 16.8M text
    join keys of which 85k pass the filter (834ef9a: 2 ms of keys after filtering first). Q1 is 3.5× slower than main
-   even as a plain table, Q2 1.5×.
+   even as a plain table, Q2 1.7×.
 8. **Text join keys on a streamed probe**: the fleet ⨝ telemetry COUNT(*) spends 8.6 ms on keys for 63k text keys
    (834ef9a: 1.3 ms).
 
@@ -169,4 +170,4 @@ libc lints and the matrix again. Goal 68's stopwatch on this branch: a tree file
   (CLAUDE.md's `llvm-nm -u` rule has nothing new to record); the flag is in apple_objects for when one does. Not built.
 - a9a3c37 exists only in the owner's checkout; if it is rebased or lost, f8dbf9e is the fallback (the patch applies
   cleanly there; not built).
-- Timings were taken beside other sessions' load (load average 5–9 on 24 cores); the builds' runs were interleaved so all saw it.
+- Timings were taken beside other sessions' load (load average 4.4–9.0 on 24 cores in the passing M1 run); the builds' runs were interleaved so all saw it.

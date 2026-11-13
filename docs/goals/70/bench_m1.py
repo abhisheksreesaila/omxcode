@@ -119,7 +119,7 @@ def main():
     # the noise seen: charts and pivots (sheetpage.compute) never touch the catalog, so main and old+sheet run the same
     # code on the same engine there; how far apart their medians land is how far apart identical work lands in this run
     same = [max(r["main_ms"], r["old_sheet_ms"]) / min(r["main_ms"], r["old_sheet_ms"]) for r in rows
-            if ("chart" in r["step"] or "pivot" in r["step"]) and min(r["main_ms"], r["old_sheet_ms"]) > 0]
+            if ("chart" in r["step"] or "pivot" in r["step"]) and min(r["main_ms"], r["old_sheet_ms"]) >= 1.0]  # (under 1 ms: the timer's jitter)
     noise = max(same) if same else 1.0
     res = {"noise": noise, "rounds": rounds, "answers": count, "differ": diffs, "errors": errors, "rows": rows, "opens": opens,
            "load": [min(loads), max(loads)]}
@@ -128,7 +128,7 @@ def main():
     lines = ["# Goal 70 M1: the app's query paths, omxcore 834ef9a vs a9a3c37", "",
              f"Same machine, same run: {rounds} interleaved rounds of 5 runs each per build (median of {5 * rounds}); load average "
              f"{min(loads):.1f}–{max(loads):.1f} on 24 cores (other sessions). Noise seen: identical code (charts and pivots, main vs old+sheet: "
-             f"they don't touch the catalog) landed up to {noise:.2f}× apart, so a single step's ratio within that is not a finding. {count} answers compared byte "
+             f"they don't touch the catalog; steps of 1 ms or more) landed up to {noise:.2f}× apart, so a ratio within that is not a finding (sub-millisecond steps jitter more). {count} answers compared byte "
              f"for byte across the three builds: {len(diffs)} differ, {len(errors)} are refusals. Made by `docs/goals/70/bench_m1.py`; "
              "the paths are tests/bench_engine_paths.mojo's (implied_sql + query_table, sheetpage.compute).", "",
              "Builds: **main** = 834ef9a, every sheet as a Frame (main today); **old+sheet** = 834ef9a with this branch's add_sheet "

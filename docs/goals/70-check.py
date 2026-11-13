@@ -327,6 +327,10 @@ def m2():
     fleet = (ROOT / "mojoui/fleet.mojo").read_text()
     if "def _asof(" not in fleet or "still % STOP_ROWS == 0" not in fleet:
         probs.append("mojoui.fleet's as-of join or stop loop changed")
+    if "sheet.value(c, r)" not in (ROOT / "mojoui/learn.mojo").read_text():
+        probs.append("Learn's features_of no longer reads the sheet's cells (did it move?)")
+    if "(v @ v[row_index])" not in (ROOT / "mojoui/plugin_py.py").read_text():
+        probs.append("plugin_py.similar no longer uses numpy's matvec (did it move?)")
     return (not probs), ("; ".join(probs) if probs else "; ".join(verdicts))
 
 

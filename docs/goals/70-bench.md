@@ -1,57 +1,57 @@
 # Goal 70 M1: the app's query paths, omxcore 834ef9a vs a9a3c37
 
-Same machine, same run: 3 interleaved rounds of 5 runs each per build (median of 15); load average 3.7–5.7 on 24 cores (other sessions). Noise seen: identical code (charts and pivots, main vs old+sheet: they don't touch the catalog) landed up to 1.23× apart, so a single step's ratio within that is not a finding. 47 answers compared byte for byte across the three builds: 0 differ, 0 are refusals. Made by `docs/goals/70/bench_m1.py`; the paths are tests/bench_engine_paths.mojo's (implied_sql + query_table, sheetpage.compute).
+Same machine, same run: 3 interleaved rounds of 5 runs each per build (median of 15); load average 4.4–9.0 on 24 cores (other sessions). Noise seen: identical code (charts and pivots, main vs old+sheet: they don't touch the catalog; steps of 1 ms or more) landed up to 1.03× apart, so a ratio within that is not a finding (sub-millisecond steps jitter more). 47 answers compared byte for byte across the three builds: 0 differ, 0 are refusals. Made by `docs/goals/70/bench_m1.py`; the paths are tests/bench_engine_paths.mojo's (implied_sql + query_table, sheetpage.compute).
 
 Builds: **main** = 834ef9a, every sheet as a Frame (main today); **old+sheet** = 834ef9a with this branch's add_sheet (an untouched sheet as a plain table, D-7006); **new** = a9a3c37 with add_sheet (this branch). **Engine** = old+sheet / new (the engine's change alone); **branch** = main / new (what a user gets). Above 1: faster.
 
 | data | step | main ms | old+sheet ms | new ms | engine | branch |
 |---|---|---:|---:|---:|---:|---:|
-| fleet68 | g68_stood_still | 0.08 | 0.08 | 0.08 | 0.96× | 0.94× |
-| fleet68 | g68_person_near | 0.64 | 0.64 | 0.64 | 1.00× | 1.00× |
-| fleet68 | g68_speed_by_robot | 0.62 | 0.63 | 0.64 | 0.99× | 0.98× |
-| fleet68 | g68_stops_by_run | 0.14 | 0.14 | 0.15 | 0.92× | 0.95× |
-| fleet68 | g68_join_linked | 0.26 | 0.22 | 0.24 | 0.93× | 1.08× |
-| fleet68 | g68_join_moments | 0.74 | 0.64 | 0.70 | 0.91× | 1.05× |
-| fleet68 | g68_pivot_stops | 0.04 | 0.04 | 0.04 | 0.90× | 0.90× |
-| fleet68 | g68_chart_speed | 0.03 | 0.03 | 0.03 | 1.00× | 0.97× |
-| fleet68 | g68_chart_median_speed | 0.10 | 0.08 | 0.11 | 0.78× | 0.95× |
-| fleet68 | g68_chart_person | 0.03 | 0.03 | 0.03 | 0.97× | 0.94× |
-| fleet47 | g47_q1_regrasped_failures | 24.20 | 29.49 | 83.71 | 0.35× | 0.29× |
-| fleet47 | g47_q2_near_limit | 17.62 | 11.09 | 25.98 | 0.43× | 0.68× |
-| fleet47 | g47_q3_picked | 0.26 | 0.26 | 0.25 | 1.00× | 1.00× |
-| fleet47 | g47_success_by_lab | 0.50 | 0.51 | 0.46 | 1.10× | 1.09× |
-| fleet47 | g47_distinct_robots | 2.40 | 2.56 | 2.37 | 1.08× | 1.01× |
-| fleet47 | g47_telemetry_by_event | 15.47 | 16.05 | 14.57 | 1.10× | 1.06× |
-| fleet47 | g47_join_lab_speed | 253.71 | 75.45 | 74.58 | 1.01× | 3.40× |
-| fleet47 | g47_chart_success_by_lab | 0.72 | 0.72 | 0.57 | 1.26× | 1.26× |
-| fleet47 | g47_chart_success_by_verb | 0.70 | 0.69 | 0.54 | 1.27× | 1.30× |
-| fleet47 | g47_chart_median_duration | 1.70 | 1.65 | 1.42 | 1.17× | 1.20× |
-| fleet47 | g47_pivot_lab_outcome | 1.81 | 1.79 | 1.48 | 1.21× | 1.22× |
-| fleet47 | g47_chart_telemetry_speed | 19.19 | 19.65 | 16.61 | 1.18× | 1.16× |
-| tpch | tpch_q01 | 15.64 | 14.46 | 14.18 | 1.02× | 1.10× |
-| tpch | tpch_q02 | 30.04 | 15.33 | 12.69 | 1.21× | 2.37× |
-| tpch | tpch_q03 | 52.17 | 33.06 | 26.55 | 1.25× | 1.97× |
-| tpch | tpch_q04 | 26.97 | 27.50 | 13.26 | 2.07× | 2.03× |
-| tpch | tpch_q05 | 93.79 | 37.47 | 22.40 | 1.67× | 4.19× |
-| tpch | tpch_q06 | 12.02 | 11.42 | 5.63 | 2.03× | 2.13× |
-| tpch | tpch_q07 | 74.25 | 70.24 | 17.87 | 3.93× | 4.16× |
-| tpch | tpch_q08 | 87.04 | 27.24 | 29.68 | 0.92× | 2.93× |
-| tpch | tpch_q09 | 135.82 | 53.70 | 51.23 | 1.05× | 2.65× |
-| tpch | tpch_q10 | 145.06 | 79.62 | 19.01 | 4.19× | 7.63× |
-| tpch | tpch_q11 | 19.54 | 7.35 | 5.60 | 1.31× | 3.49× |
-| tpch | tpch_q12 | 32.06 | 31.62 | 20.45 | 1.55× | 1.57× |
-| tpch | tpch_q13 | 97.03 | 97.72 | 34.61 | 2.82× | 2.80× |
-| tpch | tpch_q14 | 10.77 | 12.04 | 6.97 | 1.73× | 1.54× |
-| tpch | tpch_q15 | 10.03 | 6.68 | 5.58 | 1.20× | 1.80× |
-| tpch | tpch_q16 | 25.31 | 22.39 | 22.50 | 1.00× | 1.13× |
-| tpch | tpch_q17 | 66.78 | 29.59 | 11.56 | 2.56× | 5.78× |
-| tpch | tpch_q18 | 362.91 | 320.59 | 46.24 | 6.93× | 7.85× |
-| tpch | tpch_q19 | 20.34 | 23.04 | 13.62 | 1.69× | 1.49× |
-| tpch | tpch_q20 | 232.00 | 54.06 | 15.58 | 3.47× | 14.89× |
-| tpch | tpch_q21 | 251.95 | 262.34 | 47.95 | 5.47× | 5.25× |
-| tpch | tpch_q22 | 84.82 | 113.89 | 8.43 | 13.51× | 10.06× |
-| tpch | tpch_pivot_flag_status | 3.77 | 3.75 | 3.79 | 0.99× | 0.99× |
-| tpch | tpch_chart_sum_shipmode | 1.91 | 1.91 | 1.93 | 0.99× | 0.99× |
-| tpch | tpch_chart_median_shipmode | 37.33 | 37.41 | 37.57 | 1.00× | 0.99× |
+| fleet68 | g68_stood_still | 0.08 | 0.08 | 0.08 | 0.95× | 0.96× |
+| fleet68 | g68_person_near | 0.63 | 0.64 | 0.65 | 0.98× | 0.98× |
+| fleet68 | g68_speed_by_robot | 0.63 | 0.63 | 0.64 | 0.98× | 0.98× |
+| fleet68 | g68_stops_by_run | 0.14 | 0.14 | 0.15 | 0.93× | 0.92× |
+| fleet68 | g68_join_linked | 0.27 | 0.22 | 0.25 | 0.90× | 1.10× |
+| fleet68 | g68_join_moments | 0.70 | 0.65 | 0.70 | 0.93× | 1.00× |
+| fleet68 | g68_pivot_stops | 0.04 | 0.04 | 0.04 | 0.90× | 0.88× |
+| fleet68 | g68_chart_speed | 0.03 | 0.03 | 0.03 | 0.97× | 0.97× |
+| fleet68 | g68_chart_median_speed | 0.08 | 0.08 | 0.11 | 0.72× | 0.73× |
+| fleet68 | g68_chart_person | 0.03 | 0.03 | 0.04 | 0.89× | 0.89× |
+| fleet47 | g47_q1_regrasped_failures | 24.11 | 29.35 | 85.25 | 0.34× | 0.28× |
+| fleet47 | g47_q2_near_limit | 16.14 | 11.13 | 27.09 | 0.41× | 0.60× |
+| fleet47 | g47_q3_picked | 0.26 | 0.27 | 0.26 | 1.04× | 1.02× |
+| fleet47 | g47_success_by_lab | 0.52 | 0.53 | 0.47 | 1.13× | 1.10× |
+| fleet47 | g47_distinct_robots | 2.50 | 2.43 | 2.35 | 1.04× | 1.07× |
+| fleet47 | g47_telemetry_by_event | 15.41 | 15.94 | 15.00 | 1.06× | 1.03× |
+| fleet47 | g47_join_lab_speed | 260.24 | 78.16 | 74.56 | 1.05× | 3.49× |
+| fleet47 | g47_chart_success_by_lab | 0.73 | 0.74 | 0.55 | 1.35× | 1.34× |
+| fleet47 | g47_chart_success_by_verb | 0.70 | 0.69 | 0.53 | 1.30× | 1.33× |
+| fleet47 | g47_chart_median_duration | 1.68 | 1.66 | 1.38 | 1.20× | 1.21× |
+| fleet47 | g47_pivot_lab_outcome | 1.86 | 1.80 | 1.44 | 1.26× | 1.30× |
+| fleet47 | g47_chart_telemetry_speed | 19.72 | 19.40 | 16.96 | 1.14× | 1.16× |
+| tpch | tpch_q01 | 15.31 | 14.95 | 14.64 | 1.02× | 1.05× |
+| tpch | tpch_q02 | 31.29 | 15.76 | 12.47 | 1.26× | 2.51× |
+| tpch | tpch_q03 | 50.70 | 34.23 | 26.29 | 1.30× | 1.93× |
+| tpch | tpch_q04 | 26.09 | 27.77 | 13.27 | 2.09× | 1.97× |
+| tpch | tpch_q05 | 100.04 | 38.80 | 21.73 | 1.79× | 4.60× |
+| tpch | tpch_q06 | 11.21 | 11.44 | 5.16 | 2.22× | 2.17× |
+| tpch | tpch_q07 | 78.33 | 71.92 | 17.05 | 4.22× | 4.59× |
+| tpch | tpch_q08 | 85.37 | 28.63 | 28.43 | 1.01× | 3.00× |
+| tpch | tpch_q09 | 145.17 | 55.58 | 49.85 | 1.12× | 2.91× |
+| tpch | tpch_q10 | 151.37 | 79.47 | 18.38 | 4.32× | 8.24× |
+| tpch | tpch_q11 | 21.17 | 7.63 | 5.58 | 1.37× | 3.79× |
+| tpch | tpch_q12 | 34.61 | 34.20 | 20.18 | 1.69× | 1.71× |
+| tpch | tpch_q13 | 96.12 | 103.67 | 34.94 | 2.97× | 2.75× |
+| tpch | tpch_q14 | 10.93 | 13.29 | 7.01 | 1.90× | 1.56× |
+| tpch | tpch_q15 | 9.77 | 7.32 | 5.64 | 1.30× | 1.73× |
+| tpch | tpch_q16 | 25.66 | 23.70 | 22.67 | 1.05× | 1.13× |
+| tpch | tpch_q17 | 67.85 | 30.83 | 12.01 | 2.57× | 5.65× |
+| tpch | tpch_q18 | 376.84 | 321.56 | 46.65 | 6.89× | 8.08× |
+| tpch | tpch_q19 | 21.90 | 24.16 | 13.72 | 1.76× | 1.60× |
+| tpch | tpch_q20 | 257.30 | 54.38 | 15.54 | 3.50× | 16.55× |
+| tpch | tpch_q21 | 267.57 | 265.21 | 47.56 | 5.58× | 5.63× |
+| tpch | tpch_q22 | 88.61 | 115.48 | 9.46 | 12.21× | 9.37× |
+| tpch | tpch_pivot_flag_status | 3.77 | 3.77 | 3.78 | 1.00× | 1.00× |
+| tpch | tpch_chart_sum_shipmode | 1.92 | 1.92 | 1.93 | 0.99× | 0.99× |
+| tpch | tpch_chart_median_shipmode | 38.58 | 37.58 | 38.70 | 0.97× | 1.00× |
 
-Opening the tables (read_table, not timed above; main → new): fleet68/runs 159 → 158 ms; fleet68/moments 6 → 6 ms; fleet68/stops 0 → 0 ms; fleet47/fleet 315 → 318 ms; fleet47/telemetry 873 → 885 ms; tpch/lineitem 3457 → 3481 ms; tpch/orders 903 → 887 ms; tpch/customer 211 → 205 ms; tpch/part 134 → 125 ms; tpch/partsupp 590 → 558 ms; tpch/supplier 11 → 11 ms; tpch/nation 0 → 0 ms; tpch/region 0 → 0 ms
+Opening the tables (read_table, not timed above; main → new): fleet68/runs 165 → 163 ms; fleet68/moments 6 → 7 ms; fleet68/stops 0 → 0 ms; fleet47/fleet 341 → 336 ms; fleet47/telemetry 869 → 861 ms; tpch/lineitem 4014 → 4060 ms; tpch/orders 897 → 860 ms; tpch/customer 201 → 202 ms; tpch/part 124 → 123 ms; tpch/partsupp 552 → 561 ms; tpch/supplier 10 → 10 ms; tpch/nation 0 → 0 ms; tpch/region 0 → 0 ms

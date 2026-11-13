@@ -4,9 +4,9 @@ Written by docs/goals/70-check.py M2 from its own run (tests/bench_robotics.mojo
 
 | path | app ms | engine ms | engine / app | answers | decision |
 |---|---:|---:|---:|---|---|
-| asof | 1.6 | 22.2 | 13.8× | equal | stays |
-| asof_1m | 9.2 | 305.1 | 33.2× | equal | stays |
-| stops | 1.3 | 94.9 | 75.6× | equal | stays |
-| learn_reads | 7.9 | 16.3 | 2.1× | equal | stays |
-| similarity_all | 15.5 | 62.7 | 4.0× | equal | stays |
-| similarity_top10 | 10.0 | 67.4 | 6.8× | equal | stays |
+| asof | 1.5 | 20.7 | 13.5× | equal | stays |
+| asof_1m | 8.2 | 285.4 | 35.0× | equal | stays |
+| stops | 1.2 | 98.5 | 80.4× | equal | stays |
+| learn_reads | 7.9 | 16.5 | 2.1× | equal | stays |
+| similarity_all | 11.0 | 60.9 | 5.5× | equal | stays |
+| similarity_top10 | 8.9 | 65.5 | 7.3× | equal | stays |

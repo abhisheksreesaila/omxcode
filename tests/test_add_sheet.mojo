@@ -1,10 +1,11 @@
 # Goal 70 (D-7006): mojoui.tablecard.add_sheet puts a sheet in a SQL catalog. An untouched sheet goes in as its shared
 # table, so a selective filter on a big sheet is counted before the join picks its build side (on omxcore a9a3c37 a
 # Frame is streamed through the join uncounted: goal 47's questions ran 5–12× slower); a sheet with any change (an
-# edit, an appended or removed row, a merge, a formula) goes in as its frame, so SQL reads the change.
+# edit, an appended or removed row, a merge, a formula) goes in as its frame, so SQL reads the change. A column of
+# 128-bit totals (a SUM past int64) is refused, as add_frame refuses it.
 #   scripts/mxbuild.sh tests/test_add_sheet.mojo -o build/test_add_sheet && build/test_add_sheet
 from std.testing import assert_equal, assert_true
-from omxcore import Catalog, Table, TEXT, INT
+from omxcore import Catalog, Table, TEXT, INT, DECIMAL
 from mojoui.sheet import Sheet
 from mojoui.tablecard import add_sheet, query_table
 
@@ -111,3 +112,22 @@ def main() raises:
     a = answer(fsheet, t5, "SELECT COUNT(*) AS n FROM t WHERE t.k = 'e1' AND t.v > 990")
     assert_equal(a[0], 10)
     print("merge: ok")
+    # a 128-bit total (an answer whose SUM passed int64): refused, untouched or not
+    var big = Table.empty()
+    var bc = big.add_column("x", DECIMAL, 2)
+    big.append(bc, Int64(9_000_000_000_000_000_000))
+    big.append(bc, Int64(9_000_000_000_000_000_000))
+    big.check()
+    var bcat = Catalog()
+    bcat.add_table("big", big^.share())
+    var wide = query_table(bcat, "SELECT SUM(x) AS s FROM big")
+    assert_true(wide.is_wide(0), "the sum should be 128-bit")
+    var wsheet = Sheet(wide^.share(), False)
+    var refused = False
+    try:
+        var wcat = Catalog()
+        add_sheet(wcat, "w", wsheet.frame)
+    except:
+        refused = True
+    assert_true(refused, "a 128-bit column must be refused")
+    print("wide: ok (refused)")
