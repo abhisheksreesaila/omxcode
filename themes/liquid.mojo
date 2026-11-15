@@ -276,6 +276,8 @@ def liquid_css(p: Palette) -> String:
         + "window.liquid dimming { background-color: " + dim + "; }\n"
         # toasts: a dark pill
         + "window.liquid toast { border-radius: 999px; animation: liquid-rise 300ms cubic-bezier(0.22, 1, 0.36, 1); }\n"
+        # (its words in the card's colour at full strength: a broader label rule dimmed them to grey on the pill, goal 71)
+        + "window.liquid toast label, window.liquid toast widget label { color: " + hex_of(p.card) + "; opacity: 1; }\n"
     )
 
 

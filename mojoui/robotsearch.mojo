@@ -529,9 +529,11 @@ struct RobotSearch(Movable):
                                 eps += x.episodes
                                 frames += x.frames
                                 self.exported.append(x.folder)
-                            var where = self.exported[0] if len(self.exported) == 1 else String(len(self.exported)) + " folders in " + self.exports_dir
-                            self.toast = ("Exported " + String(eps) + " episodes, " + grouped(frames) + " frames, in " + millis(d.ms) + " to " + where +
-                                          " · LeRobot loads it: LeRobotDataset(root=…)")
+                            var first = self.exported[0]
+                            var name = String(first[byte=first.rfind("/") + 1:])  # (the folder's name: the whole path is in the toast's tooltip)
+                            var where = name if len(self.exported) == 1 else String(len(self.exported)) + " folders (" + name + "…)"
+                            self.toast = ("Exported " + String(eps) + " episodes (" + grouped(frames) + " frames) to " + where + " in " + millis(d.ms) +
+                                          " · LeRobot loads it")
                     except err:
                         self.toast = "Export failed: " + String(err)
                     changed = True
@@ -759,5 +761,6 @@ struct RobotSearch(Movable):
     def overlays(self) -> List[View]:
         var out = List[View]()
         if self.toast.byte_length() > 0:
-            out.append(Toast(self.toast, on_close=self.base + RS_TOAST_CLOSE, seconds=12).tag("robot-toast"))
+            var tip = self.exports_dir if len(self.exported) == 0 else self.exported[0]
+            out.append(Toast(self.toast, on_close=self.base + RS_TOAST_CLOSE, seconds=12).tag("robot-toast").tooltip(tip + " · LeRobotDataset(root=…) loads it"))
         return out^

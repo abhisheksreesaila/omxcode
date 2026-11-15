@@ -17,7 +17,8 @@ Commands, separated by ';':
   wheel:X,Y,N        N notches of the scroll wheel down there (negative: up)
   report             the app prints its widgets' state (as a MOJOUI_TEST run's end does: LABEL:, BOX:, …)
   type:TEXT          type TEXT key by key, ~25 a second (letters, capitals too, digits, space and , . - $)
-  record:PATH        start recording the window's area to PATH (ffmpeg, 30 fps, H.264) until stoprecord or the end
+  record:PATH        start recording the window's area to PATH (ffmpeg, 30 fps, H.264) until stoprecord or the end;
+                     while it records, each step prints LIVE-AT: <seconds into the recording> <step>
   stoprecord         stop the recording
 The app's stdout (TRACE: lines with MOJOUI_TRACE=1) is printed at the end.
 """
@@ -66,6 +67,10 @@ def main():
         else:
             i += 1
     headless.ensure()
+    try:  # (an arrow, not X's bare "x", where no widget sets a cursor: the headless display has no window manager; recordings show it)
+        subprocess.run(["xsetroot", "-cursor_name", "left_ptr"], env=dict(os.environ, XCURSOR_THEME=os.environ.get("XCURSOR_THEME", "Adwaita")), timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     env = dict(os.environ, MOJOUI_WINDOW=size, MOJOUI_LIVE_REPORT="1", **extra)
     env.pop("MOJOUI_TEST", None)
     log = open(Path("build") / "live.log", "w")
@@ -99,6 +104,7 @@ def main():
 
     pointer = [0.0, 0.0]
     recorder = [None]
+    rec_t0 = [0.0]
     names = {" ": "space", ",": "comma", ".": "period", "-": "minus", "$": "Shift+dollar"}
 
     def stop_recording():
@@ -109,6 +115,8 @@ def main():
         if not cmd:
             continue
         verb, _, rest = cmd.partition(":")
+        if recorder[0] is not None and verb not in ("wait", "stoprecord"):  # (each step's moment in the recording, for an editor's cuts)
+            print(f"LIVE-AT: {time.monotonic() - rec_t0[0]:.2f} {cmd}", flush=True)
         nums = [float(n) for n in rest.split(",")] if verb in ("move", "click", "shift+click", "drag", "wheel", "press", "glideto") else []
         if verb == "wait":
             time.sleep(float(rest) / 1000)
@@ -179,6 +187,7 @@ def main():
                                             "-framerate", "30", "-i", os.environ["DISPLAY"] + "+0,0", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                                             "-crf", "20", "-preset", "veryfast", rest], stdin=subprocess.PIPE)
             time.sleep(0.5)
+            rec_t0[0] = time.monotonic() - 0.5  # (ffmpeg's first frame: about when it started)
         elif verb == "stoprecord":
             stop_recording()
         elif verb == "shot":
