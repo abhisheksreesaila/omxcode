@@ -101,9 +101,10 @@ def m0():
     why = vendored_at_least(PREV)
     (probs.append(f"lineage: {why}") if why else said.append(f"vendor = {COMMIT}'s archive + the patch, at least {PREV} (engine_lineage)"))
     # F-204: no use of the old Query.table field left in the app's code
-    # (D-7106, amended after review: the first pattern, with only the one known false positive left out: tests/test_findlike's
-    # `wh`, a mojoui.visionmodel.LikeResult whose own field is called table, not omxcore's Query)
-    old = run(["bash", "-c", r"grep -rnE '\.table\.(rows|num_rows|columns|column|schema|names)\b' --include=*.mojo mojoui examples tests hosts themes | grep -viE 'self\.table\.|sheet\.table\.|card\.table\.|\btable\.table\.|\bwh\.table\.' || true"]).stdout.strip()
+    # (D-7106, amended after review: the first pattern, with only the known false positives left out, each by its file:
+    # tests/test_findlike's `wh` and `dr` (mojoui.visionmodel.LikeResult), tests/test_parquet_import's `s` and tests/test_starter's
+    # `a` (mojoui.csvio.CsvImport): mojoui structs whose own field is called table, not omxcore's Query)
+    old = run(["bash", "-c", r"grep -rnE '\.table\.(rows|num_rows|columns|column|schema|names)\b' --include=*.mojo mojoui examples tests hosts themes | grep -viE 'self\.table\.|sheet\.table\.|card\.table\.|\btable\.table\.' | grep -vE '^tests/test_findlike\.mojo:[0-9]+:.*\b(wh|dr)\.table\.|^tests/test_parquet_import\.mojo:[0-9]+:.*\bs\.table\.|^tests/test_starter\.mojo:[0-9]+:.*\ba\.table\.' || true"]).stdout.strip()
     if old:
         probs.append("possible old Query.table uses (F-204): " + old[:400])
     exs = sorted(p.parent.name for p in (ROOT / "examples").glob("*/needs") if "omxcore" in p.read_text().split())
