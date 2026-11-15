@@ -2,7 +2,8 @@
 that checkout as the working directory. Prints one JSON object (the last line of stdout).
 
     oracle.py episodes <index.parquet>                       every episode in the pool: [{dataset, episode}]
-    oracle.py like <index.parquet> <picks.json> <k>          top k for picks["one"] (one clip each) and picks["three"]
+    oracle.py like <index.parquet> <picks.json> <k> [robot]  top k for picks["one"] (one clip each) and picks["three"];
+                                                             with a robot, also picks["one"][0] filtered to it ("filtered")
     oracle.py load <folder> [dataset:episode ...]            LeRobotDataset(root=folder): episodes, frames, tasks; with
                                                              the source episodes, their frames and tasks too
     oracle.py frames <frames.json>                           the app's decoded frames vs ds.decode at the same times
@@ -36,8 +37,11 @@ def main(cmd, *a):
         idx = robot.load_index(a[0])
         picks = json.loads(Path(a[1]).read_text())
         k = int(a[2])
-        return {"one": [hits(idx.search(like=key(p), k=k, device="cuda")) for p in picks["one"]],
-                "three": [hits(idx.search(like=[key(p) for p in t], k=k, device="cuda")) for t in picks["three"]]}
+        out = {"one": [hits(idx.search(like=key(p), k=k, device="cuda")) for p in picks["one"]],
+               "three": [hits(idx.search(like=[key(p) for p in t], k=k, device="cuda")) for t in picks["three"]]}
+        if len(a) > 3:
+            out["filtered"] = hits(idx.search(like=key(picks["one"][0]), k=k, where="robot = '" + a[3].replace("'", "''") + "'", device="cuda"))
+        return out
     if cmd == "load":
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 

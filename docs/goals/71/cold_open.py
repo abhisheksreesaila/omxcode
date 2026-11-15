@@ -23,6 +23,7 @@ FONT = ROOT / "mojoui/hosts/static/fonts/Inter-SemiBold.ttf"
 SIZE = "1440x810"   # recorded at 1440x810 and scaled to 1920x1080: the UI reads at film size, never a shrunk window
 W, H = 1440, 810
 SAMPLE = ["lerobot/svla_so100_sorting:7", "lerobot/libero:14", "lerobot/libero:15", "lerobot/libero:16"]
+DRAWER_TASK = "put the black bowl in the bottom drawer of the cabinet and close it"   # libero 14, 15 and 16's task
 # (scene, its length in the film, its caption) — the words are cold-open.md's
 SCENES = [
     (5.0, "Hours of robot video. Which clips show the same task?"),
@@ -138,6 +139,11 @@ def main(index, out_mp4):
     fin = reports(t)
     toast = re.search(r"^TOAST: (.*)$", t, re.M)
     more_ok = bool(re.search(r"^LABEL: More like these 3$", t, re.M))
+    # scene 4's caption says 24 of 24 the same task: the take's last report must show it (the 24 result tiles' titles; the
+    # hero card's lines start "· ")
+    same = len(re.findall(r"^LABEL: " + re.escape(DRAWER_TASK) + "$", t, re.M))
+    if not more_ok or same != 24:
+        sys.exit(f"the take doesn't show the caption's claim: More like these 3 {more_ok}, {same} of 24 results '{DRAWER_TASK}'")
     # the real moments (live.py's LIVE-AT lines: each step's time into the recording), over the waits' sums
     at = {}
     for m in re.finditer(r"^LIVE-AT: ([\d.]+) click:(\S+)$", t, re.M):
@@ -187,7 +193,7 @@ def main(index, out_mp4):
     for s in d:
         starts.append(round(at, 1))
         at += s
-    info = {"film": str(out_mp4), "scene_starts": starts, "length": at, "exports": made, "toast": toast.group(1) if toast else "",
+    info = {"film": str(out_mp4), "scene_starts": starts, "length": at, "exports": made, "toast": toast.group(1) if toast else "", "same_task": same,
             "more_like_three": more_ok, "marks": marks,
             "boxes": {"pool_line": pool_line, "hero": hero}}
     (OUT / "cold.json").write_text(json.dumps(info, indent=1))

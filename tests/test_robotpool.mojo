@@ -91,6 +91,7 @@ def main() raises:
     var hf = pool.like([one[0]], K, robot=rb)
     for x in hf.hits:
         check(pool.episodes[x.at].robot == rb, "filter " + rb + ": " + x.key)
+    j += ', "filter_robot": "' + rb + '", "filtered": ' + ranking(hf)  # (M1 compares it with omxcore's Python, where = robot)
     # export the three seeded episodes (one dataset: one folder)
     var made = pool.export(exp, out + "/export-" + String(now_ns()))
     check(len(made) == 1 and made[0].episodes == 3, "export made " + String(len(made)) + " folders")

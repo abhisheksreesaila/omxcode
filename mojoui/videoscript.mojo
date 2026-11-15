@@ -145,6 +145,7 @@ def applied_marks(script: String, names: List[String], tables: List[SharedTable]
         if names[k] == st.value().name:
             try:
                 return (st.value().args[0], marks_from(Sheet(tables[k], False)))
-            except:  # (a script's table with a VECTOR column: no marks from it)
+            except e:  # (a script's table a Sheet refuses, such as one with a VECTOR column: no marks from it, and why)
+                print("SCRIPT: no marks from " + names[k] + ": " + String(e), flush=True)
                 return (String(""), List[Mark]())
     return (String(""), List[Mark]())

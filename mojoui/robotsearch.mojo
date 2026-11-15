@@ -8,7 +8,7 @@
 #   update(): if rs.owns(m): rs.handle(m, event.number, width)     each frame: rs.poll(now_ns(), width)
 #   view():   rs.view(width)  (+ rs.overlays() for its toast)      frames wanted while rs.busy() or rs.playing()
 from std.collections import Dict
-from std.os import getenv, makedirs
+from std.os import getenv, makedirs, listdir
 from std.os.path import exists
 from std.sys import CompilationTarget
 from std.memory import Pointer
@@ -421,6 +421,9 @@ struct RobotSearch(Movable):
             except e:
                 self.problem = String(e)
                 return
+        if shown.byte_length() == 0:  # (results like the picks: no clip plays; the last one's loop must not keep the page redrawing)
+            self.loop = List[Picture]()
+            self.loop_key = ""
         var keys = List[String]()
         for x in self.hits:
             keys.append(x.key)
@@ -584,7 +587,19 @@ struct RobotSearch(Movable):
 
     def next_folder(self) -> String:
         var i = 1
-        while exists(self.exports_dir + "/picks-" + String(i)) or exists(self.exports_dir + "/picks-" + String(i) + "-libero"):
+        var names = List[String]()
+        try:
+            names = listdir(self.exports_dir)
+        except:
+            pass
+        while True:  # (an export of several datasets writes picks-N-<dataset>: any entry that is picks-N or starts picks-N- takes N)
+            var stem = "picks-" + String(i)
+            var taken = False
+            for n in names:
+                if n == stem or n.startswith(stem + "-"):
+                    taken = True
+            if not taken:
+                break
             i += 1
         return self.exports_dir + "/picks-" + String(i)
 

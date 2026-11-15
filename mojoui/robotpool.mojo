@@ -130,7 +130,7 @@ struct RobotPool(Movable):
         if robot.byte_length() > 0:
             if robot not in self.robots:
                 raise Error("no robot `" + robot + "` in the pool")
-            q.where = "robot = '" + robot + "'"
+            q.where = "robot = '" + robot.replace("'", "''") + "'"  # (a name from the index itself: quoted as SQL quotes it)
             q.has_where = True
         var t0 = now_ns()
         var t = self.index.search(q)
@@ -192,6 +192,7 @@ def export_picks(keys: List[String], folder: String) raises -> List[Exported]:
 # An episode's pictures for a card: its poster (one frame) and a short loop, decoded by the engine (NVDEC on an NVIDIA GPU,
 # else a decoder plugin such as dav1d on MAX's CPU context), scaled down on the host, kept by key.
 
+comptime LOOPS_KEPT = 8      # loops kept decoded (each ~16 MB at the hero's 480 px)
 comptime POSTER_AT = 0.4      # the poster is the frame 40 % into the episode (the arm is mid-task; 0 s is the start pose)
 
 
@@ -362,6 +363,12 @@ struct Clips(Movable):
         var out = List[Picture]()
         for j in range(n):
             out.append(scale_planar(UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=Int(base) + j * 3 * w * h), w, h, size, up=side > 0))
+        if len(self.loops) >= LOOPS_KEPT:  # (a loop is ~16 MB at 480 px: keep the last few, the oldest leaves first)
+            var oldest = String()
+            for k in self.loops.keys():
+                oldest = k
+                break
+            _ = self.loops.pop(oldest)
         self.loops[cache] = out.copy()
         return out^
 

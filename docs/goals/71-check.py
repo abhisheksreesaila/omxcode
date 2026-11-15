@@ -101,9 +101,9 @@ def m0():
     why = vendored_at_least(PREV)
     (probs.append(f"lineage: {why}") if why else said.append(f"vendor = {COMMIT}'s archive + the patch, at least {PREV} (engine_lineage)"))
     # F-204: no use of the old Query.table field left in the app's code
-    # (D-7106: only names that hold an omxcore Query; a mojoui struct's own `table` field, such as LikeResult's, is not
-    # F-204's. Every build below compiles against 5194d77, where Query has no `table` field: that is the proof.)
-    old = run(["bash", "-c", r"grep -rnE '\b(q|query|qr|Query\([^)]*\))\.table\.' --include=*.mojo mojoui examples tests hosts themes || true"]).stdout.strip()
+    # (D-7106, amended after review: the first pattern, with only the one known false positive left out: tests/test_findlike's
+    # `wh`, a mojoui.visionmodel.LikeResult whose own field is called table, not omxcore's Query)
+    old = run(["bash", "-c", r"grep -rnE '\.table\.(rows|num_rows|columns|column|schema|names)\b' --include=*.mojo mojoui examples tests hosts themes | grep -viE 'self\.table\.|sheet\.table\.|card\.table\.|\btable\.table\.|\bwh\.table\.' || true"]).stdout.strip()
     if old:
         probs.append("possible old Query.table uses (F-204): " + old[:400])
     exs = sorted(p.parent.name for p in (ROOT / "examples").glob("*/needs") if "omxcore" in p.read_text().split())
@@ -153,7 +153,7 @@ def m1():
     got = json.loads((OUT / "pool/pool.json").read_text())
     if got["episodes"] != 1851 or round(got["hours"], 1) != 8.3 or got["datasets"] != 4:
         probs.append(f"pool: {got['episodes']} episodes, {got['hours']} h, {got['datasets']} datasets (want 1851, 8.3, 4)")
-    want = ref(["like", str(index_path()), str(OUT / "picks.json"), str(K)])
+    want = ref(["like", str(index_path()), str(OUT / "picks.json"), str(K), got["filter_robot"]])
     bad = 0
     for kind in ("one", "three"):
         for i, (g, w) in enumerate(zip(got[kind], want[kind])):
@@ -161,8 +161,12 @@ def m1():
             if not same:
                 bad += 1
                 probs.append(f"{kind}[{i}] {pk[kind][i]}: {why}")
+    same, why = same_ranking(got["filtered"], want["filtered"])  # (review: the robot filter against the reference too)
+    if not same:
+        bad += 1
+        probs.append(f"filtered to {got['filter_robot']}: {why}")
     if not bad:
-        said.append(f"{len(want['one'])} clips and {len(want['three'])} triples: top {K} equal omxcore's Python")
+        said.append(f"{len(want['one'])} clips, {len(want['three'])} triples and one filtered to {got['filter_robot']}: top {K} equal omxcore's Python")
     ms = got["warm_ms"]
     (probs.append(f"warm one-clip search {ms:.2f} ms (> 5)") if ms > 5 else said.append(f"warm search {ms:.2f} ms on {got['device']}"))
     if got["device"] != "gpu":

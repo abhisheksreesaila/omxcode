@@ -3547,7 +3547,7 @@ struct Main(App):
         self.take_recipe()
         if self.fleet_job:
             self.poll_fleet()
-        if self.robot.busy() or self.robot.playing():
+        if self.robot.busy() or (self.screen == ROBOT_SCREEN and self.robot.playing()):  # (off its screen, a playing clip draws nothing)
             if self.robot.poll(now_ns(), self.robot_w()):
                 self.version += 1
         if self.addm.busy():  # (Add a model: its download, loading or run moves on; Python's threads report)

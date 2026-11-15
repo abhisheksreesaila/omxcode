@@ -33,5 +33,7 @@ in Python; the report's own verdict: a rough first cut); the deck (next goal).
 - In-process Mojo (`omxcore.robot`) over `mx robot` or the C library: omxplorer is all-Mojo and the GPU call should be direct.
 - The reference for "equal" is omxcore's Python `omxcore.robot` in its `robotics` env (the checkout's, which contains 5194d77).
 - Clips are shown from frames the engine decodes, not from omxcore's pre-made H.264 previews.
-- Phone width is checked on GTK at 390×844; no iPhone run.
+- Phone width is checked at 390×844; no iPhone run. Amended (D-7107): on the web host in Chromium, not GTK, since a GTK
+  window can't be narrower than omxplorer's menu bar (581 points); the phone run taps one poster and reads every tagged
+  view's rect.
 - Budget: 150 turns.
