@@ -1,37 +1,37 @@
-# GOAL 70: the newest omxcore engine under omxplorer, and goal 68's robotics compute on it where it wins
+# GOAL 71: robot search by example in omxplorer, on omxcore stable 5194d77
 
-**End goal (owner, 2026-11-13):** "check with omxcore to see if you can pull the engine and snap it to your backend for
-fast compute." The app vendors omxcore 834ef9a (2026-10-29). omxcore has ~200 commits since (F-201..F-223: faster joins,
-COUNT(DISTINCT), GROUP BY over ordered runs, presence-bitmap joins, every core on the Mac, arm64 NEON). Its local main
-a9a3c37 is ahead of origin/main f8dbf9e (F-216..F-223 not pushed): vendor a9a3c37, say so, fall back to f8dbf9e only if
-a9a3c37 doesn't build.
+**End goal (owner, 2026-11-14, issue omxcode#9):** omxcore stable `5194d77` adds robot data to the engine; "the show opens in
+omxplorer with the robot search demo, then the slides." Owner: "I don't have the deck; we need to prepare it once you're done and
+have the great and latest app." So this goal is the app and a recorded cold open; the deck is the next goal.
 
-Base: main 9e3e9d0f (goal 68 in). Worktree ../mojo-ui-g70, branch goal-70-omxcore-engine. Decisions D-70xx. Goal 68's
-contract is archived as docs/goals/68.md. omxcore (~/Projects/mxframe) is read-only: sources come out with
-`git archive <sha>` only.
+Base: main 0cfcdb8a (goal 70 in, fast-forwarded 2026-11-14). Worktree ../mojo-ui-g71, branch goal-71-robot-search. Decisions
+D-71xx. Goal 70's contract is archived as docs/goals/70.md. omxcore (~/Projects/mxframe) is read-only: sources come out with
+`git archive 5194d77` only; its `robotics` pixi env and `build/robotics` (the pool's index, 1,851 episodes) are only read, as the
+reference and the data.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/70-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (`docs/goals/71-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | Re-vendor | vendor/OMXCORE_COMMIT names a9a3c37 (not on GitHub yet, said) and how to rebuild it; the Mojo 1.2 patch is rebased as vendor/patches/omxcore-a9a3c37-mojo12.patch with each patched file's reason in the report, and an engine without its libc hunks still clashes with Flare (so they stay); scripts/engine_lineage.py proves vendor/omxcore.mojoc is a build of a9a3c37's archive + the patch; omxplorer and every example whose `needs` says omxcore build for Linux; tests/test_engine_flare (the engine beside Flare) and the engine/frame/SQL tests pass; every Mac app that uses the engine (jobwake, jot, keeper, omxplorer) cross-builds with no undefined symbol that main's objects don't need, and links where main's does (D-7004: main's own omxplorer Mac link has failed since goal 68; goal 5's ALLOWED list is behind main) |
-| M1 | Same answers, measured faster | tests/bench_engine_paths.mojo (the app's own query paths: omxplorer's SQL, joins, pivots / group-by, the chart queries) built against the old engine (834ef9a) and the new one, run on goal 68's fleet tables, goal 47's fleet (made by scripts/robot_data.py when the DROID data is on disk) and TPC-H SF1 (DuckDB's dbgen into build/tpch_sf1, D-7005; the 22 queries as omxcore writes them): every answer's text is equal between the two; a timing table (median of 2 interleaved rounds of 5 runs, same machine, same run) in docs/goals/70-bench.md, slower cases kept |
-| M2 | Robotics compute on the engine where it wins | each of goal 68's paths (the fleet's every-topic time join at 10 Hz, stops, the Learn tree's row reads, the embedding similarity column with top-k) measured old vs engine on the same data in tests/bench_robotics.mojo; a path moves only if the engine is faster with equal results (mojoui.fleet's tables and Learn's tree equal before vs after); the paths that stay and the operations omxcore lacks are written as asks (operation, shape, size) in the report |
-| M3 | Nothing regressed | goal 68's 68-check.py (M0–M6, through docs/goals/68/regress.py: it starts the headless display an archived checker needs), goal 47's check (inside 68's M6), the component matrix, decisions lint, libc and seek lints |
+| M0 | Re-vendor the stable | vendor/OMXCORE_COMMIT names 5194d77 and how to rebuild it; the Mojo 1.2 patch rebased as vendor/patches/omxcore-5194d77-mojo12.patch; scripts/engine_lineage.py proves vendor/omxcore.mojoc is that archive + patch; the F-204 builder changes absorbed (`Query.base`, `q.table()`, lazy joins); omxplorer and every example whose `needs` says omxcore build for Linux; goal 70's engine tests pass; `from omxcore.robot import open_dataset, MomentIndex, export` builds beside Flare; the Mac apps on the engine (built `-D MXFRAME_SERIAL`) add no undefined symbol over goal 70's objects |
+| M1 | The pool, a framework piece | `mojoui/robotpool.mojo` (no omxplorer code): opens the index and its datasets in-process, lists each episode's facts (dataset, episode, task, robot, seconds) through the engine; `like(one)`, `like(several)` with an optional robot filter, `export(picks, folder)`. tests/test_robotpool: 1,851 episodes, 8.3 h, 4 datasets; for 10 seeded clips and 3 seeded triples the top 24 equal omxcore's Python `idx.search(like=...)` (same episodes, same order, scores within 1e-4); a warm one-clip search ≤ 5 ms on the GPU; an export of 3 picks loads with `LeRobotDataset(root=...)` and its episode count and frame count equal the picks' |
+| M2 | Clips, decoded by the engine | the pool gives an episode's poster frame and a short loop of frames (decoded by the engine: NVDEC here, dav1d elsewhere), downscaled for a card; equal to omxcore Python's `ds.decode` within 3/255 per channel; 24 posters in ≤ 1.5 s cold, 0 ms when cached; a framework `ClipGrid` (a grid of clips: poster, title, a badge, selected / picked states, a playing clip) with its test on GTK and the web host; components.md regenerated |
+| M3 | The demo screen | omxplorer opens a Robot search screen (Liquid light): the pool's line (episodes, hours, datasets, on the GPU), a robot filter, a grid of clips; tap one → the episodes like it, ranked, each with its task and score and the time the search took; pick three → "More like these"; Export → a toast naming the folder and that LeRobot loads it. scripts/live.py with real input on GTK (headless): click a clip, the results equal M1's for that clip; pick 3, the results equal M1's triple; Export, the folder loads in lerobot; screenshots at desktop (1440×900) and phone (390×844) width, every text inside its card, nothing clipped (layout read from the view tree) |
+| M4 | The cold open | docs/goals/71/cold-open.md: a 30–60 s shot list (captions first, one clip zoomed, the payoff frozen) whose every number is quoted from omxcore's docs/goals/robotics/report.md (the check greps each one there); build/g71/cold-open.mp4 recorded on Linux from the live app, 30–60 s, 1920×1080, every caption's scene present (frames differ, none blank) |
+| M5 | Nothing regressed | goal 70's 70-check M3 (goal 68's checker and goal 47's inside it), the component matrix, decisions lint, libc and seek lints |
 
 ## Done means
-70-check PASS for M0–M3 (a BLOCKED says exactly what is missing); a fresh reviewer subagent passes it; vendor/OMXCORE_COMMIT
-says how to rebuild; docs/goals/70-report.md with the before/after table, what moved and what stayed, the asks for
-omxcore; EXPERIMENTS.md. Committed after each passing milestone; never pushed or merged.
+71-check PASS for M0–M5 (a BLOCKED says exactly what is missing); a fresh reviewer subagent passes it; docs/goals/71-report.md
+with shots and the cold open; EXPERIMENTS.md. Committed after each passing milestone; merged to main locally when the reviewer
+passes; not pushed (the owner pushes).
 
 ## Out of bounds
-Editing, committing, branching or pushing in ~/Projects/mxframe; the other worktrees (../mojo-ui-g69,
-../mojo-ui-apple-test, ../mojo-ui-omxcode); pushing; merging; pip (pixi only); lowering a proof or deleting a test; a
-faster path with different answers.
+Editing, committing, branching or pushing in ~/Projects/mxframe (asks go in the report as omxcore `mxframe` issues to open);
+the other worktrees; pushing; pip (pixi only); lowering a proof or deleting a test; typed-phrase search (needs EmbeddingGemma
+in Python; the report's own verdict: a rough first cut); the deck (next goal).
 
-## Assumptions (taken instead of asking)
-- "The engine/frame/SQL tests" are the tests/ programs that import omxcore and run without arguments or downloads
-  (as in the 834ef9a re-vendor: docs/goals/engine-834ef9a/report.md).
-- The Mac is cross-built here (link + undefined-symbol audit); running it needs GitHub's Macs or the owner's: unverified.
-- TPC-H SF1 is generated here (DuckDB dbgen, DATE and DECIMAL columns); omxcore's data/tpch_sf1 stores int32 days and
-  float32 prices, which the app's SQL refuses to compare with dates (D-7005). Its queries are read from omxcore's
-  scripts/tpch_sql/queries.py at a9a3c37 (read only, no bytecode written).
+## Assumptions (instead of asking)
+- In-process Mojo (`omxcore.robot`) over `mx robot` or the C library: omxplorer is all-Mojo and the GPU call should be direct.
+- The reference for "equal" is omxcore's Python `omxcore.robot` in its `robotics` env (the checkout's, which contains 5194d77).
+- Clips are shown from frames the engine decodes, not from omxcore's pre-made H.264 previews.
+- Phone width is checked on GTK at 390×844; no iPhone run.
+- Budget: 150 turns.
