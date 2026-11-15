@@ -25,6 +25,10 @@ How to make it again: `pixi run python docs/goals/71/cold_open.py ~/Projects/mxf
 
 ## Notes for the deck (next goal)
 
+- Before the film goes in the deck it needs a cursor pass: over plain buttons the pointer shows as X's bare "x" (the
+  headless display has no window manager; xsetroot, XCURSOR_THEME and GTK's settings.ini did not change it in the take).
+  The fix: record with ffmpeg's draw_mouse off and draw an arrow at the pointer positions live.py already logs.
+
 - The film's clips are set with `OMX_ROBOT_SAMPLE` (cold_open.py's SAMPLE): one real sorting clip (scene 3) and three LIBERO
   clips of "put the black bowl in the bottom drawer of the cabinet and close it" (scene 4).
 - Typing a phrase is left out on purpose: the report calls it a rough first cut.

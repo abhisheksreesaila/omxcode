@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 71: robot search by example in omxplorer, on omxcore stable 5194d77 (2026-11-14/15)
+- **Setup:** worktree ../mojo-ui-g71, branch `goal-71-robot-search` off main 0cfcdb8a (goal 70 fast-forwarded in). Issue omxcode#9. Data: omxcore's build/robotics/index.parquet (1,851 episodes, 29,124 moments, 4 LeRobot datasets in the HF cache); reference: omxcore's Python `omxcore.robot` in its robotics env (lerobot 0.7).
+- **Worked:** 5194d77 vendored (the Mojo 1.2 patch rebased; fdio's write and the robot plugin registry's mutex calls added to the run-time lookups); search by example in-process: rankings equal omxcore's Python, 0.1 ms warm on the GPU; frames decoded by NVDEC equal its decode exactly; export loads in LeRobot; a ClipGrid component (Image(on_tap) on GTK and the web); omxplorer's Robot search screen, driven with real clicks; a 34 s cold open cut from a live take.
+- **Broke and fixed:** F-224's Frame now raises on a VECTOR column (Sheet raises too; plain_sheet for the app's own tables); the robot page pulled the GPU runtime into the Mac objects (29 symbols) until the engine state moved into a Linux-only heap box; a GTK window can't be a phone (phone checked on the web); the first takes missed clicks (the layout moves after a pick) and drifted 3 s (live.py now logs each step's time); the Liquid toast's words were grey on the pill.
+- **Means:** the show's opening demo runs on the real app with real data; the next work is polish and launch, not features (owner, 11-15). Report: docs/goals/71-report.md.
+---
+
 ## Goal 70: the newest omxcore engine under omxplorer (2026-11-13)
 - **Setup:** worktree ../mojo-ui-g70, branch `goal-70-omxcore-engine` off main 9e3e9d0f. omxcore a9a3c37 (the owner's local main, F-216..F-223 not on GitHub; origin/main f8dbf9e) read with `git archive` only. Data: goal 68's bags, goal 47's DROID fleet (63k episodes, 16.8M telemetry rows), TPC-H SF1 from DuckDB's dbgen.
 - **Worked:** the Mojo 1.2 patch rebased with offsets only (all 29 hunks still needed, measured); omxplorer, every omxcore example and 34 engine tests on the new package; 47 answers of the app's own query paths byte-equal old vs new; 2.5× faster than main over the steps of 10 ms or more (the engine alone 1.8×), TPC-H through the app up to 16.6×, goal 47's charts and pivots 1.1–1.3×.

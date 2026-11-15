@@ -411,26 +411,33 @@ struct RobotSearch(Movable):
         comptime if ROBOTS:
             try:
                 var h = _engine_at(self.eng)[].pool.value().like(like, RS_K, robot=self.robot_filter())
-                self.hits = h.hits.copy()
-                self.ms = h.ms
-                self.device = h.device
-                self.searched = h.searched
-                self.like = like.copy()
-                self.shown = shown
-                self.problem = ""
+                var keys = self.land_hits(h.hits, like, shown, h.ms, h.device, h.searched)
+                self.ask(keys, shown)
             except e:
                 self.problem = String(e)
                 return
-        if shown.byte_length() == 0:  # (results like the picks: no clip plays; the last one's loop must not keep the page redrawing)
+        self.version += 1
+
+    def land_hits(mut self, hits: List[Hit], like: List[String], shown: String, ms: Float64, device: String, searched: Int) -> List[String]:
+        """A search's answer on the page (no engine: tests feed it by hand); the posters it needs. Results like the picks
+        have no clip playing: the last loop stops, and one asked for while a job ran won't come back when it lands."""
+        self.hits = hits.copy()
+        self.ms = ms
+        self.device = device
+        self.searched = searched
+        self.like = like.copy()
+        self.shown = shown
+        self.problem = ""
+        if shown.byte_length() == 0:
             self.loop = List[Picture]()
             self.loop_key = ""
+            self.want_loop = ""
         var keys = List[String]()
         for x in self.hits:
             keys.append(x.key)
         for k in like:
             keys.append(k)
-        self.ask(keys, shown)
-        self.version += 1
+        return keys^
 
     def ask(mut self, keys: List[String], loop_key: String):
         """Posters for `keys` (those not here yet) and `loop_key`'s loop ("" none): a job now, or after the one running."""

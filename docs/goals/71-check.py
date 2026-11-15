@@ -228,6 +228,10 @@ def m3():
         return False, "run M1 first (build/g71/pool/pool.json)"
     pj = json.loads(pool.read_text())
     pk = picks()
+    ok, why = test_one("test_robotsearch")  # (review round 2: the page's bookkeeping without the engine)
+    if not ok:
+        return False, "test_robotsearch: " + why
+    said.append("test_robotsearch passes")
     r = run(["pixi", "run", "python", str(G71 / "demo_drive.py"), str(OUT / "demo"), str(OUT / "picks.json"), str(index_path())], 3600)
     if r.returncode:
         return False, "demo_drive: " + (r.stdout + r.stderr)[-600:]
