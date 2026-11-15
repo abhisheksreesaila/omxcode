@@ -1,7 +1,7 @@
-diff --git a/kernels_aot/kernels_aot_gpu.mojo b/kernels_aot/kernels_aot_gpu.mojo
-index 484e76cf..ca91e237 100644
---- a/kernels_aot/kernels_aot_gpu.mojo
-+++ b/kernels_aot/kernels_aot_gpu.mojo
+diff --git i/kernels_aot/kernels_aot_gpu.mojo w/kernels_aot/kernels_aot_gpu.mojo
+index 484e76c..ca91e23 100644
+--- i/kernels_aot/kernels_aot_gpu.mojo
++++ w/kernels_aot/kernels_aot_gpu.mojo
 @@ -7,7 +7,7 @@ from max.gpu.primitives.id import lane_id
  from std.bit import pop_count, count_trailing_zeros
  from std.sys._assembly import inlined_assembly
@@ -20,10 +20,10 @@ index 484e76cf..ca91e237 100644
  comptime SHARED_MAX_GROUPS: Int = GROUP_SMEM_LIMIT // 4   # Float32 slots: 12288 on NVIDIA, 8192 on Apple
  comptime SM_SHARED_BYTES: Int = 96 * 1024     # usable per SM on sm_80/86
  comptime MAX_BLOCKS_PER_SM: Int = 6           # global path: 1536 threads / 256
-diff --git a/kernels_aot/pipeline_gpu.mojo b/kernels_aot/pipeline_gpu.mojo
-index fb21ea08..25dafa7d 100644
---- a/kernels_aot/pipeline_gpu.mojo
-+++ b/kernels_aot/pipeline_gpu.mojo
+diff --git i/kernels_aot/pipeline_gpu.mojo w/kernels_aot/pipeline_gpu.mojo
+index fb21ea0..25dafa7 100644
+--- i/kernels_aot/pipeline_gpu.mojo
++++ w/kernels_aot/pipeline_gpu.mojo
 @@ -56,7 +56,7 @@ from max.gpu import thread_idx, block_idx, grid_dim, barrier
  from max.gpu.primitives.warp import shuffle_down
  from max.gpu.memory import AddressSpace, external_memory
@@ -42,12 +42,12 @@ index fb21ea08..25dafa7d 100644
  comptime WORD = DType.int64 if APPLE_GPU else F64
  comptime SMEM_LIMIT: Int = (32 if APPLE_GPU else 48) * 1024     # dynamic shared memory per block: Apple 32 KB, NVIDIA 48 KB
  comptime BLOCK: Int = 256
-diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
+diff --git i/mojo/omxcore/_libc.mojo w/mojo/omxcore/_libc.mojo
 new file mode 100644
-index 00000000..2db5901d
+index 0000000..6e2ba43
 --- /dev/null
-+++ b/mojo/omxcore/_libc.mojo
-@@ -0,0 +1,101 @@
++++ w/mojo/omxcore/_libc.mojo
+@@ -0,0 +1,135 @@
 +"""The libc functions the engine calls through a pointer instead of declaring them.
 +
 +Mojo allows one signature per external symbol in a binary. Mojo 1.2's stdlib declares `read` and `write` itself, and
@@ -149,10 +149,44 @@ index 00000000..2db5901d
 +    var rc = Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](at)
 +    _ = p^
 +    return rc
-diff --git a/mojo/omxcore/csv.mojo b/mojo/omxcore/csv.mojo
-index 126a7198..090c2596 100644
---- a/mojo/omxcore/csv.mojo
-+++ b/mojo/omxcore/csv.mojo
++
++
++def _call_i(name: String, a: Int) -> c_int:
++    """A libc function taking one address and returning an int (the pthread mutex calls); -1 when libc lacks it."""
++    var f = _sym(name)
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](a)
++
++
++def pthread_mutex_init(m: Int, attr: Int) -> c_int:
++    var f = _sym("pthread_mutex_init")
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](m, attr)
++
++
++def pthread_mutex_lock(m: Int) -> c_int:
++    return _call_i("pthread_mutex_lock", m)
++
++
++def pthread_mutex_unlock(m: Int) -> c_int:
++    return _call_i("pthread_mutex_unlock", m)
++
++
++def pthread_mutexattr_init(a: Int) -> c_int:
++    return _call_i("pthread_mutexattr_init", a)
++
++
++def pthread_mutexattr_settype(a: Int, kind: Int) -> c_int:
++    var f = _sym("pthread_mutexattr_settype")
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(Int, c_int) thin abi("C") -> c_int]()[](a, c_int(kind))
+diff --git i/mojo/omxcore/csv.mojo w/mojo/omxcore/csv.mojo
+index 126a719..090c259 100644
+--- i/mojo/omxcore/csv.mojo
++++ w/mojo/omxcore/csv.mojo
 @@ -64,6 +64,7 @@ File format decisions:
      non-UTF-8 encoding. The parsed columns are held twice for a moment while the chunks are stitched together.
  """
@@ -200,10 +234,10 @@ index 126a7198..090c2596 100644
      else:
          file.close()
      result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
-diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
-index de06243c..8f4663b5 100644
---- a/mojo/omxcore/fan.mojo
-+++ b/mojo/omxcore/fan.mojo
+diff --git i/mojo/omxcore/fan.mojo w/mojo/omxcore/fan.mojo
+index de06243..8f4663b 100644
+--- i/mojo/omxcore/fan.mojo
++++ w/mojo/omxcore/fan.mojo
 @@ -12,6 +12,7 @@ Which threads:
  """
  from std.atomic import Atomic
@@ -232,11 +266,32 @@ index de06243c..8f4663b5 100644
          tids.free()
          _ = fan.take_pointee()
          fan.free()
-diff --git a/mojo/omxcore/gpu.mojo b/mojo/omxcore/gpu.mojo
-index 3825dc63..b632d989 100644
---- a/mojo/omxcore/gpu.mojo
-+++ b/mojo/omxcore/gpu.mojo
-@@ -26,12 +26,12 @@ Why it looks like this:
+diff --git i/mojo/omxcore/fdio.mojo w/mojo/omxcore/fdio.mojo
+index 19d5246..00eebcf 100644
+--- i/mojo/omxcore/fdio.mojo
++++ w/mojo/omxcore/fdio.mojo
+@@ -4,6 +4,7 @@ file.mojo write() syscall failed`) and does not finish a short one, so a file th
+ reports only at the end, NFS or a full thin volume)."""
+ from std.ffi import external_call, get_errno
+ from std.sys import CompilationTarget
++from ._libc import write as _libc_write
+ 
+ comptime _EINTR = 4
+ comptime _ENOSPC = 28
+@@ -50,7 +51,7 @@ def write_all(fd: Int, addr: Int, count: Int) -> Int:
+     nothing is the device being full: ENOSPC). The caller keeps the bytes alive for the call."""
+     var done = 0
+     while done < count:
+-        var n = external_call["write", Int](fd, UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr + done), count - done)
++        var n = _libc_write(fd, addr + done, count - done)
+         if n < 0:
+             var err = last_errno()
+             if err == _EINTR:
+diff --git i/mojo/omxcore/gpu.mojo w/mojo/omxcore/gpu.mojo
+index 4b71822..9519d01 100644
+--- i/mojo/omxcore/gpu.mojo
++++ w/mojo/omxcore/gpu.mojo
+@@ -26,13 +26,13 @@ Why it looks like this:
  """
  from std.memory import ArcPointer
  from std.memory.alloc import unsafe_alloc
@@ -245,16 +300,17 @@ index 3825dc63..b632d989 100644
  from std.os import getenv
  from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
  from .table import SharedTable
+ from .vgroups import GroupLayout
  
 -comptime HAS_GPU = (CompilationTarget.is_linux() or (CompilationTarget.is_macos() and has_apple_gpu_accelerator())) and not is_defined["MXFRAME_NO_GPU"]()
 +comptime HAS_GPU = (CompilationTarget.is_linux() or (CompilationTarget.is_macos() and default_accelerator().is_apple_gpu())) and not is_defined["MXFRAME_NO_GPU"]()
  comptime NO_GPU_MESSAGE = "no GPU on this build"
  
  
-diff --git a/mojo/omxcore/job.mojo b/mojo/omxcore/job.mojo
-index e48f49a1..f1f4b7fa 100644
---- a/mojo/omxcore/job.mojo
-+++ b/mojo/omxcore/job.mojo
+diff --git i/mojo/omxcore/job.mojo w/mojo/omxcore/job.mojo
+index e48f49a..f1f4b7f 100644
+--- i/mojo/omxcore/job.mojo
++++ w/mojo/omxcore/job.mojo
 @@ -27,6 +27,7 @@ dropped first.
  """
  from std.atomic import Atomic
@@ -292,10 +348,10 @@ index e48f49a1..f1f4b7fa 100644
          _ = external_call["pthread_attr_destroy", c_int](attr)
          attr.free()
          if rc != 0:                                # no thread to be had: run it here
-diff --git a/mojo/omxcore/mapped.mojo b/mojo/omxcore/mapped.mojo
-index b64eb93f..f2c9a3d1 100644
---- a/mojo/omxcore/mapped.mojo
-+++ b/mojo/omxcore/mapped.mojo
+diff --git i/mojo/omxcore/mapped.mojo w/mojo/omxcore/mapped.mojo
+index 23b7870..4b006e4 100644
+--- i/mojo/omxcore/mapped.mojo
++++ w/mojo/omxcore/mapped.mojo
 @@ -1,5 +1,6 @@
  """A read-only mapping of part of a file (Parquet column chunks, CSV row groups): in the process only while it is held."""
  from std.ffi import external_call
@@ -312,7 +368,7 @@ index b64eb93f..f2c9a3d1 100644
          self.data = 0
          if self.addr == -1:
              self.span = 0
-@@ -28,9 +29,9 @@ struct _Mapped(Movable):
+@@ -28,12 +29,12 @@ struct _Mapped(Movable):
  
      def release(mut self):
          if self.span > 0:
@@ -324,11 +380,14 @@ index b64eb93f..f2c9a3d1 100644
          if self.span > 0:
 -            _ = external_call["munmap", Int32](self.addr, self.span)
 +            _ = _libc_munmap(self.addr, self.span)
-diff --git a/mojo/omxcore/parquet.mojo b/mojo/omxcore/parquet.mojo
-index e35986c2..81b6ef36 100644
---- a/mojo/omxcore/parquet.mojo
-+++ b/mojo/omxcore/parquet.mojo
-@@ -30,6 +30,7 @@ from std.atomic import Atomic
+ 
+ 
+ def file_seek(fd: Int, offset: Int, whence: Int) raises -> Int:
+diff --git i/mojo/omxcore/parquet.mojo w/mojo/omxcore/parquet.mojo
+index e751b74..11bb15a 100644
+--- i/mojo/omxcore/parquet.mojo
++++ w/mojo/omxcore/parquet.mojo
+@@ -47,6 +47,7 @@ from std.atomic import Atomic
  from std.time import perf_counter_ns
  from std.memory.alloc import unsafe_alloc
  from std.ffi import external_call
@@ -336,25 +395,25 @@ index e35986c2..81b6ef36 100644
  from std.sys import is_defined, CompilationTarget
  from std.bit import pop_count, byte_swap
  from .codec import zstd_compress, zstd_decompress, snappy_compress, snappy_decompress
-@@ -729,7 +730,7 @@ struct ParquetWriter(Movable):
-             self.file.close()
+@@ -1008,7 +1009,7 @@ struct ParquetWriter(Movable):
          except:
              pass
--        _ = external_call["unlink", Int32](self.tmp.as_c_string_span().ptr())
-+        _ = _libc_unlink(self.tmp)
+         if self.tmp != self.path:
+-            _ = external_call["unlink", Int32](self.tmp.as_c_string_span().ptr())
++            _ = _libc_unlink(self.tmp)
  
      def finish(mut self, metadata: String, extra: List[String] = List[String]()) raises:
          """Writes the footer and moves the file into place. `extra`: other key-value metadata to keep, key then value,
-@@ -744,7 +745,7 @@ struct ParquetWriter(Movable):
-         self.file.close()
+@@ -1032,7 +1033,7 @@ struct ParquetWriter(Movable):
+         self._close()
          var dest = self.path
-         if external_call["rename", Int32](self.tmp.as_c_string_span().ptr(), dest.as_c_string_span().ptr()) != 0:
+         if self.tmp != self.path and external_call["rename", Int32](self.tmp.as_c_string_span().ptr(), dest.as_c_string_span().ptr()) != 0:
 -            _ = external_call["unlink", Int32](self.tmp.as_c_string_span().ptr())
 +            _ = _libc_unlink(self.tmp)
              raise Error("could not move `" + self.tmp + "` to `" + self.path + "`")
  
  
-@@ -3254,7 +3255,7 @@ def scan_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+@@ -4303,7 +4304,7 @@ def scan_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
      var file = _open_file(path)
      var fd = file._get_raw_fd()
      var one = List[UInt8](length=1, fill=0)
@@ -363,10 +422,87 @@ index e35986c2..81b6ef36 100644
      _ = one^
      if got < 0:                                                       # a directory opens, but cannot be read
          raise Error("couldn't read `" + path + "`: not a regular file")
-diff --git a/mojo/omxcore/sortspill.mojo b/mojo/omxcore/sortspill.mojo
-index 0d417cf3..7104b79c 100644
---- a/mojo/omxcore/sortspill.mojo
-+++ b/mojo/omxcore/sortspill.mojo
+diff --git i/mojo/omxcore/robot/plugins.mojo w/mojo/omxcore/robot/plugins.mojo
+index 42a4f1f..87280d8 100644
+--- i/mojo/omxcore/robot/plugins.mojo
++++ w/mojo/omxcore/robot/plugins.mojo
+@@ -43,6 +43,7 @@ from std.os import getenv, listdir, stat, lstat
+ from std.os.path import realpath, isdir, isfile, exists
+ from .errors import fail, failure, OMX_E_ARG, OMX_E_IO, OMX_E_PLUGIN
+ from .json import json_string
++from .._libc import pthread_mutex_init as _mutex_init, pthread_mutex_lock as _mutex_lock, pthread_mutex_unlock as _mutex_unlock, pthread_mutexattr_init as _mutexattr_init, pthread_mutexattr_settype as _mutexattr_settype
+ 
+ comptime PLUGIN_ABI_VERSION: Int32 = 1
+ 
+@@ -431,7 +432,7 @@ def _new_mutex() -> Int:
+     """A default (non-recursive) pthread mutex kept for the process."""
+     var m = external_call["calloc", Int](1, 128)          # pthread_mutex_t: 40 bytes on Linux, 64 on macOS
+     if m != 0:
+-        _ = external_call["pthread_mutex_init", Int32](m, 0)
++        _ = _mutex_init(m, 0)
+     return m
+ 
+ 
+@@ -471,12 +472,12 @@ def _registry_init() -> _OPQ:
+     block[0] = Int(mem)
+     var mutex = external_call["calloc", Int](1, 128)       # pthread_mutex_t: 40 bytes on Linux, 64 on macOS
+     var attr = external_call["calloc", Int](1, 64)
+-    _ = external_call["pthread_mutexattr_init", Int32](attr)
++    _ = _mutexattr_init(attr)
+     comptime if CompilationTarget.is_macos():
+-        _ = external_call["pthread_mutexattr_settype", Int32](attr, Int32(2))     # PTHREAD_MUTEX_RECURSIVE
++        _ = _mutexattr_settype(attr, 2)     # PTHREAD_MUTEX_RECURSIVE
+     else:
+-        _ = external_call["pthread_mutexattr_settype", Int32](attr, Int32(1))
+-    _ = external_call["pthread_mutex_init", Int32](mutex, attr)
++        _ = _mutexattr_settype(attr, 1)
++    _ = _mutex_init(mutex, attr)
+     block[1] = mutex
+     return _OPQ(Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(block)))
+ 
+@@ -493,10 +494,10 @@ def _enter() raises -> _RegP:
+     """Locks the registry, refuses a call made from inside a plugin library's load, and fills it on first use."""
+     var b = _block()
+     var mutex = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=b + 8)[]
+-    _ = external_call["pthread_mutex_lock", Int32](mutex)
++    _ = _mutex_lock(mutex)
+     var r = _RegP(unsafe_from_address=Pointer[Int, MutUntrackedOrigin](unsafe_from_address=b)[])
+     if r[].busy:
+-        _ = external_call["pthread_mutex_unlock", Int32](mutex)
++        _ = _mutex_unlock(mutex)
+         raise fail(OMX_E_PLUGIN, "the plugin registry was called from inside a plugin library while it is being loaded (its "
+                    "constructor or omx_plugin_entry): refused", hint="return the entries from omx_plugin_entry instead")
+     if not r[].ready:
+@@ -508,7 +509,7 @@ def _enter() raises -> _RegP:
+ 
+ def _leave():
+     var b = _block()
+-    _ = external_call["pthread_mutex_unlock", Int32](Pointer[Int, MutUntrackedOrigin](unsafe_from_address=b + 8)[])
++    _ = _mutex_unlock(Pointer[Int, MutUntrackedOrigin](unsafe_from_address=b + 8)[])
+ 
+ 
+ def _builtin(kind: Int32, name: String, version: String, caps: UInt64) -> Int:
+@@ -957,14 +958,14 @@ def plugin_call_begin(addr: Int) raises -> Int:
+     if m < 0:
+         raise fail(OMX_E_ARG, "plugin_call_begin: that address is no registered plugin")
+     if m != 0:
+-        _ = external_call["pthread_mutex_lock", Int32](m)
++        _ = _mutex_lock(m)
+     return m
+ 
+ 
+ def plugin_call_end(token: Int):
+     """Ends a call begun with plugin_call_begin (releases the plugin's mutex when one was taken)."""
+     if token != 0:
+-        _ = external_call["pthread_mutex_unlock", Int32](token)
++        _ = _mutex_unlock(token)
+ 
+ 
+ def plugin_call_token_known(token: Int) raises -> Bool:
+diff --git i/mojo/omxcore/sortspill.mojo w/mojo/omxcore/sortspill.mojo
+index 0d417cf..7104b79 100644
+--- i/mojo/omxcore/sortspill.mojo
++++ w/mojo/omxcore/sortspill.mojo
 @@ -16,6 +16,7 @@ Run file layout: run after run, each column by column: n values (Int64), then n
  of a run is read with one seek and read per column. The file is removed when the sorter is dropped: on success, on an error, on a cancel.
  """

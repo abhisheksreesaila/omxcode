@@ -488,14 +488,16 @@ def ProgressBar(value: Int) -> View:
     return _one(Node(PROGRESS, value=value))
 
 
-def Image(pixels: List[UInt32], width: Int, height: Int) -> View:
+def Image(pixels: List[UInt32], width: Int, height: Int, on_tap: Int = 0) -> View:
     """A picture from RGBA pixels (row by row; each UInt32 holds R, G, B, A from the low byte up).
-    If there aren't exactly width × height pixels, it shows a transparent picture of that size."""
+    If there aren't exactly width × height pixels, it shows a transparent picture of that size.
+    `on_tap`: sent when the picture is tapped or clicked (0: it only shows), as a Button's message (goal 71: a clip card's
+    poster); hosts show a pointer over it."""
     var w = max(width, 1)  # at least 1×1: a 0-sized PNG isn't valid
     var h = max(height, 1)
     if len(pixels) != w * h:
-        return _one(Node(IMAGE, spacing=w, size=h, pixels=List[UInt32](length=w * h, fill=0)))
-    return _one(Node(IMAGE, spacing=w, size=h, pixels=pixels.copy()))
+        return _one(Node(IMAGE, "", on_tap, spacing=w, size=h, pixels=List[UInt32](length=w * h, fill=0)))
+    return _one(Node(IMAGE, "", on_tap, spacing=w, size=h, pixels=pixels.copy()))
 
 
 def Segmented(options: List[String], selected: Int, on_select: Int) -> View:

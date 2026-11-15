@@ -5,7 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
-# (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by.)
+# (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by; else an Image(on_tap) tagged X.)
 
 from mojoui.look import look_gtk_css
 from std.ffi import external_call, c_int, c_char, c_uint
@@ -1554,6 +1554,14 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_set_halign", NoneType](w, c_int(ALIGN_CENTER))
             external_call["gtk_widget_set_valign", NoneType](w, c_int(ALIGN_CENTER))
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(node.spacing), c_int(node.size))
+            if node.msg != 0:  # Image(on_tap=…): a click sends its message, as a button's (goal 71)
+                set_node(w, i)
+                var tap = external_call["gtk_gesture_click_new", Int]()
+                connect_any(tap, "released", on_image_released[Self.A], self_addr)
+                external_call["gtk_widget_add_controller", NoneType](w, tap)
+                var pointer = String("pointer")
+                external_call["gtk_widget_set_cursor_from_name", NoneType](w, pointer.as_c_string_span())
+                add_class(w, "mui-tappable")
         elif node.kind == CANVAS:
             w = external_call["gtk_picture_new", Int]()
             external_call["gtk_picture_set_can_shrink", NoneType](w, c_int(1))  # its size comes from the layout
@@ -4799,6 +4807,16 @@ def on_field_key[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_ui
     return c_int(1)
 
 
+def on_image_released[A: App](tap: Int, presses: c_int, x: Float64, y: Float64, host_addr: Int) abi("C"):
+    """A click on an Image(on_tap=…): its message, as a button's."""
+    if busy():
+        return
+    var host = host_at[A](host_addr)
+    var node = get_node(external_call["gtk_event_controller_get_widget", Int](tap))
+    if 0 <= node < len(host[].rt.shown.nodes):
+        host[].send(node, False, "", 0, host_addr)
+
+
 def on_secondary_released[A: App](click: Int, presses: c_int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     """A right click on a canvas: SECONDARY at (x, y), where the app may open a context menu."""
     if busy():
@@ -5758,6 +5776,12 @@ def run_step[A: App](host_addr: Int, step: String):
             for k in range(len(host[].rt.shown.nodes)):
                 if i < 0 and host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == t[0]:
                     i = k
+        if i < 0:  # (an Image(on_tap=…) tagged so: its message, as its click gesture sends it)
+            for k in range(len(host[].rt.shown.nodes)):
+                ref nk = host[].rt.shown.nodes[k]
+                if i < 0 and nk.kind == IMAGE and nk.msg != 0 and nk.name == t[0]:
+                    host[].send(k, False, "", 0, host_addr)
+                    return
         if i < 0:
             print("TEST: no button", rest)
             return
@@ -7034,6 +7058,8 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
         elif n.kind == IMAGE:
             var paintable = external_call["gtk_picture_get_paintable", Int](w)
             print("IMAGE: " + String(external_call["gdk_texture_get_width", c_int](paintable)) + "x" + String(external_call["gdk_texture_get_height", c_int](paintable)))
+            if n.msg != 0 and n.tip != "":  # (a tappable picture's words: what tapping it does, goal 71)
+                print("TIP: " + n.name + " = " + n.tip)
 
 
 def colours(pixels: List[UInt32]) -> Int:

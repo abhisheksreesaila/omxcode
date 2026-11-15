@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 LINEAGE = ["7cbcc04", "1889b7f", "321870f", "23edc59", "3d2455d", "2585dc9", "8017543", "5053a44", "5e4cdb1", "834ef9a",
-           "a9a3c37"]  # (a9a3c37: omxcore main, not a STABLE.md commit; the owner asked for it, goal 70, D-7001)
+           "a9a3c37", "5194d77"]  # (a9a3c37: omxcore main, not a STABLE.md commit; the owner asked for it, goal 70, D-7001; 5194d77: stable, goal 71)
 def engine_repo():
     """The omxcore checkout to read archives from: $OMXCORE_REPO (or the older $MXFRAME_REPO), else the first of
     ../../mxframe (next to the mxapp folder) and ~/Projects/mxframe that is a git checkout (a worktree elsewhere has

@@ -112,6 +112,7 @@ from mojoui.clock import now_ns, shown_ms
 from mojoui.addmodel import AddModel, AM_ANSWER, AM_RUN, AM_RAN, ADD_MESSAGES
 from mojoui.plugins import find_plugins
 from mojoui.fleetjobs import FleetOpened, FleetCamera, fleet_job, camera_file
+from mojoui.robotsearch import RobotSearch, ROBOT_MSGS
 from mojoui.video import VideoSource
 from mojoui.learn import LearnPanel, LP_ADD, LP_LEARN, LP_PICK, LP_ROWS, with_label_column, learn_sheet, label_rows
 from mojoui.draw import rect as draw_rect, with_alpha
@@ -157,6 +158,7 @@ from mojoui.uijobs import start_ui_job
 comptime START_SCREEN = 0
 comptime IMPORT = 1
 comptime SHEET = 2
+comptime ROBOT_SCREEN = 3  # Robot search (goal 71)
 
 # messages
 comptime PICK = 1  # a FilePicker returned a path (event.text)
@@ -323,6 +325,8 @@ comptime LEARN_TOGGLE = 7940  # the toolbar's Learn: the inspector shows the Lea
 comptime ADD_MODEL_MSG = 7950  # Add a model (mojoui.addmodel: ADD_MESSAGES, 7950–7961)
 comptime ADD_MODEL_OPEN = 7962  # the toolbar's Add a model
 comptime FLEET_PICK = 7963  # Open bags: a folder of ROS 2 bags as a fleet (mojoui.fleet, goal 68 M4)
+comptime ROBOT_PICK = 7964  # Robot search: a pool (an omxcore moments index) picked (goal 71)
+comptime ROBOT_MSG = 8000  # the Robot search page (mojoui.robotsearch: ROBOT_MSGS from here)
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
 comptime EDITOR_CANVAS = 300
@@ -384,6 +388,8 @@ struct Main(App):
     var pal: Palette
     var win_w: Int  # the window's content area in points (App.resize; W × 900 until the host says)
     var win_h: Int
+    var view_w: Int  # the window's width as the host says (win_w is at least 640 for the sheet; a phone page needs the real one)
+    var robot: RobotSearch  # Robot search by example (goal 71): its page
     var looks: List[Theme]  # the skin's themes, one per tint (make_looks)
     var skin: Int  # the design (LIQUID by default, D-225, D-1241; Settings → Appearance writes settings.txt, D-156)
     var appearance_mode: Int  # LIGHT, DARK (the default) or SYSTEM: Liquid's light or dark (D-1241)
@@ -539,6 +545,8 @@ struct Main(App):
         self.appearance_mode = appearance_of(read_setting(APP, "appearance", "dark"))
         self.system_dark = False
         self.win_w = W
+        self.view_w = W
+        self.robot = RobotSearch(ROBOT_MSG)
         self.win_h = 900
         self.pal = skin_palette(self.skin, 0, self.appearance_mode == DARK)
         self.import_col = 0
@@ -656,6 +664,9 @@ struct Main(App):
                 self.starter = Starter.read(environment("OMX_STARTER"))
             except e:
                 print("STARTER: " + String(e), flush=True)
+        if environment("OMX_ROBOT_POOL") != "":  # (open straight into Robot search: the demo, its checks and its film, goal 71)
+            self.robot.open(environment("OMX_ROBOT_POOL"))
+            self.screen = ROBOT_SCREEN
         self.story_step = 0
         self.story_tables = 0
         self.story_open = False
@@ -711,6 +722,9 @@ struct Main(App):
     def resize(mut self, width: Int, height: Int):
         """The window's content area: the sheet, the report and the inspector fill it (goal 25 M2)."""
         self.win_w = max(width, 640)
+        self.view_w = width
+        if self.screen == ROBOT_SCREEN:
+            self.robot.fit(self.robot_w())
         self.win_h = max(height, 480)
         self.retile()
         if self.editor:
@@ -3397,7 +3411,11 @@ struct Main(App):
         var top = self.grid.top
         var left = self.grid.left
         var widths = self.grid.widths.copy()
-        self.use_table(Sheet(t^.share()))
+        try:
+            self.use_table(Sheet(t^.share()))
+        except e:
+            self.message = String(e)
+            return
         self.seen_edits = self.frame.edits()
         self.grid = DataGrid()
         self.grid.prepare(self.frame, self.font, self.pal)
@@ -3529,6 +3547,9 @@ struct Main(App):
         self.take_recipe()
         if self.fleet_job:
             self.poll_fleet()
+        if self.robot.busy() or self.robot.playing():
+            if self.robot.poll(now_ns(), self.robot_w()):
+                self.version += 1
         if self.addm.busy():  # (Add a model: its download, loading or run moves on; Python's threads report)
             self.addm_event(self.addm.poll())
             self.version += 1
@@ -3823,6 +3844,11 @@ struct Main(App):
             self.to_sheet()
         elif m == BACK:
             self.screen = START_SCREEN
+            self.version += 1
+        elif m == ROBOT_PICK:
+            self.open_robots(event.text)
+        elif self.robot.owns(m):
+            self.robot.handle(m, event.number, self.robot_w())
             self.version += 1
         elif m == IMPORT_COLUMN:
             self.import_col = event.number
@@ -4650,6 +4676,8 @@ struct Main(App):
             return self.editor.value().view(self.pal).padding(16, 20)
         if self.screen == SHEET:
             return self.sheet_screen()
+        if self.screen == ROBOT_SCREEN:
+            return self.robot_screen()
         return self.start_screen()
 
     def gpu_chip(self) -> String:
@@ -4663,6 +4691,8 @@ struct Main(App):
         side.append(Button("Start", NO_MSG, SUBTLE, icon="file").fill().align(START))  # (rows read from their leading edge, one icon set)
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
         side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=self.open_types()).fill().align(START))
+        side.append(FilePicker("Robot search…", ROBOT_PICK, style=SUBTLE, icon="search", accept=".parquet").fill().align(START).tag("robot-search")
+                    .tooltip("A pool of robot episodes (an omxcore moments index): tap a clip, get every episode like it"))
         side.append(FilePicker("Open robot bags…", FLEET_PICK, style=SUBTLE, icon="route", accept="folder").fill().align(START).tag("open-bags")
                     .tooltip("A folder of ROS 2 bags (MCAP or sqlite3): one row per run, every topic joined on time, the cameras as videos"))
         side.append(FilePicker("Table", PICK_TABLE, style=SUBTLE, icon="table", accept=".csv,.tsv,.txt,.parquet").fill().align(START).tooltip("A CSV or Parquet file as a table card on a new sheet (read in the background)").tag("insert-table"))
@@ -4720,6 +4750,33 @@ struct Main(App):
         parts.append(body^)
         parts.append(StatusBar(["Ready"], "omxplorer · omxcode"))
         for o in self.overlays():
+            parts.append(o.copy())
+        return VStack(parts^, spacing=0).fill().grow()
+
+    def robot_w(self) -> Int:
+        """Robot search's page width: the window less its margins (16 a side on a phone, 32 on a wider window)."""
+        return self.view_w - (32 if self.view_w < 700 else 64)
+
+    def open_robots(mut self, path: String):
+        """Robot search over the pool at `path` (an omxcore moments index, e.g. omxcore's build/robotics/index.parquet)."""
+        self.robot.open(path)
+        self.screen = ROBOT_SCREEN
+        self.version += 1
+
+    def robot_screen(self) -> View:
+        """Robot search by example (mojoui.robotsearch, goal 71): the page, the menu bar over it, Start to go back."""
+        var phone = self.view_w < 700
+        var parts = List[View]()
+        if not phone:  # (a phone gets the page alone: the menu bar and its island are wider than a phone, 581 points)
+            parts.append(self.menu_bar())
+        var back = HStack(Button("Start", BACK, SUBTLE, icon="back").tag("robot-start"), Spacer(), spacing=8).fill()
+        var page = VStack(back^, self.robot.view(self.robot_w()), spacing=8).fill().align(STRETCH)
+        parts.append(Scroll(page^.padding(16 if phone else 24, 16 if phone else 32), height=0).fill().grow().tag("robot-page"))
+        if not phone:  # (the page says the pool's line itself)
+            parts.append(StatusBar([self.robot.pool_line()], "omxplorer · omxcode"))
+        for o in self.overlays():
+            parts.append(o.copy())
+        for o in self.robot.overlays():
             parts.append(o.copy())
         return VStack(parts^, spacing=0).fill().grow()
 
@@ -4814,7 +4871,7 @@ struct Main(App):
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
         _ = doc
         var t = now_ns()
-        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job) or self.addm.busy() or Bool(self.fleet_job)
+        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job) or self.addm.busy() or Bool(self.fleet_job) or (self.screen == ROBOT_SCREEN and (self.robot.busy() or self.robot.playing()))
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
         return AppBar("omxplorer", bar^, island^)

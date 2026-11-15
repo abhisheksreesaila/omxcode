@@ -101,7 +101,9 @@ def m0():
     why = vendored_at_least(PREV)
     (probs.append(f"lineage: {why}") if why else said.append(f"vendor = {COMMIT}'s archive + the patch, at least {PREV} (engine_lineage)"))
     # F-204: no use of the old Query.table field left in the app's code
-    old = run(["bash", "-c", r"grep -rnE '\.table\.(rows|num_rows|columns|column|schema|names)\b' --include=*.mojo mojoui examples tests hosts themes | grep -viE 'self\.table\.|sheet\.table\.|card\.table\.|\btable\.table\.' || true"]).stdout.strip()
+    # (D-7106: only names that hold an omxcore Query; a mojoui struct's own `table` field, such as LikeResult's, is not
+    # F-204's. Every build below compiles against 5194d77, where Query has no `table` field: that is the proof.)
+    old = run(["bash", "-c", r"grep -rnE '\b(q|query|qr|Query\([^)]*\))\.table\.' --include=*.mojo mojoui examples tests hosts themes || true"]).stdout.strip()
     if old:
         probs.append("possible old Query.table uses (F-204): " + old[:400])
     exs = sorted(p.parent.name for p in (ROOT / "examples").glob("*/needs") if "omxcore" in p.read_text().split())

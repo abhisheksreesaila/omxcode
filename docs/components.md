@@ -10,9 +10,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
 | `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
 | `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
 | `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media |
@@ -181,6 +181,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
 | `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, console, consolekit |
 | `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
+| `ClipGrid (clips to tap, compare and pick: a poster, a title, a badge, a pick toggle; goal 71)` | `mojoui/clipgrid.mojo` | Image, Text, Button with an icon, Grid, Card | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | clips, omxplorer |
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
@@ -270,12 +271,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 189 | 10 | 0 |
-| Web | 173 | 9 | 17 |
-| Android | 19 | 64 | 116 |
-| Mac (AppKit) | 5 | 163 | 31 |
-| iPhone (UIKit) | 0 | 134 | 65 |
-| Agent (MCP) | 66 | 44 | 89 |
+| Linux (GTK) | 190 | 10 | 0 |
+| Web | 174 | 9 | 17 |
+| Android | 19 | 64 | 117 |
+| Mac (AppKit) | 5 | 164 | 31 |
+| iPhone (UIKit) | 0 | 135 | 65 |
+| Agent (MCP) | 66 | 45 | 89 |
 
 ## Inside one app, not components yet (the debt)
 

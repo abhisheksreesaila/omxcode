@@ -243,6 +243,8 @@ def step(page, s):
         by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
         if not by_title.count():  # (no button with that title: the one tagged so, as GTK's step and an agent name it)
             by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
+        if not by_title.count():  # (an Image(on_tap) tagged so: a tappable picture, goal 71)
+            by_title = page.locator(f"img.tappable[data-tag={title!r}]")
         by_title.nth(int(nth or 0)).click()
     elif verb in ("type", "submit", "enter"):
         hint, _, text = rest.partition("=")

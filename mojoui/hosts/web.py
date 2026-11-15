@@ -1637,7 +1637,11 @@ def render_node(s, i, sid):
     if kind == PROGRESS:
         return Progress(value=str(n["value"]), max="100", id=nid, data_kind="progress")
     if kind == IMAGE:
-        return Img(src=f"/img/{sid}/{i}?v={s.shape}.{s.images.get(i, 0)}", width=str(n["spacing"]),
+        src = f"/img/{sid}/{i}?v={s.shape}.{s.images.get(i, 0)}"
+        if n["msg"]:  # Image(on_tap=…): a click sends its message, as a button's (goal 71)
+            return Img(src=src, width=str(n["spacing"]), height=str(n["size"]), id=nid, cls="image tappable", data_kind="image",
+                       alt="", role="button", tabindex="0", hx_trigger="click, keyup[key=='Enter']", **common)
+        return Img(src=src, width=str(n["spacing"]),
                    height=str(n["size"]), id=nid, cls="image", data_kind="image", alt="")
     if kind in (SEGMENTED, TABS, RADIO):
         group = f"g{s.shape}-{i}"

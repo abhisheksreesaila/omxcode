@@ -13,6 +13,7 @@
 #
 # The stand-in engine (mojoui.frame, frame_gpu) stays for MX Studio and the Workbook.
 
+from std.os import abort
 from std.memory import ArcPointer
 from std.collections import Dict
 from omxcore import float_text
@@ -125,12 +126,22 @@ def blank_table(rows: Int = 20) raises -> Table:
     return t^
 
 
+def plain_sheet(table: SharedTable, use_gpu: Bool = True) -> Sheet:
+    """A sheet over a table this program made without VECTOR columns (a video answer, a snapshot's base, the placeholder).
+    Since omxcore F-224 a Frame refuses a VECTOR column (`Sheet(...)` raises for a file's table); here that can't happen, so
+    a refusal is a bug in the caller and stops with its reason."""
+    try:
+        return Sheet(table, use_gpu)
+    except e:
+        abort("plain_sheet: " + String(e))
+
+
 def placeholder_sheet() -> Sheet:
     """What the app holds before a file is opened (no GPU copy)."""
     try:
         return Sheet(empty_table().share(), False)
     except:
-        return Sheet(Table.empty().share(), False)
+        return plain_sheet(Table.empty().share(), False)
 
 
 struct Sheet(Movable, GridSource):
@@ -147,7 +158,7 @@ struct Sheet(Movable, GridSource):
     var last_undone: String  # what the last undo took back ("a format change", "the formula column x", "an edit")
     var job: JobCtl  # the background job this sheet's queries run for (a snapshot's: progress in rows, cancel); JobCtl() for plain calls
 
-    def __init__(out self, table: SharedTable, use_gpu: Bool = True):
+    def __init__(out self, table: SharedTable, use_gpu: Bool = True) raises:
         self.frame = MxFrame(table)
         self.formats = List[ColumnFormat]()
         self.styles = List[Int]()
@@ -195,7 +206,7 @@ struct Sheet(Movable, GridSource):
         """A sheet of its own with this one's edits, formulas and formats as they are now, for a background job: the
         caller goes on editing this one. It shares the table and the GPU copy (read only: a DeviceTable is a shared
         handle) and the file, not the notes. Don't release() this sheet while a job holds its snapshot."""
-        var out = Sheet(self.scan.value(), False) if self.scan else Sheet(self.frame.base, False)
+        var out = Sheet(self.scan.value(), False) if self.scan else plain_sheet(self.frame.base, False)  # (its base was checked when this sheet was made)
         out.frame = frame_snapshot(self.frame)
         out.formats = self.formats.copy()
         out.styles = self.styles.copy()

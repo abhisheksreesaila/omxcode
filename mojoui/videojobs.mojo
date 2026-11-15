@@ -28,7 +28,7 @@ from mojoui.vision_presets import warehouse_analyzer, warehouse_ranges, warm_ran
 from mojoui.videoexport import RedactPlan, Caption, cut_with, cut_frames
 from mojoui.imageops import ImageOps
 from mojoui.player import Mark
-from mojoui.sheet import Sheet, BOOL, INT
+from mojoui.sheet import Sheet, plain_sheet, BOOL, INT
 from mojoui.clock import now_ns
 from mojoui.timeseries import TimeSeries
 from mojoui.geo import NadirCamera, georeference, places, name_along_route
@@ -161,7 +161,7 @@ struct Analyzed(Movable):
 
     def take_sheet(mut self) -> Sheet:
         """The rows as a sheet (a DataGrid's source, with its GPU copy), taken out of the answer."""
-        return Sheet(self.take_table().share())
+        return plain_sheet(self.take_table().share())
 
     def take_found(mut self) -> VideoTable:
         var out = self.found^

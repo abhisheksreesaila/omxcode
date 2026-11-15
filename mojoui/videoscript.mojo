@@ -143,5 +143,8 @@ def applied_marks(script: String, names: List[String], tables: List[SharedTable]
         return (String(""), List[Mark]())
     for k in range(len(names)):
         if names[k] == st.value().name:
-            return (st.value().args[0], marks_from(Sheet(tables[k], False)))
+            try:
+                return (st.value().args[0], marks_from(Sheet(tables[k], False)))
+            except:  # (a script's table with a VECTOR column: no marks from it)
+                return (String(""), List[Mark]())
     return (String(""), List[Mark]())
