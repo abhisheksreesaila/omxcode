@@ -14,7 +14,7 @@ over the fleet took 1.7 to 19.7 ms.
 ## How to try it
 
 With a table open, press **Pivot** in the toolbar, then set Value `n`, Rows `lab`, Columns `outcome` (the robot story,
-see [[Video and telemetry]]).
+see [Video and telemetry](Video-and-telemetry.md)).
 
 ## Not there yet
 

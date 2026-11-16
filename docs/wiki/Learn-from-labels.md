@@ -12,7 +12,7 @@ In the checks, 20 labels on 100,000 rows gave "waiting when speed < 0.2 and pers
 
 ## How to try it
 
-Open a table, pick a column to label (or add one), type a label in about 20 rows, then press **Learn** in the side panel. On the [[ROS 2 bags]] fleet, label the stops sheet the same way.
+Open a table, pick a column to label (or add one), type a label in about 20 rows, then press **Learn** in the side panel. On the [ROS 2 bags](ROS-2-bags.md) fleet, label the stops sheet the same way.
 
 ## Not there yet
 

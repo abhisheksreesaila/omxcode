@@ -4,7 +4,7 @@
 
 *Export on the Robot search page: the picks become a LeRobot v3 dataset.*
 
-- Picks from [[Robot search]] are written as a LeRobot v3 dataset in `~/omxplorer-exports/picks-N`.
+- Picks from [Robot search](Robot-search.md) are written as a LeRobot v3 dataset in `~/omxplorer-exports/picks-N`.
 - LeRobot opens it with `LeRobotDataset(root=...)`.
 - Export runs as a background job, so the window stays live.
 
@@ -12,7 +12,7 @@ In the checks, an export of 3 picks loaded in LeRobot as 3 episodes and 2,045 fr
 
 ## How to try it
 
-Open [[Robot search]], press **Pick** on a few clips, then press **Export**. The toast names the folder.
+Open [Robot search](Robot-search.md), press **Pick** on a few clips, then press **Export**. The toast names the folder.
 
 ## Not there yet
 

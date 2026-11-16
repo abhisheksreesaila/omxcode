@@ -6,7 +6,7 @@
 
 - A robot episode's video plays beside its telemetry, drawn as lanes: joint velocities, gripper, position and rotation.
 - One cursor drives both. Scrub the video and the lanes follow; the gripper's close and open are marked.
-- Links decide which video and which rows follow a selected row in the sheet (see [[Links]]).
+- Links decide which video and which rows follow a selected row in the sheet (see [Links](Links.md)).
 
 The demo uses DROID, a public dataset: 63,344 episodes from 13 labs, and 16,847,616 telemetry rows. The telemetry table
 landed in 583.9 ms. One episode's 244 rows were sliced in 1.7 ms. No frame went over the 50 ms budget.

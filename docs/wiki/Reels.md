@@ -13,7 +13,7 @@ PDF and a 6 s clip. On the web copy, one pack of 3 PDFs and 3 clips was 4.7 MB.
 
 ## How to try it
 
-On a video card press **Make a reel** (see [[Blur faces]] for the demo data). For a pack, run a query that returns rows
+On a video card press **Make a reel** (see [Blur faces](Blur-faces.md) for the demo data). For a pack, run a query that returns rows
 with a linked video, pick rows and press **Export pack**.
 
 ## Not there yet

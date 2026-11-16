@@ -12,7 +12,7 @@
 
 ## How to try it
 
-Open [[Robot search]] on a Linux machine with an NVIDIA GPU. The posters on the pool and the results are the decoded
+Open [Robot search](Robot-search.md) on a Linux machine with an NVIDIA GPU. The posters on the pool and the results are the decoded
 frames.
 
 ## Not there yet
