@@ -5,6 +5,8 @@
 #     while a job ran (want_loop) doesn't come back when the job lands
 #   - picks toggle in order; the grid shows the sample before a search and the hits after; the sample is one episode a
 #     task with the datasets taking turns
+#   - device_words (the island at rest on its screen): nothing before the pool opens, the GPU's name when it opened there,
+#     CPU only when it really is on the CPU
 from std.testing import assert_equal, assert_true
 from std.os import makedirs, getenv
 from mojoui.robotsearch import RobotSearch
@@ -30,7 +32,13 @@ def main() raises:
         rs.by_key[eps[i].key()] = i
     rs.episodes = eps^
     rs.robots = ["panda", "so100"]
+    assert_equal(rs.device_words(), "")
     rs.opened = True
+    assert_equal(rs.device_words(), "CPU")
+    rs.gpu = True
+    rs.gpu_name = "NVIDIA GeForce RTX 3090"
+    assert_equal(rs.device_words(), "NVIDIA GeForce RTX 3090 · ready")
+    rs.gpu = False
     rs.make_sample()
     assert_equal(len(rs.sample), 3)                  # one a task
     assert_equal(rs.sample[1], "b/real:0")           # the datasets take turns

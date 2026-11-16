@@ -5,7 +5,9 @@
 1. Learning runs (scripts/live.py, 1920x1080, real clicks) find where each control sits.
 2. The take: one recording of the window while a person's clicks play: show the SO-100 sorting clip, back, pick the three
    LIBERO drawer clips, More like these, Export. Each event's time in the take is known from the waits.
-3. The cut (ffmpeg): five scenes from the take, a caption on each (Inter, an opaque bar: omxqua's texture), scene 2 zoomed
+3. The pointer (pointer.py): the take has no X pointer in it; an arrow is drawn where live.py logged the pointer, with a
+   press ring at each click, before any zoom so it scales with the picture.
+4. The cut (ffmpeg): five scenes from the take, a caption on each (Inter, an opaque bar: omxqua's texture), scene 2 zoomed
    on the pool's line, scene 3's end zoomed on the hero card, the payoff (the export's toast) frozen.
 """
 import json
@@ -83,30 +85,21 @@ def main(index, out_mp4):
     subprocess.run(["rm", "-rf", str(exports)])  # (this script's own scratch folder under build/g71)
     env = {"OMX_ROBOT_POOL": index, "OMX_CONFIG": str(cfg), "OMX_ROBOT_SAMPLE": ",".join(SAMPLE), "OMX_ROBOT_EXPORTS": str(exports),
            "OMX_DOCUMENTS": str(OUT)}
-    # a real arrow, not X's bare "x", where no widget sets a cursor (the headless display has no window manager)
-    import os
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import headless
-
-    headless.ensure()
-    subprocess.run(["xsetroot", "-cursor_name", "left_ptr"], env=dict(os.environ, XCURSOR_THEME="Adwaita", XCURSOR_SIZE="24"))
-    gtkcfg = OUT / "xdg/gtk-4.0"
-    gtkcfg.mkdir(parents=True, exist_ok=True)
-    (gtkcfg / "settings.ini").write_text("[Settings]\ngtk-cursor-theme-name=Adwaita\ngtk-cursor-theme-size=24\n")
-    env.update({"XCURSOR_THEME": "Adwaita", "XCURSOR_SIZE": "24", "XDG_CONFIG_HOME": str(OUT / "xdg")})
+    # the take is recorded without X's pointer (over plain widgets the headless display shows its bare "x", huge when
+    # zoomed) and an arrow is drawn at live.py's logged pointer positions before any zoom (pointer.py)
     # the take's commands, built step by step: each control's place is read from a run of the take so far (picking adds a
     # Clear button and moves More like these and Export; D-7112)
     raw = OUT / "take.mp4"
-    take = ["wait:6000", f"record:{raw}", "wait:3000"]
+    take = ["move:1010,236", "wait:6000", f"recordbare:{raw}", "wait:3000"]   # (the pointer rests beside the hint line, then glides)
     marks = {}
 
     def at_end(name):
-        t = run_live([c for c in take if not c.startswith("record:")] + ["wait:400", "report"], env, name)
+        t = run_live([c for c in take if not c.startswith("recordbare:")] + ["wait:400", "report"], env, name)
         return boxes(reports(t)[-1])
 
     def secs():
-        return sum(float(c.split(":")[1]) / 1000 for c in take[take.index(f"record:{raw}") + 1:] if c.startswith("wait:")) + 0.2 * sum(
-            c.startswith("glideto:") for c in take[take.index(f"record:{raw}") + 1:])
+        return sum(float(c.split(":")[1]) / 1000 for c in take[take.index(f"recordbare:{raw}") + 1:] if c.startswith("wait:")) + 0.2 * sum(
+            c.startswith("glideto:") for c in take[take.index(f"recordbare:{raw}") + 1:])
 
     b = at_end("learn1")
     pool_line, clip0 = b["robot-pool-line"], b["robot-clip-0"]
@@ -136,6 +129,11 @@ def main(index, out_mp4):
     t = run_live(take + ["report"], env, "take")
     if not raw.exists():
         sys.exit("no take recorded")
+    import pointer
+
+    bare = raw
+    raw = OUT / "take-arrow.mp4"
+    pointer.composite(str(bare), t, str(raw))
     fin = reports(t)
     toast = re.search(r"^TOAST: (.*)$", t, re.M)
     more_ok = bool(re.search(r"^LABEL: More like these 3$", t, re.M))

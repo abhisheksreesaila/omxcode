@@ -3458,6 +3458,8 @@ struct Main(App):
     def rest_face(self) -> Activity:
         """The island at rest: the document and where its queries run (nothing before there's a document)."""
         var device = (self.frame.device_name + " · ready") if self.frame.device else String("CPU")
+        if self.screen == ROBOT_SCREEN:  # (no sheet here: the robot pool's device, where its search runs)
+            return Activity.idle(self.robot.device_words(), "")
         if self.screen != SHEET or not self.has_table:
             return Activity.idle(device, "")
         return Activity.idle(self.sheet_name, grouped(self.frame.rows()) + " rows · " + device)
