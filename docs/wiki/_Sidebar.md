@@ -12,6 +12,7 @@
 
 **Small**
 - [[Export to LeRobot]]
+- [[Learn from labels]]
 - [[Links]]
 - [[SQL]]
 - [[Pivots]]

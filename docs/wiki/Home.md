@@ -17,6 +17,7 @@ today. Mac builds are built and checked on CI Macs. A web copy is in progress.
 
 ## Small
 - [[Export to LeRobot]]
+- [[Learn from labels]]
 - [[Links]]
 - [[SQL]]
 - [[Pivots]]
