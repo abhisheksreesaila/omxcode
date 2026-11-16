@@ -18,7 +18,10 @@ Commands, separated by ';':
   report             the app prints its widgets' state (as a MOJOUI_TEST run's end does: LABEL:, BOX:, …)
   type:TEXT          type TEXT key by key, ~25 a second (letters, capitals too, digits, space and , . - $)
   record:PATH        start recording the window's area to PATH (ffmpeg, 30 fps, H.264) until stoprecord or the end;
-                     while it records, each step prints LIVE-AT: <seconds into the recording> <step>
+                     while it records, each step prints LIVE-AT: <seconds into the recording> <step>, each pointer move
+                     LIVE-PTR: <seconds> <x> <y> and each button 1 change LIVE-BTN: <seconds> down|up
+  recordbare:PATH    the same without X's pointer in the picture (draw it later from the LIVE-PTR lines: the headless
+                     display has no window manager, so over plain widgets X shows its bare "x")
   stoprecord         stop the recording
 The app's stdout (TRACE: lines with MOJOUI_TRACE=1) is printed at the end.
 """
@@ -82,10 +85,14 @@ def main():
     def move(x, y):
         xtest.fake_input(d, X.MotionNotify, x=int(x), y=int(y))
         d.sync()
+        if recorder[0] is not None:
+            print(f"LIVE-PTR: {time.monotonic() - rec_t0[0]:.3f} {int(x)} {int(y)}", flush=True)
 
     def button(down):
         xtest.fake_input(d, X.ButtonPress if down else X.ButtonRelease, 1)
         d.sync()
+        if recorder[0] is not None:
+            print(f"LIVE-BTN: {time.monotonic() - rec_t0[0]:.3f} {'down' if down else 'up'}", flush=True)
 
     def keycode(name):
         return d.keysym_to_keycode(XK.string_to_keysym(name))
@@ -122,6 +129,7 @@ def main():
             time.sleep(float(rest) / 1000)
         elif verb == "move":
             move(*nums)
+            pointer[0], pointer[1] = nums[0], nums[1]   # (a glide after it starts here)
         elif verb in ("click", "shift+click"):
             if verb == "shift+click":
                 xtest.fake_input(d, X.KeyPress, keycode("Shift_L"))
@@ -181,13 +189,16 @@ def main():
             for ch in rest:
                 key(names.get(ch, "Shift+" + ch if ch.isupper() else ch))
                 time.sleep(0.04)
-        elif verb == "record":
+        elif verb in ("record", "recordbare"):
             stop_recording()
-            recorder[0] = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "1", "-video_size", f"{w}x{h}",
+            recorder[0] = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0" if verb == "recordbare" else "1",
+                                            "-video_size", f"{w}x{h}",
                                             "-framerate", "30", "-i", os.environ["DISPLAY"] + "+0,0", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                                             "-crf", "20", "-preset", "veryfast", rest], stdin=subprocess.PIPE)
             time.sleep(0.5)
             rec_t0[0] = time.monotonic() - 0.5  # (ffmpeg's first frame: about when it started)
+            q = d.screen().root.query_pointer()
+            print(f"LIVE-PTR: 0.000 {q.root_x} {q.root_y}", flush=True)
         elif verb == "stoprecord":
             stop_recording()
         elif verb == "shot":

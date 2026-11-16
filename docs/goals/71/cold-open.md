@@ -25,9 +25,14 @@ How to make it again: `pixi run python docs/goals/71/cold_open.py ~/Projects/mxf
 
 ## Notes for the deck (next goal)
 
-- Before the film goes in the deck it needs a cursor pass: over plain buttons the pointer shows as X's bare "x" (the
-  headless display has no window manager; xsetroot, XCURSOR_THEME and GTK's settings.ini did not change it in the take).
-  The fix: record with ffmpeg's draw_mouse off and draw an arrow at the pointer positions live.py already logs.
+- Cursor pass: done (2026-11-15). The take is recorded with ffmpeg's draw_mouse off (`recordbare:` in scripts/live.py,
+  which logs each pointer move and button press as LIVE-PTR / LIVE-BTN lines), and `docs/goals/71/pointer.py` draws a
+  white arrow (dark outline, soft shadow, 24 px at the 1440x810 take) at those positions, with a faint press ring on each
+  click, before any zoom, so it scales with the picture. X's bare "x" is gone. Before recording, the pointer rests beside
+  the hint line, so the first glide starts there. The same pass fixed the island at rest on the robot screen: it said
+  "CPU" (the sheet's device, and there's no sheet there); now it names the pool's device ("NVIDIA GeForce RTX 3090 · ready").
+- Web copy: `build/g71/cold-open-web.mp4` (1280x720, H.264, CRF 28, no audio, +faststart) and the poster
+  `build/g71/cold-open-poster.jpg` (scene 4, the drawer-task results).
 
 - The film's clips are set with `OMX_ROBOT_SAMPLE` (cold_open.py's SAMPLE): one real sorting clip (scene 3) and three LIBERO
   clips of "put the black bowl in the bottom drawer of the cabinet and close it" (scene 4).

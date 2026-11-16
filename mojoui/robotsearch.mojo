@@ -229,6 +229,7 @@ struct RobotSearch(Movable):
     var n_sets: Int
     var hours: Float64
     var gpu: Bool
+    var gpu_name: String            # the device the pool's clips decode and rank on (its name), when it opened on the GPU
     var open_ms: Float64
     var posters: Dict[String, Picture]
     var fitted: Dict[String, Picture]   # the posters at tile_side (what the grid shows)
@@ -271,6 +272,7 @@ struct RobotSearch(Movable):
         self.n_sets = 0
         self.hours = 0.0
         self.gpu = False
+        self.gpu_name = ""
         self.open_ms = 0.0
         self.posters = Dict[String, Picture]()
         self.fitted = Dict[String, Picture]()
@@ -489,6 +491,7 @@ struct RobotSearch(Movable):
                         self.n_sets = len(pool.datasets)
                         self.hours = pool.hours()
                         self.gpu = pool.gpu
+                        self.gpu_name = e[].clips.value().ctx.name() if pool.gpu else ""
                         self.opened = True
                         self.make_sample()
                         self.ask(self.sample.copy(), "")
@@ -676,6 +679,12 @@ struct RobotSearch(Movable):
     def hero_for(self, width: Int) -> Int:
         """The playing clip's longest side: 480 on a wide window, the width less the margins on a phone."""
         return 480 if width >= 900 else max(200, min(480, width - 64))
+
+    def device_words(self) -> String:
+        """Where robot search runs, for an island at rest: the GPU's name and ready, or CPU ("" until the pool opens)."""
+        if not self.opened:
+            return ""
+        return (self.gpu_name if self.gpu_name else String("GPU")) + " · ready" if self.gpu else String("CPU")
 
     def pool_line(self) -> String:
         if not self.opened:
