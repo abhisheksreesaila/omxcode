@@ -17,6 +17,6 @@ Open a table, pick a column to label (or add one), type a label in about 20 rows
 ## Not there yet
 
 - It learns small rules over the columns you have. It doesn't label video frames yet: labelling clips is on the roadmap.
-- The rule is a decision tree, so it suits tables more than pictures.
+- The rule is a few thresholds over your columns, so it suits tables more than pictures.
 
 <sub>Source: docs/goals/68-report.md (M1, M4).</sub>
