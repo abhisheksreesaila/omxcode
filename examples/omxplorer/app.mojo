@@ -75,7 +75,7 @@ from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GR
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
 from omxcore import Table
 from mojoui.shared import environment, make_dir
-from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok, export_path, media_path_ok
+from mojoui.files import file_name, file_stem, file_size, file_exists, file_argument, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok, export_path, media_path_ok
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
 from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
@@ -683,7 +683,9 @@ struct Main(App):
         self.doc_opening = None
         self.doc_opening_path = ""
         self.version = 1
-        var auto_open = environment("OMX_OPEN")  # a file to open straight away (the launcher's argument)
+        var auto_open = environment("OMX_OPEN")  # a file to open straight away: OMX_OPEN (scripts/omxplorer.sh), or
+        if auto_open == "":  # the command line's (`omxplorer path/to/file.csv`, the launcher entry's %f)
+            auto_open = file_argument([".csv", ".parquet", ".omx"])
         if auto_open != "":
             self.open_path(auto_open)
         self.make_looks()

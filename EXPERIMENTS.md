@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Fix: the Linux download opens the file it is given (2026-11-16)
+- **Setup:** a fresh download of the linux-app release (sha256 db2a7475…), installed with its install.sh, run on a headless display before recording the launch video.
+- **Broke:** `./omxplorer path/to/file.csv` (the README) and the launcher entry's `%f` showed the Start screen: only scripts/omxplorer.sh opened a file, through OMX_OPEN.
+- **Fixed:** `mojoui.files.file_argument(suffixes)`: the first command-line word after the program's name that ends in one of the app's suffixes and is a file; omxplorer uses it when OMX_OPEN is empty (.csv, .parquet, .omx). Test: tests/test_file_argument.mojo (the web host's own words never match). Proof: the packaged binary with fleet.csv opens "Import fleet.csv · 63,344 rows"; with no argument, Start; the agent host (same .so in Python) shows Start.
+- **Means:** the download does what its README says; re-uploaded to the linux-app release.
+---
+
 ## Goal 71: robot search by example in omxplorer, on omxcore stable 5194d77 (2026-11-14/15)
 - **Setup:** worktree ../mojo-ui-g71, branch `goal-71-robot-search` off main 0cfcdb8a (goal 70 fast-forwarded in). Issue omxcode#9. Data: omxcore's build/robotics/index.parquet (1,851 episodes, 29,124 moments, 4 LeRobot datasets in the HF cache); reference: omxcore's Python `omxcore.robot` in its robotics env (lerobot 0.7).
 - **Worked:** 5194d77 vendored (the Mojo 1.2 patch rebased; fdio's write and the robot plugin registry's mutex calls added to the run-time lookups); search by example in-process: rankings equal omxcore's Python, 0.1 ms warm on the GPU; frames decoded by NVDEC equal its decode exactly; export loads in LeRobot; a ClipGrid component (Image(on_tap) on GTK and the web); omxplorer's Robot search screen, driven with real clicks; a 34 s cold open cut from a live take.

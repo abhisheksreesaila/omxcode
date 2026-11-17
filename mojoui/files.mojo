@@ -3,7 +3,7 @@
 # <config>/settings.txt).
 
 from std.os.path import getsize, isfile
-from mojoui.shared import environment, make_dir
+from mojoui.shared import environment, make_dir, arguments
 
 
 def file_name(path: String) -> String:
@@ -25,6 +25,22 @@ def file_size(path: String) raises -> Int:
 def file_exists(path: String) -> Bool:
     """Whether a regular file is at `path`."""
     return isfile(path)
+
+
+def file_argument_in(words: List[String], suffixes: List[String]) -> String:
+    """The first of `words` after the program's own name (words[0]) that ends in one of `suffixes` (any case) and names
+    a file, or "". A Python host's own words (mojoui/hosts/web.py, its build folder) never match."""
+    for i in range(1, len(words)):
+        var low = words[i].lower()
+        for s in suffixes:
+            if low.endswith(s.lower()) and file_exists(words[i]):
+                return words[i]
+    return ""
+
+
+def file_argument(suffixes: List[String]) -> String:
+    """The file the window was started with (`app path/to/file.csv`, a launcher entry's %f), or "" (see file_argument_in)."""
+    return file_argument_in(arguments(), suffixes)
 
 
 def config_dir(app: String) -> String:
