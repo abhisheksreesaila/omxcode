@@ -315,7 +315,7 @@ SD_BIN = Path.home() / "Projects/omx-local/third_party/stable-diffusion.cpp/buil
 LLAMA_SERVER = Path.home() / "Projects/omx-local/third_party/llama.cpp/build/bin/llama-server"
 CREATOR_ENV = {  # the creator layout (D-7250): the brain on physical GPU 0 (visible index 1), voice and embeddings on GPU 1 (index 0),
                  # the image model's own process on GPU 1 (OMX_SD_GPU is physical)
-    "CUDA_VISIBLE_DEVICES": "1,0", "OMX_LLM_GPU": "1", "OMX_SD_GPU": "1", "OMX_SD_PORT": "8291",
+    "CUDA_VISIBLE_DEVICES": "1,0", "OMX_LLM_GPU": "1", "OMX_SD": "1", "OMX_SD_GPU": "1", "OMX_SD_PORT": "8291",
     "OMX_NOTES_DIR": str(ROOT / "tests/fixtures/notes"), "OMX_NOTES_CACHE": str(OUT / "notes-cache"),
     "OMX_PICTURES": str(OUT / "pictures"),
 }
