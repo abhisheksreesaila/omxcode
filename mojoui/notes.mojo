@@ -3,7 +3,9 @@
 # that keep a search inside the one folder the person chose.
 #
 #   var notes = NotesIndex("~/Documents/notes", "build/packs/e5small", cache="~/.cache/omxcode/notes")   # raises: no such folder
-#   while not notes.step(8): ...                    # from update(): embeds new or changed files for at most 8 ms a call
+#   while not notes.step(8): ...                    # from update(): a few passages a call, never more than ~8 ms of work (D-7308)
+#   notes.refresh()                                 # before a question: new, changed or removed files are noticed (a listing, at most
+#                                                   # every 3 s; nothing is re-read when nothing changed)
 #   for hit in notes.search("when is my next dental cleaning?", k=4):  hit.file, hit.text, hit.score
 #   resolve_inside(root, "../../.ssh")              # raises (outside()'s words): a path that leaves the folder is refused, never read
 #
@@ -28,6 +30,9 @@ comptime CHUNK = 500
 comptime PER_FILE = 2
 comptime MIN_SCORE = 0.806  # e5-small cosines run high (0.7-0.9 for anything): the lowest right answer seen scored 0.812, the highest unrelated question 0.802
 comptime BAND = 0.05  # and a passage must be within this of the best one
+comptime BATCH = 8  # passages embedded in one call (about 5 ms on the GPU, whatever the batch up to 8: the cost of one tick of the index)
+comptime RESCAN_NS = 3_000_000_000  # refresh() looks at the folder at most this often
+comptime TOP = 200  # candidates kept while scoring (the best few, not a sort of every passage)
 
 
 def outside(folder: String, asked: String) -> String:
@@ -123,6 +128,13 @@ struct NotesIndex(Movable):
     var waiting: List[Int]  # files still to embed
     var embedded: Int  # passages embedded since the index was made (a cached index starts at 0)
     var scanned: Bool
+    var cur: Int  # the file being embedded a few passages a tick (-1: none)
+    var cur_parts: List[String]
+    var cur_vecs: List[Float32]
+    var cur_at: Int  # its next passage
+    var call_ms: Float64  # what one embedding call has cost lately (a tick runs another only when it fits the budget)
+    var scan_ns: Int  # when the folder was last listed
+    var scans: Int  # times the index was rebuilt from a listing that differed from what it held
 
     def __init__(out self, folder: String, pack: String, cache: String = "") raises:
         self.root = resolve_inside(folder, "")
@@ -137,18 +149,21 @@ struct NotesIndex(Movable):
         self.waiting = List[Int]()
         self.embedded = 0
         self.scanned = False
+        self.cur = -1
+        self.cur_parts = List[String]()
+        self.cur_vecs = List[Float32]()
+        self.cur_at = 0
+        self.call_ms = 6.0
+        self.scan_ns = 0
+        self.scans = 0
         self.scan()
 
     def key(self) -> String:
         return self.cache + "/" + _fnv(self.root)
 
-    def scan(mut self):
-        """Lists the folder's notes, takes what the cache holds for files that haven't changed, queues the rest."""
-        self.files = List[String]()
-        self.stamps = List[String]()
-        self.passages = List[List[String]]()
-        self.vectors = List[List[Float32]]()
-        self.waiting = List[Int]()
+    def listing(self) -> List[String]:
+        """The notes the folder holds now: relative paths of the readable types under the size limit, sorted (so two scans, and
+        two machines, agree)."""
         var found = List[String]()
         var suffixes = List[String]()
         for s in [".md", ".txt", ".org", ".MD", ".TXT", ".ORG"]:
@@ -161,18 +176,58 @@ struct NotesIndex(Movable):
             if st[1] < 0 or st[1] > MAX_BYTES:
                 continue
             found.append(rel)
-        # sorted, so two scans (and two machines) agree
-        for i in range(1, len(found)):
-            var j = i
-            while j > 0 and found[j] < found[j - 1]:
-                var t = found[j]
-                found[j] = found[j - 1]
-                found[j - 1] = t
-                j -= 1
+        sort(found)
+        return found^
+
+    def stamp_of(self, rel: String) -> String:
+        var st = file_stamp(self.root + "/" + rel)
+        return String(st[1]) + ":" + String(st[0])
+
+    def scan(mut self):
+        """Lists the folder's notes, takes what the cache holds for files that haven't changed, queues the rest."""
+        var found = self.listing()
         var old = self.load_cache()
+        self.rebuild(found, old)
+        self.scanned = True
+        self.scan_ns = now_ns()
+
+    def refresh(mut self):
+        """Notices files that were added, changed or removed since the last look: only the listing and the stamps are read, and
+        when they are what the index holds nothing else is touched (a question never re-reads the cache or the notes). At most
+        every few seconds."""
+        if self.scanned and now_ns() - self.scan_ns < RESCAN_NS:
+            return
+        self.scan_ns = now_ns()
+        var found = self.listing()
+        var same = len(found) == len(self.files)
+        if same:
+            for i in range(len(found)):
+                if found[i] != self.files[i] or self.stamp_of(found[i]) != self.stamps[i]:
+                    same = False
+                    break
+        if same:
+            return
+        var kept = _Old()  # (what the index already holds is kept as it is; only new or changed files wait to be embedded)
+        for i in range(len(self.files)):
+            if len(self.passages[i]) > 0 or i not in self.waiting:
+                kept.files.append(self.files[i])
+                kept.stamps.append(self.stamps[i])
+                kept.passages.append(self.passages[i].copy())
+                kept.vectors.append(self.vectors[i].copy())
+        self.rebuild(found, kept)
+
+    def rebuild(mut self, found: List[String], old: _Old):
+        self.scans += 1
+        self.files = List[String]()
+        self.stamps = List[String]()
+        self.passages = List[List[String]]()
+        self.vectors = List[List[Float32]]()
+        self.waiting = List[Int]()
+        self.cur = -1  # (a file half embedded starts again: its index may have moved)
+        self.cur_parts = List[String]()
+        self.cur_vecs = List[Float32]()
         for rel in found:
-            var st = file_stamp(self.root + "/" + rel)
-            var stamp = String(st[1]) + ":" + String(st[0])
+            var stamp = self.stamp_of(rel)
             self.files.append(rel)
             self.stamps.append(stamp)
             var kept = old.find(rel, stamp)
@@ -183,32 +238,46 @@ struct NotesIndex(Movable):
                 self.passages.append(List[String]())
                 self.vectors.append(List[Float32]())
                 self.waiting.append(len(self.files) - 1)
-        self.scanned = True
 
     def ready(self) -> Bool:
         return self.scanned and len(self.waiting) == 0
 
     def step(mut self, budget_ms: Int) raises -> Bool:
-        """Embeds waiting files for about `budget_ms` (at least one); True when the index is complete (and saved)."""
+        """Embeds waiting notes a few passages at a time (BATCH a call) for about `budget_ms`: a call is only made when the last one's
+        cost still fits, so one tick is one call at the usual budget, however big the file is (at least one call is always
+        made). True when the index is complete (and saved)."""
         var until = now_ns() + budget_ms * 1_000_000
-        while len(self.waiting) > 0:
-            var at = self.waiting[0]
-            var text = String("")
-            try:
-                text = open(self.root + "/" + self.files[at], "r").read()
-            except:
-                pass  # (unreadable or not text: it holds nothing)
-            var parts = split_passages(text)
-            var labelled = List[String]()
-            for p in parts:
-                labelled.append(self.files[at] + ": " + p)
-            self.embedder.prefix = "passage: "
-            self.vectors[at] = self.embedder.embed(labelled) if len(labelled) > 0 else List[Float32]()
-            self.passages[at] = parts^
-            self.embedded += len(labelled)
-            _ = self.waiting.pop(0)
-            if now_ns() >= until:
-                break
+        var first = True
+        while len(self.waiting) > 0 and (first or Float64(until - now_ns()) / 1e6 >= self.call_ms):
+            first = False
+            if self.cur < 0:  # the next file: read and cut into passages (a megabyte cuts in under a millisecond)
+                self.cur = self.waiting[0]
+                var text = String("")
+                try:
+                    text = open(self.root + "/" + self.files[self.cur], "r").read()
+                except:
+                    pass  # (unreadable or not text: it holds nothing)
+                self.cur_parts = split_passages(text)
+                self.cur_vecs = List[Float32]()
+                self.cur_at = 0
+            var n = min(BATCH, len(self.cur_parts) - self.cur_at)
+            if n > 0:
+                var t0 = now_ns()
+                var labelled = List[String]()
+                for k in range(self.cur_at, self.cur_at + n):
+                    labelled.append(self.files[self.cur] + ": " + self.cur_parts[k])
+                self.embedder.prefix = "passage: "
+                var vecs = self.embedder.embed(labelled)
+                for v in vecs:
+                    self.cur_vecs.append(v)
+                self.cur_at += n
+                self.embedded += n
+                self.call_ms = Float64(now_ns() - t0) / 1e6
+            if self.cur_at >= len(self.cur_parts):  # the file is whole: its passages become searchable at once
+                self.vectors[self.cur] = self.cur_vecs.copy()
+                self.passages[self.cur] = self.cur_parts.copy()
+                self.cur = -1
+                _ = self.waiting.pop(0)
         if len(self.waiting) == 0 and self.scanned:
             self.save_cache()
             return True
@@ -227,23 +296,32 @@ struct NotesIndex(Movable):
         self.embedder.prefix = "query: "
         var q = self.embedder.embed([question])
         var dim = self.embedder.dim
-        var scored = List[NoteHit]()
+        # (the TOP best candidates by score, kept as (score, file, passage) while scoring: no sort of every passage)
+        var top_score = List[Float64]()
+        var top_file = List[Int]()
+        var top_pass = List[Int]()
         for f in range(len(self.files)):
             if prefix != "" and not self.files[f].startswith(prefix):
                 continue
             for p in range(len(self.passages[f])):
-                var s = 0.0
+                var sc = 0.0
                 for d in range(dim):
-                    s += Float64(q[d]) * Float64(self.vectors[f][p * dim + d])
-                scored.append(NoteHit(self.files[f], self.passages[f][p], s))
-        # best first
-        for i in range(1, len(scored)):
-            var j = i
-            while j > 0 and scored[j].score > scored[j - 1].score:
-                var t = scored[j].copy()
-                scored[j] = scored[j - 1].copy()
-                scored[j - 1] = t^
-                j -= 1
+                    sc += Float64(q[d]) * Float64(self.vectors[f][p * dim + d])
+                if len(top_score) >= TOP and sc <= top_score[len(top_score) - 1]:
+                    continue
+                var at = len(top_score)
+                while at > 0 and top_score[at - 1] < sc:
+                    at -= 1
+                top_score.insert(at, sc)
+                top_file.insert(at, f)
+                top_pass.insert(at, p)
+                if len(top_score) > TOP:
+                    _ = top_score.pop()
+                    _ = top_file.pop()
+                    _ = top_pass.pop()
+        var scored = List[NoteHit]()
+        for i in range(len(top_score)):
+            scored.append(NoteHit(self.files[top_file[i]], self.passages[top_file[i]][top_pass[i]], top_score[i]))
         var out = List[NoteHit]()
         if len(scored) == 0 or scored[0].score < MIN_SCORE:
             return out^

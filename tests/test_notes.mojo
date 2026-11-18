@@ -97,4 +97,63 @@ def main() raises:
     assert_true(len(wifi) == 1, "the new passage is found")
     assert_equal(wifi[0].file, "home/garden.md")
     assert_true(wifi[0].text.find("blue-heron-42") >= 0, wifi[0].text)
+    # D-7308: a big folder never holds the UI thread. The fixtures fifty times over and a note of nearly a megabyte: every
+    # index tick (step) stays under 16 ms, a search over all of it too, and a question's look at the folder (refresh) reads
+    # nothing again when nothing changed, and only the new note when one was added.
+    var big = "build/g72/notes-big"
+    _ = output(["rm", "-rf", big])
+    _ = output(["mkdir", "-p", big])
+    for k in range(50):
+        _ = output(["cp", "-r", FIXTURE, big + "/copy" + String(k)])
+    var huge = String("")
+    for i in range(3900):
+        huge += "Paragraph " + String(i) + ": the quick brown fox jumps over the lazy dog while the committee discusses the quarterly budget, travel plans and lentil soup for Thursday afternoon.\n\n"
+    with open(big + "/huge.md", "w") as f:
+        f.write(huge)
+    var idx = NotesIndex(big, pack, "")
+    assert_equal(len(idx.files), 351)
+    assert_true(huge.byte_length() > 600_000 and huge.byte_length() < 1_000_000, String(huge.byte_length()))
+    var worst = 0.0
+    var ticks = 0
+    var t_all = now_ns()
+    while True:
+        var t_tick = now_ns()
+        var done = idx.step(6)
+        var took = Float64(now_ns() - t_tick) / 1e6
+        worst = max(worst, took)
+        ticks += 1
+        if done:
+            break
+    print("   big folder:", idx.count(), "passages in", ticks, "ticks,", (now_ns() - t_all) // 1_000_000, "ms in all; the longest tick", worst, "ms")
+    assert_true(idx.count() > 1500, "the huge note is in")
+    assert_true(worst < 16.0, "an index tick took " + String(worst) + " ms")
+    var t_s = now_ns()
+    var big_hits = idx.search("When is my next dental cleaning?", "", 4)
+    var big_search_ms = Float64(now_ns() - t_s) / 1e6
+    print("   big folder: a search over", idx.count(), "passages took", big_search_ms, "ms")
+    assert_true(big_search_ms < 16.0, "a search took " + String(big_search_ms) + " ms")
+    assert_true(len(big_hits) > 0 and big_hits[0].file.endswith("health/dentist.md"), "the right note is first")
+    # the look at the folder: throttled, then (when forced) free of work if nothing changed
+    idx.refresh()
+    assert_equal(idx.scans, 1)
+    idx.scan_ns = 0
+    var t_r = now_ns()
+    idx.refresh()
+    var look_ms = Float64(now_ns() - t_r) / 1e6
+    print("   big folder: looking at 351 notes took", look_ms, "ms")
+    assert_equal(idx.scans, 1)  # nothing changed: nothing rebuilt
+    assert_true(look_ms < 50.0, "the look took " + String(look_ms) + " ms")
+    var before = idx.count()
+    with open(big + "/new-note.md", "w") as f:
+        f.write("The locker code at the gym is 7731, written here so I stop forgetting it.")
+    idx.scan_ns = 0
+    idx.refresh()
+    assert_equal(idx.scans, 2)
+    assert_equal(len(idx.waiting), 1)  # only the new note waits
+    assert_equal(idx.count(), before)  # and everything else is still there
+    while not idx.step(6):
+        pass
+    var locker = idx.search("What is the gym locker code?", "", 1)
+    assert_true(len(locker) == 1 and locker[0].file == "new-note.md", "the new note is found")
+    _ = output(["rm", "-rf", big])
     print("notes: ok -", made, "passages in", indexed_ms, "ms (with the pack's load), 5 searches", ms, "ms in all")

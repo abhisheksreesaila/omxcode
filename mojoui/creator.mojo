@@ -330,7 +330,7 @@ struct Creator(Movable):
         except e:
             self.refuse(id, String(e))
             return
-        self.notes.value().scan()
+        self.notes.value().refresh()  # (an incremental look: nothing is re-read when nothing changed)
         self.searching.append((id, question, folder))
 
     def since_turn(self) -> Int:
@@ -426,18 +426,20 @@ struct Creator(Movable):
                 self.version += 1
 
     def search(mut self):
-        if len(self.searching) == 0 or not self.notes:
+        if not self.notes:
             return
         try:
-            if not self.notes.value().step(6):
+            if not self.notes.value().ready():  # (the index is brought up to date a few passages a tick, asked or not; a tick that did that does no more)
+                _ = self.notes.value().step(6)
                 return
-            while len(self.searching) > 0:
-                var s = self.searching.pop(0)
-                var t0 = now_ns()
-                var hits = self.notes.value().search(s[1], s[2], 4)
-                self.log.append("NOTES: hits=" + String(len(hits)) + " first=" + (hits[0].file if len(hits) > 0 else String("-"))
-                                + " search_ms=" + String((now_ns() - t0) // 1_000_000) + " ms=" + String(self.since_turn()) + " text=" + s[1])
-                self.answers.append(Answer(s[0], self.found(s[1], hits), len(hits) > 0))
+            if len(self.searching) == 0:
+                return
+            var s = self.searching.pop(0)  # (one question a tick: the query's embedding and the scoring are the tick's whole work)
+            var t0 = now_ns()
+            var hits = self.notes.value().search(s[1], s[2], 4)
+            self.log.append("NOTES: hits=" + String(len(hits)) + " first=" + (hits[0].file if len(hits) > 0 else String("-"))
+                            + " search_ms=" + String((now_ns() - t0) // 1_000_000) + " ms=" + String(self.since_turn()) + " text=" + s[1])
+            self.answers.append(Answer(s[0], self.found(s[1], hits), len(hits) > 0))
         except e:
             while len(self.searching) > 0:
                 var s = self.searching.pop(0)
