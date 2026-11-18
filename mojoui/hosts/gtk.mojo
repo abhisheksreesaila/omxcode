@@ -6581,6 +6581,19 @@ def run_step[A: App](host_addr: Int, step: String):
                                 ah = Int(rect[3] + 0.5)
                     print("BOARD: " + ch.name + " at " + String(ax) + "," + String(ay) + " " + String(aw) + "x" + String(ah)
                           + ("" if aw == ch.w and ah == ch.h and ax == ch.x and ay == ch.y else " (asked " + String(ch.x) + "," + String(ch.y) + " " + String(ch.w) + "x" + String(ch.h) + ")"))
+    elif verb == "boardscroll":  # boardscroll:<points|end|now>: the Board's page scrolled down that far (now: left where it is) ("BOARDSCROLL: value of upper, page")
+        pump()
+        for sc in host[].board_scrollers:
+            if sc[0] < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[sc[0]].kind == BOARD:
+                var adj = external_call["gtk_scrolled_window_get_vadjustment", Int](sc[1])
+                var upper = external_call["gtk_adjustment_get_upper", Float64](adj)
+                var page = external_call["gtk_adjustment_get_page_size", Float64](adj)
+                if rest != "now":
+                    external_call["gtk_adjustment_set_value", NoneType](adj, upper if rest == "end" else Float64(to_int(rest)))
+                    pump()
+                var value = external_call["gtk_adjustment_get_value", Float64](adj)
+                print("BOARDSCROLL: " + String(Int(value + 0.5)) + " of " + String(Int(upper + 0.5)) + ", " + String(Int(page + 0.5)))
+                break
     elif verb == "focus":  # focus:<title or tag>: that button given keyboard focus, as Tab would ("FOCUS: name at x,y wxh" in the window)
         pump()
         var i = find(host[], BUTTON, rest, 0)

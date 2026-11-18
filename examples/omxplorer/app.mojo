@@ -2754,7 +2754,8 @@ struct Main(App):
         return TABLE_H if len(self.objects) + len(self.media) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
 
     def board_h(self) -> Int:
-        """The Board's height: the room under the formula bar (the cards fill it; nothing scrolls)."""
+        """The room under the formula bar: the Board is this tall at least (the cards fill it); it is taller once a card has been
+        dragged past it or a new one went below (mojoui.boardtiles), and the page scrolls."""
         return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H - (0 if self.win_w < COMPACT_W else RIBBON_TITLES_H))  # (shell A: the board reaches the bottom band)
 
     def card_tags(self) -> List[String]:
