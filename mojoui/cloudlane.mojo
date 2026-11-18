@@ -289,6 +289,8 @@ struct CloudLane(Movable):
         self.log = cwd + "/out-" + String(now_ns()) + ".txt"
         try:
             makedirs(cwd, exist_ok=True)
+            if libc.chmod(cwd, 0o700) != 0:  # (only this user's: a folder someone else made first refuses the chmod)
+                raise Error("the scratch folder " + cwd + " isn't this user's")
             var argv = List[String]()
             argv.append(environment("OMX_CLAUDE_CMD", "claude"))
             argv.append("-p")
@@ -308,6 +310,7 @@ struct CloudLane(Movable):
             argv.append(text)
             self.proc = Process.start(argv, self.log, cwd=cwd)
         except e:
+            _ = ledger_add(model, "not started", 0, 0, 0.0, "")  # (the "sent" row above over-reports: say it never left; D-7316)
             return String("I couldn't start the cloud command: " + String(e))
         self.used += 1
         self.model = model

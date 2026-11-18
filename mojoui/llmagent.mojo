@@ -37,7 +37,7 @@ from mojoui.app import App, Event
 from mojoui.clock import now_ns
 from mojoui.genui import catalog, validate, Spec, Prop, P_TEXT, P_ENUM, P_NUMBER, P_TEXTS, P_NUMBERS, P_ROWS, P_POINTER, P_WORD, P_CHILDREN, P_BOOL, P_POINTS, P_ITEMS
 from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT, J_STRING, J_NULL
-from mojoui.trust import Trust
+from mojoui.trust import Trust, FENCE_END
 from mojoui.utf8 import head, tail
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
 from mojoui.view import View, BUTTON, FIELD, TOGGLE, NO_MSG
@@ -698,7 +698,10 @@ struct LlmAgent(LocalAgent, Movable):
                 if role == "assistant" and content == "Understood." and i == 1:
                     continue
                 if role == "tool":
-                    out += "Tool result: " + head(content, 500) + "\n"
+                    if FENCE_END in content:  # (untrusted text, notes or news: never carried into the summary, which is trusted history; D-7316)
+                        out += "Tool result: (passages from an outside source; not kept)\n"
+                    else:
+                        out += "Tool result: " + head(content, 500) + "\n"
                     continue
                 if content != "":
                     out += ("Person: " if role == "user" else "Assistant: ") + head(content, 2500) + "\n"

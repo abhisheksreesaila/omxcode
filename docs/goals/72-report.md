@@ -73,6 +73,9 @@ A reviewer's findings, each fixed at its root with a behaviour test (D-7300 to D
   `Album.hold` is capped; the to-do file reports a failed save and sets an unreadable file aside; the watcher never follows a link out.
 
 ## Honest gaps
+- **Open item: taint lasts one turn (D-7317).** Notes and news are fenced and refused tools need a spoken yes within the turn that read them, but the fenced text stays in the history until it is condensed; a planted instruction is held back in later turns only by the fence and the model's judgement. Not tested yet.
+- **Open item: one-word drift at turn 57.** In one of three runs of the long compaction script at temperature 0.3, replies drifted into single words from turn 57, not at a condensing; the test runs greedy. Unexplained; may hide a summary-quality issue.
+- **Test-only hook:** `llm_test_fault` in bridge/llm_shim.cpp exists only so tests can force faults; it does nothing unless a test calls it.
 
 - **Speech end to final text is 521 to 533 ms in the app against 115 ms in the unit test, and the unit's limit is 300 ms.** The unit
   counts from the endpointer's decision; the app counts from the person's last voiced sample (`LoopEvent.ms`), so it includes the
