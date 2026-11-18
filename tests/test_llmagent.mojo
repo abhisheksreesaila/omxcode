@@ -269,6 +269,14 @@ def main() raises:
     assert_equal(again.types[len(again.types) - 1], "RUN_FINISHED")
     print("agent after cancel: ok |", again.text)
 
+    # 3b. the framework's own client reads the agent as a LocalAgent (what AgentChat does): the words end up as a message
+    var client = Agent("http://unused/", 1, 2, thread_id="t-client")
+    client.say("What is two plus three? Answer with just the number in words.")
+    _ = client.run_local(agent)
+    assert_true(client.last_text().lower().find("five") >= 0, "the client read the run: " + client.last_text())
+    assert_equal(client.ended, "finished")
+    print("agent local client: ok |", client.last_text())
+
     # 4. time to the first words (warm): in this process
     var ttfts = List[Float64]()
     for k in range(3):
@@ -288,5 +296,6 @@ def main() raises:
         print("SERVING", served.port)
         with open("build/g72/agent-port", "w") as f:
             f.write(String(served.port))
-        while True:
+        for _ in range(2_000_000):
             sleep_ms(500)
+        served.stop()  # (a Served stops serving when it is dropped, and Mojo drops it after its last use: this is that use)
