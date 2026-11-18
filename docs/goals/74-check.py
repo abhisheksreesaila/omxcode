@@ -300,12 +300,16 @@ def m7():
     note, why = note_json()
     if note is None:
         return "BLOCKED", why
+    shutil.rmtree(OUT / "race-data", ignore_errors=True)
+    shutil.rmtree(OUT / "race-page", ignore_errors=True)
     code, out = gtk(["window:1440x900", "framebench:note=pan,120", "framebench:note=zoom,60", "quit"],
                     {"PNOTE_DIR": str(OUT / "race-data"), "PNOTE_IMPORT": str(note)}, 1200)
     (OUT / "race-omx-canvas.log").write_text(out)
     ours = framebench_lines(out)
     objs = [l for l in pnote_lines(out) if field(l, "kind") == "canvas"]
-    if not ours or not objs or int(field(objs[-1], "objects") or 0) < 500:
+    # (amended, D-7426: the contract's objects= counts boxes only; the note's 645 items are objects + connectors + strokes)
+    items = sum(int(field(objs[-1], k) or 0) for k in ("objects", "connectors", "strokes")) if objs else 0
+    if not ours or not objs or items < 500:
         return "FAIL", f"pnote's canvas bench didn't run on the 600-object note (exit {code}): {ours[:2]} {objs[-1:]}"
     code, out = gtk(["window:1440x900", "framebench:note=type,200", "quit"],
                     {"PNOTE_DIR": str(OUT / "race-page"), "PNOTE_PAGE_CHARS": "1000000"}, 1200)

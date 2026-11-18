@@ -7243,7 +7243,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["gtk_window_set_resizable", NoneType](host[].window, c_int(0))
         var title = String("mojoui test window (closes by itself)")
         external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
-    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0  # (a picture mid-run needs a shown window too)
+    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0  # (a picture mid-run, or frames to time (D-7425), need a shown window)
     if not testing or shoots:
         external_call["gtk_window_present", NoneType](host[].window)
     if testing and shoots:
