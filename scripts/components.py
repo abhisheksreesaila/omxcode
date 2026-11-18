@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips"],  # (clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips", "pnote"],  # (pnote: goal 74 M6/M7 run it headless; clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot", "clips"],  # (clips: goal 71 M2, docs/goals/71/clipgrid_web.py; kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -171,6 +171,12 @@ COMPOSITES = [
     ("Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)", "mojoui/album.mojo", ["Canvas"], "Album("),
     ("Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons", "ProgressBar"], "MediaCards("),
     ("MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)", "mojoui/mediatimeline.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Overlay", "ContextMenu", "Card", "Quiet buttons"], "MediaTimeline.open_with("),
+    # goal 74: Personal Note's editors, native (drawn through a Painter: no toolkit text widget, no JS)
+    ("History (undo and redo for any editor: steps, merged typing, a redo branch, a cap)", "mojoui/history.mojo", [], "History["),
+    ("TextEdit (a native multi-line editor: lazy wrap, caret, selection, words, hit tests, undo; 1M characters)", "mojoui/textedit.mojo", ["Canvas", "Canvas: keys (focus on press)", "Canvas: press, release, double"], "TextEdit("),
+    ("MdEdit (Markdown drawn and edited in place: marks hidden off the caret's line, task boxes, lists, code blocks)", "mojoui/mdedit.mojo", ["Canvas", "Canvas: keys (focus on press)", "Canvas: press, release, double"], "MdEdit("),
+    ("ObjectLayer (free objects on a canvas: text, stickies, shapes, pictures, ink, arrows; select, handles, rotate, z, undo)", "mojoui/objectlayer.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: press, release, double", "Canvas: keys (focus on press)"], "ObjectLayer("),
+    ("MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)", "mojoui/mindmap.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)"], "MindMap("),
     ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
