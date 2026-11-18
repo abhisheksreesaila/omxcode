@@ -413,6 +413,10 @@ SERVICES = [
      {"Linux (GTK)": None, "Web": ("❌", "the model needs CPython + torch in the app's process"),
       "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; needs CPython with torch beside the app (MPS), never run"),
       "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+    ("Language model in process", "mojoui.llm: Llm(gguf, gpu).chat(messages, tools) -> id, poll(id) -> TEXT / REASONING / TOOL_CALLS / DONE events, cancel(id); two sequences; prompt cache (llama.cpp library through bridge/llm_shim.cpp)", "",
+     {"Linux (GTK)": ("✅", "tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); no app yet"), "Web": ("❌", "needs libllama in the app's process"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("❌", "not built (llama.cpp has Metal; the shim is untried there)"),
+      "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
 ]
 
 

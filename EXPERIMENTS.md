@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 72 M1: `mojoui.llm`, Qwen3.8-27B in the app's own process (2026-11-17)
+- **Setup:** llama.cpp 9048bad (CUDA, sm_86) from omx-local's build, Qwen3.8-27B-UD-Q4_K_M, GPU 1 (q8_0 KV, flash attention, 32768 context, 2 sequences); `scripts/build_llm_shim.sh`, then `scripts/mxbuild.sh tests/test_llm.mojo -o build/test_llm && build/test_llm`.
+- **Built:** bridge/llm_shim.cpp (one engine thread, chat template + tools through llama.cpp's jinja code, per-sequence prompt cache with recurrent-state checkpoints, streaming parse, cancel, wake byte), mojoui/llm.mojo (`Llm`: chat / poll / cancel / complete), tests/test_llm.mojo.
+- **Worked (numbers in build/g72/llm-bench.json):** Paris; a get_weather call parsed to `{"city":"Lisbon"}` with no markup in the text; decode 42 tok/s (best of 3: 42.0, 37.3, 40.0, then 41.8, 42.1, 41.0 on a later run); cancel 14-22 ms; a 3394-token prompt: first turn 2.4 s, second 0.11-0.17 s with 3395 tokens cached; a background sequence ran beside the conversation (the answer came in 0.2-0.3 s); first token on a warm prompt 52 ms in-process (52-56 ms across runs) against 83-250 ms through llama-server over HTTP (a different GPU, its prompt cache warm).
+- **Broke and how it was fixed:** the first cache try missed when `think` changed between turns (the template changes the prompt from its first tokens: now documented, D-7204); a `List` passed to `poll` by address was freed early in the test (Mojo destroys a value after its last use: `_ = len(list)` after the call).
+- **Means:** the brain of the voice app runs inside the framework with no server and no second process, and its second turn costs a tenth of its first. Decode is the GPU's (25 ms a step); MTP could add up to 1.7x and is the next lever if M3's latency needs it.
+- **Next:** M2 (`mojoui.voice`), then M3 puts this behind an AG-UI LocalAgent.
+---
+
 ## Fix: the Linux download opens the file it is given (2026-11-16)
 - **Setup:** a fresh download of the linux-app release (sha256 db2a7475…), installed with its install.sh, run on a headless display before recording the launch video.
 - **Broke:** `./omxplorer path/to/file.csv` (the README) and the launcher entry's `%f` showed the Start screen: only scripts/omxplorer.sh opened a file, through OMX_OPEN.
