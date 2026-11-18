@@ -107,6 +107,8 @@ def _play(words: Int) raises:
         var n = min(avail, OUT_CHUNK)
         for i in range(n):
             buf[i] = ring.unsafe_offset((read + i) % OUT_RING)[]
+        if idle:  # a burst after a quiet stretch starts from a flushed stream: PipeWire's pulse server lost whole replies written to one that had run dry
+            _ = dl_call[c_int](lib, "pa_simple_flush", s, Int(err))
         if dl_call[c_int](lib, "pa_simple_write", s, Int(buf), n * 4, Int(err)) < 0:
             _A.store(_word(words, S_ERR), Int64(err[0]))
             lost = True

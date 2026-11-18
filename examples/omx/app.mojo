@@ -111,7 +111,7 @@ struct Main(App):
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
             var ctx = Int(environment("OMX_LLM_CTX", "65536"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM))
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM), max_tokens=1200)
             self.assist.register(self.llm.value())
         except e:
             self.note = "the language model didn't load: " + String(e)
@@ -401,6 +401,7 @@ struct Main(App):
                 print("OMX REPLY: turn=" + String(self.turns) + " first_words_ms=" + String(Int(first + 0.5)) + " text=" + self.reply, flush=True)
                 if kind == EV_RUN_ERROR:
                     self.note = "the run failed: " + self.client.ended
+                    print("OMX ERROR: " + self.client.ended, flush=True)
                 if self.thought_through and self.assist.jobs_started == self.jobs_before:  # (asked to think it through, the model didn't: the job starts anyway)
                     self.thought_through = False
                     self.assist.start_job("", self.heard, "", self.llm.value())

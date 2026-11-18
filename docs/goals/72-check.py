@@ -361,7 +361,7 @@ def wait_gpu(index, need_mib, timeout=1200):
 
 def run6(source, steps, env=None, **kw):
     wait_gpu(BRAIN_GPU, 20000)
-    ev, r = run_app(source, steps, env=env, **kw)
+    ev, r = run_app(source, steps, env={"OMX_TRACE": "1", **(env or {})}, **kw)
     (OUT / "last-run6.log").write_text(r.stdout)  # (what the app printed, for reading when a scenario fails)
     return ev, r
 

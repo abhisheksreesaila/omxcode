@@ -115,7 +115,7 @@ struct Assistant(Movable):
             THINK_TOOL,
             "Start thinking hard in the background about a difficult question (compare, plan, decide, analyse) when the user asks you to think it through or get back to them. "
             "The conversation carries on meanwhile; the answer appears on screen later. After calling it, tell the user in one sentence that you will get back to them.",
-            '{"type":"object","properties":{"title":{"type":"string","description":"a few words naming the question, as you would say it aloud"},"task":{"type":"string","description":"the whole question with every detail the user gave, able to stand alone"}},"required":["title","task"]}',
+            '{"type":"object","properties":{"title":{"type":"string","description":"a few words naming the question, as you would say it aloud"},"task":{"type":"string","description":"the question restated in one to three sentences with every number the user gave, able to stand alone"}},"required":["title","task"]}',
         )
 
     def take_log(mut self) -> List[String]:

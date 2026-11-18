@@ -595,6 +595,7 @@ struct LlmAgent(LocalAgent, Movable):
         self.step_calls = List[ToolCall]()
         self.step_results = List[String]()
         self.step_state = List[Int]()
+        var bad = List[Bool]()
         var assistant = '{"role":"assistant","content":' + json_string(self.text_acc) + ',"tool_calls":['
         try:
             var j = Json.parse(self.model_calls)
@@ -607,6 +608,13 @@ struct LlmAgent(LocalAgent, Movable):
                 var args = j.text(j.get(c, "arguments"), "{}")
                 if args == "":
                     args = "{}"
+                var cut = False  # (a call cut off by the token limit has an unfinished string: it must not enter the history, where the chat
+                try:  # template parses every call's arguments again on every later turn and would fail the conversation for good)
+                    _ = Json.parse(args)
+                except:
+                    cut = True
+                    args = "{}"
+                bad.append(cut)
                 self.step_calls.append(ToolCall(id, name, args, True, False))
                 self.step_results.append(String(""))
                 self.step_state.append(0)
@@ -624,7 +632,10 @@ struct LlmAgent(LocalAgent, Movable):
             out.append(_ev("TOOL_CALL_ARGS", ',"toolCallId":' + json_string(c.id) + ',"delta":' + json_string(c.arguments)))
             out.append(_ev("TOOL_CALL_END", ',"toolCallId":' + json_string(c.id)))
             out.append(_ev("STATE_DELTA", ',"delta":[{"op":"replace","path":"/agent/step","value":' + String(self.step) + '},{"op":"add","path":"/agent/tools/-","value":' + json_string(c.name) + "}]"))
-            self.route(out, i)
+            if bad[i]:
+                out.append(self.answered(i, '{"error":"that call was cut off or was not valid JSON; call it again with shorter arguments"}'))
+            else:
+                self.route(out, i)
         self.phase = PH_CALLS
         self.settle(out)
 
