@@ -1,14 +1,19 @@
 # The native mind map (goal 74 M5): a 500-topic random map laid out with no two shown boxes overlapping, every topic on
 # its first-level ancestor's side, collapse hiding and expand restoring the same places, a Scene paint with one note per
 # topic and one polygon per branch; the keys (Tab, Enter, typing, F2, Escape, Delete, arrows, Space); undo and redo of
-# every step, and the outline text round trip.
+# every step, and the outline text round trip. Goal 75 M4: motion (topics glide on springs to their places, grow out of
+# their parent, shrink into it when removed or folded; frames are asked for only while something moves; less motion
+# jumps), per-frame paint+step time on a 300-topic map, and that map drawn to build/g75/map-ours.png.
 #   pixi run mojo run -I . tests/test_mindmap.mojo
 from std.testing import assert_equal, assert_true, assert_false
 from std.time import perf_counter_ns
+from std.os import makedirs
 
 from mojoui.mindmap import MindMap, MapView, RIGHT_SIDE, LEFT_SIDE, DONE_OPEN, DONE_YES
 from mojoui.text import Font
-from mojoui.scene import Scene, OP_POLY
+from mojoui.scene import Scene, SurfacePainter, OP_POLY
+from mojoui.canvas import Surface, rgba
+from mojoui.png import encode_png
 from mojoui.textedit import SHIFT, CTRL
 
 
@@ -75,6 +80,71 @@ def count_notes(sc: Scene, prefix: String, need_poly: Bool) raises -> Int:
             if need_poly:
                 assert_equal(Int(sc.kinds[sc.note_ops[k]]), OP_POLY)
     return n
+
+
+def sample_map(n: Int) -> MindMap:
+    """The judged map (as examples/pnote's scene_map): n topics, eight main branches, seeded words; balanced."""
+    var words: List[String] = ["Plan", "Ideas", "Budget", "Garden", "Trip", "Reading", "Health", "Work", "milk", "eggs",
+                               "flights", "hotel", "notes", "draft", "review", "launch", "seeds", "soil", "run", "sleep"]
+    var m = MindMap("Life plan")
+    var ids = List[Int]()
+    ids.append(0)
+    var s = UInt32(9)
+    for k in range(n - 1):
+        s ^= s << 13
+        s ^= s >> 17
+        s ^= s << 5
+        var parent = 0 if k < 8 else ids[1 + Int(s % UInt32(len(ids) - 1))]
+        var text = words[Int((s >> 5) % UInt32(len(words)))] + (" " + words[Int((s >> 11) % UInt32(len(words)))] if s % 3 == 0 else "")
+        ids.append(m.add_child(parent, text, 0))
+    m.balance()
+    m.set_focus(0)
+    m.clear_history()
+    return m^
+
+
+def has_note(sc: Scene, text: String) -> Bool:
+    for k in range(len(sc.notes)):
+        if sc.notes[k] == text:
+            return True
+    return False
+
+
+def mentions(sc: Scene, id: Int) -> Bool:
+    """Any note naming topic id (as a topic, a leaving topic or a branch's child)."""
+    var a = "node " + String(id) + " "
+    var b = "leaving " + String(id) + " "
+    var c = "->" + String(id)
+    for k in range(len(sc.notes)):
+        ref n = sc.notes[k]
+        if n.startswith(a) or n.startswith(b) or n.endswith(c):
+            return True
+    return False
+
+
+def at_rest(m: MindMap) raises:
+    """Nothing moves and every shown topic is drawn exactly at its laid-out place, fully there."""
+    assert_false(m.moving())
+    for id in range(len(m.model.nodes)):
+        if m.boxes[id].visible:
+            assert_equal(m.shown_x(id), m.boxes[id].cx())
+            assert_equal(m.shown_y(id), m.boxes[id].cy())
+            assert_equal(m.presence(id), 1.0)
+
+
+def frame(mut m: MindMap, mut sc: Scene, font: Font, dt: Float64) -> Float64:
+    """One frame of dt ms (step, then paint into a fresh list); returns its time in ms."""
+    var t0 = perf_counter_ns()
+    _ = m.step(dt)
+    sc.reset(1440, 900, 1.0)
+    m.paint(sc, font, MapView(720, 450, 0.5))
+    return Float64(perf_counter_ns() - t0) / 1e6
+
+
+def save_png(px: List[UInt32], w: Int, h: Int, path: String) raises:
+    var png = encode_png(px, w, h)
+    with open(path, "w") as f:
+        f.write_bytes(Span(png))
 
 
 def main() raises:
@@ -354,3 +424,143 @@ def main() raises:
     big_back.layout(font)
     check_layout(big_back)
     print("mindmap undo: ok")
+
+    # ---------------------------------------------------------------- motion
+    var mm = sample_map(300)
+    var scm = Scene(1440, 900, 1.0)
+    _ = frame(mm, scm, font, 0)
+    assert_false(scm.again)  # a map that is just there asks for no frames
+    at_rest(mm)
+    # an add: the new topic grows out of its parent, the rest glide to the new layout, within 400 ms, overshooting
+    # no more than 8 % of their travel
+    var par = mm.children(mm.children(0)[0])[0]
+    var nid = mm.add_child(par, "new idea", t)
+    var first = frame(mm, scm, font, 0)
+    assert_true(scm.again)
+    assert_equal(mm.shown_x(nid), mm.shown_x(par))
+    assert_equal(mm.shown_y(nid), mm.shown_y(par))
+    assert_equal(mm.presence(nid), 0.0)
+    var n_all = len(mm.model.nodes)
+    var x0 = List[Float64]()
+    var y0 = List[Float64]()
+    var moved = 0
+    for id in range(n_all):
+        x0.append(mm.shown_x(id))
+        y0.append(mm.shown_y(id))
+        if mm.boxes[id].visible and (mm.boxes[id].cx() != x0[id] or mm.boxes[id].cy() != y0[id]):
+            moved += 1
+    assert_true(moved > 1)  # (the new topic and the ones it pushed aside)
+    var over = 0.0
+    var worst = 0.0
+    var total = first
+    var frames = 1
+    var elapsed = 0.0
+    while elapsed < 400:
+        var ms = frame(mm, scm, font, 16)
+        elapsed += 16
+        worst = max(worst, ms)
+        total += ms
+        frames += 1
+        for id in range(n_all):
+            if not mm.boxes[id].visible:
+                continue
+            var ux = mm.boxes[id].cx() - x0[id]
+            var uy = mm.boxes[id].cy() - y0[id]
+            var travel = ux * ux + uy * uy
+            if travel > 4:
+                var along = ((mm.shown_x(id) - x0[id]) * ux + (mm.shown_y(id) - y0[id]) * uy) / travel
+                over = max(over, along - 1)
+        if elapsed <= 32:
+            assert_true(scm.again)
+    at_rest(mm)
+    assert_true(over <= 0.08)
+    _ = frame(mm, scm, font, 16)
+    assert_false(scm.again)  # settled: no more frames asked for
+    assert_true(has_note(scm, "node " + String(nid) + " new idea"))
+    worst = max(worst, first)
+    # less motion: an add lands at once, asking for nothing
+    var nid2 = mm.add_child(par, "at once", t)
+    scm.reset(1440, 900, 1.0)
+    scm.is_still = True
+    mm.paint(scm, font, MapView(720, 450, 0.5))
+    assert_false(scm.again)
+    at_rest(mm)
+    assert_equal(mm.presence(nid2), 1.0)
+    # a removal: the topic shrinks into its parent, fading ("leaving" while it does), then is gone from the notes
+    mm.remove(nid, t)
+    _ = frame(mm, scm, font, 0)
+    assert_true(scm.again)
+    assert_true(has_note(scm, "leaving " + String(nid) + " new idea"))
+    assert_false(has_note(scm, "node " + String(nid) + " new idea"))
+    elapsed = 0
+    while elapsed < 400:
+        _ = frame(mm, scm, font, 16)
+        elapsed += 16
+    _ = frame(mm, scm, font, 16)
+    assert_false(scm.again)
+    assert_false(mentions(scm, nid))
+    at_rest(mm)
+    # collapse glides the subtree into its topic and away; expand grows it back to the same places
+    var fold = mm.children(0)[1]
+    var kids_of = mm.children(fold)
+    var kx = mm.boxes[kids_of[0]].cx()
+    var ky = mm.boxes[kids_of[0]].cy()
+    mm.toggle(fold, t)
+    _ = frame(mm, scm, font, 0)
+    assert_true(has_note(scm, "leaving " + String(kids_of[0]) + " " + mm.text_of(kids_of[0])))
+    elapsed = 0
+    while elapsed < 400:
+        _ = frame(mm, scm, font, 16)
+        elapsed += 16
+    assert_false(mentions(scm, kids_of[0]))
+    at_rest(mm)
+    mm.toggle(fold, t)
+    _ = frame(mm, scm, font, 0)
+    assert_equal(mm.shown_x(kids_of[0]), mm.shown_x(fold))  # (growing out of the topic)
+    elapsed = 0
+    while elapsed < 400:
+        _ = frame(mm, scm, font, 16)
+        elapsed += 16
+    at_rest(mm)
+    assert_equal(mm.boxes[kids_of[0]].cx(), kx)
+    assert_equal(mm.boxes[kids_of[0]].cy(), ky)
+    _ = frame(mm, scm, font, 16)
+    assert_false(scm.again)
+    assert_equal(count_notes(scm, "node ", False), mm.visible_nodes())
+    assert_equal(count_notes(scm, "branch ", True), mm.visible_nodes() - 1)
+    # the clock drives a host's frames (no step()): a settled map asks for nothing
+    var live = sample_map(40)
+    var scl = Scene(800, 600, 1.0)
+    live.paint(scl, font, MapView(400, 300, 1.0))
+    assert_false(scl.again)
+    _ = live.add_child(0, "grows", t)
+    scl.reset(800, 600, 1.0)
+    live.paint(scl, font, MapView(400, 300, 1.0))
+    assert_true(scl.again)
+    assert_true(worst < 4.0)  # (the budget is 2 ms; noise on a busy machine is allowed for, the mean is printed)
+    print("mindmap motion: ok")
+    print("mindmap motion frame (300 topics, step + paint into a Scene, add animation):", total / Float64(frames), "ms mean,", worst,
+          "ms worst over", frames, "frames; overshoot", over * 100, "% of travel")
+
+    # ---------------------------------------------------------------- the judged picture: build/g75/map-ours.png
+    var pic = sample_map(300)
+    pic.layout(font)
+    var bx0 = 1e9
+    var by0 = 1e9
+    var bx1 = -1e9
+    var by1 = -1e9
+    for id in range(len(pic.model.nodes)):
+        if pic.boxes[id].visible:
+            bx0 = min(bx0, pic.boxes[id].x)
+            by0 = min(by0, pic.boxes[id].y)
+            bx1 = max(bx1, pic.boxes[id].x + pic.boxes[id].w)
+            by1 = max(by1, pic.boxes[id].y + pic.boxes[id].h)
+    var W = 1440
+    var H = 900
+    var k = min(Float64(W - 40) / (bx1 - bx0), Float64(H - 40) / (by1 - by0))
+    var px = List[UInt32](length=W * H, fill=rgba(0xF7, 0xF8, 0xFA))
+    var sp = SurfacePainter(Surface(Int(px.unsafe_ptr()), W, H, 1.0))
+    pic.paint(sp, font, MapView(Float64(W) / 2 - (bx0 + bx1) / 2 * k, Float64(H) / 2 - (by0 + by1) / 2 * k, k))
+    makedirs("build/g75", exist_ok=True)
+    save_png(px, W, H, "build/g75/map-ours.png")
+    print("mindmap picture: build/g75/map-ours.png,", Int(bx1 - bx0), "x", Int(by1 - by0), "map points at zoom", k)

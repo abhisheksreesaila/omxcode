@@ -1674,3 +1674,10 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7514 · gpu2d stacks the five faces in one 1026×312 R8 atlas with zero borders · bilinear sampling with clamp reads zeros past a face's edge exactly as Face.coverage · yes
 - D-7515 · gpu2d skips glyphs with no pixels (a space) · a space only moves the pen · yes
 - D-7516 · Canvas(…).gpu() marks a canvas for the GPU path through the node's hint ("gpu"), not a bit in spacing or size (those carry scroll_pans, keys, passthrough and hosts compare them exactly) · nothing existing changes meaning · yes
+- D-7517 · mindmap packs subtrees by their outline instead of full-height bands · a 300-topic map comes out round (2359×2118 points) instead of a column (Personal Note lays the same seed out 4340×9585); no boxes overlap · yes
+- D-7518 · mindmap writes deeper topics on their branch (cards only for main topics, a dark root) · the Buzan look, Personal Note's branch style · yes
+- D-7519 · mindmap springs at stiffness 600 / damping 40 (ζ≈0.82) · the default Spring takes ~1 s to stop; this one is still by 400 ms with ~1 % overshoot · yes
+- D-7520 · mindmap takes time from the clock in paint, step(dt_ms) for tests · pnote's paint call stays as is; tests stay deterministic · yes
+- D-7521 · fading topics are noted "leaving <id>", not "node <id>" · the node-notes-equal-shown proof holds mid-fade · yes
+- D-7522 · a removed topic keeps its box after an undo · so the undo's removal shrinks out instead of vanishing · yes
+- D-7523 · balance() is explicit (one undo step), not run on every layout; pnote's scene map calls it · sides are stored (the L flag) and a layout shouldn't change what the person chose · yes
