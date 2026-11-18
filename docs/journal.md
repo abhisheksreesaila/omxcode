@@ -1425,3 +1425,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Measured the old look on the real app (omxplorer, fleet.csv, two charts, 1440x900, GTK headless and the web in Chromium): light canvas L* 92 against the cards' 100, dark 9 against 11.7 (a 2.4 step: the dark sheet read flat; omxplorer opens in dark). ink3 on the old light canvas was 3.8:1, already under AA.
 - Darker/cooler light canvas, deeper dark canvas, one edge and one soft shadow on a light card (the dark ones had them), ink3 darker; the contrast test and the shots' pixel step are docs/goals/73/m3.py's proof. GTK clips a card's shadow at the Board's edge (the Board is the window's height), so the bottom of the last card shows 3 px of it; the sides and gaps show all of it.
 - Goal 54's checker pinned the old backdrop colours: updated to the new ones (D-7323).
+## 2026-11-17 (goal 73 M1)
+- Links autocomplete: mojoui.links `complete`, chips under the field, omxplorer feeds videos' and folders' columns. tests/test_link_complete.mojo; docs/goals/73/m1.py PASS on GTK headless (real widgets) and the web host (agent tools).
+- Bug found by the proof: after Return the Links field showed the old link text again (a held change from the chip's own set_text, sent after the rebuild; D-7304). Fixed in the GTK host.
+- Not run: AppKit/iPhone (chips are plain Buttons; the AppKit test-step parser still looks fields up by hint only); no web-host picture (the agent host has no pixels); tests/test_links.mojo needs python duckdb, missing in this env.
