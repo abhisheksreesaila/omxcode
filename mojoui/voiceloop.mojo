@@ -340,7 +340,7 @@ struct VoiceLoop(Movable):
         """The reply's next words as the model produces them: each complete sentence goes to the mouth."""
         if not self.loaded:
             return
-        self.pending += speech_clean(delta)
+        self.pending = self.pending + speech_clean(delta)  # (not `+=`: on a String field that crossed ~192 bytes it crashed the app, D-7245)
         for s in take_sentences(self.pending):
             self.speak(s)
 

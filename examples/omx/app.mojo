@@ -20,7 +20,6 @@ from mojoui.view import View, Overlay
 from mojoui.agui import Agent, EV_TEXT, EV_RUN_FINISHED, EV_RUN_ERROR
 from mojoui.agentui import Screens
 from mojoui.canvas import Surface
-from mojoui.chip import Badge, BADGE_OK, BADGE_WARN
 from mojoui.clock import now_ns
 from mojoui.effects import Every
 from mojoui.json import Json
@@ -29,9 +28,8 @@ from mojoui.llmagent import LlmAgent, press, view_tools, render_ui_tool, DEFAULT
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme
-from mojoui.view import Button, HStack, SUBTLE
 from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
-from mojoui.voiceui import VoiceHome, VoiceWork, VoiceDock, VoiceChips
+from mojoui.voiceui import VoiceHome, VoiceWork, VoiceDock, VoiceChips, VoiceLane
 from themes.liquid import liquid
 
 comptime TICK = 1
@@ -251,7 +249,7 @@ struct Main(App):
                 var j = Json.parse(ev)
                 var delta = j.text(j.get(0, "delta"))
                 if not self.silent_run:
-                    self.reply += delta
+                    self.reply = self.reply + delta  # (not `+=`: see mojoui.voiceloop, D-7245)
                     self.loop.say(delta)
             except:
                 pass
@@ -290,9 +288,7 @@ struct Main(App):
     def page(self, cards: Bool) -> View:
         """The screen without the cards' own buttons when `cards` is False: those are the agent's to show, not to press, so
         the tools it is offered (the app's buttons) don't change when a card appears (the model's prompt cache keeps)."""
-        var lane = HStack(Badge("Cloud · Claude" if self.cloud else "Local · Qwen 27B", BADGE_WARN if self.cloud else BADGE_OK, dot=True),
-                          Button("Switch lane", LANE, SUBTLE).tag("lane").tooltip("Switch the lane the answers come from, this machine or the cloud."),
-                          spacing=8)
+        var lane = VoiceLane("Local · Qwen 27B", "Cloud · Claude", self.cloud, LANE)
         var dock = VoiceDock(self.muted, self.typing, self.draft, MUTE, TYPE, STOP, DRAFT, SEND)
         if not cards:
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), "", "", "", lane, List[View](), dock)

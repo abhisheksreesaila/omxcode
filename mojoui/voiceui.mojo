@@ -5,11 +5,13 @@
 #
 #   VoiceHome(OrbView(ORB, v, True), "Hi, I'm omx.", "Listening", lane, chips, dock)
 #   VoiceWork(OrbView(ORB, v, False), "Listening", heard, reply, lane_badge, cards, dock)
+#   VoiceLane("Local · Qwen 27B", "Cloud · Claude", on_cloud, LANE)    the chip and its switch (the tool `lane`)
 #   VoiceDock(muted, typing, draft, MUTE, TYPE, STOP, DRAFT, SEND)       buttons are named mute, type, stop: an agent's tools
 #   VoiceChips(["What is the capital of France?", …], CHIP)               one button per phrase, messages CHIP + k
 #
 # The orb and the rim come from mojoui.orb; the cards from mojoui.agentui.Screens.
 
+from mojoui.chip import Badge, BADGE_OK, BADGE_WARN
 from mojoui.view import (View, Text, Button, TextField, VStack, HStack, Spacer, Scroll, TITLE, HEADLINE, CAPTION, PLAIN, SUBTLE,
                          PROMINENT, CENTER, START, END)
 
@@ -19,6 +21,15 @@ def VoiceChips(phrases: List[String], first_msg: Int) -> View:
     for k in range(len(phrases)):
         items.append(Button(phrases[k], first_msg + k, PLAIN).tag("ask-" + String(k + 1)).tooltip("Ask: " + phrases[k]))
     return VStack(items^, spacing=8).align(CENTER)
+
+
+def VoiceLane(local: String, cloud: String, on_cloud: Bool, switch: Int) -> View:
+    """The lane chip: which model answers, `local` (on this machine, a green dot) or `cloud` (an orange one; the app also
+    shows mojoui.orb's rim while it is), and the button that switches between them."""
+    var items = List[View]()
+    items.append(Badge(cloud if on_cloud else local, BADGE_WARN if on_cloud else BADGE_OK, dot=True))
+    items.append(Button("Switch lane", switch, SUBTLE).tag("lane").tooltip("Switch the lane the answers come from, this machine or the cloud."))
+    return HStack(items^, spacing=8).align(CENTER)
 
 
 def VoiceDock(muted: Bool, typing: Bool, draft: String, mute: Int, type_: Int, stop: Int, on_draft: Int, on_send: Int) -> View:
@@ -60,9 +71,9 @@ def VoiceWork(orb: View, status: String, heard: String, reply: String, lane: Vie
     var head = List[View]()
     head.append(orb.copy())
     head.append(VStack(words^, spacing=4).align(START).grow())
-    head.append(lane.copy())
     var items = List[View]()
     items.append(HStack(head^, spacing=14).align(CENTER).fill())
+    items.append(lane.copy())
     items.append(Scroll(VStack(cards^, spacing=12).align(START).fill(), height=0).grow().fill().tag("shelf"))
     items.append(dock.copy())
     return VStack(items^, spacing=12).align(START).fill().grow().padding(20).tag("voice-work")
