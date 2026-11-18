@@ -1,40 +1,47 @@
-# GOAL 74: Personal Note's editors, native in Mojo
+# GOAL 75: silky on the GPU, Linux and Mac (whiteboard, canvas, mind map)
 
-**End goal (owner, 2026-11-17):** "Can we even build Personal Note?" — build it natively: "I don't want to use the JS… I want
-to use native stuff so that we can use it for many things" (fast on CPU and GPU, polished, agent tools and AG-UI for free,
-"slap in any app"). The missing heart of Personal Note (`~/Projects/personalnotev2`, docs/audits/personalnote.md) becomes
-generic `mojoui` components, then a small Personal Note app composes them, and we race the original on the same machine.
+**End goal (owner, 2026-11-18):** "I want a native Linux and Mac running on GPU with super speed… I will judge with
+whiteboard and canvas and mindmap… personalnote.app has a Tony Buzan mind map and silky smooth." And: "the mac is
+connected to the env, so you can test instead of relying on CI."
 
-Base: main cc33c9d7. Worktree ../mojo-ui-g74, branch goal-74-personal-note, its own pixi env. Decisions D-74xx. Goal 71's
-contract is archived as docs/goals/71.md. Checker: `scripts/check` → `docs/goals/74-check.py`.
+Base: goal 74's branch (a2a91071, not yet on main). Worktree ../mojo-ui-g74, branch goal-75-gpu-canvas. Decisions
+D-75xx. Checker: `scripts/check` → `docs/goals/75-check.py`. Goal 74's contract is archived as docs/goals/74-GOAL.md.
+
+**What we found first (D-7501):** on the RTX 3090 desktop with GTK's Vulkan renderer, pnote's 645-object canvas pans at
+0.7 ms a frame (p50) but spikes to 120–230 ms whenever a layer is rebuilt: GTK fills our ink outlines as vector paths on
+the CPU. The Mac host rasterizes every canvas on the CPU at Retina size. So: our own GPU renderer for the Scene.
+
+## The three judged scenes (pnote, `PNOTE_SCENE=`)
+- **whiteboard:** 1,000 pressure strokes (~100k points) on a canvas note; pan, zoom, and a pen drawing a new stroke.
+- **canvas:** Personal Note's own 645-object benchmark note (300 text boxes, 240 ink paths, 60 rects, 45 arrows).
+- **mindmap:** a 300-topic map; pan, zoom, and topics added and collapsed while it animates.
+A scene is **silky** on a machine when, over the steps below, frame work is p95 ≤ 8.3 ms (120 Hz) and no frame passes
+16.7 ms (one 60 Hz frame), measured by the host's framebench on the real GPU (not a virtual display).
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/74-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (`docs/goals/75-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | The audit, today | docs/audits/personalnote.md and .json re-dated 2026-11-17 against this branch's base; each row's `omxcode piece` names files that exist; the counts in the verdict equal the JSON's; a `native` field per row (JS-free: true/false) and no row's `have` rests on a JS widget |
-| M1 | Undo, generic | `mojoui/history.mojo`: a typed undo/redo stack of edits with coalescing (typing merges into one step by time and kind), a redo branch dropped on a new edit, a cap; tests/test_history: `history: ok`, `history coalesce: ok`, `history cap: ok` |
-| M2 | A native text editor | `mojoui/textedit.mojo` (no JS, no toolkit text widget): a buffer of paragraphs, soft wrap by `Font.measure`, caret and selection (shift, word ⌥/ctrl moves, home/end, up/down keeping x, select all), insert/delete/backspace/enter, hit test x,y → offset and back, copy/cut/paste through the host clipboard text, undo via M1; paints only visible lines through any Painter. tests/test_textedit: `textedit edit: ok`, `textedit caret: ok`, `textedit wrap: ok`, `textedit hit: ok`, `textedit undo: ok`, and `textedit 1M: ok` (a 1,000,000-character document: opening ≤ 300 ms, a keystroke in the middle with re-layout and paint of the view ≤ 4 ms p95 over 200 keys) |
-| M3 | Markdown drawn and edited | `mojoui/mdedit.mojo` on M2: headings, bold, italic, inline code, links, bullet/numbered lists, task boxes, quotes, code blocks, rules drawn with their styles; the marks (`#`, `**`, `` ` ``, `- [ ]`) hidden except on the caret's line; a click on a task box toggles it. tests/test_mdedit reads the Scene's notes: `mdedit styles: ok`, `mdedit marks: ok`, `mdedit task: ok` |
-| M4 | Objects on a canvas | `mojoui/objectlayer.mojo`: text boxes (M3 inside), stickies, rectangles, ellipses, pictures; select, shift-select, marquee, move, resize by 8 handles, rotate, z-order, lock, nudge, select all, delete, duplicate; connectors that stay attached and re-route when an end moves; every change undoable (M1); hit tests and paint culled to the view. tests/test_objectlayer: `objectlayer edit: ok`, `objectlayer connectors: ok`, `objectlayer undo: ok`, `objectlayer random: ok` (3,000 random operations, then undo all → the start, redo all → the end), `objectlayer 600: ok` (Personal Note's 600-object benchmark note: a pan's paint ≤ 4 ms, a hit test ≤ 0.1 ms) |
-| M5 | Mind map | `mojoui/mindmap.mojo`: a tree laid out left/right of the root with no two nodes overlapping, tapered curved branches (filled polygons), keys Tab child, Enter sibling, F2/typing edits (M2), Delete, arrows move the focus, Space collapses, undo (M1). tests/test_mindmap: `mindmap layout: ok` (500 random nodes, no overlap), `mindmap keys: ok`, `mindmap undo: ok` |
-| M6 | Personal Note, the app | `examples/pnote`: a sidebar of notes kept in SQLite (FTS5 search box), three note kinds: canvas (M4 + pressure ink), page (M3 full page) and mind map (M5); Ctrl+K palette over notes and commands; Liquid theme; saved on close and reopened. On GTK headless with real steps: type a page, make a canvas box and a sticky, connect them, draw a stroke, undo, add three map nodes; quit; relaunch shows the same notes (read from the reports); screenshots of each kind at 1440×900 with nothing clipped |
-| M7 | The race | same machine: Personal Note's own `scripts/benchmark-leafer.mjs` (600-object note, pan/zoom frame times in Chromium) against pnote's canvas with the same note (frame times on GTK), and a 1M-character page: typing latency in pnote vs Personal Note's page editor in Chromium. docs/goals/74/race.md generated by the check, as measured; PASS when both sides ran (the result is reported, not required to win); BLOCKED names what would not run |
-| M8 | Nothing regressed | components matrix regenerated with the new components (✅ GTK where a check runs them), decisions lint, goal 40's M0–M2 (ink and Sketch), goal 71's M5 |
+| M0 | Baselines, both machines | pnote's PNOTE_SCENE (three scenes); framebench on the AppKit host (pan, zoom, draw, type, as GTK's); scripts/mac-ssh passes app env (MAC_ENV); docs/goals/75/baseline.md generated: each scene's pan/zoom (and draw / grow) numbers on the Linux desktop GPU and the M4 Mac, today's renderers |
+| M1 | The renderer's core | `mojoui/gpu2d.mojo` (backend-free): a Scene → batches: instanced rects, rounded rects and circles (distance in the shader), lines, glyph quads from the baked font atlases, images, filled polygons (non-zero, stencil-and-cover fans), clips, layer transforms; plus a CPU executor of the batches. tests/test_gpu2d: `gpu2d batches: ok` (op counts and order kept per layer), `gpu2d cpu: ok` (the CPU executor's picture vs SurfacePainter's for each primitive and for the three scenes: mean ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 off) |
+| M2 | Linux on the GPU | a GL backend (mojoui.present's context): batches → an MSAA texture (stencil polygons, the glyph atlas as a texture), shown by GTK as a GdkGLTexture; canvases opt in (`Canvas(…).gpu()`), CPU fallback when GL is missing. Readback vs the CPU executor within M1's bounds; on the desktop (GTK on the real Wayland display): all three scenes silky |
+| M3 | Mac on the GPU | a Metal backend (same batches; instanced pipelines and the stencil fill built once at start), shown through a CAMetalLayer (or the IOSurface the host has); readback vs the CPU executor within M1's bounds; on the owner's M4 over scripts/mac-ssh: all three scenes silky |
+| M4 | A Buzan mind map, silky | mojoui.mindmap: one-bend organic branches as ribbons tapering by depth (thick at the root), a colour per main branch, branch-style labels resting on their branch below the root's children, and motion: topics glide on springs (mojoui.spring) when added, removed, collapsed or relaid, branches following each frame; less-motion jumps. test_mindmap's proofs still pass plus `mindmap motion: ok` (positions converge, no overshoot past 8 %, still frames stop asking for frames); the grow step (20 topics added one per 100 ms, collapse/expand) silky on both machines; a side-by-side shot with Personal Note's map (build/g75/compare.png) |
+| M5 | Whiteboard ink, silky | the wet stroke on its own layer drawn each frame on the GPU; framebench draw (a 300-move stroke) and finish (strokes landing) silky on both machines with 1,000 strokes on the page |
+| M6 | Nothing regressed | goal 74's M1–M7, goal 40's M0–M2, the component matrix (gpu2d listed; ✅ where a check runs it), decisions lint |
 
 ## Done means
-74-check PASS for M0–M8 (a BLOCKED says exactly what is missing); a fresh reviewer subagent passes it; docs/goals/74-report.md
-with shots and the race; EXPERIMENTS.md entry. Commit after each passing milestone; merge to main locally after review; never push.
+75-check PASS for M0–M6 (BLOCKED names exactly what is missing); a fresh reviewer passes it; docs/goals/75-report.md with
+the numbers on both machines and shots; EXPERIMENTS.md. Commit after each passing milestone; not merged, never pushed.
 
 ## Out of bounds
-Pushing; editing ~/Projects/personalnotev2 (read and run its benchmarks only, outputs to this worktree's build/); other
-worktrees (goal 73 is running in ../mojo-ui-g73*); pip (pixi only); JS, CodeMirror or a toolkit text widget inside M2–M5;
-lowering a proof or deleting a test; ink anchored to words, secure notes, zip, AI/Jam (next goals).
+Pushing; the owner's global macOS settings (`defaults`); other worktrees (goal 73's); pip; a third-party 2D library
+(Skia, Vello, wgpu) in the path: the renderer is ours, in Mojo, over GL and Metal; lowering a proof or deleting a test.
 
 ## Assumptions (instead of asking)
-- Native means drawn by mojoui on a Canvas through a Painter (CPU now; the same paint calls feed the GPU presenter): one
-  implementation for GTK, the web host and the Mac.
-- Text input arrives as Canvas KEY events (`event.text`); IME composition (CJK) is out of scope this goal, noted as debt.
-- Fonts are the embedded Inter and JetBrains Mono atlases (mojoui.text); bold is Medium, italic is the face slanted.
-- M7 reports the race as measured; a loss is a finding, not a failure.
-- GTK first; the web host must at least build pnote; Mac builds are not attempted this goal.
-- Budget: 200 turns.
+- Windows open on the owner's desktop (Linux, a few seconds each) and on the Mac (a minute per run) for the GPU timings;
+  the owner said go. Each check run says so before it opens one.
+- GL through GTK's GdkGLContext on Linux (mojoui.present already makes one and hands textures to GTK, under the Vulkan
+  renderer too); Metal through the Objective-C runtime the AppKit host already uses; shaders compiled once at start.
+- The virtual Xvfb display keeps the CPU path (no GPU there); its checks stay as they are.
+- Text stays the baked atlases (sharp at 1× and 2×; huge zooms blur until a later SDF atlas).
+- Budget: 250 turns.
