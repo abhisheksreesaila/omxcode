@@ -34,6 +34,38 @@ struct Album(Copyable, Movable, Defaultable):
         self.abouts.append(about)
         self.pictures.append(ArcPointer(p^))
 
+    def hold(mut self, name: String, picture: ArcPointer[Picture], about: String) -> String:
+        """A picture the app made at run time (a tool drew it: mojoui.creator), kept under a name the agent may use. The name
+        is made safe: lower-case letters, digits and "-" only, at most 40 letters, never one already held (a number is added);
+        what it ended up as is returned. The agent still never sends pixels, only this name."""
+        var base = String("")
+        var dash = False
+        for b in name.as_bytes():
+            var c = Int(b)
+            if c >= 65 and c <= 90:
+                c += 32
+            if (c >= 97 and c <= 122) or (c >= 48 and c <= 57):
+                if dash and base.byte_length() > 0:
+                    base += "-"
+                dash = False
+                base += chr(c)
+            else:
+                dash = True
+        if base.byte_length() > 40:
+            var cut = String(base[byte = :40])
+            base = cut^
+        if base == "":
+            base = "picture"
+        var final = base
+        var n = 2
+        while self.find(final) >= 0:
+            final = base + "-" + String(n)
+            n += 1
+        self.names.append(final)
+        self.abouts.append(about)
+        self.pictures.append(picture)
+        return final
+
     def find(self, name: String) -> Int:
         for k in range(len(self.names)):
             if self.names[k] == name:

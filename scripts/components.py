@@ -470,6 +470,18 @@ SERVICES = [
     ("Assistant features (glue)", "mojoui.assistant.Assistant: registers todo_*, news and think_it_through as the agent's tools (LlmAgent.add_deferred: tools the app answers later), owns the to-do card's messages, the job, the news cards, the cloud lane; an app calls register / tick / flush / notice / cards", "",
      {"Linux (GTK)": ("✅", "examples/omx (72-check M6)"), "Web": ("🔨", "same code; never run in the browser"), "Android": ("❌", "needs the llama shim"),
       "Mac (AppKit)": ("❌", "needs the llama shim"), "iPhone (UIKit)": ("❌", "needs the llama shim"), "Agent (MCP)": ("—", "")}),
+    ("Image generation (a model as a child process)", "mojoui.imagegen: ImageServer.zimage(bin, models, gpu, port).start() / tick() / draw_request(msg, id, prompt, seed, size) -> an HTTP request effect; png_of(reply); sd-server with Z-Image-Turbo on its own GPU, ended with the app", "",
+     {"Linux (GTK)": ("✅", "tests/test_imagegen: healthy in 0.8 s, a 768 px picture in 3.4 s once warm (8.6 s the first), the same seed the same bytes, nothing left running after stop(); docs/goals/72-check.py M6-picture 5.5 s"),
+      "Web": ("❌", "the painter and its model files are on this machine; not run from the web host"), "Android": ("❌", "not built"),
+      "Mac (AppKit)": ("❌", "stable-diffusion.cpp's Metal build not tried"), "iPhone (UIKit)": ("❌", "no child processes"), "Agent (MCP)": ("—", "")}),
+    ("Comic and picture cards (agent-made images)", "mojoui.comic: ComicPlan.parse (the model's plan as a tool call: title, one hero, four panels), prompts with one hero and one seed; mojoui.creator.Creator: make_comic / draw_picture, a card that fills in panel by panel with a fade, full PNGs kept, Album.hold (a safe name; the agent never sends pixels)", "",
+     {"Linux (GTK)": ("✅", "docs/goals/72-check.py M6-comic on examples/omx: first panel 10.6-15.7 s, four 21-26 s, none blank, Qwen sees the hero in panel 1; tests/test_creator; docs/goals/72/comic_card.png, picture_card.png"),
+      "Web": ("🔨", "plain views and canvases; never run with this app"), "Android": ("🔨", "plain views and canvases; never run"),
+      "Mac (AppKit)": ("🔨", "builds; never run"), "iPhone (UIKit)": ("🔨", "builds; never run"), "Agent (MCP)": ("—", "")}),
+    ("Find in my notes (in-process embeddings)", "mojoui.notes: NotesIndex(folder, pack, cache).step(ms) / search(question, folder, k) -> files + passages; e5-small-v2 by MAX, a cached index, one folder only (no .., links, hidden files, > 1 MB); Creator.find_in_notes cites the files on a card", "",
+     {"Linux (GTK)": ("✅", "tests/test_notes: five questions each find the right file first (4 ms a search), unrelated finds nothing, cache reuse, confinement; docs/goals/72-check.py M6-notes 5/5 answered and cited; docs/goals/72/notes_card.png"),
+      "Web": ("❌", "needs the notes folder and MAX in the app's process"), "Android": ("❌", "no MAX"),
+      "Mac (AppKit)": ("❌", "MAX has no Mac GPU path here"), "iPhone (UIKit)": ("❌", "no MAX"), "Agent (MCP)": ("—", "")}),
 ]
 
 

@@ -48,6 +48,7 @@ comptime T_BUTTON = 0  # an app control: pressing it (its message)
 comptime T_TEXT = 1  # a text field: `text` argument
 comptime T_TOGGLE = 2  # a switch: `on` argument
 comptime T_DEFERRED = 3  # a tool the app answers later (a network request, a background job): take_calls hands it over, answer() ends it
+comptime T_CALL = T_DEFERRED  # (the same kind under the name mojoui.creator/comic use: a tool the app answers itself)
 
 comptime PH_IDLE = 0
 comptime PH_MODEL = 1  # the model is producing a step

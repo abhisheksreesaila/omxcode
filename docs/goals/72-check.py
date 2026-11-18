@@ -2,7 +2,7 @@
 
     pixi run python docs/goals/72-check.py [M0 M1 ...]          (default: every milestone)
 
-M6 has parts you can run alone: M6-UNITS, M6-TODO, M6-NEWS, M6-JOBS, M6-CLOUD (the other half adds M6-COMICS, M6-NOTES).
+M6 has parts you can run alone: M6-UNITS, M6-TODO, M6-NEWS, M6-JOBS, M6-CLOUD, M6-COMIC, M6-PICTURE, M6-NOTES.
 M4 and M5 are the app: examples/omx on GTK (headless Xvfb) and on the web host. The models run on GPU $G72_GPU (default 1:
 GPU 0 belongs to the prototype), the recorded "person" is Kokoro's voice played into the app's microphone through
 mojoui.audio's `file:` source, the app's speaker goes to a PulseAudio null sink this script loads and unloads, and what the
@@ -133,23 +133,10 @@ def build():
     return _BUILT[0]
 
 
-def run_app(source, steps, window=None, record=None, timeout=300, env=None):
-    """examples/omx on GTK on the headless display, the recorded voice as its microphone; the OMX lines it printed, in order,
-    as dicts {kind, ...} (turn=, ms=, text=, ...)."""
-    import headless
-
-    headless.ensure()
-    extra_env = env
-    if os.environ.get("G72_LAYOUT") == "split" and not env:  # (the brain on card 0, the voice on card 1: how M6 runs; set it to run M4 and M5 as the owner's machine is laid out)
-        extra_env = dict(SPLIT)
-    env = {"CUDA_VISIBLE_DEVICES": GPU, "OMX_LLM_GPU": "0", "OMX_MODELS": str(MODELS), "MOJOUI_AUDIO_SINK": SINK,
-           "MOJOUI_AUDIO_SOURCE": source.replace("W/", str(WAV) + "/"), "MOJOUI_TEST": steps}
-    env.update(extra_env or {})
-    if window:
-        env["MOJOUI_WINDOW"] = window
-    r = sh([str(ROOT / "build/omx/linux/omx")], timeout, env)
+def parse_omx(stdout):
+    """The OMX lines of an app run as dicts {kind, ...}."""
     events = []
-    for line in r.stdout.splitlines():
+    for line in stdout.splitlines():
         m = re.match(r"OMX (\w+): (.*)$", line)
         if not m:
             continue
@@ -162,7 +149,26 @@ def run_app(source, steps, window=None, record=None, timeout=300, env=None):
         for k, v in re.findall(r"(\w+)=(\S+)", rest):
             kv[k] = int(v) if v.lstrip("-").isdigit() else v
         events.append({"kind": m.group(1), **kv})
-    return events, r
+    return events
+
+
+def run_app(source, steps, window=None, record=None, timeout=300, env=None):
+    """examples/omx on GTK on the headless display, the recorded voice as its microphone; the OMX lines it printed, in order,
+    as dicts {kind, ...} (turn=, ms=, text=, ...). `env` adds to (and overrides) the app's environment."""
+    import headless
+
+    headless.ensure()
+    extra_env = env
+    if os.environ.get("G72_LAYOUT") == "split" and not env:  # (the brain on card 0, the voice on card 1: how M6 runs; set it to run M4 and M5 as the owner's machine is laid out)
+        extra_env = dict(SPLIT)
+    env = {"CUDA_VISIBLE_DEVICES": GPU, "OMX_LLM_GPU": "0", "OMX_MODELS": str(MODELS), "MOJOUI_AUDIO_SINK": SINK,
+           "MOJOUI_AUDIO_SOURCE": source.replace("W/", str(WAV) + "/"), "MOJOUI_TEST": steps,
+           "OMX_SD": "0"}  # (the painter off: M4's layout has the brain and the voice on one card; M6's creator layout turns it on)
+    if window:
+        env["MOJOUI_WINDOW"] = window
+    env.update(extra_env or {})
+    r = sh([str(ROOT / "build/omx/linux/omx")], timeout, env)
+    return parse_omx(r.stdout), r
 
 
 def of(events, kind, turn=None):
@@ -322,8 +328,8 @@ def m5():
 # The cards are the assistant's own (mojoui.assistant): to-do, news, think-it-through jobs, the cloud lane. The turns are typed
 # (the Type box, as a person at a keyboard would) except where the voice itself is the point (the job's second turn is a
 # recorded voice). Layout: the brain on card $G72_BRAIN_GPU (default 0), the voice models on card $G72_VOICE_GPU (default 1).
-# Sub-scenarios: M6-UNITS, M6-TODO, M6-NEWS, M6-JOBS, M6-CLOUD (with the frame), and the other half's (M6-COMICS, M6-NOTES:
-# BLOCKED until they are merged). M6 passes when every sub-scenario does.
+# Sub-scenarios: M6-UNITS, M6-TODO, M6-NEWS, M6-JOBS, M6-CLOUD (with the frame), and the creator's (M6-COMIC, M6-PICTURE,
+# M6-NOTES, below). M6 passes when every sub-scenario does.
 
 BRAIN_GPU = os.environ.get("G72_BRAIN_GPU", "0")
 VOICE_GPU = os.environ.get("G72_VOICE_GPU", "1")
@@ -608,12 +614,235 @@ def m6_cloud():
     return ("FAIL", "; ".join(probs)) if probs else ("PASS", " | ".join(said))
 
 
-def m6_other(name):
-    return "BLOCKED", f"{name} belongs to the other half of M6 (comics, notes search): not merged into this branch yet"
+# The creator's sub-scenarios: m6_comic, m6_picture, m6_notes (one run of the app, creator_session, read three ways).
+
+SD_BIN = Path.home() / "Projects/omx-local/third_party/stable-diffusion.cpp/build/bin/sd-server"
+LLAMA_SERVER = Path.home() / "Projects/omx-local/third_party/llama.cpp/build/bin/llama-server"
+CREATOR_ENV = {  # the creator layout (D-7250): the brain on physical GPU 0 (visible index 1), voice and embeddings on GPU 1 (index 0),
+                 # the image model's own process on GPU 1 (OMX_SD_GPU is physical)
+    "CUDA_VISIBLE_DEVICES": "1,0", "OMX_LLM_GPU": "1", "OMX_SD": "1", "OMX_SD_GPU": "1", "OMX_SD_PORT": "8291",
+    "OMX_NOTES_DIR": str(ROOT / "tests/fixtures/notes"), "OMX_NOTES_CACHE": str(OUT / "notes-cache"),
+    "OMX_PICTURES": str(OUT / "pictures"),
+}
+COMIC_SAYS = "Make a comic about a little robot learning to bake bread."
+PIC_SAYS = "Draw me a red fox sitting in a snowy forest."
+NOTE_QS = [
+    ("When is my next dental cleaning?", "health/dentist.md", r"14 february|february 14|fourteenth"),
+    ("What tyre pressure did I write down for the front tyres?", "home/car.md", r"2\.3|two point three"),
+    ("Who offered to narrate the onboarding video?", "work/q1-ideas.md", r"priya"),
+    ("What time do I land in Lisbon?", "trips/lisbon.md", r"7:40|seven forty"),
+    ("How long should grandma's lentil soup simmer?", "recipes.txt", r"\b25\b|twenty-five|twenty five"),
+]
+NAMED = {"health/dentist.md": r"dentist|dental", "home/car.md": r"\bcar\b|tyre|tire", "work/q1-ideas.md": r"ideas|q1|quarter|work",
+         "trips/lisbon.md": r"lisbon|trip", "recipes.txt": r"recipe"}
+_CREATOR = {}
 
 
-M6_PARTS = {"M6-UNITS": m6_units, "M6-TODO": m6_todo, "M6-NEWS": m6_news, "M6-JOBS": m6_jobs, "M6-CLOUD": m6_cloud,
-            "M6-COMICS": lambda: m6_other("M6-COMICS"), "M6-NOTES": lambda: m6_other("M6-NOTES")}
+def wait_for_gpu(index=0, under_mib=3000, minutes=45):
+    """The creator layout needs the brain's card (GPU 0) to itself: another checkout's run holds ~18 GB there while it works, so wait."""
+    until = time.time() + minutes * 60
+    while time.time() < until:
+        used = sh(["nvidia-smi", f"--id={index}", "--query-gpu=memory.used", "--format=csv,noheader,nounits"]).stdout.strip()
+        if used.isdigit() and int(used) < under_mib:
+            return True
+        time.sleep(15)
+    return False
+
+
+def kill_painter():
+    """Ends an image server this check left on its own port (looked up by its command line, not by name: other checkouts run theirs)."""
+    for d in Path("/proc").iterdir():
+        try:
+            cmd = (d / "cmdline").read_bytes().split(b"\0")
+            if d.name.isdigit() and b"--listen-port" in cmd and cmd[cmd.index(b"--listen-port") + 1] == CREATOR_ENV["OMX_SD_PORT"].encode():
+                os.killpg(int(d.name), signal.SIGTERM)
+        except (OSError, IndexError, ValueError):
+            pass
+
+
+def typed(text, then, open_box=False):
+    """Steps that type `text` into the app's question box (`open_box`: open it first; the Type button toggles it, so only the first
+    question taps it), then `then` (a wait or a waitfor)."""
+    return ("tap:type;wait:500;" if open_box else "") + f"enter:Type to omx={text};{then}"
+
+
+def blank_png(path):
+    from PIL import Image
+    import numpy as np
+    im = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
+    return float(im.std()) < 12
+
+
+def creator_session():
+    """One run of the app with the creator's features: a comic, a picture, five questions about the notes, a path outside them.
+    Pictures of the cards are taken as each lands (the shelf shows the newest first). Memoised: the three sub-scenarios read it."""
+    if _CREATOR:
+        return _CREATOR
+    why = build()
+    if why:
+        _CREATOR.update(error=why)
+        return _CREATOR
+    if os.environ.get("G72_REUSE_SESSION") and (OUT / "creator-session.log").exists():  # (re-judge the last run: a vision check that was blocked)
+        text = (OUT / "creator-session.log").read_text()
+        _CREATOR.update(events=parse_omx(text), out=text)
+        return _CREATOR
+    shutil.rmtree(OUT / "pictures", ignore_errors=True)
+    shutil.rmtree(OUT / "notes-cache", ignore_errors=True)
+    ensure_wavs()
+    kill_painter()
+    if not wait_for_gpu():
+        _CREATOR.update(error="GPU 0 stayed busy for 45 minutes (another run's brain is on it)")
+        return _CREATOR
+    steps = ["waitfor:Listening=240000", "wait:3000",
+             typed(COMIC_SAYS, "waitfor:Drawn in=150000", open_box=True), "wait:1500", f"shot:{OUT}/comic_card.png",
+             typed(PIC_SAYS, "waitfor:Drawn in=90000"), "wait:1500", f"shot:{OUT}/picture_card.png"]
+    for k, (q, f, fact) in enumerate(NOTE_QS):
+        steps.append(typed(q, "wait:24000"))
+        if k == 0:
+            steps.append(f"shot:{OUT}/notes_card.png")
+    steps.append(typed("Use find_in_notes with the folder ../../.ssh and the question keys.", "wait:20000"))
+    steps.append("wait:500")
+    with NullSink():
+        ev, r = run_app("file:W/q1.wav@3000", ";".join(steps), "390x844", timeout=900, env=CREATOR_ENV)
+    kill_painter()
+    for n in ("comic_card.png", "picture_card.png", "notes_card.png"):
+        pic(n)
+    (OUT / "creator-session.log").write_text(r.stdout + r.stderr)
+    _CREATOR.update(events=ev, out=r.stdout + r.stderr)
+    return _CREATOR
+
+
+def vision_check(png, question):
+    """Qwen's own eyes: Qwen3.8-27B with its mmproj in omx-local's llama-server (a process of mine on GPU 0, after the app has
+    ended and given the card back), asked what the main character of the picture is. mojoui.llm has no image input yet."""
+    import base64
+    import urllib.request
+    mm = MODELS / "mmproj-F16.gguf"
+    if not (LLAMA_SERVER.exists() and mm.exists()):
+        return None, "no llama-server or mmproj under " + str(MODELS)
+    if not wait_for_gpu():
+        return None, "GPU 0 stayed busy for 45 minutes (another run's brain is on it)"
+    log = open(OUT / "vision-server.log", "w")
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="0")
+    srv = subprocess.Popen([str(LLAMA_SERVER), "-m", str(MODELS / "Qwen3.8-27B-UD-Q4_K_M.gguf"), "--mmproj", str(mm), "-ngl", "999", "-c", "4096",
+                            "-fa", "on", "--host", "127.0.0.1", "--port", "8199", "--no-webui"], stdout=log, stderr=log, env=env,
+                           cwd=LLAMA_SERVER.parent, start_new_session=True)
+    try:
+        for _ in range(240):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8199/health", timeout=1)
+                break
+            except Exception:
+                time.sleep(1)
+                if srv.poll() is not None:
+                    return None, "llama-server ended: " + (OUT / "vision-server.log").read_text()[-300:]
+        else:
+            return None, "llama-server never became healthy"
+        uri = "data:image/png;base64," + base64.b64encode(Path(png).read_bytes()).decode()
+        body = json.dumps({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": uri}},
+                                                                        {"type": "text", "text": question}]}],
+                           "max_tokens": 12, "chat_template_kwargs": {"enable_thinking": False}}).encode()
+        req = urllib.request.Request("http://127.0.0.1:8199/v1/chat/completions", body, {"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=120).read())["choices"][0]["message"]["content"], ""
+    finally:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(srv.pid, sig)
+                srv.wait(15)
+                break
+            except ProcessLookupError:
+                break
+            except subprocess.TimeoutExpired:
+                continue
+
+
+def m6_comic():
+    """omx-local's M21, ported: first panel <= 20 s after the request, four in <= 60 s, none blank, Qwen sees the hero in panel 1."""
+    o = creator_session()
+    if "error" in o:
+        return "FAIL", o["error"]
+    ev = o["events"]
+    if of(ev, "FAILED"):
+        return "FAIL", "the app failed: " + of(ev, "FAILED")[0].get("text", "")
+    lines = [e for e in of(ev, "COMIC") if "panel" in e]
+    if not lines:
+        return "FAIL", "no comic: " + str([(e["kind"], e.get("text", "")[:80]) for e in ev if e["kind"] in ("REPLY", "REFUSED", "CARD")][:4]) + " " + o["out"][-300:]
+    first, last = lines[0]["ms"] / 1000, lines[-1]["ms"] / 1000
+    files = [e["file"] for e in lines]
+    probs = []
+    if len(lines) < 4:
+        probs.append(f"only {len(lines)} panels landed")
+    if first > 20:
+        probs.append(f"first panel after {first:.1f} s (> 20)")
+    if last > 60:
+        probs.append(f"all four after {last:.1f} s (> 60)")
+    blanks = [Path(f).name for f in files if blank_png(f)]
+    if blanks:
+        probs.append("blank panels: " + ", ".join(blanks))
+    seen, why = vision_check(files[0], "What is the main character in this picture? Answer in at most three words.") if files else (None, "no panel")
+    bench(comic_first_panel_s=round(first, 1), comic_all_s=round(last, 1), comic_panel1_seen=seen)
+    if probs:
+        return "FAIL", "; ".join(probs)
+    if seen is None:
+        return "BLOCKED", f"first panel {first:.1f} s, four in {last:.1f} s, none blank; Qwen's eyes could not run: {why}"
+    if "robot" not in seen.lower():
+        return "FAIL", f"Qwen sees {seen!r} in panel 1"
+    return "PASS", f"first panel {first:.1f} s, four panels {last:.1f} s, none blank, Qwen sees {seen.strip()!r} in panel 1; docs/goals/72/comic_card.png"
+
+
+def m6_picture():
+    o = creator_session()
+    if "error" in o:
+        return "FAIL", o["error"]
+    ev = o["events"]
+    got = [e for e in of(ev, "PICTURE") if "panel" in e]
+    if not got:
+        return "FAIL", "no single picture: " + o["out"][-300:]
+    ms = got[0]["ms"] / 1000
+    f = got[0]["file"]
+    if not Path(f).exists() or blank_png(f):
+        return "FAIL", f"the picture {f} is missing or blank"
+    from PIL import Image
+    w, h = Image.open(f).size
+    if ms > 20 or (w, h) != (768, 768):
+        return "FAIL", f"{w}x{h} after {ms:.1f} s"
+    bench(picture_s=round(ms, 1))
+    return "PASS", f"{w}x{h} picture {ms:.1f} s after the request, not blank, kept as {Path(f).name}; docs/goals/72/picture_card.png"
+
+
+def m6_notes():
+    """omx-local's M22, ported: >= 4 of 5 questions answered with the right file cited; a path outside the folder refused."""
+    o = creator_session()
+    if "error" in o:
+        return "FAIL", o["error"]
+    ev = o["events"]
+    good, named, lines = 0, 0, []
+    searches = [e for e in of(ev, "NOTES") if "first" in e]
+    for k, (q, f, fact) in enumerate(NOTE_QS):
+        turn = k + 3  # (turns 1 and 2 were the comic and the picture)
+        said = " ".join(e.get("text", "") for e in of(ev, "REPLY", turn)).lower()
+        cited = any(s.get("first") == f and s.get("text", "")[:12].lower() == q[:12].lower() for s in searches)
+        ok = cited and re.search(fact, said) is not None
+        good += ok
+        named += bool(re.search(NAMED[f], said))
+        lines.append(f"{f.split('/')[-1]}:{'ok' if ok else 'x(' + ('cited' if cited else 'cite') + ')'}")
+    refused = [e for e in of(ev, "REFUSED") if "only read your notes folder" in e.get("text", "")]
+    declined = of(ev, "REPLY", len(NOTE_QS) + 3)
+    unit = sh([str(ROOT / "build/test_creator")], 300, {"CUDA_VISIBLE_DEVICES": "1"})
+    refused_ok = "creator: ok" in unit.stdout
+    bench(notes_good=good, notes_named=named, notes_search_ms=[s.get("search_ms") for s in searches])
+    probs = []
+    if good < 4:
+        probs.append(f"{good}/5 notes answers right: {' '.join(lines)}")
+    if not refused_ok:
+        probs.append("the unit test of the outside-path refusal did not pass: " + tail(unit, 300))
+    if probs:
+        return "FAIL", "; ".join(probs)
+    return "PASS", (f"{good}/5 answered and cited ({' '.join(lines)}), the note named aloud in {named}/5; searches {[s.get('search_ms') for s in searches]} ms; "
+                    f"'../../.ssh' refused (unit test), asked aloud in the app: {'the tool refused it' if refused else 'the model declined by itself: ' + (declined[0].get('text', '')[:80] if declined else '(no answer)')}; docs/goals/72/notes_card.png")
+
+
+M6_PARTS = {"M6-" + k[3:].upper(): f for k, f in list(globals().items()) if k.startswith("m6_") and callable(f)}
 
 
 def m6():
@@ -632,8 +861,29 @@ def m6():
     return ("BLOCKED", summary) if "BLOCKED" in states else ("PASS", summary)
 
 
+OMX_LOCAL = Path.home() / "Projects/omx-local"
+OMX_LOCAL_HEAD = "8b6bcd0"  # (its head when this goal began: nothing of it is edited, committed or reset by this goal; D-7250)
+
+
 def m7():
-    return "BLOCKED", "M7 (nothing regressed) waits for M6 and goal 71's check"
+    """Nothing regressed: the component matrix is current, goal 71's M5 (the robot search) still passes, the decisions and libc
+    lints, and the prototype (omx-local) is exactly as the goal found it."""
+    probs, said = [], []
+    r = sh(["pixi", "run", "python", "scripts/components.py", "--check"], 300)
+    (probs if r.returncode else said).append("the component matrix is " + ("stale: " + tail(r, 300) if r.returncode else "current"))
+    for lint in ("decisions_lint", "libc_lint"):
+        r = sh(["pixi", "run", "python", f"scripts/{lint}.py"], 300)
+        (probs if r.returncode else said).append(f"{lint}: " + (tail(r, 400) if r.returncode else (r.stdout.strip().splitlines() or ["ok"])[-1]))
+    r = sh(["pixi", "run", "python", "docs/goals/71-check.py", "M5"], 3600)
+    line = next((l for l in r.stdout.splitlines() if l.startswith("M5:")), "")
+    (said if line.startswith("M5: PASS") else probs).append("goal 71 " + (line[:300] or "M5 printed nothing: " + tail(r, 300)))
+    head = sh(["git", "-C", str(OMX_LOCAL), "rev-parse", "--short=7", "HEAD"]).stdout.strip()
+    dirty = sh(["git", "-C", str(OMX_LOCAL), "status", "--porcelain", "--untracked-files=no"]).stdout.strip()
+    if head != OMX_LOCAL_HEAD or dirty:
+        probs.append(f"omx-local changed: HEAD {head} (was {OMX_LOCAL_HEAD}), edits: {dirty[:200] or 'none'}")
+    else:
+        said.append(f"omx-local untouched (HEAD {head}, no edits)")
+    return ("FAIL", "; ".join(probs + said)) if probs else ("PASS", "; ".join(said))
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, **M6_PARTS}

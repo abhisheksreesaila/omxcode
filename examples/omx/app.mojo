@@ -11,6 +11,9 @@
 #   the features      mojoui.assistant.Assistant      to-do (a file; the voice and the tick boxes edit it), news (cards of links), think-it-
 #                                                      through jobs (the model's second sequence), the cloud lane (`claude -p`, only when asked for)
 #
+#   pictures, notes    mojoui.creator.Creator          make_comic / draw_picture (an image model on its own GPU, panel by panel on a card)
+#                                                      and find_in_notes (e5 embeddings by MAX, a card citing the files)
+#
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the card the model loads on, counted among the
 # cards the process can see (default 0), OMX_LLM_CTX = its context (default 65536); the voice models use the first visible
@@ -33,7 +36,9 @@ from mojoui.clock import now_ns
 from mojoui.effects import Every
 from mojoui.json import Json
 from mojoui.llm import Llm
-from mojoui.llmagent import LlmAgent, press, view_tools, render_ui_tool, DEFAULT_SYSTEM
+from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool, DEFAULT_SYSTEM
+from mojoui.creator import Creator
+from mojoui.http import Request
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme
@@ -55,10 +60,12 @@ comptime ORB_CANVAS = 1
 comptime RIM_CANVAS = 2
 comptime CARDS = 20_000  # the cards' controls (mojoui.agentui.Screens) and their canvases
 comptime CARD_CANVASES = 2000
+comptime CREATOR_MSG = 900  # the image server's replies (mojoui.creator)
+comptime CREATOR_CANVAS = 12_000  # the creator's cards' canvases
 
 
 struct Main(App):
-    comptime HTTP = True  # the news tool is a request (https through Flare: examples/omx/needs)
+    comptime HTTP = True  # the news tool and the creator (the image server) send requests (https through Flare: examples/omx/needs)
 
     var http: Http
     var assist: Assistant
@@ -66,6 +73,7 @@ struct Main(App):
     var llm: Optional[LlmAgent]
     var client: Agent  # the conversation as the screen keeps it (AG-UI messages, the cards' calls)
     var screens: Screens[]
+    var creator: Creator  # comics, pictures and notes (mojoui.creator)
     var orb: Orb
     var look: Theme
     var suggestions: List[String]
@@ -120,6 +128,8 @@ struct Main(App):
         self.client = Agent("", 0, 0, "omx")
         self.client.offer(render_ui_tool())
         self.screens = Screens(CARDS, CARD_CANVASES)
+        var sd = environment("HOME") + "/Projects/omx-local"
+        self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
         self.orb = Orb()
         self.look = liquid(False)
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
@@ -155,9 +165,6 @@ struct Main(App):
     def every(self) -> List[Every]:
         return [Every(30, TICK)]
 
-    def requests(mut self) -> List[Request]:
-        return self.http.take()
-
     # --- events ---------------------------------------------------------------------------------------------------
 
     def update(mut self, e: Event):
@@ -191,9 +198,28 @@ struct Main(App):
                 _ = self.assist.on_http(e, self.llm.value())
         elif self.assist.owns(m):
             _ = self.assist.handle(e)
+        elif self.creator.owns(m):
+            self.creator.reply(e)
         elif self.screens.owns(m):
             if self.screens.handle(e, self.client):  # (a card's button: the agent hears it)
                 self.start_run()
+
+    def requests(mut self) -> List[Request]:
+        var all = self.http.take()  # (the news tool's, then the image server's)
+        for r in self.creator.take_requests():
+            all.append(r.copy())
+        return all^
+
+    def closing(mut self):
+        self.creator.closing()
+
+    def tools(self) -> List[AppTool]:
+        """What the agent may call: the app's buttons (not the cards' own: those don't change the tool list when a card appears,
+        so the model's prompt cache keeps) and the creator's tools."""
+        var all = view_tools(self.page(False))
+        for t in self.creator.tools():
+            all.append(t.copy())
+        return all^
 
     def send(mut self, text: String):
         """Words typed or tapped: the same turn as words said."""
@@ -204,7 +230,7 @@ struct Main(App):
     def tick(mut self):
         if not self.primed and self.llm:
             self.primed = True
-            self.llm.value().set_tools(view_tools(self.page(False)))
+            self.llm.value().set_tools(self.tools())
             self.llm.value().prime(self.client.input_json())
         self.loop.hold = self.llm.value().warm() == False if self.llm else False  # (the first question meets a warm prompt cache)
         for ref e in self.loop.tick():
@@ -221,6 +247,9 @@ struct Main(App):
                 print("OMX BARGE: ms=" + String(Int(e.ms + 0.5)), flush=True)
             elif e.kind == HEARD:
                 self.heard_turn(e.copy())
+        self.creator.tick()
+        for line in self.creator.take_log():
+            print("OMX " + line, flush=True)
         self.pump_run()
         self.drive_assistant()
         if self.loop.first_ns != self.told_first and self.loop.first_ns > 0:
@@ -247,6 +276,7 @@ struct Main(App):
         """The person's words are in (said or typed): the Work screen, and a run of the agent on them."""
         self.work = True
         self.turns += 1
+        self.creator.turn_began()
         var fresh = String(e.text[byte = self.said_before.byte_length() + 1 :]) if e.merged and e.text.byte_length() > self.said_before.byte_length() else e.text
         self.heard = e.text
         self.said_before = e.text
@@ -351,7 +381,7 @@ struct Main(App):
         self.assist.turn_ns = self.run_ns
         self.assist.flush(self.llm.value())  # (what a job found joins the conversation here: the start of a turn)
         var input = self.client.local_input()
-        self.llm.value().set_tools(view_tools(self.page(False)))
+        self.llm.value().set_tools(self.tools())
         for ev in self.llm.value().begin(input):
             self.take(ev)
 
@@ -372,16 +402,21 @@ struct Main(App):
             for ev in self.llm.value().poll():
                 self.take(ev)
             var calls = self.llm.value().take_calls()
-            for c in calls:  # (the assistant's slow tools, then the app's own buttons, as the agent pressed them)
+            for c in calls:  # (the assistant's slow tools, the creator's (answered when done), then the app's own buttons, as the agent pressed them)
                 print("OMX TOOL: " + c.name + " " + c.arguments, flush=True)
                 if self.assist.is_tool(c.name):
                     self.assist.run_tool(c, self.llm.value(), self.http)
+                    continue
+                if self.creator.handles(c.name):
+                    self.creator.call(c.id, c.name, c.arguments)
                     continue
                 self.by_agent = True
                 var result = press(self, c.name, c.arguments)
                 self.by_agent = False
                 self.llm.value().answer(c.id, result)
-                self.llm.value().set_tools(view_tools(self.page(False)))
+                self.llm.value().set_tools(self.tools())
+            for a in self.creator.take_answers():
+                self.llm.value().answer(a.id, a.content)
         elif self.queued:
             self.start_run()
 
@@ -444,7 +479,9 @@ struct Main(App):
         if not cards:
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), "", "", "", lane, List[View](), dock)
         if self.work:
-            var shelf = self.assist.cards()  # (the to-do list, the job, the news: the assistant's own, then what the agent drew)
+            var shelf = self.creator.views()  # (the creator's newest on top, then the assistant's own: the to-do list, the job, the news, then what the agent drew)
+            for v in self.assist.cards():
+                shelf.append(v.copy())
             for k in range(len(self.screens.uis) - 1, -1, -1):  # (newest on top)
                 shelf.append(self.screens.view(k, self.client.state, self.shelf_version))
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), self.status(), self.heard, self.reply, lane, shelf^, dock)
@@ -460,5 +497,7 @@ struct Main(App):
             self.orb.draw(surface, self.look.palette)
         elif canvas == RIM_CANVAS:
             draw_rim(surface, self.look.palette, self.cloud)
+        elif self.creator.owns_canvas(canvas):
+            self.creator.draw(canvas, surface, self.look.palette)
         else:
             self.screens.draw(canvas, surface, self.look.palette, self.client.state)

@@ -155,6 +155,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Think-it-through job | `mojoui.llmjob: ThinkJob(title, task).start(llm) on the model's second sequence with thinking on, poll(), ThinkCard (a clock, then the answer; the thinking is never shown), job_notice / job_memory; LlmAgent.remember` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
 | Cloud lane | `mojoui.cloudlane: route(text) (the cloud only when named: 'ask Claude', 'use Opus for…'; 'stay local' wins; 'think it through' is a background job), looks_secret, CloudLane (claude -p as a child process, capped, never waits), the ledger of bytes sent` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
 | Assistant features (glue) | `mojoui.assistant.Assistant: registers todo_*, news and think_it_through as the agent's tools (LlmAgent.add_deferred: tools the app answers later), owns the to-do card's messages, the job, the news cards, the cloud lane; an app calls register / tick / flush / notice / cards` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
+| Image generation (a model as a child process) | `mojoui.imagegen: ImageServer.zimage(bin, models, gpu, port).start() / tick() / draw_request(msg, id, prompt, seed, size) -> an HTTP request effect; png_of(reply); sd-server with Z-Image-Turbo on its own GPU, ended with the app` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
+| Comic and picture cards (agent-made images) | `mojoui.comic: ComicPlan.parse (the model's plan as a tool call: title, one hero, four panels), prompts with one hero and one seed; mojoui.creator.Creator: make_comic / draw_picture, a card that fills in panel by panel with a fade, full PNGs kept, Album.hold (a safe name; the agent never sends pixels)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| Find in my notes (in-process embeddings) | `mojoui.notes: NotesIndex(folder, pack, cache).step(ms) / search(question, folder, k) -> files + passages; e5-small-v2 by MAX, a cached index, one folder only (no .., links, hidden files, > 1 MB); Creator.find_in_notes cites the files on a card` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
 
 - Microphone (Web): tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too.
 - Microphone (Android): not built.
@@ -229,6 +232,21 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Assistant features (glue) (Android): needs the llama shim.
 - Assistant features (glue) (Mac (AppKit)): needs the llama shim.
 - Assistant features (glue) (iPhone (UIKit)): needs the llama shim.
+- Image generation (a model as a child process) (Linux (GTK)): tests/test_imagegen: healthy in 0.8 s, a 768 px picture in 3.4 s once warm (8.6 s the first), the same seed the same bytes, nothing left running after stop(); docs/goals/72-check.py M6-picture 5.5 s.
+- Image generation (a model as a child process) (Web): the painter and its model files are on this machine; not run from the web host.
+- Image generation (a model as a child process) (Android): not built.
+- Image generation (a model as a child process) (Mac (AppKit)): stable-diffusion.cpp's Metal build not tried.
+- Image generation (a model as a child process) (iPhone (UIKit)): no child processes.
+- Comic and picture cards (agent-made images) (Linux (GTK)): docs/goals/72-check.py M6-comic on examples/omx: first panel 10.6-15.7 s, four 21-26 s, none blank, Qwen sees the hero in panel 1; tests/test_creator; docs/goals/72/comic_card.png, picture_card.png.
+- Comic and picture cards (agent-made images) (Web): plain views and canvases; never run with this app.
+- Comic and picture cards (agent-made images) (Android): plain views and canvases; never run.
+- Comic and picture cards (agent-made images) (Mac (AppKit)): builds; never run.
+- Comic and picture cards (agent-made images) (iPhone (UIKit)): builds; never run.
+- Find in my notes (in-process embeddings) (Linux (GTK)): tests/test_notes: five questions each find the right file first (4 ms a search), unrelated finds nothing, cache reuse, confinement; docs/goals/72-check.py M6-notes 5/5 answered and cited; docs/goals/72/notes_card.png.
+- Find in my notes (in-process embeddings) (Web): needs the notes folder and MAX in the app's process.
+- Find in my notes (in-process embeddings) (Android): no MAX.
+- Find in my notes (in-process embeddings) (Mac (AppKit)): MAX has no Mac GPU path here.
+- Find in my notes (in-process embeddings) (iPhone (UIKit)): no MAX.
 
 ## Composite components (Mojo, built from the ones above)
 
@@ -265,10 +283,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit, omx |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, omx, widgets |
 | `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, omx |
-| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
+| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omx, omxplorer |
 | `Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)` | `mojoui/album.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat, omx |
 | `Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
@@ -320,7 +338,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `A fleet of bags (runs, every topic joined on time at 10 Hz, stops, story.json; read off the UI thread)` | `mojoui/fleet.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
+| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer |
 | `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |

@@ -27,6 +27,32 @@ SPEED = 1.05
 torch = None
 
 
+def _espeak_data_path():
+    """espeak-ng (the engine under Kokoro's G2P) can't read its data from a path with a hidden folder in it, such as a checkout
+    under `.claude/worktrees`: it prints "Error processing file …/phontab" and ends the process. A copy of the data in the
+    temporary folder (no hidden part) is given to it instead (D-7289). A no-op for every other path."""
+    import os
+    import tempfile
+
+    import espeakng_loader
+    from misaki import espeak  # (sets the data path at import: ours goes after it)
+    from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
+    real = espeakng_loader.get_data_path()
+    if "/." not in real:
+        return
+    copy = os.path.join(tempfile.gettempdir(), "mojoui-espeak-ng-data-%d" % os.getuid())
+    if os.path.islink(copy) or not os.path.isfile(os.path.join(copy, "phontab")):  # (a copy, not a link: phonemizer resolves links)
+        import shutil
+
+        if os.path.islink(copy):
+            os.remove(copy)
+        shutil.rmtree(copy, ignore_errors=True)
+        shutil.copytree(real, copy)
+    EspeakWrapper.set_data_path(copy)
+    del espeak
+
+
 def clauses(text):
     """Speakable pieces: sentences, and sentences over 140 characters at their commas."""
     parts = [p.strip() for p in re.split(r"(?<=[.!?;:])\s+|\n+", text) if p.strip()]
@@ -63,6 +89,7 @@ class Voice:
         try:
             global torch
             import torch
+            _espeak_data_path()
             from kokoro import KPipeline
 
             dev = device if torch.cuda.is_available() and device == "cuda" else "cpu"
