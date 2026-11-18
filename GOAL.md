@@ -1,39 +1,40 @@
-# GOAL 71: robot search by example in omxplorer, on omxcore stable 5194d77
+# GOAL 74: Personal Note's editors, native in Mojo
 
-**End goal (owner, 2026-11-14, issue omxcode#9):** omxcore stable `5194d77` adds robot data to the engine; "the show opens in
-omxplorer with the robot search demo, then the slides." Owner: "I don't have the deck; we need to prepare it once you're done and
-have the great and latest app." So this goal is the app and a recorded cold open; the deck is the next goal.
+**End goal (owner, 2026-11-17):** "Can we even build Personal Note?" — build it natively: "I don't want to use the JS… I want
+to use native stuff so that we can use it for many things" (fast on CPU and GPU, polished, agent tools and AG-UI for free,
+"slap in any app"). The missing heart of Personal Note (`~/Projects/personalnotev2`, docs/audits/personalnote.md) becomes
+generic `mojoui` components, then a small Personal Note app composes them, and we race the original on the same machine.
 
-Base: main 0cfcdb8a (goal 70 in, fast-forwarded 2026-11-14). Worktree ../mojo-ui-g71, branch goal-71-robot-search. Decisions
-D-71xx. Goal 70's contract is archived as docs/goals/70.md. omxcore (~/Projects/mxframe) is read-only: sources come out with
-`git archive 5194d77` only; its `robotics` pixi env and `build/robotics` (the pool's index, 1,851 episodes) are only read, as the
-reference and the data.
+Base: main cc33c9d7. Worktree ../mojo-ui-g74, branch goal-74-personal-note, its own pixi env. Decisions D-74xx. Goal 71's
+contract is archived as docs/goals/71.md. Checker: `scripts/check` → `docs/goals/74-check.py`.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/71-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (`docs/goals/74-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | Re-vendor the stable | vendor/OMXCORE_COMMIT names 5194d77 and how to rebuild it; the Mojo 1.2 patch rebased as vendor/patches/omxcore-5194d77-mojo12.patch; scripts/engine_lineage.py proves vendor/omxcore.mojoc is that archive + patch; the F-204 builder changes absorbed (`Query.base`, `q.table()`, lazy joins); omxplorer and every example whose `needs` says omxcore build for Linux; goal 70's engine tests pass; `from omxcore.robot import open_dataset, MomentIndex, export` builds beside Flare; the Mac apps on the engine (built `-D MXFRAME_SERIAL`) add no undefined symbol over goal 70's objects |
-| M1 | The pool, a framework piece | `mojoui/robotpool.mojo` (no omxplorer code): opens the index and its datasets in-process, lists each episode's facts (dataset, episode, task, robot, seconds) through the engine; `like(one)`, `like(several)` with an optional robot filter, `export(picks, folder)`. tests/test_robotpool: 1,851 episodes, 8.3 h, 4 datasets; for 10 seeded clips and 3 seeded triples the top 24 equal omxcore's Python `idx.search(like=...)` (same episodes, same order, scores within 1e-4); a warm one-clip search ≤ 5 ms on the GPU; an export of 3 picks loads with `LeRobotDataset(root=...)` and its episode count and frame count equal the picks' |
-| M2 | Clips, decoded by the engine | the pool gives an episode's poster frame and a short loop of frames (decoded by the engine: NVDEC here, dav1d elsewhere), downscaled for a card; equal to omxcore Python's `ds.decode` within 3/255 per channel; 24 posters in ≤ 1.5 s cold, 0 ms when cached; a framework `ClipGrid` (a grid of clips: poster, title, a badge, selected / picked states, a playing clip) with its test on GTK and the web host; components.md regenerated |
-| M3 | The demo screen | omxplorer opens a Robot search screen (Liquid light): the pool's line (episodes, hours, datasets, on the GPU), a robot filter, a grid of clips; tap one → the episodes like it, ranked, each with its task and score and the time the search took; pick three → "More like these"; Export → a toast naming the folder and that LeRobot loads it. scripts/live.py with real input on GTK (headless): click a clip, the results equal M1's for that clip; pick 3, the results equal M1's triple; Export, the folder loads in lerobot; screenshots at desktop (1440×900) and phone (390×844) width, every text inside its card, nothing clipped (layout read from the view tree) |
-| M4 | The cold open | docs/goals/71/cold-open.md: a 30–60 s shot list (captions first, one clip zoomed, the payoff frozen) whose every number is quoted from omxcore's docs/goals/robotics/report.md (the check greps each one there); build/g71/cold-open.mp4 recorded on Linux from the live app, 30–60 s, 1920×1080, every caption's scene present (frames differ, none blank) |
-| M5 | Nothing regressed | goal 70's 70-check M3 (goal 68's checker and goal 47's inside it), the component matrix, decisions lint, libc and seek lints |
+| M0 | The audit, today | docs/audits/personalnote.md and .json re-dated 2026-11-17 against this branch's base; each row's `omxcode piece` names files that exist; the counts in the verdict equal the JSON's; a `native` field per row (JS-free: true/false) and no row's `have` rests on a JS widget |
+| M1 | Undo, generic | `mojoui/history.mojo`: a typed undo/redo stack of edits with coalescing (typing merges into one step by time and kind), a redo branch dropped on a new edit, a cap; tests/test_history: `history: ok`, `history coalesce: ok`, `history cap: ok` |
+| M2 | A native text editor | `mojoui/textedit.mojo` (no JS, no toolkit text widget): a buffer of paragraphs, soft wrap by `Font.measure`, caret and selection (shift, word ⌥/ctrl moves, home/end, up/down keeping x, select all), insert/delete/backspace/enter, hit test x,y → offset and back, copy/cut/paste through the host clipboard text, undo via M1; paints only visible lines through any Painter. tests/test_textedit: `textedit edit: ok`, `textedit caret: ok`, `textedit wrap: ok`, `textedit hit: ok`, `textedit undo: ok`, and `textedit 1M: ok` (a 1,000,000-character document: opening ≤ 300 ms, a keystroke in the middle with re-layout and paint of the view ≤ 4 ms p95 over 200 keys) |
+| M3 | Markdown drawn and edited | `mojoui/mdedit.mojo` on M2: headings, bold, italic, inline code, links, bullet/numbered lists, task boxes, quotes, code blocks, rules drawn with their styles; the marks (`#`, `**`, `` ` ``, `- [ ]`) hidden except on the caret's line; a click on a task box toggles it. tests/test_mdedit reads the Scene's notes: `mdedit styles: ok`, `mdedit marks: ok`, `mdedit task: ok` |
+| M4 | Objects on a canvas | `mojoui/objectlayer.mojo`: text boxes (M3 inside), stickies, rectangles, ellipses, pictures; select, shift-select, marquee, move, resize by 8 handles, rotate, z-order, lock, nudge, select all, delete, duplicate; connectors that stay attached and re-route when an end moves; every change undoable (M1); hit tests and paint culled to the view. tests/test_objectlayer: `objectlayer edit: ok`, `objectlayer connectors: ok`, `objectlayer undo: ok`, `objectlayer random: ok` (3,000 random operations, then undo all → the start, redo all → the end), `objectlayer 600: ok` (Personal Note's 600-object benchmark note: a pan's paint ≤ 4 ms, a hit test ≤ 0.1 ms) |
+| M5 | Mind map | `mojoui/mindmap.mojo`: a tree laid out left/right of the root with no two nodes overlapping, tapered curved branches (filled polygons), keys Tab child, Enter sibling, F2/typing edits (M2), Delete, arrows move the focus, Space collapses, undo (M1). tests/test_mindmap: `mindmap layout: ok` (500 random nodes, no overlap), `mindmap keys: ok`, `mindmap undo: ok` |
+| M6 | Personal Note, the app | `examples/pnote`: a sidebar of notes kept in SQLite (FTS5 search box), three note kinds: canvas (M4 + pressure ink), page (M3 full page) and mind map (M5); Ctrl+K palette over notes and commands; Liquid theme; saved on close and reopened. On GTK headless with real steps: type a page, make a canvas box and a sticky, connect them, draw a stroke, undo, add three map nodes; quit; relaunch shows the same notes (read from the reports); screenshots of each kind at 1440×900 with nothing clipped |
+| M7 | The race | same machine: Personal Note's own `scripts/benchmark-leafer.mjs` (600-object note, pan/zoom frame times in Chromium) against pnote's canvas with the same note (frame times on GTK), and a 1M-character page: typing latency in pnote vs Personal Note's page editor in Chromium. docs/goals/74/race.md generated by the check, as measured; PASS when both sides ran (the result is reported, not required to win); BLOCKED names what would not run |
+| M8 | Nothing regressed | components matrix regenerated with the new components (✅ GTK where a check runs them), decisions lint, goal 40's M0–M2 (ink and Sketch), goal 71's M5 |
 
 ## Done means
-71-check PASS for M0–M5 (a BLOCKED says exactly what is missing); a fresh reviewer subagent passes it; docs/goals/71-report.md
-with shots and the cold open; EXPERIMENTS.md. Committed after each passing milestone; merged to main locally when the reviewer
-passes; not pushed (the owner pushes).
+74-check PASS for M0–M8 (a BLOCKED says exactly what is missing); a fresh reviewer subagent passes it; docs/goals/74-report.md
+with shots and the race; EXPERIMENTS.md entry. Commit after each passing milestone; merge to main locally after review; never push.
 
 ## Out of bounds
-Editing, committing, branching or pushing in ~/Projects/mxframe (asks go in the report as omxcore `mxframe` issues to open);
-the other worktrees; pushing; pip (pixi only); lowering a proof or deleting a test; typed-phrase search (needs EmbeddingGemma
-in Python; the report's own verdict: a rough first cut); the deck (next goal).
+Pushing; editing ~/Projects/personalnotev2 (read and run its benchmarks only, outputs to this worktree's build/); other
+worktrees (goal 73 is running in ../mojo-ui-g73*); pip (pixi only); JS, CodeMirror or a toolkit text widget inside M2–M5;
+lowering a proof or deleting a test; ink anchored to words, secure notes, zip, AI/Jam (next goals).
 
 ## Assumptions (instead of asking)
-- In-process Mojo (`omxcore.robot`) over `mx robot` or the C library: omxplorer is all-Mojo and the GPU call should be direct.
-- The reference for "equal" is omxcore's Python `omxcore.robot` in its `robotics` env (the checkout's, which contains 5194d77).
-- Clips are shown from frames the engine decodes, not from omxcore's pre-made H.264 previews.
-- Phone width is checked at 390×844; no iPhone run. Amended (D-7107): on the web host in Chromium, not GTK, since a GTK
-  window can't be narrower than omxplorer's menu bar (581 points); the phone run taps one poster and reads every tagged
-  view's rect.
-- Budget: 150 turns.
+- Native means drawn by mojoui on a Canvas through a Painter (CPU now; the same paint calls feed the GPU presenter): one
+  implementation for GTK, the web host and the Mac.
+- Text input arrives as Canvas KEY events (`event.text`); IME composition (CJK) is out of scope this goal, noted as debt.
+- Fonts are the embedded Inter and JetBrains Mono atlases (mojoui.text); bold is Medium, italic is the face slanted.
+- M7 reports the race as measured; a loss is a finding, not a failure.
+- GTK first; the web host must at least build pnote; Mac builds are not attempted this goal.
+- Budget: 200 turns.
