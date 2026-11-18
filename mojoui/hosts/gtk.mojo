@@ -4177,7 +4177,7 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
 
 
 def frame_bench[A: App](host_addr: Int, rest: String):
-    """framebench:K=pan|zoom|draw|finish|erase|deepzoom,N (goal 40): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
+    """framebench:K=pan|zoom|draw|finish|erase|deepzoom|type,N (goal 40; type: goal 74): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
     fro every 20; ZOOM by 1.01× around the middle, in then out; one pen stroke of N moves; finish: short strokes, press,
     three moves, release, every frame timed, the releases and the frame after each also on their own; erase: one drag
     of N moves to and fro, where moves that hit nothing don't redraw and count as unchanged; deepzoom: zoom's steps
@@ -4277,6 +4277,15 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 kind = RELEASE
                 host[].canvases[ci].pressure = 0.5
                 host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        elif what == "type":  # (goal 74, D-7405: keystrokes into the canvas's key controller, as a typist's reach it)
+            var typed = String("native mojo is fast ")
+            var ch = String(typed[byte = i % 20 : i % 20 + 1])
+            var handled = List[c_int](length=1, fill=0)
+            var sig = String("key-pressed")
+            if host[].canvases[ci].keys != 0:
+                external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].keys, sig.as_c_string_span(),
+                    c_uint(gdk_keyval(ch)), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
+            _ = len(handled)
         elif what == "erase":  # (an eraser dragged to and fro across the page: only moves that hit a stroke redraw)
             x += 4.0 if (i // 60) % 2 == 0 else -4.0
             y += 1.5 if (i // 30) % 2 == 0 else -1.5
