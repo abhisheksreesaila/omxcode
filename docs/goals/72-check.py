@@ -325,7 +325,7 @@ def m4():
             (said if ok else probs).append(f"first audio {first1[0]['ms']} ms after the question's last word (limit {LIMITS['first_audio_ms']})")
             bench(first_audio_ms=first1[0]["ms"], heard_ms=heard1[0]["ms"] if heard1 else None,
                   first_words_ms=reply1[0].get("first_words_ms") if reply1 else None)
-        said.append(f"heard {heard1[0]['text']!r} in {heard1[0]['ms']} ms after the endpointer's quiet" if heard1 else "heard nothing")
+        said.append(f"heard {heard1[0]['text']!r} in {heard1[0]['ms']} ms after the last voiced sample (the endpointer's hangover is in it)" if heard1 else "heard nothing")
         if reply1:
             said.append("answered " + repr(reply1[0]["text"]))
         spoken = hear(OUT / "reply-a.wav")
