@@ -1,6 +1,6 @@
 """Goal 76 M3: nothing regressed. Goal 73's whole check (M1-M3 its own proofs through the ribbon, M4 goal 71's M5 chain
 71 -> 70 -> 68 -> 47 plus scenario.py robots), the component matrix fresh, the decisions lint, and the AppKit build
-(BLOCKED, not FAIL, when this machine can't cross-build it: the reason is printed)."""
+(a failed build is a FAIL: this goal changed mojoui/hosts/appkit.mojo)."""
 import os
 import subprocess
 from pathlib import Path
@@ -30,5 +30,6 @@ def check():
         return False, "decisions lint: " + (r.stdout + r.stderr)[-300:]
     r = run(["scripts/build.sh", "omxplorer", "mac"], 3600)
     (OUT / "mac-build.log").write_text(r.stdout + r.stderr)
-    mac = "AppKit build ok" if r.returncode == 0 else "AppKit build BLOCKED here: " + (r.stdout + r.stderr).strip().splitlines()[-1][:160]
-    return True, "73-check M1-M4 PASS; matrix fresh; decisions lint ok; " + mac
+    if r.returncode != 0:  # (review round 1: this goal changed the AppKit host, so a failed build is a FAIL, not a note)
+        return False, "AppKit build failed: " + (r.stdout + r.stderr).strip()[-300:]
+    return True, "73-check M1-M4 PASS; matrix fresh; decisions lint ok; AppKit build ok"

@@ -406,6 +406,7 @@ struct Main(App):
     var import_col: Int
     var insp_tab: Int  # 0 Table, 1 Cell
     var inspector_open: Bool
+    var keep_panels: Bool  # Settings' "Open the inspector with a sheet" (saved as panels=open), not whether one is open now
     var formula_open: Bool  # the formula bar adds a column instead of editing a cell
     var edit_text: String
     var message: String
@@ -561,7 +562,8 @@ struct Main(App):
         self.pal = skin_palette(self.skin, 0, self.appearance_mode == DARK)
         self.import_col = 0
         self.insp_tab = 1
-        self.inspector_open = read_setting(APP, "panels", "closed") == "open"  # (goal 76: the right-hand panels start closed; the old "inspector" setting is not read, so its "yes" is ignored; a person's later choice is kept under "panels", D-7610)
+        self.keep_panels = read_setting(APP, "panels", "closed") == "open"
+        self.inspector_open = self.keep_panels  # (goal 76: the right-hand panels start closed; the old "inspector" setting is not read, so its "yes" is ignored; a person's later choice is kept under "panels", D-7610)
         self.formula_open = False
         self.edit_text = ""
         self.message = ""
@@ -2755,6 +2757,13 @@ struct Main(App):
             self.message = "Couldn't compute that chart: " + String(e)
         self.version += 1
 
+    def show_inspector(mut self):
+        """The inspector itself in the dock (a chart picked or its word tapped): any other panel there gives way (goal 76)."""
+        self.inspector_open = True
+        self.links_open = False
+        self.story_open = False
+        self.learn.open = False
+
     def close_panels(mut self):
         """Every right-hand panel closes (a panel's ✕, Esc on the sheet): the board takes their width (goal 76)."""
         self.inspector_open = False
@@ -3941,9 +3950,9 @@ struct Main(App):
             self.show_timings = event.number == 1
             write_setting(APP, "timings", "yes" if self.show_timings else "no")
             self.version += 1
-        elif m == KEEP_INSPECTOR:
-            self.inspector_open = event.number == 1
-            write_setting(APP, "panels", "open" if self.inspector_open else "closed")
+        elif m == KEEP_INSPECTOR:  # (only the saved choice: the panel open now stays as it is, review round 1)
+            self.keep_panels = event.number == 1
+            write_setting(APP, "panels", "open" if self.keep_panels else "closed")
             self.version += 1
         elif m == TOAST_CLOSE:
             self.toast = ""
@@ -4357,7 +4366,7 @@ struct Main(App):
                 self.insp_tab = 2
                 if self.objects[self.active].kind == OBJ_CHART:
                     self.ask_here(self.active)
-                self.inspector_open = True
+                self.show_inspector()
                 self.version += 1
         elif m == CHART_STYLE or m == OBJ_VALUE or m == OBJ_GROUP or m == OBJ_ACROSS:
             if 0 <= self.active < len(self.objects):
@@ -4432,8 +4441,7 @@ struct Main(App):
                 self.word_ref = cref
                 self.word_slot = (m - WORD) % 10
                 self.ask_here(cref)
-                self.inspector_open = True  # (a tap on a chart's coloured word asks for its inspector: goal 76)
-                self.links_open = False
+                self.show_inspector()  # (a tap on a chart's coloured word asks for its inspector, not Learn's or Story's: goal 76)
                 if cref < TILE_REF:
                     self.active = cref  # (the inspector follows the chart being edited)
                     self.insp_tab = 2
@@ -4908,7 +4916,8 @@ struct Main(App):
             Menu("View", [Item("Inspector", TOGGLE_INSPECTOR, checked=self.inspector_open, shortcut="Ctrl+Shift+I", disabled=not on_sheet), Separator(),
                           Item("Sheet", SHOW_SHEET, icon="sheet", checked=on_sheet and self.sheet_tab == 0, disabled=not on_sheet),
                           Item("Report", SHOW_REPORT, icon="chart-bar", checked=on_sheet and self.sheet_tab == 1, disabled=not on_sheet), Separator(),
-                          Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet)]),
+                          Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet), Separator(),
+                          Item("Close panel", DOCK_CLOSE, icon="x", shortcut="Escape", disabled=not on_sheet or not self.inspector_open or self.grid.editor_place(self.frame)[2] > 0)]),
             Menu("Insert", [Item("Chart", INSERT_CHART, icon="chart-bar", shortcut="Ctrl+Shift+C", disabled=not on_sheet),
                             Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet),
                             Item("Video…", INSERT_VIDEO, icon="video", disabled=not on_sheet), Item("Image…", INSERT_IMAGE, icon="image", disabled=not on_sheet),
@@ -5049,7 +5058,7 @@ struct Main(App):
                 Segmented(materialize[APPEARANCES](), self.appearance_mode, APPEARANCE).tag("appearance"),
                 Divider().fill(),
                 Checkbox("Show GPU timings in the status bar", self.show_timings, TIMINGS),
-                Checkbox("Open the inspector with a sheet", self.inspector_open, KEEP_INSPECTOR),
+                Checkbox("Open the inspector with a sheet", self.keep_panels, KEEP_INSPECTOR),
                 HStack(Text("Kept in settings.txt in your config folder, so every launch looks the same.", CAPTION), Spacer(), Button("Done", SETTINGS_CLOSE, PROMINENT), spacing=10).fill().align(CENTER),
                 spacing=12).align(START), on_close=SETTINGS_CLOSE))
         if self.inserting == OBJ_TABLE and self.screen == SHEET:

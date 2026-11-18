@@ -162,6 +162,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
     """"Ctrl+Shift+S" → ("s", ⌘⇧): Ctrl means ⌘ on a Mac (D-159). Arrows become their NSMenuItem characters."""
     var name = shortcut
     var mask = 0
+    if name == "Escape":  # (a window-level Escape item, goal 76: no key equivalent on a Mac, where a menu's Esc would beat a field's own)
+        return (String(""), 0)
     while True:
         if name.startswith("Ctrl+"):
             mask |= MASK_COMMAND

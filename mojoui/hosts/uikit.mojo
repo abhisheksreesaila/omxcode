@@ -791,6 +791,8 @@ struct UIKitHost[A: App](Movable):
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.min_w)), "setActive:", 1)
         if node.max_w != 0:
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintLessThanOrEqualToConstant:", Float64(node.max_w)), "setActive:", 1)
+        if node.hidden and outer != shown:  # (the padded or sized wrapper is what the parent stack holds: it hides too, review round 1)
+            _ = msg(outer, "setHidden:", 1)
         return outer
 
     def show(mut self, self_addr: Int):

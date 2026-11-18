@@ -690,6 +690,7 @@ struct GtkHost[A: App](Movable):
     var popovers: List[Int]  # context-menu popovers parented to anchors (unparented at the next rebuild)
     var popups: List[Int]  # popovers to pop up once the new screen is in the window
     var shortcut_keys: Int  # the window's key controller: menu shortcuts (Ctrl+S) from anywhere
+    var escape_keys: Int  # the window's last-chance key controller: an Escape nothing else took fires the item declaring "Escape" (goal 76)
     var toast_overlay: Int  # AdwToastOverlay around the screen (toasts float over it)
     var page: Int  # GtkScrolledWindow inside it: a screen taller than the window scrolls, as a web page does
     var toast: Int  # the toast showing, if any (kept across rebuilds while its node stays)
@@ -830,6 +831,7 @@ struct GtkHost[A: App](Movable):
         self.popovers = List[Int]()
         self.popups = List[Int]()
         self.shortcut_keys = 0
+        self.escape_keys = 0
         self.toast_overlay = 0
         self.page = 0
         self.toast = 0
@@ -4958,6 +4960,24 @@ def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint
     return 0
 
 
+def on_escape_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
+    """An Escape no widget took (it bubbled up to the window): the enabled menu item declaring the shortcut "Escape" fires
+    (omxplorer: close the docked panel). Never from a text field (its own Escape), never while busy (goal 76)."""
+    if Int(keyval) != 0xff1b or busy():
+        return 0
+    var host = host_at[A](host_addr)
+    var focus = external_call["gtk_root_get_focus", Int](host[].window)
+    if focus != 0 and (external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_editable_get_type", Int]()) != 0
+                       or external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_text_view_get_type", Int]()) != 0):
+        return 0
+    for i in range(len(host[].rt.shown.nodes)):
+        ref n = host[].rt.shown.nodes[i]
+        if n.kind == ITEM and len(n.options) > 0 and n.options[0] == "Escape" and n.value & DISABLED == 0 and n.msg != 0:
+            host[].send(i, False, "", 0, host_addr)
+            return 1
+    return 0
+
+
 def animations_enabled() -> Bool:
     """GtkSettings' gtk-enable-animations (off when the person asked for less motion)."""
     var settings = external_call["gtk_settings_get_default", Int]()
@@ -6272,6 +6292,13 @@ def run_step[A: App](host_addr: Int, step: String):
         if handled[0] == 0:
             print("TEST: no item with shortcut", rest)
         _ = len(handled)
+    elif verb == "escape":  # escape: an Escape that reached the window (the last-chance controller's own signal, goal 76)
+        var handled = List[c_int](length=1, fill=0)
+        var signal = String("key-pressed")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].escape_keys, signal.as_c_string_span(), c_uint(0xff1b), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
+        if handled[0] == 0:
+            print("TEST: escape: no enabled item with shortcut Escape")
+        _ = len(handled)
     elif verb == "rightclick":  # rightclick:K=fx,fy: the right button's click gesture's own signal at (x, y) thousandths
         var kv = split_at(rest, "=")
         var node = canvas_node(host[], kv[0])
@@ -7202,6 +7229,10 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     external_call["gtk_event_controller_set_propagation_phase", NoneType](host[].shortcut_keys, c_int(1))  # GTK_PHASE_CAPTURE
     connect_any(host[].shortcut_keys, "key-pressed", on_shortcut_pressed[A], host_addr)
     external_call["gtk_widget_add_controller", NoneType](host[].window, host[].shortcut_keys)
+    host[].escape_keys = external_call["gtk_event_controller_key_new", Int]()  # Escape after every widget had its turn (a cell editor's cancel first)
+    external_call["gtk_event_controller_set_propagation_phase", NoneType](host[].escape_keys, c_int(3))  # GTK_PHASE_BUBBLE
+    connect_any(host[].escape_keys, "key-pressed", on_escape_pressed[A], host_addr)
+    external_call["gtk_widget_add_controller", NoneType](host[].window, host[].escape_keys)
     var size = host[].rt.app.window_size()
     var forced = getenv("MOJOUI_WINDOW")  # tests: "1280x800" checks a smaller laptop screen
     if forced != "":
