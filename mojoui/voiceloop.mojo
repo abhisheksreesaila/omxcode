@@ -65,13 +65,13 @@ struct LoopEvent(Copyable, Movable):
 
 def speech_clean(text: String) -> String:
     """A reply's words as they are said: markdown marks and emphasis dropped, line breaks as spaces."""
-    var out = String("")
-    for b in text.as_bytes():
-        var c = Int(b)
+    var out = List[UInt8](capacity=text.byte_length())
+    for b in text.as_bytes():  # (bytes, not chr(byte): that turned each byte of an "é" into a character of its own, "BelÃ©m", so the
+        var c = Int(b)         # voice misread accented names and the pointer never matched them, D-7748)
         if c == 42 or c == 35 or c == 96 or c == 95 or c == 126:  # * # ` _ ~
             continue
-        out += " " if c == 10 or c == 13 else chr(c)
-    return out^
+        out.append(UInt8(32) if c == 10 or c == 13 else b)
+    return String(unsafe_from_utf8=out)
 
 
 def take_sentences(mut pending: String, final: Bool = False) -> List[String]:
@@ -472,6 +472,12 @@ struct VoiceLoop(Movable):
             return
         var now = now_ns()
         for g in range(len(self.bursts)):  # (a burst's first sample is measured: its estimate is corrected once)
+            if not self.bursts[g].fixed and now > self.bursts[g].est_ns + 2_000_000_000:  # (never measured: its points keep the estimate, D-7748)
+                self.bursts[g].fixed = True
+                for k in range(len(self.due)):
+                    if self.due[k].group == g:
+                        self.due[k].group = -1
+                continue
             if not self.bursts[g].fixed and self.speaker.first_ns() >= self.bursts[g].ref_ns:
                 var real = self.speaker.first_ns() + Int(self.speaker.latency_ms() * 1e6)
                 var delta = real - self.bursts[g].est_ns

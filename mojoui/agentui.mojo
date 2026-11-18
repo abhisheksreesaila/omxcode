@@ -13,6 +13,7 @@
 # (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
 
 from mojoui.agui import Agent
+from mojoui.tripmap import SHOW_MAP, trip_ui
 from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui, LOADING_UI
 from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
@@ -26,6 +27,14 @@ from mojoui.app import Event
 from mojoui.text import Font
 
 comptime MAX_SCREENS = 40
+
+
+def tool_card(name: String, args: String) -> String:
+    """A card tool's call (an agent tool that shows one card from its arguments: show_map) as render_ui's JSON; "" when `name`
+    isn't one or its arguments can't be read. adopt() shows these beside render_ui's own screens (goal 77 M3)."""
+    if name == SHOW_MAP:
+        return trip_ui(args)
+    return ""
 comptime MAX_RETRIES = 3  # reruns after refused UI in a row; then take() stops asking and gave_up says so (D-725)
 
 
@@ -203,7 +212,8 @@ struct Screens[H: Hub = NoData](Movable):
         var added = 0
         for ref m in agent.messages:
             for ref c in m.calls:
-                if c.name != tool or not c.done or self.index_of(c.id) >= 0 or self.was_refused(c.id):
+                var made = tool_card(c.name, c.arguments) if c.name != tool and c.done else String("")  # (a card tool: show_map's map)
+                if (c.name != tool and made == "") or not c.done or self.index_of(c.id) >= 0 or self.was_refused(c.id):
                     continue
                 var answer = String("")
                 for ref r in agent.messages:
@@ -215,7 +225,7 @@ struct Screens[H: Hub = NoData](Movable):
                     self.refused.append(c.id)
                     continue
                 var k = len(self.uis)
-                var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+                var ui = GenUi[Self.H](made if made != "" else c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
                 if ui.problem != "":
                     self.refused.append(c.id)
                     continue
@@ -261,6 +271,22 @@ struct Screens[H: Hub = NoData](Movable):
             if not self.live[k]:
                 for pt in self.uis[k].parts():
                     out.append(pt.copy())
+        return out^
+
+    def point(mut self, tag: String) -> Bool:
+        """A `point` event's tag (card + "." + part): the screen it names moves for it if it can (a map flies to the stop). The
+        pointer's ring is the app's (mojoui.pointer); this is what the card itself does. True when one did."""
+        for k in range(len(self.uis)):
+            if self.uis[k].point(tag):
+                return True
+        return False
+
+    def take_log(mut self) -> List[String]:
+        """What the screens' components did since the last call, one line each, for a checker ("MAP: card=card3 stop=1 …")."""
+        var out = List[String]()
+        for k in range(len(self.uis)):
+            for line in self.uis[k].take_log():
+                out.append(line)
         return out^
 
     def of_message(self, message_id: String) -> List[Int]:

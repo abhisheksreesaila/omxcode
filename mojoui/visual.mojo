@@ -4,19 +4,21 @@
 #
 #   VISUAL_SYSTEM                      the system prompt (the framework's, not the app's): which card for which question, show first,
 #                                      one or two sentences that refer to the card, no card for plain talk
-#   Visual.register(agent)             the card tools that are not built yet, as stubs the model can already route to
+#   Visual.register(agent)             the card tools: show_map (mojoui.maptool, the map card, goal 77 M3), and a stub for the one not
+#                                      built yet (explain) that the model can already route to
 #   card_kind(tool, shape) -> String   the kind of card a turn showed ("word", "map", "iso", "table", "todo", "news", "other", "")
 #
-# The tools it names: render_ui (a WordCard, a Table, any catalogued card), show_map (a trip, a route, places: goal 77 M3) and explain
-# (how something works, a small isometric diagram: M4), the to-do tools and news (mojoui.assistant). show_map and explain are answered
-# here with "not built yet, use render_ui" until the developer who builds them registers a function of the same name first: Visual.register
-# leaves a name that is already registered alone, so the real card replaces the stub without touching this file.
+# The tools it names: render_ui (a WordCard, a Table, any catalogued card), show_map (a trip, a route, places: a map with real tiles,
+# mojoui.tripmap, goal 77 M3) and explain (how something works, a small isometric diagram: M4), the to-do tools and news
+# (mojoui.assistant). explain is answered here with "not built yet, use render_ui" until the developer who builds it registers a
+# function of the same name first: Visual.register leaves a name that is already registered alone.
 #
 # A card tool says its parts by name in its description (WordCard: word, sounds, meaning, example, origin), and the card prints a small
 # label over each part, so "the meaning says…" refers to something on the screen: mojoui.pointer matches those words to parts and moves
 # the ring.
 
 from mojoui.llmagent import LlmAgent, ToolFn
+from mojoui.maptool import show_map_tool
 
 comptime SHOW_MAP = "show_map"
 comptime EXPLAIN = "explain"
@@ -36,15 +38,10 @@ comptime VISUAL_SYSTEM = (
     "buttons, call the tool of that name. If you were interrupted, stop and listen."
 )
 
-comptime MAP_ABOUT = (
-    "Show a trip, a route, a walk or a set of places as a map card: the stops numbered in the order visited, joined by a line. Call it "
-    "first, then say one or two sentences naming the stops. Not built yet: when it says so, show the places with render_ui instead."
-)
 comptime EXPLAIN_ABOUT = (
     "Show how something works as a small isometric diagram: three to six blocks, arrows between them, numbered steps. Call it first, then "
     "say one or two sentences that name the blocks in order. Not built yet: when it says so, show the steps with render_ui instead."
 )
-comptime MAP_PARAMS = '{"type":"object","properties":{"title":{"type":"string","description":"a few words"},"stops":{"type":"array","items":{"type":"string"},"description":"the places, in the order visited, each with its city"}},"required":["stops"]}'
 comptime EXPLAIN_PARAMS = '{"type":"object","properties":{"topic":{"type":"string","description":"what is being explained, a few words"},"steps":{"type":"array","items":{"type":"string"},"description":"what happens, in order, one short sentence each"}},"required":["topic"]}'
 
 
@@ -65,7 +62,7 @@ def card_kind(tool: String, shape: String) -> String:
         return "news"
     if shape.find("WordCard") >= 0:
         return "word"
-    if shape.find("MapView") >= 0:
+    if shape.find("MapView") >= 0 or shape.find("TripMap") >= 0:
         return "map"
     if shape.find("Table") >= 0 or shape.find("DataGrid") >= 0:
         return "table"
@@ -77,8 +74,8 @@ def card_kind(tool: String, shape: String) -> String:
 struct Visual:
     @staticmethod
     def register(mut agent: LlmAgent):
-        """Offers the model the card tools that aren't built yet (before agent.prime(): the tools are part of the prompt the cache
-        holds). A name already registered is left alone: the real tool wins."""
+        """Offers the model the card tools (before agent.prime(): the tools are part of the prompt the cache holds): show_map, and the
+        stub of the one not built yet. A name already registered is left alone: an app's own tool wins."""
         var have = List[String]()
         for ref f in agent.functions:
             have.append(f.name)
@@ -88,6 +85,6 @@ struct Visual:
             map_there = map_there or n == SHOW_MAP
             explain_there = explain_there or n == EXPLAIN
         if not map_there:
-            agent.add_function(ToolFn(SHOW_MAP, MAP_ABOUT, MAP_PARAMS, _not_built))
+            agent.add_function(show_map_tool())
         if not explain_there:
             agent.add_function(ToolFn(EXPLAIN, EXPLAIN_ABOUT, EXPLAIN_PARAMS, _not_built))

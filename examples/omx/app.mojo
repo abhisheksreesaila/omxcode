@@ -13,6 +13,8 @@
 #
 #   pictures, notes    mojoui.creator.Creator          make_comic / draw_picture (an image model on its own GPU, panel by panel on a card)
 #                                                      and find_in_notes (e5 embeddings by MAX, a card citing the files)
+#   maps               mojoui.tripmap (via mojoui.visual)  show_map: a trip on real tiles, stops checked by a geocoder; the map flies to
+#                                                      each stop as she names it (the cards' own move: Screens.point)
 #   the camera         mojoui.looker.Looker            look: the tablet's (or this machine's) camera, the model's own eyes in this process
 #                                                      (the vision projector), a card with the picture and labelled boxes; each box is a
 #                                                      part the pointer lands on when the reply names it ("the banana is on the left")
@@ -142,7 +144,7 @@ struct Main(App):
             var mmproj = environment("OMX_MMPROJ", models + "/mmproj-F16.gguf")
             self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx, mmproj=mmproj if exists(mmproj) else String("")), "Your name is omx. " + String(VISUAL_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
-            Visual.register(self.llm.value())  # (the map and the diagram: stubs until they are built, mojoui.visual)
+            Visual.register(self.llm.value())  # (the map card's show_map, and the diagram's stub until it is built: mojoui.visual)
             self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
             self.llm.value().trust.allow("type")
         except e:
@@ -287,6 +289,8 @@ struct Main(App):
             elif e.kind == POINT:
                 self.point(e)
         self.tell_points()
+        for line in self.screens.take_log():  # (what the cards did: a map's checked stops, its tiles, its flights)
+            self.out("OMX " + line)
         self.creator.tick()
         for line in self.creator.take_log():
             self.out("OMX " + line)
@@ -358,6 +362,7 @@ struct Main(App):
             return
         var tag = hit.value().tag()
         self.pointer.go(tag)
+        _ = self.screens.point(tag)  # (the card moves for it too: a map flies to the stop)
         self.marks.append(PointMark(tag, e.ns, now_ns(), self.pointer.version()))
         self.out("OMX POINT_SENT: turn=" + String(self.turns) + " tag=" + tag + " at_ms=" + String(Int(e.ms)) + " late_ms=" + String(Int(Float64(now_ns() - e.ns) / 1e6)))
 

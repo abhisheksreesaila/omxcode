@@ -104,6 +104,8 @@ def _play(words: Int) raises:
                 idle = True
             _ = libc.usleep(2000)
             continue
+        if not idle and now_ns() >= Int(_A.load(_word(words, S_TAIL))):  # (what was written has sounded: this is a new burst, as playing()
+            idle = True                                                    # already says; seen between two 2 ms looks, it lost its first-sample stamp, D-7748)
         var n = min(avail, OUT_CHUNK)
         for i in range(n):
             buf[i] = ring.unsafe_offset((read + i) % OUT_RING)[]

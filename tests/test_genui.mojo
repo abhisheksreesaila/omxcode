@@ -72,6 +72,7 @@ def main() raises:
     var pal = omxqua(False).palette.copy()
     pic.draw(100, surface, pal, blank, Font())
     assert_true(surface.get(150, 80) != pal.card and surface.get(150, 80) != 0, "the picture is drawn, not only its backdrop")
+    _ = len(px)  # (the surface's pixels live in px: keep it alive past the last read, or Mojo frees it after Surface() took its address)
     assert_true(album.describe().find('"name":"tagus"') >= 0 and album.describe().find('"width":1200') >= 0, album.describe())
     print("picture: ok")
     # Sight (goal 77 M6): a held picture with boxes named by their labels; a box outside 0-1000 or a name the app doesn't hold is refused
@@ -84,6 +85,7 @@ def main() raises:
     # the sample's box is 120,300..640,520 of 1000 on a 1200x800 picture fitted to 300x200 (scale 0.25): its left edge is at x = 36 (2 px wide)
     assert_equal(sight_surface.get(37, 80), pal.series[0])
     assert_true(sight_surface.get(60, 80) != pal.series[0], "inside the box is the picture, not a fill")
+    _ = len(sx)  # (as px above: the drawing wrote into freed memory and a later parse crashed once genui's struct grew, goal 77 M3)
     # its boxes are parts the pointer lands on: named by the label, found in the picture's view (tagged card + ".picture" + canvas)
     sight.card = "card4"
     var sparts = sight.parts()

@@ -2,8 +2,10 @@
 
     pixi run python docs/goals/77-check.py [M0 M1 M2 M5 ...]          (default: every milestone)
 
-M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M5 visual first, M6 the camera.
-M3 (map), M4 (isometric) and M7 (polish) are other developers' and report BLOCKED("not built yet") until they land. The language model of
+M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M3 the map card (two trips on GTK at
+tablet size, then on the web host in headless Chromium: stops within 25 km of hand-entered truth, points that fly the map and put the
+ring on the marker, tiles in the browser), M5 visual first, M6 the camera. M4 (isometric) and M7 (polish) are other developers' and
+report BLOCKED("not built yet") until they land. The language model of
 M1, M2 and M5 runs on GPU $G77_GPU (default 0); M6's (the model, its vision projector and the voice) on GPU $G77_VISION_GPU (default 1),
 PCI order as nvidia-smi counts. The machinery is goal 72's (docs/goals/72-check.py: the app on the headless display, typed turns, the null
 sink). Numbers: build/g77; pictures: docs/goals/77.
@@ -198,6 +200,178 @@ def bench(**kv):
     data = json.loads(f.read_text()) if f.exists() else {}
     data.update(kv)
     f.write_text(json.dumps(data, indent=1))
+
+# ------------------------------------------------------------------------------------------------ M3: the map card
+
+TRIPS = [  # M3: what the person asks, the places it names (each must be a stop, within 25 km of its truth), and the truth for any stop
+    ("Plan me a day in Lisbon: Belém Tower, the Alfama and LX Factory.", ["belem", "alfama", "lx factory"]),
+    ("A trip through Rome, Florence and Venice.", ["rome", "florence", "venice"]),
+]
+TRUTH = {  # hand-entered (OpenStreetMap, checked by eye on osm.org), lower-case ASCII words a stop's name may carry -> (lat, lon)
+    "belem": (38.6916, -9.2160), "alfama": (38.7114, -9.1301), "lx factory": (38.7036, -9.1784), "jeronimos": (38.6979, -9.2068),
+    "sao jorge": (38.7139, -9.1335), "castle": (38.7139, -9.1335), "comercio": (38.7075, -9.1364), "baixa": (38.7110, -9.1370),
+    "time out": (38.7069, -9.1459), "chiado": (38.7107, -9.1424), "bairro alto": (38.7126, -9.1457), "rossio": (38.7139, -9.1394),
+    "pasteis": (38.6975, -9.2030), "maat": (38.6957, -9.1946), "monument to the discoveries": (38.6935, -9.2058), "padrao": (38.6935, -9.2058),
+    "rome": (41.9028, 12.4964), "roma": (41.9028, 12.4964), "colosseum": (41.8902, 12.4922), "vatican": (41.9029, 12.4534),
+    "florence": (43.7696, 11.2558), "firenze": (43.7696, 11.2558), "uffizi": (43.7678, 11.2553), "duomo": (43.7731, 11.2560),
+    "venice": (45.4408, 12.3155), "venezia": (45.4408, 12.3155), "st mark": (45.4341, 12.3388), "san marco": (45.4341, 12.3388),
+    "rialto": (45.4380, 12.3358), "pisa": (43.7230, 10.3966), "siena": (43.3188, 11.3308), "bologna": (44.4949, 11.3426),
+}
+STOP_KM = 25.0
+
+
+def ascii_words(s):
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
+    return " " + re.sub(r"[^a-z0-9]+", " ", t).strip() + " "
+
+
+def truth_of(name):
+    """The truth entry a stop's name names (the longest key found in it as whole words), or None."""
+    words = ascii_words(name)
+    keys = [k for k in TRUTH if f" {k} " in words]
+    return max(keys, key=len) if keys else None
+
+
+def km_between(a, b):
+    import math
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 6371 * 2 * math.asin(min(1, math.sqrt(h)))
+
+
+def map_stops(maps):
+    """The settled stops of the newest map card in OMX MAP lines: [{n, name, lat, lon, how, geocoder_km, cached}] in order."""
+    rows = {}
+    card = None
+    for m in maps:
+        if "stop" in m and "lat" in m:
+            if card != m.get("card"):
+                card, rows = m.get("card"), {}
+            rows[int(m["stop"])] = {"n": int(m["stop"]), "name": m.get("text", ""), "lat": float(m["lat"]), "lon": float(m["lon"]), "how": m.get("how"),
+                                   "geocoder_km": float(m.get("geocoder_km", -1)), "cached": m.get("cached")}
+    return card, [rows[k] for k in sorted(rows)]
+
+
+def judge_trip(ask, wanted, stops, points, flights):
+    """(problems, the stops with their distance to the truth) for one trip."""
+    probs = []
+    for st in stops:
+        key = truth_of(st["name"])
+        if key is None:  # (a stop the checker has no truth for by name: the nearest truth of this trip's places)
+            near = min(wanted, key=lambda k: km_between((st["lat"], st["lon"]), TRUTH[k]))
+            st["truth"], st["km"], st["by"] = near, round(km_between((st["lat"], st["lon"]), TRUTH[near]), 2), "nearest"
+        else:
+            st["truth"], st["km"], st["by"] = key, round(km_between((st["lat"], st["lon"]), TRUTH[key]), 2), "name"
+        if st["km"] > STOP_KM:
+            probs.append(f"{ask!r}: stop {st['n']} {st['name']!r} is {st['km']} km from {st['truth']} (limit {STOP_KM})")
+    if len(stops) < 3:
+        probs.append(f"{ask!r}: {len(stops)} stops, need 3")
+    for w in wanted:
+        if not any(st["truth"] == w and st["by"] == "name" for st in stops):
+            probs.append(f"{ask!r}: no stop named for {w} (stops {[st['name'] for st in stops]})")
+    on_stops = [p for p in points if re.match(r"^card\d+\.stop\d+$", str(p.get("tag")))]
+    if len(on_stops) < 3:
+        probs.append(f"{ask!r}: {len(on_stops)} points on stops, need 3 (all points: {[p.get('tag') for p in points]})")
+    lags = [p["lag_ms"] for p in on_stops]
+    if lags and max(abs(x) for x in lags) > LAG_LIMIT_MS:
+        probs.append(f"{ask!r}: a point was shown {max(lags, key=abs)} ms from its audio (limit {LAG_LIMIT_MS})")
+    if len(flights) < min(3, len(on_stops)):
+        probs.append(f"{ask!r}: the map flew {len(flights)} times for {len(on_stops)} points")
+    for p in on_stops:  # (the ring is drawn round the marker: a marker-sized rect)
+        ring = [int(v) for v in str(p.get("ring", "-")).split(",")] if p.get("ring", "-") != "-" else []
+        if len(ring) != 4 or not (16 <= ring[2] <= 36 and 16 <= ring[3] <= 36):
+            probs.append(f"{ask!r}: point {p.get('tag')} ring {p.get('ring')} isn't round a marker")
+    return probs, stops
+
+
+def m3():
+    why = build()
+    if why:
+        return "FAIL", why
+    probs, said, numbers = [], [], {}
+    OUT.mkdir(parents=True, exist_ok=True)
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    # the framework's own: PNG decoding, the map offline, tiles and the geocoder against the real web
+    for name, how in (("test_pngread", "scripts/mxbuild.sh"), ("test_tripmap", "scripts/mxbuild.sh"), ("test_mapweb", "flare")):
+        cmd = ["scripts/mojo_flare.sh", "build", f"tests/{name}.mojo", "-o", f"build/{name}"] if how == "flare" else [how, f"tests/{name}.mojo", "-o", f"build/{name}"]
+        b = g72.sh(cmd, 1800)
+        if b.returncode:
+            return "FAIL", f"{name} doesn't build: {g72.tail(b, 900)}"
+        r = g72.sh([f"build/{name}"], 600)
+        if r.returncode:
+            return "FAIL", f"{name}: {g72.tail(r, 900)}"
+        numbers[name] = [l for l in r.stdout.splitlines() if re.match(r"(pngread|tripmap|tiles|geocode)\b", l)]
+    tl = next((l for l in numbers["test_mapweb"] if l.startswith("tiles cold_ms")), "")
+    m = re.search(r"cold_ms ([\d.]+) cached_ms ([\d.]+)", tl)
+    tile_cold, tile_cached = (float(m.group(1)), float(m.group(2))) if m else (None, None)
+    # the app on GTK (the headless display): both trips typed, the replies spoken to the null sink
+    g72.ensure_wavs()  # (the recorded microphone the app starts with: silent until after the run)
+    env = dict(CTX, CUDA_DEVICE_ORDER="PCI_BUS_ID", MOJOUI_GEO_CACHE=str(OUT / "geo"))
+    for old in OUT.glob("m3_gtk_*.png"):
+        old.unlink()
+    fresh_todo()
+    steps = g72.TYPED_OPEN
+    for k, (ask, _) in enumerate(TRIPS, 1):
+        steps += f"enter:Type to omx={ask};waitfor:Speaking=150000;" + "".join(f"shot:{OUT}/m3_gtk_{k}_{i:02d}.png;wait:350;" for i in range(14)) + "waitfor:Listening=170000;wait:2500;"
+    with g72.NullSink():
+        ev, r = g72.run_app(g72.SILENT, steps, window="820x1180", env=env, timeout=1800)
+    failed = [f for f in of(ev, "FAILED") if not f.get("raw", "").startswith("microphone")]
+    if failed:
+        probs.append("the app failed: " + failed[0].get("raw", ""))
+    trips = []
+    for k, (ask, wanted) in enumerate(TRIPS, 1):
+        calls = [str(e.get("name")) for e in of(ev, "CALL", k)]
+        maps = [e for e in ev if e["kind"] == "MAP"]
+        card = next((e for e in of(ev, "CARD", k) if "cardkind=map" in e.get("raw", "")), None)
+        if "show_map" not in calls or card is None:
+            probs.append(f"{ask!r}: no map card (calls {calls}; reply {(of(ev, 'REPLY', k) or [{}])[0].get('text')!r})")
+            trips.append({"ask": ask, "calls": calls})
+            continue
+        cardname = re.search(r"cards=(\d+)", card.get("raw", ""))
+        cname = f"card{cardname.group(1)}" if cardname else None
+        mine = [m_ for m_ in maps if m_.get("card") == cname]
+        _, stops = map_stops(mine)
+        points = of(ev, "POINT", k)
+        flights = [m_ for m_ in mine if "fly" in m_]
+        tiles = next((m_ for m_ in mine if "tiles" in m_), {})
+        p_, stops = judge_trip(ask, wanted, stops, points, flights)
+        probs += p_
+        trips.append({"ask": ask, "card": cname, "stops": stops, "points": [(p.get("tag"), p.get("lag_ms"), p.get("ring")) for p in points],
+                      "flights": len(flights), "tiles": {x: tiles.get(x) for x in ("tiles", "net", "net_ms", "disk", "disk_ms", "full_ms")},
+                      "reply": (of(ev, "REPLY", k) or [{}])[0].get("text")})
+    shot = max(OUT.glob("m3_gtk_1_*.png"), key=lambda f: f.stat().st_size, default=None)
+    if shot:
+        shutil.copy(shot, SHOTS / "m3-map-gtk.png")
+    bench(m3_gtk=trips, m3_tests=numbers, m3_tile_cold_ms=tile_cold, m3_tile_cached_ms=tile_cached)
+    for t in trips:
+        if "stops" in t:
+            said.append(f"GTK {t['ask']!r}: " + ", ".join(f"{st['n']} {st['name']} {st['km']} km ({st['how']})" for st in t["stops"])
+                        + f"; {len(t['points'])} points lags {[p[1] for p in t['points']]} ms, {t['flights']} flights")
+    # the web host at tablet size: both trips again, the ring round the marker and the tiles in the browser
+    if not probs and not os.environ.get("G77_SKIP_WEB"):
+        b = g72.sh(["scripts/build.sh", "omx", "web"], 3600)
+        if b.returncode:
+            probs.append("web build: " + g72.tail(b, 400))
+        else:
+            w = g72.sh(["pixi", "run", "python", "scripts/omx_map_web.py"], 2400)
+            if w.returncode or "omx_map_web: ok" not in w.stdout:
+                probs.append("web host: " + g72.tail(w, 900))
+            else:
+                rep = json.loads((OUT / "omx-map-web.json").read_text())
+                web = []
+                for (ask, wanted), t in zip(TRIPS, rep["trips"]):
+                    wev = g72.parse_omx("\n".join(t["maps"] + t["points"]))
+                    _, stops = map_stops([e for e in wev if e["kind"] == "MAP"])
+                    p_, stops = judge_trip(ask, wanted, stops, [e for e in wev if e["kind"] == "POINT"], [e for e in wev if e["kind"] == "MAP" and "fly" in e])
+                    probs += ["web: " + x for x in p_]
+                    web.append({"ask": ask, "stops": stops, "ring_share": t["ring_share"], "tile_colours": t["tile_colours"], "shot": t["shot"]})
+                    said.append(f"web {ask!r}: " + ", ".join(f"{st['n']} {st['name']} {st['km']} km" for st in stops)
+                                + f"; ring share {t['ring_share']}, {t['tile_colours']} colours of tiles; {t['shot']}")
+                bench(m3_web=web)
+    said.append(f"tiles: {tile_cold:.0f} ms a tile from the web (request + decode, median), {tile_cached:.2f} ms from the disk cache" if tile_cold else "tiles: no numbers")
+    said.append("GTK screenshot docs/goals/77/m3-map-gtk.png")
+    return ("FAIL", "; ".join(probs)) if probs else ("PASS", " | ".join(said))
 
 
 # ------------------------------------------------------------------------------------------------ M2, M5, the rest
@@ -438,7 +612,7 @@ def blocked(what):
     return lambda: ("BLOCKED", f"{what}: not built yet")
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": blocked("the map card (goal 77 M3)"), "M4": blocked("the isometric explainer (goal 77 M4)"),
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": blocked("the isometric explainer (goal 77 M4)"),
               "M5": m5, "M6": m6, "M7": blocked("the polish (goal 77 M7)")}
 
 
