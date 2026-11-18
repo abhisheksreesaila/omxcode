@@ -9,7 +9,11 @@ goal-73-links-canvas.
 - `Links.complete(draft)`: no dot → card names (`fleet.`, `telemetry.`, `episode.`); `card.par` → that card's columns;
   after a whole end → `=` and `~`; then the second end the same way. Replaces only the word being typed; at most 8.
 - The Links panel shows them as chips under the field (agent tools `link-pick-k`); Return on a partial draft takes the first
-  completion; a whole link links as before. Nothing links until Return (links stay explicit).
+  completion (on an empty field: the first card's name), and so does Return on a whole-looking draft whose last word only
+  begins a column the app offers (`clip.mp4.fr`, review round 1: a video card's columns aren't in a table schema, so the
+  check couldn't refuse it); a whole link links as before. Nothing links until Return (links stay explicit).
+- The host proofs type only `fl`; everything after is Return and chip taps (GTK by widget, the web host by the chips' agent
+  tools), the link made by Return on the chips' draft.
 - The app feeds video cards (`file`, `t`, `frame`) and document folders beside its tables (`know_card`).
 - Found on the way: GTK put a stale held text back into a field after the app cleared it (D-7304); chips three to a row
   widened the inspector over the card beside it, now packed by width (D-7306, M1 checks the panel holds still).
@@ -28,6 +32,9 @@ goal-73-links-canvas.
   ink3 #4f5d72 (it was 3.8:1, under 4.5, before this goal). Dark: canvas #0b0d12 under #1b1f27 cards.
 - Measured on the shots: light card/canvas step +10.4 L* (GTK), +10.7 (web), was ~7.8; dark +5.8/+6.2, was ~2.4. 36 text
   pairs ≥ 4.5:1 (lowest 4.64).
+- The thresholds (step ≥ 8 L* light, ≥ 5 dark; a shadow check in light only) are this goal's own choice, not the contract's.
+  Dark's depth comes from the step and the rim; its shadow barely shows on a near-black canvas (0.2–0.9 L*), so "the same,
+  inverted" is met by the lift, not by a visible shadow.
 - Shots: build/g73/m3/{gtk,web}-{light,dark}{,-before}.png.
 
 ## M4: nothing regressed
@@ -43,4 +50,10 @@ goal-73-links-canvas.
 ## Not done / unverified
 - AppKit and iPhone not run (chips are plain Buttons; AppKit's test steps still find a field by hint only).
 - No autoscroll while dragging near the window's edge; the Board doesn't shorten when a card closes (drag the bottom card up).
+- A grown Board's height isn't saved: a document reopens re-tiled to the window (the tiling was never saved; no .omx format
+  change; no old .omx file was opened in a proof).
+- Completions split the draft at its last space, so a card whose name has a space (a document folder "My docs") completes
+  its columns badly; non-ASCII card names whose lower case changes length may slice wrongly (review nits, not fixed).
+- The agent host's "ask again" retry (D-7330) is the client honouring the GTK host's own protocol (its input lines and jobs
+  already wait for the next idle turn the same way); the rebuild it waits out is real and short.
 - The ribbon (next, after the launch posts).
