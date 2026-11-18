@@ -25,6 +25,12 @@
 #  (c) plain Mojo functions registered with add_function: run inside the agent.
 # The conversation (sequence 0 of the Llm) and its prompt cache live as long as the agent: a run adds only what's new (the
 # input's messages whose ids the agent hasn't seen). `think` is fixed per agent (the cache breaks when it changes).
+#
+# Never full (D-7314): the conversation is kept inside a budget (compact_fraction of the context, 40 %). Between turns,
+# agent.maintain() (the app calls it on its tick; begin() calls it too) notices the history has outgrown it, has the model's
+# second sequence condense the older turns into a short summary (a cut only at a user message, so a tool call and its result
+# are never parted), and, once the agent is idle, swaps the summary in for them and warms the prompt cache for the new history,
+# so the next turn is as quick as the ones before it. Nothing here runs in the middle of a turn. agent.start_over() clears it all.
 from std.ffi import external_call
 from mojoui.agui import LocalAgent, Tool, ToolCall, content_text
 from mojoui.app import App, Event
@@ -32,6 +38,7 @@ from mojoui.clock import now_ns
 from mojoui.genui import catalog, validate, Spec, Prop, P_TEXT, P_ENUM, P_NUMBER, P_TEXTS, P_NUMBERS, P_ROWS, P_POINTER, P_WORD, P_CHILDREN, P_BOOL, P_POINTS, P_ITEMS
 from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT, J_STRING, J_NULL
 from mojoui.trust import Trust
+from mojoui.utf8 import head, tail
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
 from mojoui.view import View, BUTTON, FIELD, TOGGLE, NO_MSG
 from mojoui import libc
@@ -56,6 +63,15 @@ comptime PH_MODEL = 1  # the model is producing a step
 comptime PH_CALLS = 2  # the step's tool calls wait for answers
 
 comptime RENDER_UI = "render_ui"
+comptime SUMMARY_MARK = "[Summary of our conversation so far] "
+comptime SUMMARY_SYSTEM = (
+    "You condense a conversation between a person and their voice assistant into notes for the assistant's own memory, at most 250 "
+    "words, plain sentences, no preamble. Begin with 'Facts the person told me:' and list every fact about the person and their "
+    "life exactly as given (names, numbers, codes, dates, places, preferences, plans, decisions: these matter most, more than "
+    "routine or repeated content). Then write 'What happened:' in two or three sentences: what they asked for, what is still open, "
+    "what the assistant did or found. If the text begins with an EARLIER SUMMARY, keep every fact in it word for word and add the "
+    "new ones: never drop a fact from it."
+)
 
 
 @fieldwise_init
@@ -325,6 +341,18 @@ struct LlmAgent(LocalAgent, Movable):
     var used: Int  # tools called this run
     var warm_id: Int  # the warm-up request prime() made, until its end is seen (0: none)
     var runs: Int
+    var compact_fraction: Float64  # the share of the context the conversation may fill before it is condensed (0.4)
+    var last_tokens: Int  # what the conversation's last request read and wrote: the prompt cache's size
+    var summ_id: Int  # the summary request on sequence 1 (0: none)
+    var summ_cut: Int  # history[0:cut] is what it condenses
+    var summ_text: String
+    var summ_ready: Bool  # the summary is complete and waits for an idle moment to be swapped in
+    var summ_tried: Int  # the history's length when a cut was last looked for in vain
+    var rewarm_id: Int  # the request that warms the cache for the condensed history (0: none)
+    var last_reason: String  # why the model's last step ended: stop, length, cancel
+    var compactions: Int
+    var compact_ms: Float64  # how long the last condensing took, from its start to the swap
+    var summ_start_ns: Int
     var trust: Trust  # what a turn that has read untrusted text may not do (mojoui.trust, D-7301)
 
     def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 1200, temperature: Float64 = 0.3):
@@ -360,6 +388,18 @@ struct LlmAgent(LocalAgent, Movable):
         self.used = 0
         self.warm_id = 0
         self.runs = 0
+        self.compact_fraction = 0.4
+        self.last_tokens = 0
+        self.summ_id = 0
+        self.summ_cut = 0
+        self.summ_text = String("")
+        self.summ_ready = False
+        self.summ_tried = -1
+        self.rewarm_id = 0
+        self.last_reason = String("")
+        self.compactions = 0
+        self.compact_ms = 0.0
+        self.summ_start_ns = 0
         self.trust = Trust()
 
     def add_function(mut self, var f: ToolFn):
@@ -394,6 +434,7 @@ struct LlmAgent(LocalAgent, Movable):
         if self.phase != PH_IDLE:
             out.append(_ev("RUN_ERROR", ',"message":"a run is already in progress","code":"busy"'))
             return out^
+        _ = self.maintain()  # (between turns: a summary that is ready is swapped in, one that is due is started)
         self.runs += 1
         self.trust.new_turn()  # (a run starts with the person's words: nothing untrusted has been read in it yet)
         self.t_begin = now_ns()
@@ -515,10 +556,7 @@ struct LlmAgent(LocalAgent, Movable):
         self.text_id = String("")
         self.text_acc = String("")
         self.model_calls = String("")
-        var msgs = '[{"role":"system","content":' + json_string(self.system) + "}"
-        for ref m in self.history:
-            msgs += "," + m
-        msgs += "]"
+        var msgs = self.messages_json()
         try:
             self.req_id = self.llm.chat(msgs, self.tools_json, 0, self.think, self.max_tokens, self.temperature)
             self.phase = PH_MODEL
@@ -547,6 +585,178 @@ struct LlmAgent(LocalAgent, Movable):
             self.llm.cancel(self.req_id)
         elif self.phase == PH_CALLS:
             self.cancelled = True
+
+    # --- never full --------------------------------------------------------------------------------------------------
+
+    def budget(self) -> Int:
+        """Tokens the conversation may hold before the older turns are condensed."""
+        return Int(Float64(self.llm.n_ctx) * self.compact_fraction)
+
+    def messages_json(self) -> String:
+        """The system prompt and the conversation, as one request carries them."""
+        var msgs = '[{"role":"system","content":' + json_string(self.system) + "}"
+        for ref m in self.history:
+            msgs += "," + m
+        return msgs + "]"
+
+    def start_over(mut self):
+        """A fresh conversation: the history, what was condensed and anything being condensed are gone."""
+        if self.phase != PH_IDLE:
+            self.cancel()
+        if self.summ_id != 0:
+            self.llm.cancel(self.summ_id)
+        if self.rewarm_id != 0:
+            self.llm.cancel(self.rewarm_id)
+        self.history = List[String]()
+        self.seen = List[String]()
+        self.last_tokens = 0
+        self.summ_id = 0
+        self.summ_ready = False
+        self.summ_text = String("")
+        self.summ_tried = -1
+        self.rewarm_id = 0
+        self.compactions = 0
+
+    def maintain(mut self) -> Bool:
+        """Keeps the conversation inside its budget, between turns only (call it on the app's tick: it is cheap when there is
+        nothing to do). When the history has outgrown the budget the model's second sequence condenses the older turns; when
+        that is done and no turn is running they are swapped for the summary and the prompt cache is warmed for what is left.
+        True while it has something in flight."""
+        if self.summ_id != 0:
+            try:
+                for ref e in self.llm.poll(self.summ_id):
+                    if e.kind == TEXT:
+                        self.summ_text += e.text
+                    elif e.kind == DONE:
+                        self.summ_id = 0
+                        self.summ_ready = True
+                    elif e.kind == ERROR:
+                        self.summ_id = 0
+                        self.summ_text = String("")
+                        self.summ_tried = len(self.history)  # (not again until the conversation has moved on)
+            except:
+                self.summ_id = 0
+        if self.rewarm_id != 0:
+            try:
+                for ref e in self.llm.poll(self.rewarm_id):
+                    if e.kind == DONE or e.kind == ERROR:
+                        self.rewarm_id = 0
+            except:
+                self.rewarm_id = 0
+        if self.phase != PH_IDLE:
+            return self.summ_id != 0 or self.summ_ready or self.rewarm_id != 0
+        if self.summ_ready:
+            self.apply_summary(String(self.summ_text.strip()))
+        elif self.last_tokens > Int(Float64(self.llm.n_ctx) * 0.9):  # (the model's summary didn't come in time: what's older is let go, not the turn)
+            if self.summ_id != 0:
+                self.llm.cancel(self.summ_id)
+                self.summ_id = 0
+            self.apply_summary("(Earlier parts of this conversation were left out to make room.)", True)
+        elif self.summ_id == 0 and self.rewarm_id == 0 and self.last_tokens > self.budget() and self.summ_tried != len(self.history):
+            self.start_summary()
+        return self.summ_id != 0 or self.summ_ready or self.rewarm_id != 0
+
+    def cut_point(self) -> Int:
+        """Where the older turns end: the index of a user message such that what follows it is about a third of the budget (and
+        at least the last turn). 0 when there is nothing older to condense. A cut only ever falls before a user message, so
+        an assistant's tool call and the tool's result stay together."""
+        var users = List[Int]()
+        var sizes = List[Int]()
+        for i in range(len(self.history)):
+            sizes.append(self.history[i].byte_length())
+            if self.history[i].startswith('{"role":"user"'):
+                users.append(i)
+        if len(users) < 2:
+            return 0
+        var keep = self.budget() // 3 * 3  # (bytes: about three to a token)
+        var tail = 0
+        var at = len(users) - 1
+        for i in range(users[at], len(self.history)):
+            tail += sizes[i]
+        while at > 0:
+            var more = 0
+            for i in range(users[at - 1], users[at]):
+                more += sizes[i]
+            if tail + more > keep:
+                break
+            tail += more
+            at -= 1
+        return users[at] if users[at] > 0 else 0
+
+    def transcript(self, cut: Int) -> String:
+        """history[0:cut] as plain text for the summariser: who said what, a tool's call and the start of its result."""
+        var out = String("")
+        var earlier = String("")  # (an earlier summary is never cut: only the turns after it make way when the text is too long)
+        for i in range(cut):
+            try:
+                var j = Json.parse(self.history[i])
+                var role = j.text(j.get(0, "role"))
+                var content = j.text(j.get(0, "content"))
+                if role == "user" and content.startswith(SUMMARY_MARK):  # (an earlier summary leads, marked, so it is folded in whole)
+                    earlier = "EARLIER SUMMARY (keep every fact in it): " + String(content[byte = String(SUMMARY_MARK).byte_length() :]) + "\n\n"
+                    continue
+                if role == "assistant" and content == "Understood." and i == 1:
+                    continue
+                if role == "tool":
+                    out += "Tool result: " + head(content, 500) + "\n"
+                    continue
+                if content != "":
+                    out += ("Person: " if role == "user" else "Assistant: ") + head(content, 2500) + "\n"
+                var calls = j.get(0, "tool_calls")
+                if calls >= 0:
+                    for k in range(j.size(calls)):
+                        var f = j.get(j.at(calls, k), "function")
+                        out += "Assistant used the tool " + j.text(j.get(f, "name")) + " with " + head(j.text(j.get(f, "arguments")), 300) + "\n"
+            except:
+                pass
+        var room = max(self.llm.n_ctx - self.budget() - 1500, 1000) * 3  # (bytes, three to a token: what fits beside the conversation's own cache)
+        room -= earlier.byte_length()
+        if out.byte_length() > room:  # (too long for the room: the middle makes way; the first turns and the last ones are what the summary needs most)
+            out = head(out, room * 2 // 5) + "\n[...]\n" + tail(out, room * 3 // 5)
+        return earlier + out
+
+    def start_summary(mut self):
+        var cut = self.cut_point()
+        if cut <= 0:
+            self.summ_tried = len(self.history)
+            return
+        var msgs = ('[{"role":"system","content":' + json_string(String(SUMMARY_SYSTEM)) + '},{"role":"user","content":'
+                    + json_string("Condense this conversation:\n\n" + self.transcript(cut)) + "}]")
+        try:
+            self.summ_id = self.llm.chat(msgs, "", 1, False, 500, 0.2)
+            self.summ_cut = cut
+            self.summ_text = String("")
+            self.summ_ready = False
+            self.summ_start_ns = now_ns()
+        except:
+            self.summ_tried = len(self.history)
+
+    def apply_summary(mut self, summary: String, forced: Bool = False):
+        """Swaps history[0:cut] for the summary (a user message that carries it and a short acknowledgement, so the roles
+        still alternate) and warms the cache for the history that is left. Only ever called with no turn running."""
+        var cut = self.summ_cut if not forced else self.cut_point()
+        self.summ_ready = False
+        self.summ_text = String("")
+        if cut <= 0 or cut > len(self.history):
+            self.summ_tried = len(self.history)
+            return
+        var kept = List[String]()
+        kept.append('{"role":"user","content":' + json_string(String(SUMMARY_MARK) + summary) + "}")
+        kept.append('{"role":"assistant","content":"Understood."}')
+        for i in range(cut, len(self.history)):
+            kept.append(self.history[i])
+        self.history = kept^
+        self.compactions += 1
+        self.compact_ms = Float64(now_ns() - self.summ_start_ns) / 1e6 if not forced else 0.0
+        var bytes = 0
+        for ref m in self.history:
+            bytes += m.byte_length()
+        self.last_tokens = (bytes + self.system.byte_length() + self.tools_json.byte_length()) // 3
+        self.summ_tried = -1
+        try:  # (the cache holds the old history: read the new one now, while nobody waits, so the next turn finds it warm)
+            self.rewarm_id = self.llm.chat(self.messages_json(), self.tools_json, 0, self.think, 1, 0.0)
+        except:
+            self.rewarm_id = 0
 
     # --- events out ----------------------------------------------------------------------------------------------
 
@@ -579,6 +789,8 @@ struct LlmAgent(LocalAgent, Movable):
                     self.fail(out, e.text)
                     return out^
                 elif e.kind == DONE:
+                    self.last_tokens = e.n_prompt + e.n_gen
+                    self.last_reason = e.text + " prompt=" + String(e.n_prompt) + " cached=" + String(e.n_cached) + " gen=" + String(e.n_gen)
                     self.close_text(out)
                     self.model_done(out, e.text)
                     break

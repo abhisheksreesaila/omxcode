@@ -77,6 +77,7 @@ struct Req {
     int32_t n_cached = 0;           // of those, the ones reused from the cache
     int32_t ck_at = -1;             // take a checkpoint when the KV holds this many tokens
     int32_t i_logits = -1;          // index of this request's logits row in the batch being processed
+    int32_t batched = 0;            // tokens of this request in the batch being processed (taken back when the batch doesn't fit)
     bool generating = false;
     llama_token last = LLAMA_TOKEN_NULL;
     std::string generated;          // the reply text so far (complete UTF-8 only)
@@ -221,6 +222,19 @@ void take_checkpoint(Engine * e, int s, int32_t n) {
     }
 }
 
+// One request failed in a way nobody planned for: it ends with an error event, its sequence starts empty (its KV is in an
+// unknown state), and the engine and every other sequence go on.
+void fail_request(Engine * e, int s, Req & r, const std::string & why) {
+    emit_error(e, r, why);
+    if (r.smpl) { common_sampler_free(r.smpl); r.smpl = nullptr; }
+    seq_reset(e, s);
+    {
+        std::lock_guard<std::mutex> l(e->mu);
+        if (e->seqs[s].active.get() == &r) e->seqs[s].active.reset();
+    }
+    wake(e);
+}
+
 // Turn a queued request into a prefilling one: template, tokens, cache reuse. false: an error event was emitted.
 bool admit_inner(Engine * e, int s, Req & r) {
     r.t_admit = clk::now();
@@ -246,6 +260,28 @@ bool admit_inner(Engine * e, int s, Req & r) {
     const int32_t n = (int32_t) r.prompt.size();
     if (n < 1 || n >= e->n_ctx - 8) {
         emit_error(e, r, "prompt of " + std::to_string(n) + " tokens does not fit the context of " + std::to_string(e->n_ctx));
+        return false;
+    }
+
+    // the sequences share one context (a unified KV cache): the other sequences' tokens and this prompt must fit together. The
+    // conversation (sequence 0) outranks background work: that is stopped to make room, never the other way round, and a
+    // prompt that still doesn't fit is refused with its own error without touching what the sequence already holds.
+    auto others_hold = [&]() {
+        int64_t held = 0;
+        for (size_t o = 0; o < e->seqs.size(); o++) if ((int) o != s) held += (int64_t) e->seqs[o].cached.size();
+        return held;
+    };
+    if ((int64_t) n > (int64_t) e->n_ctx - others_hold() - 16 && s == 0) {
+        for (int o = 1; o < (int) e->seqs.size(); o++) {
+            std::shared_ptr<Req> bg;
+            { std::lock_guard<std::mutex> l(e->mu); bg = e->seqs[o].active; }
+            if (bg) fail_request(e, o, *bg, "stopped to make room for the conversation");
+            else seq_reset(e, o);
+        }
+    }
+    if ((int64_t) n > (int64_t) e->n_ctx - others_hold() - 16) {
+        emit_error(e, r, "no room for this request: its prompt is " + std::to_string(n) + " tokens and the context has " +
+                         std::to_string((int64_t) e->n_ctx - others_hold()) + " free beside the other sequences");
         return false;
     }
 
@@ -303,19 +339,6 @@ bool admit_inner(Engine * e, int s, Req & r) {
         return false;
     }
     return true;
-}
-
-// One request failed in a way nobody planned for: it ends with an error event, its sequence starts empty (its KV is in an
-// unknown state), and the engine and every other sequence go on.
-void fail_request(Engine * e, int s, Req & r, const std::string & why) {
-    emit_error(e, r, why);
-    if (r.smpl) { common_sampler_free(r.smpl); r.smpl = nullptr; }
-    seq_reset(e, s);
-    {
-        std::lock_guard<std::mutex> l(e->mu);
-        if (e->seqs[s].active.get() == &r) e->seqs[s].active.reset();
-    }
-    wake(e);
 }
 
 bool admit(Engine * e, int s, Req & r) {
@@ -462,7 +485,9 @@ void engine_pass(Engine * e, common_batch & batch) {
         Req & r = *rp;
         Seq & sq = e->seqs[s];
         r.i_logits = -1;
+        r.batched = 0;
         if (r.generating) {
+            r.batched = 1;
             sq.cached.push_back(r.last);
             r.i_logits = batch.add(r.last, (llama_pos) (sq.cached.size() - 1), s, true);
         } else {
@@ -477,6 +502,7 @@ void engine_pass(Engine * e, common_batch & batch) {
                 sq.cached.push_back(r.prompt[r.n_done + i]);
             }
             r.n_done += take;
+            r.batched = take;
         }
     }
     if (batch.size() == 0) return;
@@ -484,9 +510,30 @@ void engine_pass(Engine * e, common_batch & batch) {
     int ret = llama_process(e->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get());
     if (ret == 0) llama_synchronize(e->ctx);
     double dec_ms = std::chrono::duration<double, std::milli>(clk::now() - t_dec).count();
+    if (ret == 1) {
+        // No room in the shared context for this batch (nothing was processed). The batch is taken back; the highest sequence
+        // (background work) gives way with an error of its own and the rest try again next pass. A lone request (the
+        // conversation) fails alone and keeps what the sequence holds: a full context never wipes the conversation.
+        for (auto & [s, rp] : active) {
+            Seq & sq = e->seqs[s];
+            sq.cached.resize(sq.cached.size() - (size_t) rp->batched);
+            if (!rp->generating) rp->n_done -= rp->batched;
+        }
+        auto & [vs, vr] = active.back();
+        if (active.size() > 1) {
+            fail_request(e, vs, *vr, "the context is full: this background request was stopped to keep the conversation");
+        } else {
+            emit_error(e, *vr, "the context is full: " + std::to_string(e->seqs[vs].cached.size()) + " of " + std::to_string(e->n_ctx) + " tokens are in use");
+            if (vr->smpl) { common_sampler_free(vr->smpl); vr->smpl = nullptr; }
+            std::lock_guard<std::mutex> l(e->mu);
+            e->seqs[vs].active.reset();
+        }
+        wake(e);
+        return;
+    }
     if (ret != 0) {
         for (auto & [s, rp] : active) {
-            emit_error(e, *rp, ret == 1 ? "the context is full" : "decode failed (" + std::to_string(ret) + ")");
+            emit_error(e, *rp, "decode failed (" + std::to_string(ret) + ")");
             if (rp->smpl) { common_sampler_free(rp->smpl); rp->smpl = nullptr; }
             seq_reset(e, s);
             std::lock_guard<std::mutex> l(e->mu);

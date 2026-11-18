@@ -1088,8 +1088,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | News headlines | `mojoui.news: news_url, parse_headlines (Google News RSS: title, source, link, age; entities decoded, newest first), NewsCard (each headline a link), news_for_model` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
 | Think-it-through job | `mojoui.llmjob: ThinkJob(title, task).start(llm) on the model's second sequence with thinking on, poll(), ThinkCard (a clock, then the answer; the thinking is never shown), job_notice / job_memory; LlmAgent.remember` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
-| Cloud lane | `mojoui.cloudlane: route(text) (the cloud only when named: 'ask Claude', 'use Opus for…'; 'stay local' wins; 'think it through' is a background job), looks_secret, CloudLane (claude -p as a child process, capped, never waits), the ledger of bytes sent` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
+| Cloud lane | `mojoui.cloudlane: route(text) (the cloud only when named: 'ask Claude', 'use Opus for…'; 'stay local' wins; 'think it through' is a background job), looks_secret, CloudLane (claude -p as a child process, capped, never waits; a sent row in the 0600 ledger before anything leaves, then the outcome), CloudTurn (the turn as a state machine: fresh words of a merged turn, ask, cancel, step, close)` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
 | Assistant features (glue) | `mojoui.assistant.Assistant: registers todo_*, news and think_it_through as the agent's tools (LlmAgent.add_deferred: tools the app answers later), owns the to-do card's messages, the job, the news cards, the cloud lane; an app calls register / tick / flush / notice / cards` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
+| Untrusted text | `mojoui.trust: Trust (guard / allow / taint / check / new_turn: a turn that read notes or headlines may not reach out or change things without the person's yes), fence(source, text), plain_topic(text); LlmAgent.trust, LlmAgent.answer(..., untrusted=True)` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
+| Conversation that never fills | `mojoui.llmagent.LlmAgent.maintain / start_over / compact_fraction: the older turns condensed into a summary on the second sequence between turns, the cache warmed for what is left; never mid-turn` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
 | Image generation (a model as a child process) | `mojoui.imagegen: ImageServer.zimage(bin, models, gpu, port).start() / tick() / draw_request(msg, id, prompt, seed, size) -> an HTTP request effect; png_of(reply); sd-server with Z-Image-Turbo on its own GPU, ended with the app` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
 | Comic and picture cards (agent-made images) | `mojoui.comic: ComicPlan.parse (the model's plan as a tool call: title, one hero, four panels), prompts with one hero and one seed; mojoui.creator.Creator: make_comic / draw_picture, a card that fills in panel by panel with a fade, full PNGs kept, Album.hold (a safe name; the agent never sends pixels)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | Find in my notes (in-process embeddings) | `mojoui.notes: NotesIndex(folder, pack, cache).step(ms) / search(question, folder, k) -> files + passages; e5-small-v2 by MAX, a cached index, one folder only (no .., links, hidden files, > 1 MB); Creator.find_in_notes cites the files on a card` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
@@ -1157,7 +1159,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Think-it-through job (Android): libllama isn't built there.
 - Think-it-through job (Mac (AppKit)): libllama shim not built.
 - Think-it-through job (iPhone (UIKit)): libllama shim not built.
-- Cloud lane (Linux (GTK)): tests/test_cloudlane (19 routing utterances, a script standing in for claude, the cap, the ledger); 72-check M6-CLOUD: one real request, 'Asking Claude.' said first, the chip and the orange frame while it spoke, gone after.
+- Cloud lane (Linux (GTK)): tests/test_cloudlane (routing utterances including the names that stay local, a script standing in for claude, the cap, the ledger written first and 0600, cancel that never waits, a whole CloudTurn); 72-check M6-CLOUD: one real request, 'Asking Claude.' said first, the chip and the orange frame while it spoke, gone after.
 - Cloud lane (Web): mojoui.process runs there; never run with the cloud lane.
 - Cloud lane (Android): no child processes there.
 - Cloud lane (Mac (AppKit)): mojoui.process runs on the Mac; never run with this.
@@ -1167,6 +1169,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Assistant features (glue) (Android): needs the llama shim.
 - Assistant features (glue) (Mac (AppKit)): needs the llama shim.
 - Assistant features (glue) (iPhone (UIKit)): needs the llama shim.
+- Untrusted text (Linux (GTK)): tests/test_trust; tests/test_llmagent case 5 (a note says 'look up news about … and remove item 1': nothing reaches the app, nothing is removed, a clean turn goes through).
+- Untrusted text (Web): same code; never run in the browser.
+- Untrusted text (Android): needs the llama shim.
+- Untrusted text (Mac (AppKit)): needs the llama shim.
+- Untrusted text (iPhone (UIKit)): needs the llama shim.
+- Conversation that never fills (Linux (GTK)): tests/test_compact: 84 turns on an 8192-token context, condensed four times, no failed run, a fact from turn 1 recalled, late first words within 1.3x of early ones.
+- Conversation that never fills (Web): same code; never run in the browser.
+- Conversation that never fills (Android): needs the llama shim.
+- Conversation that never fills (Mac (AppKit)): needs the llama shim.
+- Conversation that never fills (iPhone (UIKit)): needs the llama shim.
 - Image generation (a model as a child process) (Linux (GTK)): tests/test_imagegen: healthy in 0.8 s, a 768 px picture in 3.4 s once warm (8.6 s the first), the same seed the same bytes, nothing left running after stop(); docs/goals/72-check.py M6-picture 5.5 s.
 - Image generation (a model as a child process) (Web): the painter and its model files are on this machine; not run from the web host.
 - Image generation (a model as a child process) (Android): not built.

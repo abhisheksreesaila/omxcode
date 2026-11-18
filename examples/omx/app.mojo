@@ -251,6 +251,11 @@ struct Main(App):
             self.out("OMX " + line)
         self.pump_run()
         self.drive_assistant()
+        if self.llm:
+            var before = self.llm.value().compactions
+            _ = self.llm.value().maintain()  # (never full: between turns the older conversation is condensed, mojoui.llmagent)
+            if self.llm.value().compactions != before:
+                self.out("OMX COMPACT: n=" + String(self.llm.value().compactions) + " messages=" + String(len(self.llm.value().history)) + " ms=" + String(Int(self.llm.value().compact_ms + 0.5)))
         if self.loop.first_ns != self.told_first and self.loop.first_ns > 0:
             self.told_first = self.loop.first_ns
             self.out("OMX FIRST_AUDIO: turn=" + String(self.turns) + " ms=" + String(Int(self.loop.first_audio_ms() + 0.5)))
