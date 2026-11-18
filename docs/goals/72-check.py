@@ -957,10 +957,17 @@ def m7():
     for lint in ("decisions_lint", "libc_lint"):
         r = sh(["pixi", "run", "python", f"scripts/{lint}.py"], 300)
         (probs if r.returncode else said).append(f"{lint}: " + (tail(r, 400) if r.returncode else (r.stdout.strip().splitlines() or ["ok"])[-1]))
-    r = sh(["pixi", "run", "python", "docs/goals/71-check.py", "M5"], 3600)
+    skipped = bool(os.environ.get("G72_M7_SKIP_71"))
+    if skipped:  # (goal 71's M5 runs goal 68, whose robot data and videos are tens of GB: with no disk it only fills it)
+        blocked.append("goal 71 M5 not run: G72_M7_SKIP_71 is set because the disk has no room for goal 68's data (1.9 GB free)")
+        r = type("R", (), {"stdout": "", "stderr": "", "returncode": 0})()
+    else:
+        r = sh(["pixi", "run", "python", "docs/goals/71-check.py", "M5"], 3600)
     line = next((l for l in r.stdout.splitlines() if l.startswith("M5:")), "")
     full = (ROOT / "build/g70/m3-68.txt").read_text() if (ROOT / "build/g70/m3-68.txt").exists() else ""
-    if line.startswith("M5: PASS"):
+    if skipped:
+        pass
+    elif line.startswith("M5: PASS"):
         said.append("goal 71 " + line[:200])
     elif "No space left on device" in full:  # (its robot data and videos are tens of GB: not a regression, but nothing was proved)
         blocked.append("goal 71 M5 could not run: the disk is full (" + str(len(re.findall("No space left on device", full))) + " writes refused in goal 68's run); " + line[:300])

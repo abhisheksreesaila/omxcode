@@ -4,6 +4,16 @@ Branch `goal-72-omx-voice` (base main cc33c9d7). Check: `pixi run python docs/go
 the last full run in `build/g72/check-full.txt`). Decisions D-7200 to D-7315 in `docs/decisions.md`. The prototype this reproduces is
 `~/Projects/omx-local` (Python and JavaScript, goals 1 to 4, 23 of 23 checks); it was only read.
 
+## Where the checks stand
+
+`build/g72/check-full.txt`: M0 to M6 PASS (M1 with the HTTP baseline and the two-sequence room test, M3 with the AG-UI client and the
+84-turn compaction, M6 with every sub-scenario). **M7 is BLOCKED, for one part only:** goal 71's M5 runs goal 68, whose robot data and
+videos are tens of GB, and this machine had 1.9 GB free (`G72_M7_SKIP_71=1` says so in the line). The rest of M7 passes: the component
+matrix is current, the decisions lint (1613 numbers), the libc lint, omx-local untouched (HEAD 8b6bcd0, no edits). Goal 68's earlier failures
+in M7 were "No space left on device", not this branch: run by itself with the disk it needed, goal 68's M0 to M5 PASS here (`build/g72/rerun-g68.txt`)
+and the cheap parts of its M6 (components, message ranges, seek lint) pass; its M6 also runs goal 47 M0 to M8, 59 and 62 on the robot data,
+which was not run. The check's regeneration of that data had filled the disk twice; the files it made were removed again.
+
 ## What was built
 
 The framework first; the app only composes.
