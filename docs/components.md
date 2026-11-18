@@ -150,6 +150,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Voice loop (turn-taking) | `mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
 | Camera | `mojoui.camera: Camera().start(), snapshot(), tick() -> a new JPEG (jpeg, width, height); the browser's rear camera on the web host (a still only when asked, tag 3 of the /audio socket, mojoui.webcamera), this machine's V4L2 camera elsewhere` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
 | Camera card and look tool | `mojoui.looker: Looker.tools() / call() / tick(llm) / views() / parts(since) (each box a pointer part: mojoui.pointer.area_part); mojoui.sight: draw_sight() (a picture with boxes named by their labels); mojoui.grounding: Qwen's 0-1000 boxes validated into pixels; genui's Sight component` | 🔨 | ✅ | 🔨 | 🔨 | 🔨 | — |
+| Map card and show_map tool | `mojoui.tripmap: TripMap (real OpenStreetMap tiles, numbered stops in the order visited, a route, fitted; each stop a pointer part card.stopN; point(tag) flies there, van Wijk-Nuij eased; the ring follows the marker through mojoui.geometry spots) and genui's TripMap (component 8); mojoui.maptool: show_map; mojoui.tiles (TileStore: HTTPS on worker threads, disk cache, attribution), mojoui.geocode (Nominatim one a second, cached, the 60 km rule), mojoui.webcache, mojoui.pngread` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
@@ -211,6 +212,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Camera card and look tool (Android): plain canvases; never run with this app.
 - Camera card and look tool (Mac (AppKit)): builds; never run.
 - Camera card and look tool (iPhone (UIKit)): builds; never run.
+- Map card and show_map tool (Linux (GTK)): docs/goals/77-check.py M3: two trips typed into examples/omx at 820x1180, every stop within 2 km of the truth, 3 points on stops each within 25 ms of their audio, a flight per point; tests/test_tripmap, test_pngread, test_mapweb (live tiles and Nominatim); docs/goals/77/m3-map-gtk.png.
+- Map card and show_map tool (Web): scripts/omx_map_web.py (M3): the same trips in headless Chromium at 820x1180, tiles in the browser, the ring round the named stop's marker after the flight; docs/goals/77/m3-map-tablet-1.png, -2.png.
+- Map card and show_map tool (Android): a plain canvas; https needs Flare, which isn't built there.
+- Map card and show_map tool (Mac (AppKit)): builds; never run.
+- Map card and show_map tool (iPhone (UIKit)): no Flare on iOS: no tiles.
 - Orb and cloud rim (Linux (GTK)): tests/test_orb; screenshots in docs/goals/72, light and dark.
 - Orb and cloud rim (Web): the same canvases in the browser (docs/goals/72/tablet.png).
 - Orb and cloud rim (Android): canvases run there; never drawn.

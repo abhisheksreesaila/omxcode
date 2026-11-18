@@ -35,4 +35,5 @@ def main() raises:
     assert_equal(s3[1], "and Saturn follows it.")
     # nothing is said of markup
     assert_equal(speech_clean("**Paris** is the `capital`.\n- _France_"), "Paris is the capital. - France")
+    assert_equal(speech_clean("Start at **Belém** Tower, then Pastéis de Belém."), "Start at Belém Tower, then Pastéis de Belém.")  # (UTF-8 kept whole, D-7748)
     print("voiceloop parts: ok")

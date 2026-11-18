@@ -50,6 +50,7 @@ from mojoui.sight import draw_sight
 from mojoui.disclosure import Disclosure
 from mojoui.pointer import Part, area_part, names_for, part_name
 from mojoui.wordcard import WordCard, word_parts, draw_word
+from mojoui.tripmap import TripMap, Stop
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
@@ -220,6 +221,11 @@ def catalog() -> List[Spec]:
                                 Field("label", P_TEXT, False, 100, 0, List[String]()),
                                 Field("kind", P_ENUM, False, 0, 0, ["place", "finding"])]),
         number("height", 160, 600, False, "points")]))
+    out.append(Spec("TripMap", "a trip, a route or places to go on a real map (tiles from the web): the stops numbered in the order visited, joined by a line, fitted to the card. Each stop is a part named by its name that the voice can point at (the map flies there). lat/lon are your best guesses; a geocoder checks them. The show_map tool builds this card for you.", [
+        text("area", 80, False, "the city or region, e.g. Lisbon, Portugal"),
+        items("stops", 1, 8, [Field("name", P_TEXT, True, 60, 0, List[String]()), Field("note", P_TEXT, False, 160, 0, List[String]()),
+                              Field("lat", P_NUMBER, True, 85, -85, List[String]()), Field("lon", P_NUMBER, True, 180, -180, List[String]())], True),
+        number("height", 200, 700, False, "points")]))
     out.append(Spec("WordCard", "a word explained as a card: the word printed big, how it sounds, its part of speech, its meaning and one example with the word in it, and where it comes from. The voice can point at its parts by name: word, sounds, meaning, example, origin. Use it whenever someone asks what a word means.", [
         text("word", 60, True), text("sounds", 60, False, "how it is said, e.g. /ɪˈfɛm.ər.əl/"), text("part_of_speech", 30, False, "noun, verb, adjective…"),
         text("meaning", 300, True, "one plain sentence"), text("example", 240, False, "a sentence that uses the word"), text("origin", 200, False, "where it comes from, one short line")]))
@@ -304,6 +310,8 @@ def sample(name: String) -> String:
         n = '{"component":"Timeline","steps":[{"label":"Plan","status":"done"},{"label":"Build","status":"running","detail":"2 of 5"}]}'
     elif name == "MapView":
         n = '{"component":"MapView","route":[[38.70,-9.14],[38.69,-9.20]],"places":[{"lat":38.70,"lon":-9.14,"label":"Baixa"}]}'
+    elif name == "TripMap":
+        n = '{"component":"TripMap","area":"Lisbon, Portugal","stops":[{"name":"Belém Tower","note":"the river fort","lat":38.6916,"lon":-9.216},{"name":"the Alfama","lat":38.7114,"lon":-9.1301}],"height":300}'
     elif name == "WordCard":
         n = '{"component":"WordCard","word":"ephemeral","sounds":"/ɪˈfɛm.ər.əl/","part_of_speech":"adjective","meaning":"Lasting only a very short time.","example":"The ephemeral beauty of cherry blossoms.","origin":"From the Greek ephemeros, lasting a day."}'
     elif name == "Breadcrumbs":
@@ -750,6 +758,7 @@ comptime CV_GRID = 4
 comptime CV_PICTURE = 5
 comptime CV_WORD = 6  # a WordCard's big word, typed in letter by letter
 comptime CV_SIGHT = 7  # a Sight card: the camera's still with its labelled boxes
+comptime CV_TRIP = 8  # a TripMap: tiles from the web, numbered stops, a route; flies to a stop when it is pointed at (goal 77 M3)
 
 
 @fieldwise_init
@@ -787,6 +796,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_WORD
     if comp == "Sight":
         return CV_SIGHT
+    if comp == "TripMap":
+        return CV_TRIP
     return -1
 
 
@@ -823,6 +834,7 @@ struct GenUi[H: Hub = NoData](Movable):
     var album: Album  # the app's pictures (a Picture names one: mojoui.album)
     var shown: List[Int]  # per canvas: the album's picture it draws (-1: not a Picture)
     var born: List[Int]  # per canvas: now_ns() of its first draw (a WordCard's typing starts then)
+    var trips: List[TripMap]  # per canvas (CV_TRIP; an empty one for the others)
     var card: String  # what the screen is called in a `point` event ("card2": Screens names it); its parts' tags start with it
 
     def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H(), album: Album = Album()):
@@ -849,6 +861,7 @@ struct GenUi[H: Hub = NoData](Movable):
         self.album = album.copy()
         self.shown = List[Int]()
         self.born = List[Int]()
+        self.trips = List[TripMap]()
         self.card = "card"
         if self.problem != "":
             self.json = Json()
@@ -936,6 +949,7 @@ struct GenUi[H: Hub = NoData](Movable):
                 self.problem = "unknown picture " + json_string(self.str(n, "name")) + " (the app holds: " + self.album.names_text() + ")"
             self.shown.append(picture)
             self.born.append(0)
+            self.trips.append(self.trip_of(n) if kind == CV_TRIP else TripMap.empty())
             self.sources.append(source)
             self.notes.append("")
             if kind == CV_CHART and source >= 0:
@@ -1019,6 +1033,18 @@ struct GenUi[H: Hub = NoData](Movable):
             var p = self.json.at(places, i)
             m.mark(self.num(p, "lat", 0), self.num(p, "lon", 0), self.str(p, "label"), MARK_FINDING if self.str(p, "kind") == "finding" else MARK_PLACE)
         return m^
+
+    def trip_of(self, n: Int) -> TripMap:
+        var stops = List[Stop]()
+        var a = self.json.get(n, "stops")
+        for i in range(self.json.size(a)):
+            var s = self.json.at(a, i)
+            stops.append(Stop(self.str(s, "name"), self.str(s, "note"), self.num(s, "lat", 0), self.num(s, "lon", 0)))
+        return TripMap(self.card, "", self.str(n, "area"), stops^)
+
+    def map_tag(self, k: Int) -> String:
+        """The tag of canvas k's view when it is a TripMap ("card3.map0"): its stops' spots are measured from it."""
+        return self.card + ".map" + String(k)
 
     def kpi_of(self, n: Int) -> KpiView:
         var t = self.str(n, "tone")
@@ -1193,6 +1219,19 @@ struct GenUi[H: Hub = NoData](Movable):
                 var status = STAGE_DONE if st == "done" else (STAGE_RUNNING if st == "running" else (STAGE_FAILED if st == "failed" else (STAGE_CANCELLED if st == "cancelled" else STAGE_PENDING)))
                 stages.append(Stage(self.str(s, "label"), status, -1, self.str(s, "detail")))
             return Timeline(stages)
+        if comp == "TripMap":
+            var k = self.canvas_of.get(n, 0)
+            var head = List[View]()
+            if self.json.get(n, "area") >= 0 and self.str(n, "area") != "":
+                head.append(Text(self.str(n, "area"), style=CAPTION))
+            head.append(Spacer())
+            head.append(Chip("web", 0))  # (tiles and the geocoder come from the web: the card says so)
+            var body = VStack(HStack(head^, spacing=SPACE_S).align(CENTER).fill(),
+                              Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 320))).tag(self.map_tag(k)),
+                              spacing=SPACE_XS).align(START).fill()
+            if in_card:
+                return body^
+            return Card(body^, spacing=SPACE_S).fill()
         if comp == "WordCard":
             var body = WordCard(self.card, self.canvas(n), v + self.stamp(n), self.str(n, "word"), self.str(n, "sounds"), self.str(n, "part_of_speech"),
                                 self.str(n, "meaning"), self.str(n, "example"), self.str(n, "origin"))
@@ -1328,7 +1367,10 @@ struct GenUi[H: Hub = NoData](Movable):
             return out^
         for k in range(len(self.canvases)):
             var n = self.canvases[k]
-            if self.kinds[k] == CV_WORD:
+            if self.kinds[k] == CV_TRIP:
+                for pt in self.trips[k].parts(self.card):
+                    out.append(pt.copy())
+            elif self.kinds[k] == CV_WORD:
                 for pt in word_parts(self.card, self.str(n, "word"), self.str(n, "sounds"), self.str(n, "origin")):
                     out.append(pt.copy())
             elif self.kinds[k] == CV_SIGHT and self.shown[k] >= 0:  # each box, named by its label, in the picture's view
@@ -1344,6 +1386,28 @@ struct GenUi[H: Hub = NoData](Movable):
     def sight_tag(self, k: Int) -> String:
         """The tag of canvas k's view when it is a Sight ("card2.picture1"): where the pointer finds its boxes."""
         return self.card + ".picture" + String(k)
+
+    def point(mut self, tag: String) -> Bool:
+        """A `point` at one of its parts: a map flies to the stop (and redraws). False when no component of it moves for it."""
+        if not tag.startswith(self.card + "."):
+            return False
+        for k in range(len(self.canvases)):
+            if self.kinds[k] == CV_TRIP:
+                self.trips[k].card = self.card
+                self.trips[k].tag = self.map_tag(k)
+                if self.trips[k].point(tag):
+                    self.drawn += 1
+                    return True
+        return False
+
+    def take_log(mut self) -> List[String]:
+        """What its components did that a checker reads (a map's geocoded stops, its tiles, its flights)."""
+        var out = List[String]()
+        for k in range(len(self.canvases)):
+            if self.kinds[k] == CV_TRIP:
+                for line in self.trips[k].take_log():
+                    out.append(line)
+        return out^
 
     def draws(self, canvas: Int) -> Bool:
         return canvas >= self.canvas_base and canvas < self.canvas_base + len(self.canvases)
@@ -1369,6 +1433,10 @@ struct GenUi[H: Hub = NoData](Movable):
         elif kind == CV_MAP:
             surface.fill(p.card)
             self.map_of(n).draw(surface, font, p)
+        elif kind == CV_TRIP:
+            self.trips[k].card = self.card
+            self.trips[k].tag = self.map_tag(k)
+            self.trips[k].draw(surface, font, p)
         elif kind == CV_WORD:
             if self.born[k] == 0:
                 self.born[k] = now_ns()

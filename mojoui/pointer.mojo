@@ -18,14 +18,15 @@
 #   Pointer: update(): pointer.go(card + "." + part)      draw(): pointer.draw(surface, palette)   view(): PointerView(canvas, pointer.version())
 #            pointer.know(parts): the parts on screen (the same list the voice loop gets), so a box in a picture can be found
 #   The ring lives on a clear Canvas over the whole page (put it in an Overlay, like mojoui.orb.RimView). Where the part is comes
-#   from mojoui.geometry.rect_of (GTK; the web host reports the rects of the tagged views it shows). It follows the part when the part
+#   from mojoui.geometry: a spot its canvas reported in its last draw (spot_of: a map's marker, which moves as the map flies), else
+#   rect_of (GTK; the web host reports the rects of the tagged views it shows). It follows the part when the part
 #   moves (a scroll, a resize): the target is read again every frame. The part's tint and the ring are one drawing.
 
 from std.math import sqrt, exp
 from mojoui.canvas import Surface
 from mojoui.clock import now_ns
 from mojoui.draw import over, with_alpha
-from mojoui.geometry import rect_of
+from mojoui.geometry import rect_of, spot_of
 from mojoui.json import Json, json_string, J_OBJECT
 from mojoui.spring import Spring
 from mojoui.theme import Palette
@@ -341,7 +342,11 @@ struct Pointer(Movable):
                 self.areas.append(p.copy())
 
     def where(self, tag: String) -> List[Float64]:
-        """The part tagged `tag` in window points ([x, y, w, h]): its view's rect, or its box in its picture's view; [] unknown."""
+        """The part tagged `tag` in window points ([x, y, w, h]): a spot its canvas reports (a map's marker, mojoui.geometry), its
+        view's rect, or its box in its picture's view; [] unknown."""
+        var spot = spot_of(tag)
+        if len(spot) == 4:
+            return spot^
         for a in self.areas:
             if a.tag() == tag:
                 return fitted_rect(rect_of(a.inside), a.area)
