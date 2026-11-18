@@ -147,6 +147,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Voice (text to speech) | `mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Speech model: Parakeet | `mojoui.speech: SpeechModel("parakeet") (Parakeet TDT 0.6B v3 int8, onnx_asr, GPU), same transcribe()/SpeechStream` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Endpointer (turn-taking) | `mojoui.voice: Endpointer().feed(samples, captured_ns, playing), poll() -> START / BARGE / END (Silero VAD)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Voice loop (turn-taking) | `mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
+| Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
+| Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 
 - Microphone (Web): tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too.
 - Microphone (Android): not built.
@@ -156,7 +159,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Speech model in process (Android): not built.
 - Speech model in process (Mac (AppKit)): builds; needs CPython with torch beside the app (MPS), never run.
 - Speech model in process (iPhone (UIKit)): no CPython on the phone.
-- Language model in process (Linux (GTK)): tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); no app yet.
+- Language model in process (Linux (GTK)): tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); examples/omx runs it in the app (M4).
 - Language model in process (Web): needs libllama in the app's process.
 - Language model in process (Android): not built.
 - Language model in process (Mac (AppKit)): not built (llama.cpp has Metal; the shim is untried there).
@@ -181,6 +184,21 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Endpointer (turn-taking) (Android): not built.
 - Endpointer (turn-taking) (Mac (AppKit)): builds; never run.
 - Endpointer (turn-taking) (iPhone (UIKit)): no CPython on the phone.
+- Voice loop (turn-taking) (Linux (GTK)): docs/goals/72-check.py M4 on examples/omx: first audio 882 ms after the question's last word, an interruption stops the speaker in 212 ms; tests/test_voiceloop_parts, tests/test_audio_file.
+- Voice loop (turn-taking) (Web): scripts/omx_tablet_check.py (M5): over the tailnet name, question to first audio in the page 1.1 s; one tab at a time (each page load loads its own models).
+- Voice loop (turn-taking) (Android): not built.
+- Voice loop (turn-taking) (Mac (AppKit)): needs CPython with torch beside the app and a microphone host; never run.
+- Voice loop (turn-taking) (iPhone (UIKit)): no CPython on the phone.
+- Orb and cloud rim (Linux (GTK)): tests/test_orb; screenshots in docs/goals/72, light and dark.
+- Orb and cloud rim (Web): the same canvases in the browser (docs/goals/72/tablet.png).
+- Orb and cloud rim (Android): canvases run there; never drawn.
+- Orb and cloud rim (Mac (AppKit)): builds; never run.
+- Orb and cloud rim (iPhone (UIKit)): builds; never run.
+- Voice screens (Linux (GTK)): examples/omx (72-check M4): the card on the shelf, phone width and desktop, light and dark; tests/test_agentui_adopt.
+- Voice screens (Web): examples/omx in the browser (M5).
+- Voice screens (Android): plain views; never run with this app.
+- Voice screens (Mac (AppKit)): builds; never run.
+- Voice screens (iPhone (UIKit)): builds; never run.
 
 ## Composite components (Mojo, built from the ones above)
 
@@ -189,10 +207,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
-| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, maccheck, mxstudio, omxplorer, workbook |
+| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, maccheck, mxstudio, omx, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
-| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, dashboard, maccheck, media, mxstudio, omxplorer, workbook |
-| `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omxplorer |
+| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, dashboard, maccheck, media, mxstudio, omx, omxplorer, workbook |
+| `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omx, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
@@ -206,22 +224,22 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Sheet objects (charts, pivots)` | `mojoui/sheetpage.mojo` | Board: drag, resize, snap, Canvas, Card, Grid | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
 | `Report page (KPI and chart tiles, filters)` | `mojoui/reportpage.mojo` | Grid, Card, Dropdown, Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | omxplorer |
-| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat, console, consolekit |
+| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat, console, consolekit, omx |
 | `LogView` | `mojoui/logview.mojo` | Scroll, Text, Scroll pinned to its end | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
-| `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
-| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, console, consolekit |
-| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
+| `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit, omx |
+| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, console, consolekit, omx |
+| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit, omx |
 | `ClipGrid (clips to tap, compare and pick: a poster, a title, a badge, a pick toggle; goal 71)` | `mojoui/clipgrid.mojo` | Image, Text, Button with an icon, Grid, Card | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | clips, omxplorer |
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
-| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, consolekit |
-| `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
-| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
-| `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat |
+| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, consolekit, omx |
+| `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit, omx |
+| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, omx, widgets |
+| `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, omx |
 | `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)` | `mojoui/album.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
+| `Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)` | `mojoui/album.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat, omx |
 | `Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)` | `mojoui/tablecard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
@@ -238,11 +256,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Copy (copy row, labeled value, code panel, secret)` | `mojoui/copy.mojo` | Text, Button, Icon, VStack, HStack, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `Fields (search box, outlined field, filter chips, short field)` | `mojoui/fields.mojo` | TextField, Button, Text, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Search results (result rows, source badges, suggestions)` | `mojoui/results.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
-| `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console |
+| `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, omx |
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
-| `GenUi (UI from an agent's data: 38 catalogued components, validated, drawn natively, previewed while it streams)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, TextArea, Toggle, Checkbox, Segmented, Dropdown, Slider, Radio, DatePicker, Tabs, Grid, ProgressBar, Icon, VStack, HStack, Divider, Spacer | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
+| `GenUi (UI from an agent's data: 38 catalogued components, validated, drawn natively, previewed while it streams)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, TextArea, Toggle, Checkbox, Segmented, Dropdown, Slider, Radio, DatePicker, Tabs, Grid, ProgressBar, Icon, VStack, HStack, Divider, Spacer | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat, omx |
 | `AgentChat (a chat on an AG-UI agent: streaming Markdown, tool stages, approvals, interrupts, suggestions, Stop, Retry, Regenerate; panel, sidebar or popup)` | `mojoui/agentchat.mojo` | Scroll pinned to its end, Card, Text, Button, TextField, Icon, Overlay, Clipboard, Arrive on a spring | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat |
-| `Rows (a DataGrid's source over plain rows of text)` | `mojoui/rowsource.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
+| `Rows (a DataGrid's source over plain rows of text)` | `mojoui/rowsource.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat, omx |
 | `SheetHub (datasets an agent's UI names instead of sending rows: MX frame sheets, the GPU)` | `mojoui/sheethub.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
@@ -252,7 +270,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)` | `mojoui/videojobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, omxplorer |
+| `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, omx, omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -277,7 +295,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
-| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omx, omxplorer |
 | `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)` | `mojoui/documentset.mojo` | Canvas, Canvas: pan, zoom, tap, Card, TextField, Dropdown, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |

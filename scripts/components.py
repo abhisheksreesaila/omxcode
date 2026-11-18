@@ -414,7 +414,7 @@ SERVICES = [
       "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; needs CPython with torch beside the app (MPS), never run"),
       "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
     ("Language model in process", "mojoui.llm: Llm(gguf, gpu).chat(messages, tools) -> id, poll(id) -> TEXT / REASONING / TOOL_CALLS / DONE events, cancel(id); two sequences; prompt cache (llama.cpp library through bridge/llm_shim.cpp)", "",
-     {"Linux (GTK)": ("✅", "tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); no app yet"), "Web": ("❌", "needs libllama in the app's process"),
+     {"Linux (GTK)": ("✅", "tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); examples/omx runs it in the app (M4)"), "Web": ("❌", "needs libllama in the app's process"),
       "Android": ("❌", "not built"), "Mac (AppKit)": ("❌", "not built (llama.cpp has Metal; the shim is untried there)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
     # Goal 72 M2 (the voice components, run by tests/test_voice.mojo in the `voice` pixi environment, GPU 1 + a null sink)
@@ -438,6 +438,19 @@ SERVICES = [
       "Web": ("❌", "needs CPython + torch in the app's process"), "Android": ("❌", "not built"),
       "Mac (AppKit)": ("🔨", "builds; never run"),
       "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+    ("Voice loop (turn-taking)", "mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)", "",
+     {"Linux (GTK)": ("✅", "docs/goals/72-check.py M4 on examples/omx: first audio 882 ms after the question's last word, an interruption stops the speaker in 212 ms; tests/test_voiceloop_parts, tests/test_audio_file"),
+      "Web": ("✅", "scripts/omx_tablet_check.py (M5): over the tailnet name, question to first audio in the page 1.1 s; one tab at a time (each page load loads its own models)"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("❌", "needs CPython with torch beside the app and a microphone host; never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+    ("Orb and cloud rim", "mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases", "",
+     {"Linux (GTK)": ("✅", "tests/test_orb; screenshots in docs/goals/72, light and dark"), "Web": ("✅", "the same canvases in the browser (docs/goals/72/tablet.png)"),
+      "Android": ("🔨", "canvases run there; never drawn"), "Mac (AppKit)": ("🔨", "builds; never run"),
+      "iPhone (UIKit)": ("🔨", "builds; never run"), "Agent (MCP)": ("—", "")}),
+    ("Voice screens", "mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)", "",
+     {"Linux (GTK)": ("✅", "examples/omx (72-check M4): the card on the shelf, phone width and desktop, light and dark; tests/test_agentui_adopt"), "Web": ("✅", "examples/omx in the browser (M5)"),
+      "Android": ("🔨", "plain views; never run with this app"), "Mac (AppKit)": ("🔨", "builds; never run"),
+      "iPhone (UIKit)": ("🔨", "builds; never run"), "Agent (MCP)": ("—", "")}),
 ]
 
 
