@@ -81,6 +81,7 @@ struct ParaLook(Copyable, Movable):
     var block_color: UInt32
     var marker: String  # drawn in the indent before the first line ("•", "1.", "☐", "☑"); "" none
     var marker_color: UInt32
+    var marker_back: UInt32  # an open task box's inside (the page's colour)
     var marker_role: String  # "bullet", "number", "task", "done"
     var role: String  # the paragraph's kind for agents and tests ("p", "h1", "li", "task", "quote", "code", "rule")
 
@@ -94,6 +95,7 @@ struct ParaLook(Copyable, Movable):
         self.block_color = 0
         self.marker = ""
         self.marker_color = color
+        self.marker_back = 0xFFFFFFFF
         self.marker_role = ""
         self.role = "p"
 
@@ -959,10 +961,26 @@ struct TextEdit(Movable):
                 p.rect(left + 2, y + l.look.before, 3, l.height - l.look.before - l.look.after, l.look.block_color, 1.5)
             elif l.look.block == BLOCK_RULE and len(l.starts) > 0:
                 p.rect(left, y + l.tops[0] + l.heights[0] / 2, self.content_width(), 1, l.look.block_color, 0)
-            if l.look.marker != "" and len(l.starts) > 0:
+            if l.look.marker_role != "" and len(l.starts) > 0:
                 var msize = l.look.spans[0].size if len(l.look.spans) > 0 else 15
-                var mx = left + l.look.indent - msize * 1.3
-                p.text(font, l.look.marker, mx, y + l.tops[0] + l.ascents[0], msize, l.look.marker_color, REGULAR, LEFT, 0)
+                var mid = y + l.tops[0] + l.heights[0] / 2
+                var mx = left + l.look.indent - msize * 1.1
+                var mc = l.look.marker_color
+                if l.look.marker_role == "bullet":
+                    p.circle(mx + msize * 0.35, mid, msize * 0.17, mc)
+                elif l.look.marker_role == "task" or l.look.marker_role == "done":
+                    var bs = msize * 0.95
+                    var bx = mx - msize * 0.1
+                    var by = mid - bs / 2
+                    if l.look.marker_role == "done":
+                        p.rect(bx, by, bs, bs, mc, 3.5)
+                        p.line(bx + bs * 0.24, by + bs * 0.52, bx + bs * 0.43, by + bs * 0.72, 1.8, 0xFFFFFFFF)
+                        p.line(bx + bs * 0.43, by + bs * 0.72, bx + bs * 0.78, by + bs * 0.3, 1.8, 0xFFFFFFFF)
+                    else:
+                        p.rect(bx, by, bs, bs, mc, 3.5)
+                        p.rect(bx + 1.5, by + 1.5, bs - 3, bs - 3, l.look.marker_back, 2.5)
+                else:
+                    p.text(font, l.look.marker, mx - msize * 0.4, y + l.tops[0] + l.ascents[0], msize, mc, REGULAR, LEFT, 0)
                 if notes:
                     p.note("marker " + l.look.marker_role + " " + String(i))
             for line in range(len(l.starts)):
