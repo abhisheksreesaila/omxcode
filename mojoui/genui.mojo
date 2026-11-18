@@ -26,7 +26,7 @@ from mojoui.view import (
     TONE_NONE, TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD_WARN, CARD_GOOD,
 )
 from mojoui.overlays import Checkbox
-from mojoui.paragraph import Paragraph, Plain
+from mojoui.paragraph import Paragraph, Plain, Bold, Run
 from mojoui.table import Table
 from mojoui.meter import Meter
 from mojoui.sparkline import Sparkline, SparklineView
@@ -50,6 +50,7 @@ from mojoui.sight import draw_sight
 from mojoui.disclosure import Disclosure
 from mojoui.pointer import Part, area_part, names_for, part_name
 from mojoui.wordcard import WordCard, word_parts, draw_word
+from mojoui.iso import IsoDiagram, iso_problem, draw_iso, LIFT_MS
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
@@ -233,6 +234,16 @@ def catalog() -> List[Spec]:
                               Field("x0", P_NUMBER, True, 1000, 0, List[String]()), Field("y0", P_NUMBER, True, 1000, 0, List[String]()),
                               Field("x1", P_NUMBER, True, 1000, 0, List[String]()), Field("y1", P_NUMBER, True, 1000, 0, List[String]())], True),
         text("caption", 200), number("height", 80, 600, False, "points")]))
+    out.append(Spec("Iso", "how something works as a small isometric diagram: 3 to 6 blocks (the things involved, each a short label and a kind), arrows between them with short labels, and numbered steps in order, each naming the block it happens at by its label (the explain tool builds it)", [
+        text("title", 200),
+        items("blocks", 3, 6, [Field("label", P_TEXT, True, 32, 0, List[String]()),
+                               Field("kind", P_ENUM, False, 0, 0, ["process", "device", "store", "person", "place", "energy", "thing"]),
+                               Field("id", P_TEXT, False, 40, 0, List[String]())], True, "the things involved, in the order things happen"),
+        items("links", 0, 10, [Field("from", P_TEXT, True, 40, 0, List[String]()), Field("to", P_TEXT, True, 40, 0, List[String]()),
+                               Field("label", P_TEXT, False, 28, 0, List[String]())], False, "arrows: from and to name blocks by label"),
+        items("steps", 1, 8, [Field("block", P_TEXT, True, 40, 0, List[String]()), Field("text", P_TEXT, True, 140, 0, List[String]())], True,
+              "what happens, in order: block names a block by its label, text is one short sentence"),
+        number("height", 160, 600, False, "points: the drawing's")]))
     out.append(Spec("Icon", "a Lucide icon by name (\"map-pin\", \"calendar\", \"check\")", [text("name", 40, True), number("size", 12, 64)]))
     # inputs
     out.append(Spec("Button", "a button that reports its action", [
@@ -304,6 +315,8 @@ def sample(name: String) -> String:
         n = '{"component":"Timeline","steps":[{"label":"Plan","status":"done"},{"label":"Build","status":"running","detail":"2 of 5"}]}'
     elif name == "MapView":
         n = '{"component":"MapView","route":[[38.70,-9.14],[38.69,-9.20]],"places":[{"lat":38.70,"lon":-9.14,"label":"Baixa"}]}'
+    elif name == "Iso":
+        n = '{"component":"Iso","title":"How a heat pump heats a house","blocks":[{"label":"Outdoor coil","kind":"device"},{"label":"Compressor","kind":"process"},{"label":"Indoor coil","kind":"device"},{"label":"Living room","kind":"place"}],"links":[{"from":"Outdoor coil","to":"Compressor","label":"cold gas"},{"from":"Compressor","to":"Indoor coil","label":"hot gas"},{"from":"Indoor coil","to":"Living room","label":"warm air"}],"steps":[{"block":"Outdoor coil","text":"The outdoor coil soaks up heat from the outside air."},{"block":"Compressor","text":"The compressor squeezes the gas so it gets hot."},{"block":"Indoor coil","text":"The indoor coil gives the heat to the air inside."},{"block":"Living room","text":"A fan blows the warm air into the living room."}]}'
     elif name == "WordCard":
         n = '{"component":"WordCard","word":"ephemeral","sounds":"/ɪˈfɛm.ər.əl/","part_of_speech":"adjective","meaning":"Lasting only a very short time.","example":"The ephemeral beauty of cherry blossoms.","origin":"From the Greek ephemeros, lasting a day."}'
     elif name == "Breadcrumbs":
@@ -613,6 +626,10 @@ def walk(j: Json, n: Int, depth: Int, where: String, specs: List[Spec], mut coun
     for ref p in spec.props:
         if p.required and j.get(n, p.name) < 0:
             raise Error("bad prop: " + where + ": " + name + " needs " + json_string(p.name))
+    if name == "Iso":  # (a rule a schema can't say: every link and step names one of the blocks)
+        var why = iso_problem(j, n)
+        if why != "":
+            raise Error("bad prop: " + where + ": " + why)
     var ch = j.get(n, "children")
     for i in range(j.size(ch)):
         walk(j, j.at(ch, i), depth + 1, where + "/children/" + String(i), specs, count)
@@ -750,6 +767,7 @@ comptime CV_GRID = 4
 comptime CV_PICTURE = 5
 comptime CV_WORD = 6  # a WordCard's big word, typed in letter by letter
 comptime CV_SIGHT = 7  # a Sight card: the camera's still with its labelled boxes
+comptime CV_ISO = 9  # an isometric diagram (mojoui.iso); 8 is the map card's
 
 
 @fieldwise_init
@@ -787,6 +805,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_WORD
     if comp == "Sight":
         return CV_SIGHT
+    if comp == "Iso":
+        return CV_ISO
     return -1
 
 
@@ -824,6 +844,12 @@ struct GenUi[H: Hub = NoData](Movable):
     var shown: List[Int]  # per canvas: the album's picture it draws (-1: not a Picture)
     var born: List[Int]  # per canvas: now_ns() of its first draw (a WordCard's typing starts then)
     var card: String  # what the screen is called in a `point` event ("card2": Screens names it); its parts' tags start with it
+    var focus: String  # the part being pointed at now (its tag, "card2.compressor"; "" none): point_at()
+    var focus_ns: Int  # when it was pointed at (a block rises over LIFT_MS)
+    var was: String  # the part pointed at before it (it sinks back)
+    var was_ns: Int
+    var pointed: Int  # bumps on every point_at() that changes something: part of the pointable canvases' versions
+    var stepping: List[Int]  # per canvas: an Iso's step being spoken (-1: none yet)
 
     def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H(), album: Album = Album()):
         self.problem = validate(args)
@@ -850,6 +876,12 @@ struct GenUi[H: Hub = NoData](Movable):
         self.shown = List[Int]()
         self.born = List[Int]()
         self.card = "card"
+        self.focus = ""
+        self.focus_ns = 0
+        self.was = ""
+        self.was_ns = 0
+        self.pointed = 0
+        self.stepping = List[Int]()
         if self.problem != "":
             self.json = Json()
             return
@@ -936,6 +968,7 @@ struct GenUi[H: Hub = NoData](Movable):
                 self.problem = "unknown picture " + json_string(self.str(n, "name")) + " (the app holds: " + self.album.names_text() + ")"
             self.shown.append(picture)
             self.born.append(0)
+            self.stepping.append(-1)
             self.sources.append(source)
             self.notes.append("")
             if kind == CV_CHART and source >= 0:
@@ -1201,6 +1234,18 @@ struct GenUi[H: Hub = NoData](Movable):
             return Card(body^, spacing=SPACE_S).fill()
         if comp == "Breadcrumbs":
             return Breadcrumbs(self.texts_of(n, "items"), self.msg(n))
+        if comp == "Iso":  # the drawing (its blocks are parts the pointer finds in it: parts()), then the steps, the one spoken marked
+            var k = self.canvas_of.get(n, 0)
+            var d = IsoDiagram.parse(self.json, n)
+            var rows = List[View]()
+            rows.append(Canvas(self.canvas(n), v + self.stamp(n) + self.pointed).fill().height(Int(self.num(n, "height", 280))).tag(self.iso_tag(k)))
+            for i in range(len(d.steps)):
+                var now = i == self.stepping[k]
+                var runs = List[Run]()
+                runs.append(Bold(d.steps[i].text) if now else Plain(d.steps[i].text))
+                var said = Paragraph(runs^)
+                rows.append(HStack(Chip(String(i + 1), 1 if now else 0), said^.grow(), spacing=SPACE_S).align(START).fill())
+            return self.framed(n, VStack(rows^, spacing=SPACE_S).align(START).fill(), in_card)
         if comp == "Picture" or comp == "Sight":
             var parts = List[View]()
             var picture = Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200)))
@@ -1339,7 +1384,46 @@ struct GenUi[H: Hub = NoData](Movable):
                     labels.append(b.label)
                 for b in boxes:
                     out.append(area_part(self.card, part_name(b.label), names_for(b.label, labels), self.sight_tag(k), b.x0, b.y0, b.x1, b.y1, pic.width, pic.height))
+            elif self.kinds[k] == CV_ISO:  # each block, named by its label, in the drawing's view
+                for pt in IsoDiagram.parse(self.json, n).parts(self.card, self.iso_tag(k)):
+                    out.append(pt.copy())
         return out^
+
+    def iso_tag(self, k: Int) -> String:
+        """The tag of canvas k's view when it is an Iso ("card2.iso1"): where the pointer finds its blocks."""
+        return self.card + ".iso" + String(k)
+
+    def point_at(mut self, tag: String):
+        """The pointer went to the part tagged `tag` ("" let go; a part of another card counts as letting go here): a pointed-at
+        block rises, and an Iso marks the step being spoken (the next step at that block)."""
+        var mine = tag if tag.startswith(self.card + ".") else String("")
+        if mine == self.focus:
+            return
+        self.was = self.focus
+        self.was_ns = now_ns()
+        self.focus = mine
+        self.focus_ns = now_ns()
+        self.pointed += 1
+        if mine == "":
+            return
+        var part = String(mine[byte = self.card.byte_length() + 1 :])
+        for k in range(len(self.canvases)):
+            if self.kinds[k] != CV_ISO:
+                continue
+            var d = IsoDiagram.parse(self.json, self.canvases[k])
+            var b = d.block_of(part)
+            if b < 0:
+                continue
+            var pick = -1
+            for st in range(len(d.steps)):  # (the first step at that block after the one before; else its first)
+                if d.steps[st].block == b and st > self.stepping[k] and pick < 0:
+                    pick = st
+            if pick < 0:
+                for st in range(len(d.steps)):
+                    if d.steps[st].block == b and pick < 0:
+                        pick = st
+            if pick >= 0:
+                self.stepping[k] = pick
 
     def sight_tag(self, k: Int) -> String:
         """The tag of canvas k's view when it is a Sight ("card2.picture1"): where the pointer finds its boxes."""
@@ -1373,6 +1457,19 @@ struct GenUi[H: Hub = NoData](Movable):
             if self.born[k] == 0:
                 self.born[k] = now_ns()
             draw_word(surface, p, font, self.str(n, "word"), self.born[k])
+        elif kind == CV_ISO:
+            var d = IsoDiagram.parse(self.json, n)
+            var now = now_ns()
+            var q = Float64(now - self.focus_ns) / Float64(LIFT_MS * 1_000_000) if self.focus_ns > 0 else 1.0
+            var q_was = Float64(now - self.was_ns) / Float64(LIFT_MS * 1_000_000) if self.was_ns > 0 else 1.0
+            var focus = d.block_of(String(self.focus[byte = self.card.byte_length() + 1 :])) if self.focus != "" else -1
+            var was = d.block_of(String(self.was[byte = self.card.byte_length() + 1 :])) if self.was.startswith(self.card + ".") else -1
+            if surface.still:
+                q = 1.0
+                q_was = 1.0
+            draw_iso(surface, d, p, font, focus, q, was, q_was, self.stepping[k])
+            if (focus >= 0 and q < 1.0) or (was >= 0 and q_was < 1.0):
+                surface.again = True
         elif kind == CV_PICTURE:
             surface.fill(p.card)
             if self.shown[k] >= 0:

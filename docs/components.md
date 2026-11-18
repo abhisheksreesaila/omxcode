@@ -150,6 +150,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Voice loop (turn-taking) | `mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
 | Camera | `mojoui.camera: Camera().start(), snapshot(), tick() -> a new JPEG (jpeg, width, height); the browser's rear camera on the web host (a still only when asked, tag 3 of the /audio socket, mojoui.webcamera), this machine's V4L2 camera elsewhere` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
 | Camera card and look tool | `mojoui.looker: Looker.tools() / call() / tick(llm) / views() / parts(since) (each box a pointer part: mojoui.pointer.area_part); mojoui.sight: draw_sight() (a picture with boxes named by their labels); mojoui.grounding: Qwen's 0-1000 boxes validated into pixels; genui's Sight component` | 🔨 | ✅ | 🔨 | 🔨 | 🔨 | — |
+| Isometric explainer | `mojoui.iso: genui's Iso component (3-6 blocks as isometric boxes tinted by kind, arrows with labels, numbered step badges, the steps listed under it; layered by the links, painter's order), IsoDiagram.parts() (each block a pointer part named by its label: mojoui.pointer.area_part; a pointed-at block rises and its step is marked: Screens.point_at); mojoui.explain: the agent's explain tool (explain_tool(), explain_ui() -> render_ui's card, Screens.adopt_with)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
@@ -211,6 +212,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Camera card and look tool (Android): plain canvases; never run with this app.
 - Camera card and look tool (Mac (AppKit)): builds; never run.
 - Camera card and look tool (iPhone (UIKit)): builds; never run.
+- Isometric explainer (Linux (GTK)): docs/goals/77-check.py M4 on examples/omx: three "how does X work?" questions at phone width, light and dark, points on the blocks as they are named; tests/test_iso.
+- Isometric explainer (Web): the same canvas and parts (the web host draws canvases and reports tagged rects); not run by a check in the browser.
+- Isometric explainer (Android): plain canvases; never run with this app.
+- Isometric explainer (Mac (AppKit)): builds; never run.
+- Isometric explainer (iPhone (UIKit)): builds; never run.
 - Orb and cloud rim (Linux (GTK)): tests/test_orb; screenshots in docs/goals/72, light and dark.
 - Orb and cloud rim (Web): the same canvases in the browser (docs/goals/72/tablet.png).
 - Orb and cloud rim (Android): canvases run there; never drawn.

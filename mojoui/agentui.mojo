@@ -26,6 +26,11 @@ from mojoui.app import Event
 from mojoui.text import Font
 
 comptime MAX_SCREENS = 40
+
+
+def _as_is(args: String) -> String:
+    return args
+
 comptime MAX_RETRIES = 3  # reruns after refused UI in a row; then take() stops asking and gave_up says so (D-725)
 
 
@@ -200,6 +205,11 @@ struct Screens[H: Hub = NoData](Movable):
         """For an agent that runs `tool` itself (mojoui.llmagent.LlmAgent validates render_ui and answers it in the run):
         a screen for every finished call that was answered and not refused, once each, oldest first. Returns how many
         were added (redraw when it isn't 0). take() is for agents whose client answers the call."""
+        return self.adopt_with(agent, tool, _as_is)
+
+    def adopt_with(mut self, agent: Agent, tool: String, card: def(String) thin -> String) -> Int:
+        """adopt() for a card tool whose arguments aren't render_ui's: `card` turns them into render_ui's ({"ui": …}), as
+        mojoui.iso.explain_ui does for the explain tool's (title, blocks, links, steps)."""
         var added = 0
         for ref m in agent.messages:
             for ref c in m.calls:
@@ -215,7 +225,7 @@ struct Screens[H: Hub = NoData](Movable):
                     self.refused.append(c.id)
                     continue
                 var k = len(self.uis)
-                var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+                var ui = GenUi[Self.H](card(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
                 if ui.problem != "":
                     self.refused.append(c.id)
                     continue
@@ -262,6 +272,12 @@ struct Screens[H: Hub = NoData](Movable):
                 for pt in self.uis[k].parts():
                     out.append(pt.copy())
         return out^
+
+    def point_at(mut self, tag: String):
+        """The pointer is on the part tagged `tag` ("" on nothing): the card it belongs to may answer (a block rises, a step is
+        marked: GenUi.point_at)."""
+        for k in range(len(self.uis)):
+            self.uis[k].point_at(tag)
 
     def of_message(self, message_id: String) -> List[Int]:
         var out = List[Int]()

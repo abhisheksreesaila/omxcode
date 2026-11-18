@@ -16,6 +16,8 @@
 #   the camera         mojoui.looker.Looker            look: the tablet's (or this machine's) camera, the model's own eyes in this process
 #                                                      (the vision projector), a card with the picture and labelled boxes; each box is a
 #                                                      part the pointer lands on when the reply names it ("the banana is on the left")
+#   how things work    mojoui.explain + mojoui.iso     explain: a small isometric diagram card (blocks, arrows, numbered steps); each block
+#                                                      is a part the pointer lands on as the walkthrough names it, and it rises
 #
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the card the model loads on, counted among the
@@ -45,6 +47,8 @@ from mojoui.llm import Llm
 from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool
 from mojoui.pointer import Pointer, PointerView, Part, parse_point
 from mojoui.visual import Visual, VISUAL_SYSTEM, card_kind
+from mojoui.explain import EXPLAIN
+from mojoui.iso import explain_ui
 from mojoui.creator import Creator
 from mojoui.looker import Looker
 from mojoui.http import Request
@@ -287,6 +291,7 @@ struct Main(App):
             elif e.kind == POINT:
                 self.point(e)
         self.tell_points()
+        self.screens.point_at(self.pointer.tag)  # (a pointed-at block rises, its step is marked)
         self.creator.tick()
         for line in self.creator.take_log():
             self.out("OMX " + line)
@@ -530,7 +535,7 @@ struct Main(App):
                 if self.thought_through and self.assist.jobs_started == self.jobs_before:  # (asked to think it through, the model didn't: the job starts anyway)
                     self.thought_through = False
                     self.assist.start_job("", self.heard, "", self.llm.value())
-        if self.screens.adopt(self.client) > 0:
+        if self.screens.adopt(self.client) + self.screens.adopt_with(self.client, EXPLAIN, explain_ui) > 0:  # (render_ui's cards, and explain's diagrams)
             self.shelf_version += 1
             self.out("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
                      + String(len(self.screens.uis)) + " cardkind=" + card_kind("", self.screens.uis[len(self.screens.uis) - 1].summary()) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary() + " text=" + self.card_json())
