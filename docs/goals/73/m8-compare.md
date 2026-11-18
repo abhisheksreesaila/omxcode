@@ -19,3 +19,5 @@ Reading: the distributions match the base's (median paint 11.8 vs 11.7 ms, media
 at comparable runs); the SLOW lines are single stalls in steps goal 73 didn't change (Insert > Documents, the pack, a lanes
 canvas), and the base shows them too under load. One goal 73 run passed M8 outright. Goal 73 doesn't make the recording
 slower; goal 47's zero-SLOW rule is a tail check that any stall on a shared machine trips.
+
+Review round 2 (the reviewer's own runs, load 3–12): goal 73 PASS, PASS (0 SLOW both); base PASS, FAIL (SLOW lines).

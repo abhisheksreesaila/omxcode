@@ -123,6 +123,17 @@ def main() raises:
     _ = links.update(Event(7600 + LINKS_ADD, "", 0))
     assert_equal(links.list()[1], "orders.order_id = clip.mp4.code", "a column nothing completes links as typed")
     _ = links.remove(1)
+    links.draft = "Orders.ORDER_ID = clip.mp4.FILE"  # (another case: the last word takes its card's own case; a column
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))  # named in a case its table doesn't have is refused, saying its columns)
+    assert_equal(links.draft, "Orders.ORDER_ID = clip.mp4.file", "Return puts the word being typed in its card's own case")
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(len(links), 1, "ORDER_ID isn't Orders' column: nothing links")
+    assert_equal(links.problem.find("order_id") >= 0, True, "and the error names the columns it has")
+    links.problem = ""
+    links.draft = "orders.order_id = clip.mp4.f"  # (a strict prefix of a video's column always completes: by design)
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(links.draft, "orders.order_id = clip.mp4.file", "a strict prefix of file/t/frame completes, never links")
+    assert_equal(len(links), 1, "and links nothing")
     links.draft = ""  # (Return on an empty field offers the first card: nothing links)
     _ = links.update(Event(7600 + LINKS_ADD, "", 0))
     assert_equal(links.draft, "fleet.", "Return on an empty field fills the first card's name")

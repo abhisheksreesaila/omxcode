@@ -854,18 +854,17 @@ struct Links(Movable, Sized):
             var next = self.complete(text)
             var whole = len(next) == 0
             for c in next:
-                whole = whole or c.text == text
+                whole = whole or c.text.lower() == text.lower()  # (any case: "Orders.ORDER_ID" is whole as typed)
             if not whole:  # (the word being typed only begins what could come: "clip.mp4.fr", whose card's columns the
-                self.draft = next[0].text  # check below can't know, links nothing; Return completes it, as on any partial draft)
-                self.problem = String("")
+                self.draft = next[0].text  # check below can't know, links nothing; Return completes it, as on any partial draft;
+                self.problem = String("")  # so a column named as a strict prefix of a video's file/t/frame ("f") can't be typed)
                 return True
             try:
                 _ = self.add(parse_link(text, BY_PERSON))  # (a host can't tell a person's typing from an agent's)
                 self.draft = String("")
                 self.problem = String("")
             except e:
-                var next = self.complete(text)  # (not a whole link: Return takes the first thing that could come next)
-                if len(next) > 0 and next[0].text != text:
+                if len(next) > 0 and next[0].text != text:  # (not a whole link: Return takes the first thing that could come next)
                     self.draft = next[0].text
                     self.problem = String("")
                 else:
