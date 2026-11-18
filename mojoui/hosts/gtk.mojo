@@ -5,6 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
+# (type/submit/enter/holdtext find a field by its hint, else by its tag: type:link=fleet.episode = telemetry.episode.)
 # (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by; else an Image(on_tap) tagged X.)
 
 from mojoui.look import look_gtk_css
@@ -2716,6 +2717,7 @@ struct GtkHost[A: App](Movable):
                 elif kind == FIELD and not is_held(w):  # (a change held while busy is newer than this patch: D-1321)
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
+                        drop_held(w)  # (the app's own value just written: the change this set held (D-1321) is older than the app's next one, goal 73)
             if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
                 var cols = max(self.rt.shown.nodes[p.node].value, 1)
                 var r = 0
@@ -5526,6 +5528,17 @@ def find(host: GtkHost, kind: Int, label: String, nth: Int, by_hint: Bool = Fals
     return -1
 
 
+def find_field(host: GtkHost, key: String) -> Int:
+    """A test step's field: the one whose hint is `key`, else the one tagged `key` (the name an agent calls it by: a hint
+    may hold the step's own "=", as the Links field's does)."""
+    var i = find(host, FIELD, key, 0, by_hint=True)
+    if i < 0:
+        for k in range(len(host.rt.shown.nodes)):
+            if i < 0 and host.rt.shown.nodes[k].kind == FIELD and host.rt.shown.nodes[k].name == key:
+                i = k
+    return i
+
+
 def canvas_node(host: GtkHost, which: String) -> Int:
     """A canvas step's target: the nth content canvas ("0", "1"…) or the canvas tagged `which` ("island")."""
     var digits = which != ""
@@ -5890,7 +5903,7 @@ def run_step[A: App](host_addr: Int, step: String):
         _ = ret[0]
     elif verb == "type" or verb == "submit" or verb == "enter":
         var kv = split_at(rest, "=")
-        var i = find(host[], FIELD, kv[0], 0, by_hint=True)
+        var i = find_field(host[], kv[0])
         if i < 0:
             print("TEST: no field", kv[0])
             return
@@ -5902,7 +5915,7 @@ def run_step[A: App](host_addr: Int, step: String):
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
     elif verb == "holdtext":  # holdtext:Field=text: a change of that field held as if it came during a rebuild (D-1703: the queue's own test)
         var kv = split_at(rest, "=")
-        var i = find(host[], FIELD, kv[0], 0, by_hint=True)
+        var i = find_field(host[], kv[0])
         if i < 0:
             print("TEST: no field", kv[0])
             return

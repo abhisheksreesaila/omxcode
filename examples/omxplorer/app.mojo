@@ -139,7 +139,7 @@ from mojoui.linkdrag import LinkDrag, DropCard, column_values, match_columns, is
 from mojoui.timelane import TimeLane
 from mojoui.peek import Peek
 from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
-from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, BY_PERSON, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT, parse_link
+from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, BY_PERSON, LINKS_ADD, LINKS_DRAFT, LINKS_PICK, LINKS_MESSAGES, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT, parse_link
 from mojoui.starter import Starter, Question, share_starter
 from mojoui.effects import Every
 from mojoui.asksql import AskBook, implied_sql, lineage
@@ -1580,6 +1580,11 @@ struct Main(App):
             for c in range(self.tables.cards[k].sheet.columns()):
                 cols.append(self.tables.cards[k].sheet.name(c))
             _ = self.links.know(self.tables.cards[k].name, cols)
+        for k in range(len(self.media.cards)):  # (the cards a link may name beside the tables: completions offer their columns, goal 73)
+            if self.media.cards[k].kind == OBJ_VIDEO:
+                self.links.know_card(self.media.cards[k].title(), ["file", "t", "frame"])
+        for k in range(len(self.docs)):
+            self.links.know_card(self.docs[k].name, self.docs[k].columns())
 
     def resolve_links(mut self):
         """A link typed on a video's name joins its analysis' rows (End.table); a folder's name, its fields' table."""
@@ -3743,6 +3748,11 @@ struct Main(App):
                 self.message = self.links.problem
             if self.trace and m - LINKS_MSG == LINKS_ADD and self.links.problem == "" and len(self.links) > 0:  # (LINKS_ADD: the link typed)
                 print("LINK: " + self.links.items[len(self.links) - 1].label() + " (typed)", flush=True)
+            if self.trace and (m - LINKS_MSG == LINKS_DRAFT or LINKS_PICK <= m - LINKS_MSG < LINKS_MESSAGES or m - LINKS_MSG == LINKS_ADD):
+                var offers = List[String]()  # (what the chips under the field offer now: goal 73's proof reads it)
+                for c in self.links.complete(self.links.draft):
+                    offers.append(c.label)
+                print("LINKS: draft '" + self.links.draft + "' offers [" + " | ".join(offers) + "]", flush=True)
             self.sync_lanes()
             self.version += 1
             return

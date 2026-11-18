@@ -1414,3 +1414,8 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - /tmp/claude-1000 hit its quota (13 GB, mostly other sessions' omxcore task outputs): commands' printed output is lost; worked around with TMPDIR=/dev/shm/t71 (a short path: Chromium's singleton socket refuses long ones) and output to files under build/g71. Nothing of other sessions deleted.
 - Not solved: in the take, the pointer over a plain button shows X's "x" cursor (xsetroot, XCURSOR_THEME and GTK settings.ini tried); over a poster it is a hand.
 - M5 first run: goal 68 M0/M2/M6 failed for missing data in this fresh worktree (build/packs: e5small half-built, no yolox; its builder needs build/demo, the DROID slice, not here or cached); copied goal 70's built packs (same scripts, same source commit). Its M1 failed on a web build that passes alone: my own compile check ran in the same TMPDIR at the same moment. Rerun started; nothing else built while it runs.
+
+## 2026-11-17 (goal 73 M1)
+- Links autocomplete: mojoui.links `complete`, chips under the field, omxplorer feeds videos' and folders' columns. tests/test_link_complete.mojo; docs/goals/73/m1.py PASS on GTK headless (real widgets) and the web host (agent tools).
+- Bug found by the proof: after Return the Links field showed the old link text again (a held change from the chip's own set_text, sent after the rebuild; D-7304). Fixed in the GTK host.
+- Not run: AppKit/iPhone (chips are plain Buttons; the AppKit test-step parser still looks fields up by hint only); no web-host picture (the agent host has no pixels); tests/test_links.mojo needs python duckdb, missing in this env.
