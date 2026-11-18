@@ -255,7 +255,15 @@ def m1():
                 continue
     if r.returncode or "llm " not in r.stdout:
         return "FAIL", tail(r, 500)
-    return "PASS", [l for l in r.stdout.splitlines() if l.strip()][-1][:160]
+    line = [l for l in r.stdout.splitlines() if l.strip()][-1][:160]
+    # D-7309: two sequences in a context too small for both (the conversation is never wiped by a background request)
+    b2 = sh(["scripts/mxbuild.sh", "tests/test_llm_room.mojo", "-o", "build/test_llm_room"], 3600)
+    if b2.returncode:
+        return "FAIL", "build test_llm_room: " + tail(b2, 400)
+    r2 = sh(["build/test_llm_room"], 900, {"LLM_GPU": GPU})
+    if r2.returncode or "llm room: ok" not in r2.stdout:
+        return "FAIL", "test_llm_room: " + tail(r2, 500)
+    return "PASS", line + " | llm room: ok (a background request that doesn't fit is refused, the conversation keeps its cache)"
 
 
 def m2():
