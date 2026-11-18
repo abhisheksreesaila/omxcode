@@ -81,7 +81,8 @@ from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
                               NUMBER_STYLES, DATE_STYLES)
 from mojoui.inspector import Inspector, Section, Row, Stepper, StatCards, NavRow, InspectorPage
-from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, BottomTabs, AppBar, Rail
+from mojoui.sheetchrome import Tool, FormulaBar, StatusBar, Tab, BottomTabs, AppBar
+from mojoui.ribbon import Ribbon, RibbonTab, RibbonGroup, RibbonTool, ribbon_tab, ribbon_group, ribbon_tool, ribbon_picker, ribbon_toggle, RIBBON_HEAD_H, RIBBON_BAND_H, RIBBON_BAND_COMPACT_H
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
@@ -138,7 +139,8 @@ from mojoui.links import Links, LINK_KEY, LINK_TIME
 from mojoui.linkdrag import LinkDrag, DropCard, column_values, match_columns, is_time_column
 from mojoui.timelane import TimeLane
 from mojoui.peek import Peek
-from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
+from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP, GRID_NONE
+from mojoui.view import KEY
 from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, BY_PERSON, LINKS_ADD, LINKS_DRAFT, LINKS_PICK, LINKS_MESSAGES, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT, parse_link
 from mojoui.starter import Starter, Question, share_starter
 from mojoui.effects import Every
@@ -326,6 +328,14 @@ comptime ADD_MODEL_MSG = 7950  # Add a model (mojoui.addmodel: ADD_MESSAGES, 795
 comptime ADD_MODEL_OPEN = 7962  # the toolbar's Add a model
 comptime FLEET_PICK = 7963  # Open bags: a folder of ROS 2 bags as a fleet (mojoui.fleet, goal 68 M4)
 comptime ROBOT_PICK = 7964  # Robot search: a pool (an omxcore moments index) picked (goal 71)
+comptime RIBBON_TAB = 7970  # + k: the ribbon's tab k (Home, Insert, Data, Format, View, Report: goal 76)
+comptime DOCK_CLOSE = 7980  # a docked panel's ✕ (or Esc on the sheet): every right-hand panel closes (goal 76)
+comptime RIBBON_HOME = 0
+comptime RIBBON_INSERT = 1
+comptime RIBBON_DATA = 2
+comptime RIBBON_FORMAT = 3
+comptime RIBBON_VIEW = 4
+comptime RIBBON_REPORT = 5  # (contextual: only while the Report tab is open)
 comptime ROBOT_MSG = 8000  # the Robot search page (mojoui.robotsearch: ROBOT_MSGS from here)
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
@@ -348,14 +358,13 @@ comptime OMX_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 10
 comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxapp's are adopted, D-285)
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
-comptime RAIL_W = 48  # the sheet's side rail (goal 41)
-comptime SHELL_CHROME_H = 228  # shell A's bands (icons-only toolbar), the formula bar and the board's padding (goal 54: measured)
-comptime RIBBON_TITLES_H = 26  # the toolbar's titles under its icons, when the window is wide enough for them
+comptime SHELL_CHROME_H = 126  # the formula bar, the board's padding, the bottom tabs and the status bar (goal 54: measured; the ribbon's own height is ribbon_h())
+comptime RIBBON_PAD_H = 5  # what a theme adds to a ribbon band (Liquid: 2 + 2 padding and its edge line; goal 76: measured)
 comptime BOARD_PAD = 12  # the board's padding inside the docked chrome (shell A, goal 54)
 comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
 comptime TILE_MIN_H = 200
 comptime CHROME_H = 252  # the menu bar, toolbar, formula bar, bottom tabs, status bar and the gaps between them (goal 25: measured)
-comptime COMPACT_W = 1680  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips); the labelled ribbon needs 1,663 pt (goal 54)
+comptime COMPACT_W = 1100  # narrower windows: the ribbon's tools show only their icons (their titles are tooltips): its widest tab, Home, needs ~1,050 pt labelled (goal 76)
 comptime FX_H = 42  # the formula bar and its gap (the report has none: its page is that much taller)
 comptime SYMBOLS: List[String] = ["$", "€", "£", "₹"]
 comptime NEGATIVE_STYLES: List[String] = ["−1,234", "(1,234)"]
@@ -508,6 +517,7 @@ struct Main(App):
     var story_step: Int  # 0, or how far the starter's story has got (STORY_SHEET … STORY_READY)
     var story_tables: Int  # the starter's tables landed so far
     var story_open: Bool  # the inspector shows the story's questions
+    var ribbon_at: Int  # the ribbon's selected tab (RIBBON_HOME…; remembered for the session, not saved in the document)
     var docs_dir: String  # where documents go ("": OMX_DOCUMENTS or ~/Documents/omxplorer); the web host's per-visitor folder (App.hosted)
     var public: Bool  # on the public internet (App.hosted): files the person keeps are handed over as downloads
     var handover: String  # a file or folder made for the person to keep, until the host takes it (App.take_download)
@@ -551,7 +561,7 @@ struct Main(App):
         self.pal = skin_palette(self.skin, 0, self.appearance_mode == DARK)
         self.import_col = 0
         self.insp_tab = 1
-        self.inspector_open = read_setting(APP, "inspector", "yes") != "no"
+        self.inspector_open = read_setting(APP, "panels", "closed") == "open"  # (goal 76: the right-hand panels start closed; the old "inspector" setting is not read, so its "yes" is ignored; a person's later choice is kept under "panels", D-7610)
         self.formula_open = False
         self.edit_text = ""
         self.message = ""
@@ -670,6 +680,7 @@ struct Main(App):
         self.story_step = 0
         self.story_tables = 0
         self.story_open = False
+        self.ribbon_at = RIBBON_HOME
         self.docs_dir = ""
         self.public = False
         self.handover = ""
@@ -2744,6 +2755,20 @@ struct Main(App):
             self.message = "Couldn't compute that chart: " + String(e)
         self.version += 1
 
+    def close_panels(mut self):
+        """Every right-hand panel closes (a panel's ✕, Esc on the sheet): the board takes their width (goal 76)."""
+        self.inspector_open = False
+        self.links_open = False
+        self.story_open = False
+        self.learn.open = False
+
+    def follow_tab(mut self):
+        """The ribbon follows the document's tab: the Report's own tools while it's open (a contextual tab), Home back on the sheet."""
+        if self.sheet_tab == 1:
+            self.ribbon_at = RIBBON_REPORT
+        elif self.ribbon_at == RIBBON_REPORT:
+            self.ribbon_at = RIBBON_HOME
+
     def ask_here(mut self, cref: Int):
         """The ask field moves to chart `cref` (its last reply and marks go with the old one)."""
         if cref != self.asking:
@@ -2761,7 +2786,7 @@ struct Main(App):
     def board_h(self) -> Int:
         """The room under the formula bar: the Board is this tall at least (the cards fill it); it is taller once a card has been
         dragged past it or a new one went below (mojoui.boardtiles), and the page scrolls."""
-        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H - (0 if self.win_w < COMPACT_W else RIBBON_TITLES_H))  # (shell A: the board reaches the bottom band)
+        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H - self.ribbon_h())  # (shell A: the board reaches the bottom band)
 
     def card_tags(self) -> List[String]:
         """The Board's cards by their tags, in the Board's order (sheet_screen): the table, the objects, the media, the
@@ -3695,8 +3720,8 @@ struct Main(App):
             return
         if m == STORY_TOGGLE:
             self.story_open = not self.story_open
+            self.inspector_open = self.story_open  # (Story again closes the panel: goal 76)
             if self.story_open:
-                self.inspector_open = True
                 self.links_open = False
             self.version += 1
             return
@@ -3718,8 +3743,8 @@ struct Main(App):
             return
         if m == LEARN_TOGGLE:
             self.learn.open = not self.learn.open
+            self.inspector_open = self.learn.open  # (Learn again closes the panel: goal 76)
             if self.learn.open:
-                self.inspector_open = True
                 self.links_open = False
                 self.story_open = False
                 self.learn.count_labels(self.frame)
@@ -3729,7 +3754,7 @@ struct Main(App):
             self.learn_event(event)
             self.version += 1
             return
-        if m == INSERT_PIVOT or m == INSERT_CHART or m == LINKS_TOGGLE or m == TOGGLE_INSPECTOR or m == STORY_TOGGLE:
+        if m == LINKS_TOGGLE or m == TOGGLE_INSPECTOR or m == STORY_TOGGLE:  # (inserting a chart or pivot leaves the panels as they are: goal 76)
             self.story_open = self.story_open and m == STORY_TOGGLE  # (the inspector turns to what was asked for)
             self.learn.open = False
         if self.editor and self.editor.value().owns(m):  # (the editor over the window: its own messages)
@@ -3784,8 +3809,15 @@ struct Main(App):
             return
         if m == LINKS_TOGGLE:
             self.links_open = not self.links_open
-            if self.links_open:
-                self.inspector_open = True
+            self.inspector_open = self.links_open  # (Links again closes the panel: goal 76)
+            self.version += 1
+            return
+        if m == DOCK_CLOSE:
+            self.close_panels()
+            self.version += 1
+            return
+        if m >= RIBBON_TAB and m < RIBBON_TAB + 6:
+            self.ribbon_at = m - RIBBON_TAB
             self.version += 1
             return
         if self.tracks.update(event, self.font, self.pal):  # (a log's chart tapped or set: its video seeks; a column picked; close)
@@ -3911,7 +3943,7 @@ struct Main(App):
             self.version += 1
         elif m == KEEP_INSPECTOR:
             self.inspector_open = event.number == 1
-            write_setting(APP, "inspector", "yes" if self.inspector_open else "no")
+            write_setting(APP, "panels", "open" if self.inspector_open else "closed")
             self.version += 1
         elif m == TOAST_CLOSE:
             self.toast = ""
@@ -3986,6 +4018,10 @@ struct Main(App):
             elif action == GRID_CANCEL:
                 self.select_cell(self.grid.cur_row, self.grid.cur_col)
                 self.message = "Edit cancelled"
+            elif action == GRID_NONE and event.number == KEY and event.text == "Escape" and self.inspector_open:  # (Esc with nothing to cancel: the panel closes, goal 76)
+                self.close_panels()
+                self.message = "Panel closed"
+                action = 1
             elif action == GRID_COMMIT:
                 var typed = String(self.grid.typed)
                 self.write_cell(typed)
@@ -4117,6 +4153,7 @@ struct Main(App):
                 self.version += 1
         elif m == SHOW_REPORT or m == SHOW_SHEET:
             self.sheet_tab = 1 if m == SHOW_REPORT else 0
+            self.follow_tab()
             self.renaming = -1
             self.picking = 0
             self.version += 1
@@ -4157,8 +4194,7 @@ struct Main(App):
                 self.objects.append(obj^)
                 self.active = len(self.objects) - 1
                 if m == INSERT_CHART:
-                    self.ask_here(self.active)
-                    self.inspector_open = True  # (a new chart opens its inspector: the toolbar only inserts)
+                    self.ask_here(self.active)  # (its sentence takes the ask field; no panel opens: inserting never does, goal 76)
                 self.insp_tab = 2
                 self.reveal = self.active + 1  # (child 0 is the table)
                 self.reveal_count += 1
@@ -4198,6 +4234,10 @@ struct Main(App):
             self.version += 1
         elif m == COMPARE_OPEN:
             var pl = self.place_tables()
+            if len(pl) < 2:  # (the ribbon's Compare is always there; the menu item was off until a second table came)
+                self.message = "Compare needs two tables: insert another first (Insert ▸ Table)"
+                self.version += 1
+                return
             self.compare_open = True
             self.compare_a = 0
             self.compare_b = max(len(pl) - 1, 0)
@@ -4367,8 +4407,7 @@ struct Main(App):
                 var chart_tile = t.kind == TILE_CHART
                 self.tiles.append(t^)
                 if chart_tile:
-                    self.ask_here(TILE_REF + len(self.tiles) - 1)
-                    self.inspector_open = True
+                    self.ask_here(TILE_REF + len(self.tiles) - 1)  # (no panel opens: goal 76)
             self.version += 1
         elif m >= TILE_CLOSE and m < TILE_CLOSE + 100:
             if m - TILE_CLOSE < len(self.tiles):
@@ -4393,6 +4432,8 @@ struct Main(App):
                 self.word_ref = cref
                 self.word_slot = (m - WORD) % 10
                 self.ask_here(cref)
+                self.inspector_open = True  # (a tap on a chart's coloured word asks for its inspector: goal 76)
+                self.links_open = False
                 if cref < TILE_REF:
                     self.active = cref  # (the inspector follows the chart being edited)
                     self.insp_tab = 2
@@ -4505,6 +4546,7 @@ struct Main(App):
                 self.renaming = m - TAB
             else:
                 self.sheet_tab = m - TAB
+                self.follow_tab()
                 self.renaming = -1
                 self.picking = 0
             self.version += 1
@@ -4834,7 +4876,13 @@ struct Main(App):
                       .fill().align(CENTER).height(34), Divider().fill(), spacing=0).fill()
 
     def menu_bar(self) -> View:
-        """The menus every screen carries (on a Mac, the system menu bar): the same actions as the toolbar, with shortcuts."""
+        """The app bar the screens other than the sheet carry: the mark, every menu, the island (the sheet wears the ribbon)."""
+        return AppBar("omxplorer", self.menus(False), self.island_views())
+
+    def menus(self, ribbon: Bool) -> View:
+        """The menus every screen carries (on a Mac, the system menu bar), with their shortcuts. Under the ribbon (`ribbon`) only
+        File shows; the others are .hidden(): their items still lend their shortcuts (Ctrl+Shift+I, Ctrl+B…) and stay an
+        agent's menu tools, and a Mac's system menu bar still shows them all (goal 76, D-7604)."""
         var on_sheet = self.screen == SHEET
         var edits = on_sheet  # (a streamed file edits too, D-213)
         var col = self.ctx_col if self.ctx_col >= 0 else self.grid.cur_col
@@ -4849,7 +4897,7 @@ struct Main(App):
         for k in range(9):
             inks.append(Item(swatch_name(k), SET_INK + k, checked=st.ink() == k, disabled=not cells))
             fills.append(Item("None" if k == 0 else swatch_name(k), SET_FILL + k, checked=st.fill() == k, disabled=not cells))
-        var bar = MenuBar([
+        var menus: List[View] = [
             Menu("File", [Item("New blank sheet", BLANK, icon="grid", shortcut="Ctrl+N"), Item("Open…", BACK, icon="open", shortcut="Ctrl+O", disabled=not on_sheet),
                           Separator(), Item("Save", SAVE, icon="save", shortcut="Ctrl+S", disabled=not edits),
                           Item("Export CSV", EXPORT_CSV, icon="download", disabled=not on_sheet), Separator(),
@@ -4882,14 +4930,19 @@ struct Main(App):
                             Separator(), format_as.copy(), Item("Clear formatting", CLEAR_FORMAT, icon="clear-format", disabled=not cells), Separator(),
                             Item("Format inspector", TOGGLE_INSPECTOR, icon="format", checked=self.inspector_open, disabled=not on_sheet)]),
             Menu("Help", [Item("About omxplorer", ABOUT, icon="file")]),
-        ])
-        var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
-        _ = doc
+        ]
+        if ribbon:
+            for k in range(1, len(menus)):
+                menus[k] = menus[k].copy().hidden()
+        return MenuBar(menus^)
+
+    def island_views(self) -> List[View]:
+        """The status island at the bar's far end: the document, the GPU and what's happening, in one place (D-255)."""
         var t = now_ns()
         var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job) or self.addm.busy() or Bool(self.fleet_job) or (self.screen == ROBOT_SCREEN and (self.robot.busy() or self.robot.playing()))
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
-        return AppBar("omxplorer", bar^, island^)
+        return island^
 
     def video_overlays(self) -> List[View]:
         """The video card's Analyze popover, Make a reel dialog and the Query dialog (each only while open)."""
@@ -5090,36 +5143,101 @@ struct Main(App):
             parts.append(Row("p50 · p95", Text(fixed(shown_ms(p50), 1) + " ms · " + fixed(shown_ms(p95), 1) + " ms").tag("island-p50")))
         return VStack(parts^, spacing=8).align(STRETCH).width(380)
 
-    def toolbar(self) -> View:
-        """The tools for the tab you're on: the sheet's (edit, data, formats, insert) or the Report's (tiles, filter)."""
-        var streamed = self.frame.streamed()  # (from disk, editable: D-213)
-        var left: List[Tool] = [Tool("Save", "save", SAVE, False, "Save the document (Ctrl+S)"), Tool("Undo", "undo", UNDO, False, "Undo the last change (Ctrl+Z)")]
-        var right: List[Tool] = [Tool("Links", "share", LINKS_TOGGLE, self.links_open, "The links on this sheet (" + String(len(self.links)) + "): see, unlink, set a time offset"),
-                                 Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open and not self.story_open and not self.learn.open, "Show or hide the inspector (Ctrl+Shift+I)")]
-        right.insert(0, Tool("Add a model", "brain", ADD_MODEL_OPEN, self.addm.open, "A model from the Hugging Face Hub, a file or a folder: it answers on the row or frame you're on"))
-        right.insert(0, Tool("Learn from labels", "sparkles", LEARN_TOGGLE, self.learn.open, "Teach a column by example: label about 20 rows, a decision tree fills the rest and says its rule"))
-        if self.story_step > 0:
-            right.insert(0, Tool("Story", "book-open", STORY_TOGGLE, self.story_open, "The story's questions, each with its SQL: Run one"))
-        var extra = List[View]()
-        if streamed:
-            extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
-        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=self.open_types()).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
-        extra.append(FilePicker("Bags", FLEET_PICK, style=TOOL_INLINE, icon="route", accept="folder").tooltip("Open a folder of ROS 2 bags as a fleet: runs, moments, stops, cameras").tag("open-bags-tool"))
-        extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
+    def ribbon_h(self) -> Int:
+        """The ribbon's height: its tab row and a band (labelled, or icons only in a narrow window), the theme's padding."""
+        return RIBBON_HEAD_H + (RIBBON_BAND_COMPACT_H if self.win_w < COMPACT_W else RIBBON_BAND_H) + RIBBON_PAD_H
+
+    def ribbon_tabs(self) -> List[RibbonTab]:
+        """The sheet's tools as Office's tabs, trimmed to what omxplorer has (goal 76): Home, Insert, Data, Format, View, and
+        the Report's own tab while it's open. A tool may sit on two tabs (Links on Insert and View)."""
+        var on_sheet = self.sheet_tab == 0
+        var home = List[RibbonGroup]()
+        var doc: List[RibbonTool] = [ribbon_tool("Save", "save", SAVE, "Save the document (Ctrl+S)"), ribbon_tool("Undo", "undo", UNDO, "Undo the last change (Ctrl+Z)")]
+        if on_sheet:
+            doc.append(ribbon_tool("Copy", "copy", COPY, "Copy the selection (Ctrl+C)"))
+        home.append(ribbon_group("Document", doc^))
+        if on_sheet:
+            for g in self.format_groups(False):
+                home.append(g.copy())
+            home.append(ribbon_group("Sort", [ribbon_tool("Sort", "sort", SORT, "Sort by the selected column; again to flip", on=self.grid.sort_col >= 0)]))
+            home.append(ribbon_group("Rows", [ribbon_tool("Add row", "row-plus", ADD_ROW, "A new row at the end (Ctrl+Shift+R)"),
+                                              ribbon_tool("Formula", "formula", NEW_FORMULA, "A new column computed from others", on=self.formula_open)]))
+        var files: List[RibbonTool] = [ribbon_picker("Table", "table", PICK_TABLE, ".csv,.tsv,.txt,.parquet", "Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)", tag="insert-table")]
         if not self.public:  # (the public copy's host opens CSV, Parquet and video only)
-            extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
-        if self.sheet_tab == 1:
-            return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
-        var middle = List[Tool]()
-        middle.append(Tool("Add row", "row-plus", ADD_ROW, False, "A new row at the end (Ctrl+Shift+R)"))
-        middle.append(Tool("Formula", "formula", NEW_FORMULA, self.formula_open, "A new column computed from others"))
-        middle.append(Tool("Sort", "sort", SORT, self.grid.sort_col >= 0, "Sort by the selected column; again to flip"))
-        middle.append(Tool("Pivot", "pivot", INSERT_PIVOT, False, "A pivot table of the selected column (Ctrl+Shift+P)"))
-        middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
-        middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
+            files.append(ribbon_picker("Documents", "file", PICK_DOCS, "folder,.pdf", "Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)", tag="insert-documents"))
+        files.append(ribbon_tool("Video", "video", INSERT_VIDEO, "Insert a video"))
+        files.append(ribbon_tool("Picture", "image", INSERT_IMAGE, "Insert a picture"))
+        files.append(ribbon_picker("Open", "import", PICK, self.open_types(), "Open a CSV, Parquet or .omx file, or a video or picture"))
+        files.append(ribbon_picker("Bags", "route", FLEET_PICK, "folder", "Open a folder of ROS 2 bags as a fleet: runs, moments, stops, cameras", tag="open-bags-tool"))
+        var make: List[RibbonTool] = [ribbon_tool("Chart", "chart-bar", INSERT_CHART, "A chart of the selected column (Ctrl+Shift+C)"),
+                                      ribbon_tool("Pivot", "pivot", INSERT_PIVOT, "A pivot table of the selected column (Ctrl+Shift+P)"),
+                                      ribbon_tool("Query", "database", QUERY_OPEN, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table", on=self.query_open)]
         if not self.public:  # (the public copy asks one SELECT at a time, inside its budgets: no Script window, goal 62's review)
-            middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
-        return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=False, compact=self.win_w < COMPACT_W)  # (shell A: a ribbon, each icon over its title, goal 54)
+            make.append(ribbon_tool("Script", "terminal", SCRIPT_OPEN, "A script over every table and video here: statements in order, each result a card", on=self.script.open))
+        if on_sheet:
+            make.append(ribbon_tool("Formula column", "formula", NEW_FORMULA, "A new column computed from others", on=self.formula_open))
+        var links_tip = "The links on this sheet (" + String(len(self.links)) + "): see, unlink, set a time offset"
+        var insert: List[RibbonGroup] = [ribbon_group("From a file", files^), ribbon_group("Make", make^),
+                                         ribbon_group("Connect", [ribbon_tool("Links", "share", LINKS_TOGGLE, links_tip, on=self.links_open)])]
+        var data = List[RibbonGroup]()
+        if on_sheet:
+            var col = self.grid.cur_col
+            var style = self.frame.format_of(col).style if col >= 0 else AUTO
+            data.append(ribbon_group("Sort", [ribbon_tool("Sort up", "sort", SORT_ASC, "Smallest first (Ctrl+Shift+↑)"), ribbon_tool("Sort down", "sort", SORT_DESC, "Largest first (Ctrl+Shift+↓)")]))
+            data.append(ribbon_group("Format as", [ribbon_tool("Number", "format", FMT_NUMBER, "The whole column as numbers", on=style == NUMBER),
+                                                   ribbon_tool("Currency", "currency", FMT_CURRENCY, "The whole column as money", on=style == CURRENCY, tag="as-currency"),
+                                                   ribbon_tool("Percent", "percent", FMT_PERCENT, "The whole column as percentages", on=style == PERCENT, tag="as-percent")]))
+        data.append(ribbon_group("Models", [ribbon_tool("Learn from labels", "sparkles", LEARN_TOGGLE, "Teach a column by example: label about 20 rows, a decision tree fills the rest and says its rule", on=self.learn.open),
+                                            ribbon_tool("Add a model", "brain", ADD_MODEL_OPEN, "A model from the Hugging Face Hub, a file or a folder: it answers on the row or frame you're on", on=self.addm.open)]))
+        data.append(ribbon_group("Compare", [ribbon_tool("Compare", "chart", COMPARE_OPEN, "Compare inspections: two of the sheet's tables, row by row")]))
+        var fmt = List[RibbonGroup]()
+        if on_sheet:
+            for g in self.format_groups(True):
+                fmt.append(g.copy())
+        var plain = self.inspector_open and not self.links_open and not self.story_open and not self.learn.open
+        fmt.append(ribbon_group("Inspector", [ribbon_tool("Format inspector", "format", TOGGLE_INSPECTOR, "Show or hide the inspector (Ctrl+Shift+I)", on=plain)]))
+        var panels: List[RibbonTool] = [ribbon_tool("Inspector", "sliders-horizontal", TOGGLE_INSPECTOR, "Show or hide the inspector (Ctrl+Shift+I)", on=plain),
+                                        ribbon_tool("Links", "share", LINKS_TOGGLE, links_tip, on=self.links_open)]
+        if self.story_step > 0:
+            panels.append(ribbon_tool("Story", "book-open", STORY_TOGGLE, "The story's questions, each with its SQL: Run one", on=self.story_open))
+        var view: List[RibbonGroup] = [ribbon_group("Panels", panels^),
+                                       ribbon_group("Tabs", [ribbon_tool("Sheet", "sheet", SHOW_SHEET, "The sheet", on=on_sheet), ribbon_tool("Report", "chart-bar", SHOW_REPORT, "The Report", on=not on_sheet),
+                                                             ribbon_tool("Rename tab", "rename", RENAME_TAB, "Rename the tab you're on")]),
+                                       ribbon_group("App", [ribbon_tool("Settings", "gear", SETTINGS, "Settings (Ctrl+,)"), ribbon_tool("About", "file", ABOUT, "About omxplorer")])]
+        var tabs: List[RibbonTab] = [ribbon_tab("Home", home^), ribbon_tab("Insert", insert^), ribbon_tab("Data", data^), ribbon_tab("Format", fmt^), ribbon_tab("View", view^)]
+        if not on_sheet:  # (the Report's own tools: tiles of a column, the filter every tile reads)
+            var tiles = List[RibbonTool]()
+            for t in self.report_tools():
+                tiles.append(ribbon_tool(t.title, t.icon, t.message, t.tip))
+            tabs.append(ribbon_tab("Report", [ribbon_group("Tiles", tiles^, self.report_controls()), ribbon_group("Filter", [], self.filter_controls())], contextual=True))
+        return tabs^
+
+    def ribbon(self) -> View:
+        """The sheet's ribbon (mojoui.ribbon): the mark and the File menu leading, the tabs, the status island trailing."""
+        var tabs = self.ribbon_tabs()
+        var at = self.ribbon_at if self.ribbon_at < len(tabs) else RIBBON_HOME
+        var mark = HStack(Icon("app-logo", 18), Text("omxplorer", HEADLINE), spacing=6).align(CENTER).tag("app-mark")
+        var trailing = List[View]()
+        if self.frame.streamed():  # (from disk, editable: D-213)
+            trailing.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
+        for v in self.island_views():
+            trailing.append(v.copy())
+        return Ribbon(tabs, at, RIBBON_TAB, leading=[mark^, self.menus(True)], trailing=trailing, compact=self.win_w < COMPACT_W)
+
+    def format_groups(self, full: Bool) -> List[RibbonGroup]:
+        """The format toggles (format_tools) as captioned ribbon groups; `full` (the Format tab) adds automatic alignment."""
+        var names: List[String] = ["Font", "Colour", "Align", "Number"]
+        var groups = self.format_tools()
+        var out = List[RibbonGroup]()
+        for k in range(len(groups)):
+            var tools = List[RibbonTool]()
+            if full and k == 2:
+                var at = self.frame.style_of(self.grid.cur_col, self.grid.cur_row).align() if self.grid.cur_col >= 0 else AUTO_ALIGN
+                tools.append(ribbon_toggle("Align automatically", "text", STYLE_ALIGN + AUTO_ALIGN, at == AUTO_ALIGN, "Automatic: numbers right, text left", tag="align-auto"))
+            for t in groups[k]:
+                tools.append(ribbon_toggle(t.title, t.icon, t.message, t.on, t.tip))
+            out.append(ribbon_group(names[k], tools^))
+        return out^
 
     def format_tools(self) -> List[List[Tool]]:
         """Excel's Home tab, in small toggles: font, colours, alignment, number. Each shows the selection's state."""
@@ -5185,7 +5303,7 @@ struct Main(App):
         come from (the tiles and the filter are in the toolbar)."""
         if self.asking >= TILE_REF and self.has_chart(self.asking):
             var one: List[String] = ["Chart"]
-            return Inspector(one, 0, NO_MSG, self.chart_inspector(self.asking), INSPECTOR_W)
+            return Inspector(one, 0, NO_MSG, self.chart_inspector(self.asking), INSPECTOR_W, on_close=DOCK_CLOSE)
         var sections = List[View]()
         var data = List[View]()
         data.append(Row("Source", Text(self.sheet_name)))
@@ -5194,7 +5312,7 @@ struct Main(App):
         data.append(Text("Edits in the table show here at once. Add tiles and set the filter in the toolbar.", CAPTION))
         sections.append(Section("Data", data))
         var tabs: List[String] = [self.report_name]
-        return Inspector(tabs, 0, NO_MSG, sections, INSPECTOR_W)
+        return Inspector(tabs, 0, NO_MSG, sections, INSPECTOR_W, on_close=DOCK_CLOSE)
 
     def chart_inspector(self, cref: Int) -> List[View]:
         """A chart's inspector: its sentence and what's set, a row per part opening its page (Data, Order, Rows, Style)."""
@@ -5284,11 +5402,11 @@ struct Main(App):
 
     def inspector(self) -> View:
         if self.learn.open:  # (the toolbar's Learn: label rows, Learn, the rule)
-            return Inspector(["Learn"], 0, LEARN_TOGGLE, self.learn.view(self.frame.rows(), max(self.grid.cur_row, 0)), INSPECTOR_W)
+            return Inspector(["Learn"], 0, LEARN_TOGGLE, self.learn.view(self.frame.rows(), max(self.grid.cur_row, 0)), INSPECTOR_W, on_close=DOCK_CLOSE)
         if self.story_open and self.starter.has():  # (the starter's story: its questions, each with its SQL and a Run)
-            return Inspector(["Story"], 0, STORY_TOGGLE, self.story_panel(), INSPECTOR_W)
+            return Inspector(["Story"], 0, STORY_TOGGLE, self.story_panel(), INSPECTOR_W, on_close=DOCK_CLOSE)
         if self.links_open:  # (the toolbar's Links: the sheet's links, their offsets, Unlink)
-            return Inspector(["Links"], 0, LINKS_TOGGLE, self.links.panel(), INSPECTOR_W)
+            return Inspector(["Links"], 0, LINKS_TOGGLE, self.links.panel(), INSPECTOR_W, on_close=DOCK_CLOSE)
         if self.sheet_tab == 1:
             return self.report_inspector()
         var tabs: List[String] = ["Table", "Cell"]
@@ -5297,9 +5415,9 @@ struct Main(App):
             if self.insp_tab == 2:
                 if self.objects[self.active].kind == OBJ_CHART:  # (a chart: its sentence and pages, editing the chart being asked about)
                     if self.asking != self.active:
-                        return Inspector(tabs, 2, INSP_TAB, self.object_inspector(), INSPECTOR_W)
-                    return Inspector(tabs, 2, INSP_TAB, self.chart_inspector(self.active), INSPECTOR_W)
-                return Inspector(tabs, 2, INSP_TAB, self.object_inspector(), INSPECTOR_W)
+                        return Inspector(tabs, 2, INSP_TAB, self.object_inspector(), INSPECTOR_W, on_close=DOCK_CLOSE)
+                    return Inspector(tabs, 2, INSP_TAB, self.chart_inspector(self.active), INSPECTOR_W, on_close=DOCK_CLOSE)
+                return Inspector(tabs, 2, INSP_TAB, self.object_inspector(), INSPECTOR_W, on_close=DOCK_CLOSE)
         var sections = List[View]()
         if self.insp_tab == 0:
             var info = List[View]()
@@ -5343,7 +5461,7 @@ struct Main(App):
             sections.append(Section("Data format", fmt))
             if len(self.stats) > 0:
                 sections.append(Section("Column stats", [StatCards(self.stats)]))
-        return Inspector(tabs, min(self.insp_tab, 1), INSP_TAB, sections, INSPECTOR_W)
+        return Inspector(tabs, min(self.insp_tab, 1), INSP_TAB, sections, INSPECTOR_W, on_close=DOCK_CLOSE)
 
     def status(self) -> View:
         var items = List[String]()
@@ -5372,17 +5490,7 @@ struct Main(App):
         return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
 
     def sheet_width(self) -> Int:
-        return self.win_w - RAIL_W - 1 - 2 * BOARD_PAD - (INSPECTOR_W + 1 if self.inspector_open else 0)  # (shell A: the rail, the board's padding, the inspector, their lines)
-
-    def rail(self) -> View:
-        """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
-        var items = List[View]()
-        items.append(FilePicker("Table", PICK_TABLE, style=ICON_ONLY, icon="table", accept=TABLE_TYPES).tooltip("Insert a table from a CSV or Parquet file"))
-        if not self.public:  # (the public copy opens the tables and clips a visitor uploads: no folder of documents)
-            items.append(FilePicker("Documents", PICK_DOCS, style=ICON_ONLY, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs, read into a table of their fields"))
-        items.append(Button("Video", INSERT_VIDEO, ICON_ONLY, icon="video").tooltip("Insert a video"))
-        items.append(Button("Picture", INSERT_IMAGE, ICON_ONLY, icon="image").tooltip("Insert a picture"))
-        return Rail(items^, RAIL_W)
+        return self.win_w - 2 * BOARD_PAD - (INSPECTOR_W + 1 if self.inspector_open else 0)  # (goal 76: no rail; the board's padding, and a docked panel with its line only while one is open)
 
     def report_view(self) -> View:
         """The Report tab (Stitch 06): KPI and chart tiles over the filtered rows, and the row that adds them."""
@@ -5474,12 +5582,11 @@ struct Main(App):
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
         var main = (VStack(fx, area^, spacing=BOARD_PAD) if self.sheet_tab == 0 else VStack(area^, spacing=BOARD_PAD)).padding(BOARD_PAD).grow().align(STRETCH)
-        var row = (HStack(self.rail(), main, self.inspector(), spacing=0) if self.inspector_open else HStack(self.rail(), main, spacing=0)).align(STRETCH)  # (shell A: docked, goal 54)
+        var row = (HStack(main, self.inspector(), spacing=0) if self.inspector_open else HStack(main, spacing=0)).align(STRETCH)  # (docked, goal 54; no rail, a panel only while one is open: goal 76)
         var tabs: List[Tab] = [Tab(self.sheet_name, "sheet"), Tab(self.report_name, "chart-bar")]
         var chip = List[View]()  # (the GPU's state shows once, in the menu bar)
         var parts = List[View]()
-        parts.append(self.menu_bar())
-        parts.append(self.toolbar())
+        parts.append(self.ribbon())  # (goal 76: one ribbon for the menu bar, the toolbar and the rail)
         parts.append(row^.fill().grow())
         parts.append(BottomTabs(tabs, self.sheet_tab, TAB, self.renaming, RENAME_SUBMIT, RENAME_CANCEL, chip).height(30))  # (Excel's place for them)
         parts.append(self.status().height(30))

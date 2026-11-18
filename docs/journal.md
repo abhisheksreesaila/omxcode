@@ -1436,3 +1436,10 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - The web dump showed no RIBBON: lines (the web host doesn't relay the app's prints): the check reads the page's own words instead.
 - regions: listed hidden bands with odd boxes (-5,-1 12x5): mojoui.regions now skips hidden nodes; the agent's outline marks them "not shown" and its texts() skips them.
 - drive.py's tap: prefers a shown button (a ribbon's same-titled tool on a hidden tab would time out Playwright's click).
+
+## 2026-11-18 (goal 76 M2)
+- omxplorer: one Ribbon (Home, Insert, Data, Format, View, and Report while it's open) replaces the AppBar row, the Toolbar row and the rail; the menus other than File are hidden inside the one MenuBar (shortcuts, agent menu tools, the Mac's system menus). Panels closed by default (setting "panels"); inserting opens none; ✕ and Esc close them.
+- First M2 run: OMX_OPEN lands on Import, not the sheet (the steps tap Create table first, as goal 73's do); the agent session with OMX_OPEN broke the MCP stream (a start-up line on stdout): the agent half opens the file with goal 73's open-file tool instead.
+- drive.py's wait: waited for a *visible* Links (hidden on Home): now "attached", as GTK's waitfor reads the tree.
+- The "nothing lost" diff found INSERT_TABLE (Insert ▸ Table…, a dialog holding a picker) missing: the ribbon's Table is the picker itself; listed as an equivalence with the colour swatches (D-7613).
+- The web's file-picker tools sat 3 px higher than button tools (label.picker.tool had no tool box): the base sheet gives a picker tool the same box.

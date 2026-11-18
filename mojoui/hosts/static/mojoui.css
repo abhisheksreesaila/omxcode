@@ -168,6 +168,8 @@ label.picker { position: relative; cursor: pointer; display: inline-flex; align-
 label.picker.tool { flex-direction: column; } label.picker input.picker-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 button.tool { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 58px; min-height: 48px; padding: 4px 6px; }
 button.tool span { font-size: 11px; line-height: 13px; }
+label.picker.tool:not(.inline):not(.icon-only) { justify-content: center; gap: 2px; min-width: 58px; min-height: 48px; padding: 4px 6px; }  /* (a picker as a tool: the same box as a button tool, goal 76's ribbon) */
+label.picker.tool:not(.inline) span { font-size: 11px; line-height: 13px; }
 button.tool.inline, label.picker.tool.inline { flex-direction: row; gap: 6px; min-width: 0; min-height: 34px; padding: 0 10px; }
 button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 [data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only { min-width: 34px; min-height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }

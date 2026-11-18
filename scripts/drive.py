@@ -410,7 +410,7 @@ def step(page, s):
     elif verb == "wait" and rest.isdigit():  # wait:1500: as GTK's wait (= pause), so one step list drives both hosts
         page.wait_for_timeout(int(rest))
     elif verb == "wait":  # until a button with this title appears (e.g. after frames change the screen)
-        page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000)
+        page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000, state="attached")  # (in the page: a ribbon's hidden tab counts, as GTK's waitfor reads the tree, D-7601)
     elif verb == "open" and "." in rest and not page.locator(".menu-title").filter(has_text=exact(rest)).count():
         # open:clip.mp4: a file, as GTK's step opens it: the first file picker on screen whose accept list takes its
         # extension (or any file) gets it; a relative name is looked up in $MOJOUI_DOCUMENTS, then $OMX_DOCUMENTS

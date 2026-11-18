@@ -166,11 +166,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer, ribbon |
-| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
-| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
+| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck |
+| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | maccheck |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
-| `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
-| `Ribbon (tabs of captioned tool groups; the other tabs' tools hidden, still reachable)` | `mojoui/ribbon.mojo` | Toolbar button (icon over label), Icon toggle shown pressed, File picker, Hidden (in the tree, not drawn; agents and test steps still reach it), Divider, Tooltips | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ | ribbon |
+| `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | 🔨 | 🔨 | ❌ | 🔨 | 🔨 | 🔨 | — |
+| `Ribbon (tabs of captioned tool groups; the other tabs' tools hidden, still reachable)` | `mojoui/ribbon.mojo` | Toolbar button (icon over label), Icon toggle shown pressed, File picker, Hidden (in the tree, not drawn; agents and test steps still reach it), Divider, Tooltips | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer, ribbon |
 | `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
@@ -273,8 +273,8 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 191 | 11 | 0 |
-| Web | 176 | 9 | 17 |
+| Linux (GTK) | 189 | 13 | 0 |
+| Web | 174 | 11 | 17 |
 | Android | 19 | 64 | 119 |
 | Mac (AppKit) | 5 | 165 | 32 |
 | iPhone (UIKit) | 0 | 136 | 66 |
