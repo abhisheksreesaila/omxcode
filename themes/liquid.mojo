@@ -96,16 +96,21 @@ def liquid_look(p: Palette) -> Look:
 def liquid_palette() -> Palette:
     """Liquid, light (docs/design/liquid.md): a white sheet, glass islands over a soft cool backdrop, teal (the default).
     The chrome is the glass as it looks over the backdrop (GTK can't blur what's behind a widget)."""
-    return Palette(False, hx("#e1e7ef"), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#64748b"),
+    return Palette(False, hx(LIGHT_PAGE), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#4f5d72"),
                    hx("#e3e8ef"), hx("#c9d1dc"), hx("#0e7c86"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0e7c86"), 0.40), hx("#e6f2f3"),
                    hx("#6a4fd6"), hx("#16a34a"), hx("#dc2626"), hx("#d97706"), REGULAR, MEDIUM, [hx("#0e7c86"), hx("#f59e0b"), hx("#6366f1"), hx("#ec4899"), hx("#22c55e"), hx("#a16207"), hx("#64748b"), hx("#c026d3")], hx("#f7f9fc"), hx("#334155"), hx("#ffffff"))
 
 
-comptime DARK_PAGE = "#12151b"  # Liquid dark's backdrop: a deep, cool slate (its gradient runs a shade either side)
+comptime LIGHT_PAGE = "#d7dee9"  # Liquid light's canvas (goal 73 M3, D-7320): a clear step darker and cooler than the white cards (L* 88 against 100)
+comptime LIGHT_TOP = "#dde4ee"  # (its gradient: a shade lighter at the top, a shade deeper at the bottom; ink3 holds 4.5:1 on both ends)
+comptime LIGHT_BOTTOM = "#cfd8e4"
+comptime LIGHT_EDGE = "rgba(15,23,42,0.10)"  # a light card's hairline edge on the canvas
+comptime LIGHT_LIFT = "0 8px 24px rgba(15,23,42,0.10)"  # its one soft shadow
+comptime DARK_PAGE = "#0b0d12"  # Liquid dark's canvas (goal 73 M3, D-7321): deeper than the cards (#1b1f27), which stand lighter on it (L* 3.6 against 11.7)
 
 
 def liquid_dark_palette() -> Palette:
-    """Liquid, dark (owner, 2026-10-30: "you can design a new liquid dark", D-1240): a deep cool backdrop #12151b, the
+    """Liquid, dark (owner, 2026-10-30: "you can design a new liquid dark", D-1240): a deep cool canvas #0b0d12, the
     glass islands a step lighter, solid content cards #1b1f27 (raised #252a34), crisp #323946 hairlines, ink #f1f4f9 /
     #c4cad6 / #8f98a8 (≥ 4.5:1 on the cards), Liquid's teal lifted for the dark (#3cc4cf; a mode's tint goes over it
     with dark_tint), its tones (ok #34d399, warn #fbbf24, bad #f87171, info #7aa7ff) and Liquid's data palette, lifted."""
@@ -190,7 +195,7 @@ def liquid_css(p: Palette) -> String:
         "background-color: " + hex_of(p.card) + "; box-shadow: 0 0 0 1px " + line + ", 0 1px 3px rgba(0,0,0,0.30);")
     var solid_hover = String("0 0 0 1px rgba(15,23,42,0.14), 0 10px 30px rgba(15,23,42,0.10)") if not d else ("0 0 0 1px " + strong + ", 0 10px 30px rgba(0,0,0,0.40)")
     var hover = String("rgba(15,23,42,0.06)") if not d else String("rgba(255,255,255,0.07)")
-    var backdrop = String("background-color: #e1e7ef; background-image: linear-gradient(180deg, #e6ebf2, #dbe2eb);") if not d else (
+    var backdrop = String("background-color: " + LIGHT_PAGE + "; background-image: linear-gradient(180deg, " + LIGHT_TOP + ", " + LIGHT_BOTTOM + ");") if not d else (
         "background-color: " + hex_of(p.page) + "; background-image: linear-gradient(180deg, " + hex_of(mix(p.page, WHITE, 0.03)) + ", " + hex_of(mix(p.page, hx("#000000"), 0.08)) + ");")
     var thumb = String("background: #ffffff; color: ") if not d else ("background: " + hex_of(p.raised) + "; color: ")
     var thumb_shadow = String("0 1px 3px rgba(15,23,42,0.12), 0 0 0 1px rgba(15,23,42,0.04)") if not d else ("0 1px 3px rgba(0,0,0,0.35), 0 0 0 1px " + strong)
@@ -289,7 +294,7 @@ body.liquid { --sp-snappy: cubic-bezier(.22, 1, .36, 1);  /* calm ease-out, no o
   --glass-bg: rgba(255,255,255,.62); --glass-fx: blur(24px) saturate(1.6);
   --glass-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(255,255,255,.75), 0 8px 32px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06);
   --solid-shadow: 0 0 0 1px rgba(15,23,42,.14), 0 1px 3px rgba(15,23,42,.05);
-  --l-backdrop: linear-gradient(180deg, #e6ebf2, #dbe2eb); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
+  --l-backdrop: linear-gradient(180deg, #dde4ee, #cfd8e4); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
   --l-lift: 0 0 0 1px rgba(15,23,42,.14), 0 10px 30px rgba(15,23,42,.10); --l-hi: rgba(255,255,255,.18);
   --l-track: rgba(15,23,42,.06); --l-thumb: #fff; --l-thumb-shadow: 0 1px 3px rgba(15,23,42,.12), 0 0 0 1px rgba(15,23,42,.04);
   --l-pop: rgba(255,255,255,.84); --l-pop-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(15,23,42,.08), 0 12px 40px rgba(15,23,42,.16);
@@ -378,10 +383,19 @@ def liquid_dark_gtk(p: Palette) -> String:
 
 
 def liquid_light_gtk(p: Palette) -> String:
-    """Liquid light on GTK: every card on a Board in a 1 px border (owner, 2026-11-05: the white sheet on the pale
-    backdrop had no visible edge, in the app or a screenshot)."""
+    """Liquid light on GTK: every card on a Board in a hairline edge and one soft shadow, white on the darker canvas
+    (owner, 2026-11-05: the white sheet had no visible edge; 2026-11-17: "more contrast and depth so the cards are like
+    on the canvas", goal 73 M3)."""
     var w = String("window.liquid ")
-    return w + ".mui-board > * { border: 1px solid " + hex_of(p.line_strong) + "; border-radius: 16px; }\n"
+    return (w + ".mui-board > * { border: 1px solid " + LIGHT_EDGE + "; border-radius: 16px; }\n"
+            + w + ".mui-board > .mui-card, " + w + ".mui-board > .mui-board-clip { box-shadow: " + LIGHT_LIFT + "; }\n")
+
+
+def liquid_light_web() -> String:
+    """Liquid light on the web: the same hairline and shadow on a Board's objects, the card inside them flat (as in Liquid dark)."""
+    var b = String("body.liquid ")
+    return (b + ".board > .object:not([data-tag=cell-editor]) { border: 1px solid " + LIGHT_EDGE + "; border-radius: 16px; box-shadow: " + LIGHT_LIFT + "; }\n"
+            + b + ".board > .object > .vstack.card { box-shadow: none; border-radius: 15px; }\n")
 
 
 def liquid() -> Theme:
@@ -396,5 +410,5 @@ def liquid(dark: Bool) -> Theme:
 def liquid(pal: Palette) -> Theme:
     """Liquid over `pal`: dark when the palette is (liquid_dark_palette)."""
     var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else liquid_light_gtk(pal))
-    var web = String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else String(""))
+    var web = String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else liquid_light_web())
     return Theme("liquid", "skin liquid", pal.copy(), gtk, web, pal.ink2, pal.accent_ink, True, liquid_look(pal))
