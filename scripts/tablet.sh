@@ -43,7 +43,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-MOJOUI_EXTRA_HOSTS="$NAME" "${RUN[@]}" python mojoui/hosts/web.py "$MODULE" "$PORT" &
+MOJOUI_BEHIND_PROXY=1 MOJOUI_EXTRA_HOSTS="$NAME" "${RUN[@]}" python mojoui/hosts/web.py "$MODULE" "$PORT" &
 SERVER=$!
 for _ in $(seq 1 120); do
   (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break

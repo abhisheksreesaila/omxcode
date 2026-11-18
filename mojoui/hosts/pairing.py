@@ -81,8 +81,8 @@ def admit(origin, host, peer, key_given, key, hosts, forwarded=False):
     the proxy, not the caller."""
     if host_name(host) not in hosts:
         return False
-    if origin and origin != "null" and urlsplit(origin).netloc.lower() != host.lower():
-        return False
+    if origin and (origin == "null" or urlsplit(origin).netloc.lower() != host.lower()):
+        return False  # ("null" is a sandboxed iframe or a file:// page: a foreign page, never ours)
     local = peer in LOOPBACK_PEERS and not forwarded
     if local:
         return True
@@ -134,7 +134,7 @@ class Pairing:
         if scope["type"] == "http" and scope["method"] == "GET" and query.get("k") and hmac.compare_digest(query["k"].encode(), self.key.encode()):
             https = headers.get(b"x-forwarded-proto", b"").decode() == "https" or scope.get("scheme") == "https"
             rest = urlencode([(k, v) for k, v in parse_qsl(scope.get("query_string", b"").decode("latin-1")) if k != "k"])
-            where = scope["path"] + ("?" + rest if rest else "")
+            where = "/" + scope["path"].lstrip("//\\") + ("?" + rest if rest else "")
             cookie = f"{COOKIE}={self.key}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000" + ("; Secure" if https else "")
             await send({"type": "http.response.start", "status": 303,
                         "headers": [(b"location", where.encode()), (b"set-cookie", cookie.encode()), (b"cache-control", b"no-store")]})

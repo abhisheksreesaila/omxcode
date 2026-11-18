@@ -63,6 +63,14 @@ def main():
     assert ask(host="evil.example:5001")[1] == 403
     # a page on another site (its Origin is not the Host) is refused even from here
     assert ask(origin="http://evil.example")[1] == 403
+    # D-7300: "Origin: null" (a sandboxed iframe, a file:// page) is a foreign page, even from loopback with no key: the page
+    # and the audio socket are both refused
+    assert ask(origin="null")[1] == 403
+    assert ask(kind="websocket", origin="null")[:2] == ("websocket.close", 1008)
+    assert ask(kind="websocket", origin="null", path="/audio")[:2] == ("websocket.close", 1008)
+    # D-7300: the redirect after the key goes to a relative path on this host, never "//evil.example/"
+    _, status, heads = ask(host="ablearn.tail53f36c.ts.net:8444", proxy=True, query=("k=" + KEY).encode(), path="//evil.example/x")
+    assert status == 303 and heads[b"location"] == b"/evil.example/x"
     # behind `tailscale serve`: the peer is loopback but a proxy header is on the request, so nobody is local
     behind = dict(host="ablearn.tail53f36c.ts.net:8444", proxy=True)
     assert ask(**behind)[1] == 403  # no key
@@ -84,6 +92,13 @@ def main():
     assert ask(**ok, origin="https://ablearn.tail53f36c.ts.net:8444")[1] == 200
     assert ask(kind="websocket", **ok)[:2] == ("websocket.accept", None)
     assert ask(**ok, origin="https://evil.example")[1] == 403
+    # MOJOUI_BEHIND_PROXY=1 (scripts/tablet.sh sets it): a proxy that adds no header still makes every caller need the key
+    os.environ["MOJOUI_BEHIND_PROXY"] = "1"
+    try:
+        assert ask(host="ablearn.tail53f36c.ts.net:8444")[1] == 403
+        assert ask(host="ablearn.tail53f36c.ts.net:8444", cookie="mojoui_pair=" + KEY)[1] == 200
+    finally:
+        del os.environ["MOJOUI_BEHIND_PROXY"]
     # a peer that isn't loopback (the host was bound wide by mistake) needs the key too
     assert ask(peer="192.168.1.50")[1] == 403
     assert ask(peer="192.168.1.50", cookie="mojoui_pair=" + KEY)[1] == 200
