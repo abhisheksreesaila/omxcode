@@ -47,6 +47,7 @@ comptime DEFAULT_SYSTEM = (
 comptime T_BUTTON = 0  # an app control: pressing it (its message)
 comptime T_TEXT = 1  # a text field: `text` argument
 comptime T_TOGGLE = 2  # a switch: `on` argument
+comptime T_CALL = 3  # a tool the app answers itself (not a control): its own arguments, an answer when it has one (goal 72 M6)
 
 comptime PH_IDLE = 0
 comptime PH_MODEL = 1  # the model is producing a step
