@@ -1075,15 +1075,15 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Service | API | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) |
 |---|---|---|---|---|---|---|---|
-| Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ✅ | ❌ | 🔨 | ❌ | — |
 | Speech model in process | `mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Language model in process | `mojoui.llm: Llm(gguf, gpu).chat(messages, tools) -> id, poll(id) -> TEXT / REASONING / TOOL_CALLS / DONE events, cancel(id); two sequences; prompt cache (llama.cpp library through bridge/llm_shim.cpp)` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
-| Speaker | `mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Speaker | `mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread` | ✅ | ✅ | ❌ | 🔨 | ❌ | — |
 | Voice (text to speech) | `mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Speech model: Parakeet | `mojoui.speech: SpeechModel("parakeet") (Parakeet TDT 0.6B v3 int8, onnx_asr, GPU), same transcribe()/SpeechStream` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Endpointer (turn-taking) | `mojoui.voice: Endpointer().feed(samples, captured_ns, playing), poll() -> START / BARGE / END (Silero VAD)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 
-- Microphone (Web): the web host doesn't stream the browser's microphone to the app.
+- Microphone (Web): tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too.
 - Microphone (Android): not built.
 - Microphone (Mac (AppKit)): builds; start() reports "no microphone on this host yet" (AVAudioEngine planned).
 - Microphone (iPhone (UIKit)): not built.
@@ -1097,7 +1097,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Language model in process (Mac (AppKit)): not built (llama.cpp has Metal; the shim is untried there).
 - Language model in process (iPhone (UIKit)): not built.
 - Speaker (Linux (GTK)): tests/test_voice: heard on a PulseAudio null sink's monitor, silent 25 ms after stop().
-- Speaker (Web): the browser's AudioContext is goal 72 M5.
+- Speaker (Web): tests/test_web_audio.py: the browser's AudioContext plays it gap-free (440 Hz at the right level), stop() flushes the page in 16 ms.
 - Speaker (Android): not built.
 - Speaker (Mac (AppKit)): builds; play() reports "no speaker on this host yet" (AVAudioEngine planned).
 - Speaker (iPhone (UIKit)): not built.
