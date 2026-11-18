@@ -1,0 +1,46 @@
+# Goal 73 report: links you type with help, a Board that grows, cards with depth (2026-11-17)
+
+The owner ran the DROID links story in the Linux download and asked for four things now (the ribbon waits): autocomplete
+in the Links field, cards that can be made big, a canvas that grows as cards are added, and more depth. Contract:
+docs/goals/73.md. Built as three milestones in parallel worktrees (g73-links, g73-board, g73-look), merged into
+goal-73-links-canvas.
+
+## M1: Links autocomplete (mojoui.links)
+- `Links.complete(draft)`: no dot → card names (`fleet.`, `telemetry.`, `episode.`); `card.par` → that card's columns;
+  after a whole end → `=` and `~`; then the second end the same way. Replaces only the word being typed; at most 8.
+- The Links panel shows them as chips under the field (agent tools `link-pick-k`); Return on a partial draft takes the first
+  completion; a whole link links as before. Nothing links until Return (links stay explicit).
+- The app feeds video cards (`file`, `t`, `frame`) and document folders beside its tables (`know_card`).
+- Found on the way: GTK put a stale held text back into a field after the app cleared it (D-7304); chips three to a row
+  widened the inspector over the card beside it, now packed by width (D-7306, M1 checks the panel holds still).
+- Shots: build/g73/m1/gtk-2-fl.png … gtk-8-linked.png.
+
+## M2: a Board that grows (mojoui.tiling, mojoui.boardtiles)
+- Why it "snapped": the resize already waited for the drag to end, but the Board was exactly the window's room and the tiling
+  clamped every neighbour to its minimum. Now a drag past the room makes the Board taller (only the dragged card's row grows;
+  the others keep their pixels) and the page scrolls; dragging a bottom card up gives the height back.
+- A new card that would squeeze any card under 300×200 goes in a new row below; the page scrolls it into view.
+- Proof: GTK and web, real drags: +600 pt drag → table +600, Board 672 → 1272; 7 cards each ≥ 300×200.
+- Shots: build/g73/m2/gtk-2-grown-bottom.png, gtk-4-seven-cards.png, web-*.png.
+
+## M3: cards with depth (themes/liquid)
+- Light: canvas #d7dee9 (gradient #dde4ee → #cfd8e4) under white cards with a hairline edge and one soft shadow; quiet text
+  ink3 #4f5d72 (it was 3.8:1, under 4.5, before this goal). Dark: canvas #0b0d12 under #1b1f27 cards.
+- Measured on the shots: light card/canvas step +10.4 L* (GTK), +10.7 (web), was ~7.8; dark +5.8/+6.2, was ~2.4. 36 text
+  pairs ≥ 4.5:1 (lowest 4.64).
+- Shots: build/g73/m3/{gtk,web}-{light,dark}{,-before}.png.
+
+## M4: nothing regressed
+- Goal 71's M5 chain (70 → 68 → 47) run on the merged branch. Goal 68 M0 failed only on a fresh worktree's missing
+  moments.csv (made by a later milestone); rerun PASS.
+- Goal 47's M8 (the robots recording on GTK) first failed on "the screen is being rebuilt: ask again" (a link made just as a
+  row's video card opened); the agent host now asks again (D-7330). It then reports SLOW frames (52–141 ms over the 50 ms
+  budget): the base commit run back to back under the same load (load average 58: the owner's running app and another
+  session's ffmpeg) is as slow or slower (51–299 ms), so these are the machine's load, not this goal.
+- Already failing before this goal (checked on cc33c9d7): tests/test_theme's graphite accent assertion; goal 54's M1 width
+  check (board 1066 → 927 for a 160-point narrower window, the check wants ≥ 150).
+
+## Not done / unverified
+- AppKit and iPhone not run (chips are plain Buttons; AppKit's test steps still find a field by hint only).
+- No autoscroll while dragging near the window's edge; the Board doesn't shorten when a card closes (drag the bottom card up).
+- The ribbon (next, after the launch posts).

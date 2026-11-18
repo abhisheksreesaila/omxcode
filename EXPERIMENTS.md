@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 73: links you type with help, a Board that grows, cards with depth (2026-11-17)
+- **Setup:** worktree ../mojo-ui-g73, branch `goal-73-links-canvas` off main cc33c9d7; three milestones built in parallel worktrees (g73-links, g73-board, g73-look) and merged. Data: goal 47's DROID folder (fleet.csv, telemetry.parquet, clips).
+- **Worked:** Links autocomplete as chips under the field (`fl` → `fleet.`, `fleet.ep` → `episode`, `=`/`~`, the second end), Return completes a partial draft; a Board that grows downwards and scrolls (a +600 pt drag makes the table 600 pt taller; a 6th card goes in a new row instead of squeezing); Liquid cards on a darker canvas with one soft shadow (+10 L* step, every text pair ≥ 4.5:1). Proven on GTK (headless, real input) and the web host.
+- **Broke and fixed:** GTK put a field's stale held text back after the app cleared it; chips three to a row widened the inspector over the next card (now packed by width); the agent host didn't retry the GTK host's "ask again" (goal 47's robots run).
+- **Means:** making a link is typing with help, not copy-paste; a card can be made as big as the data needs. The ribbon is next, after the launch posts. Report: docs/goals/73-report.md.
+---
+
 ## Fix: the Linux download opens the file it is given (2026-11-16)
 - **Setup:** a fresh download of the linux-app release (sha256 db2a7475…), installed with its install.sh, run on a headless display before recording the launch video.
 - **Broke:** `./omxplorer path/to/file.csv` (the README) and the launcher entry's `%f` showed the Start screen: only scripts/omxplorer.sh opened a file, through OMX_OPEN.
