@@ -123,6 +123,11 @@ class Link:
 
     def ok(self, op):
         r = self.call(op)
+        waited = 0.0
+        while not r.get("ok") and "ask again" in (r.get("error") or "") and waited < 10.0:  # (the GTK host mid-rebuild says so;
+            time.sleep(0.05)  # it is free again on its next idle turn: goal 73, a link made just as a row's video card opened)
+            waited += 0.05
+            r = self.call(op)
         if not r.get("ok"):
             raise ValueError(r.get("error") or f"the host refused {op.get('op')}")
         return r
@@ -208,7 +213,8 @@ class Host:
             if n["msg"] or n["msg2"]:
                 said = n["hint"] if is_secret(n) else (n["hint"] or text)  # (a secret field is named by its placeholder, never its contents)
                 self.add(tag or slug(said) or "field", i, tip or f'Text field "{said}"',
-                         {"text": prop("string", "the new contents"), "submit": prop("boolean", "press Return after typing")}, how="field", required=("text",), prefix=prefix)
+                         {"text": prop("string", "the new contents (leave out with submit: Return on what the field holds now)"),
+                          "submit": prop("boolean", "press Return after typing")}, how="field", prefix=prefix)
         elif k == TEXTAREA:
             if n["msg"]:
                 self.add(tag or slug(n["hint"]) or "textarea", i, tip or f'Text area "{n["hint"]}"', {"text": prop("string", "the new contents")}, how="text", required=("text",), prefix=prefix)
@@ -514,6 +520,10 @@ class Host:
         if a.how == "pick":
             return self.send_event(i, 1, str(args.get("path", "")), 0)
         if a.how == "field":
+            if "text" not in args:  # (submit alone: Return on what the field holds, as a person presses it after picking a
+                if not args.get("submit") or not n["msg2"]:  # suggestion; goal 73's link chips build the draft)
+                    raise ValueError(f'{a.name} needs "text" (or "submit" on a field that has Return)')
+                return self.send_event(i, 1, n["text"], 0)
             text = str(args.get("text", ""))
             r = self.send_event(i, 0, text, 0) if n["msg"] else None
             if args.get("submit") and n["msg2"]:

@@ -5,6 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
+# (type/submit/enter/holdtext find a field by its hint, else by its tag: type:link=fleet.episode = telemetry.episode.)
 # (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by; else an Image(on_tap) tagged X.)
 
 from mojoui.look import look_gtk_css
@@ -2554,12 +2555,18 @@ struct GtkHost[A: App](Movable):
         # where the card really is (on the page, or stacked in the narrow list): its widget's bounds
         var rect = List[Float32](length=4, fill=0)  # graphene_rect_t: x, y, width, height
         var inner = self.widgets[i]
-        if external_call["gtk_widget_compute_bounds", c_int](self.widgets[b.children[k]], inner, Int(rect.unsafe_ptr())) == 0:
-            return False
-        var cx = Float64(rect[0])
-        var cy = Float64(rect[1])
-        var cw = Float64(rect[2])
-        var ch = Float64(rect[3])
+        ref card = self.rt.shown.nodes[b.children[k]]
+        var cx = Float64(card.x)  # (on the page: where the app put it, not where GTK has got to moving it: a card the tiling just
+        var cy = Float64(card.y)  # moved would be scrolled to its old place)
+        var cw = Float64(card.w)
+        var ch = Float64(card.h)
+        if self.board_list:
+            if external_call["gtk_widget_compute_bounds", c_int](self.widgets[b.children[k]], inner, Int(rect.unsafe_ptr())) == 0:
+                return False
+            cx = Float64(rect[0])
+            cy = Float64(rect[1])
+            cw = Float64(rect[2])
+            ch = Float64(rect[3])
         if cw <= 0 or ch <= 0:  # (an object just put on the Board isn't laid out yet: next frame)
             return False
         _ = len(rect)
@@ -2720,6 +2727,7 @@ struct GtkHost[A: App](Movable):
                 elif kind == FIELD and not is_held(w):  # (a change held while busy is newer than this patch: D-1321)
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
+                        drop_held(w)  # (the app's own value just written: the change this set held (D-1321) is older than the app's next one, goal 73)
             if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
                 var cols = max(self.rt.shown.nodes[p.node].value, 1)
                 var r = 0
@@ -5530,6 +5538,17 @@ def find(host: GtkHost, kind: Int, label: String, nth: Int, by_hint: Bool = Fals
     return -1
 
 
+def find_field(host: GtkHost, key: String) -> Int:
+    """A test step's field: the one whose hint is `key`, else the one tagged `key` (the name an agent calls it by: a hint
+    may hold the step's own "=", as the Links field's does)."""
+    var i = find(host, FIELD, key, 0, by_hint=True)
+    if i < 0:
+        for k in range(len(host.rt.shown.nodes)):
+            if i < 0 and host.rt.shown.nodes[k].kind == FIELD and host.rt.shown.nodes[k].name == key:
+                i = k
+    return i
+
+
 def canvas_node(host: GtkHost, which: String) -> Int:
     """A canvas step's target: the nth content canvas ("0", "1"…) or the canvas tagged `which` ("island")."""
     var digits = which != ""
@@ -5894,7 +5913,7 @@ def run_step[A: App](host_addr: Int, step: String):
         _ = ret[0]
     elif verb == "type" or verb == "submit" or verb == "enter":
         var kv = split_at(rest, "=")
-        var i = find(host[], FIELD, kv[0], 0, by_hint=True)
+        var i = find_field(host[], kv[0])
         if i < 0:
             print("TEST: no field", kv[0])
             return
@@ -5906,7 +5925,7 @@ def run_step[A: App](host_addr: Int, step: String):
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
     elif verb == "holdtext":  # holdtext:Field=text: a change of that field held as if it came during a rebuild (D-1703: the queue's own test)
         var kv = split_at(rest, "=")
-        var i = find(host[], FIELD, kv[0], 0, by_hint=True)
+        var i = find_field(host[], kv[0])
         if i < 0:
             print("TEST: no field", kv[0])
             return
@@ -6585,6 +6604,19 @@ def run_step[A: App](host_addr: Int, step: String):
                                 ah = Int(rect[3] + 0.5)
                     print("BOARD: " + ch.name + " at " + String(ax) + "," + String(ay) + " " + String(aw) + "x" + String(ah)
                           + ("" if aw == ch.w and ah == ch.h and ax == ch.x and ay == ch.y else " (asked " + String(ch.x) + "," + String(ch.y) + " " + String(ch.w) + "x" + String(ch.h) + ")"))
+    elif verb == "boardscroll":  # boardscroll:<points|end|now>: the Board's page scrolled down that far (now: left where it is) ("BOARDSCROLL: value of upper, page")
+        pump()
+        for sc in host[].board_scrollers:
+            if sc[0] < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[sc[0]].kind == BOARD:
+                var adj = external_call["gtk_scrolled_window_get_vadjustment", Int](sc[1])
+                var upper = external_call["gtk_adjustment_get_upper", Float64](adj)
+                var page = external_call["gtk_adjustment_get_page_size", Float64](adj)
+                if rest != "now":
+                    external_call["gtk_adjustment_set_value", NoneType](adj, upper if rest == "end" else Float64(to_int(rest)))
+                    pump()
+                var value = external_call["gtk_adjustment_get_value", Float64](adj)
+                print("BOARDSCROLL: " + String(Int(value + 0.5)) + " of " + String(Int(upper + 0.5)) + ", " + String(Int(page + 0.5)))
+                break
     elif verb == "focus":  # focus:<title or tag>: that button given keyboard focus, as Tab would ("FOCUS: name at x,y wxh" in the window)
         pump()
         var i = find(host[], BUTTON, rest, 0)
