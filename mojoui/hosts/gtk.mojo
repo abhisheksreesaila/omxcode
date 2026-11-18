@@ -5699,7 +5699,8 @@ def test_steps(steps: String) -> List[String]:
     var out = List[String]()
     for part in steps.split(";"):
         var p = String(part)
-        if len(out) > 0 and out[len(out) - 1].startswith("stroke:") and ":" not in p and p != "":
+        var number = p != "" and (p.as_bytes()[0] == 45 or p.as_bytes()[0] == 46 or (p.as_bytes()[0] >= 48 and p.as_bytes()[0] <= 57))
+        if len(out) > 0 and out[len(out) - 1].startswith("stroke:") and ":" not in p and number:  # (only a point: a bare `quit` stays a step, D-7506)
             out[len(out) - 1] += ";" + p
         else:
             out.append(p)

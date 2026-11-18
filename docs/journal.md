@@ -1435,3 +1435,10 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Reading: typical frames are already cheap; the spikes are layer rebuilds, where GSK fills our polygons (ink, branch
   ribbons) as paths on the CPU (draw_p95 ≈ the spike). The mind map pans silky today (its layer only moves); growing
   relays and refills every branch.
+
+## 2026-11-18 goal 75 M0 (Mac)
+- scripts/mac-ssh: MAC_ENV="K=V,…" goes over as data/env.txt (an empty or spaced ssh argument would vanish or split), `{data}` filled in; the app's stdout.txt comes back into the report folder, even when the run fails.
+- appkit.mojo test verbs in GTK's words: key, typekeys (⏎ ⎋; GDK names like Return mapped to web names), stroke (PRESS, PANs, RELEASE with pressure), zoom, wheel, window (= resize), quit; `stroke:` steps keep their `;`-separated points (only parts that start as a number glue on, so a bare `quit` after a stroke stays a step: GTK's test_steps would glue it).
+- appkit.mojo framebench (pan|zoom|draw|finish|type|grow, GTK's recipes), synchronous: frame = gesture (update+diff, plus a frame event if asked) + draw_canvas (app draw + CGImage/IOSurface handed over) + window displayIfNeeded + CATransaction flush; the 60 Hz timer is stopped while it runs.
+- Mac baseline (M4, pnote, Personal Note's 645-object note, 1440×900 window, canvas 1160×865 pt at 1.0× backing scale: the Mac's display isn't Retina here), AppKit-CPU: pan n=120 p50 15.6 p95 17.3 max 26.4; zoom n=60 p50 19.0 p95 20.1 max 56.5; draw n=120 p50 17.5 p95 17.9 max 27.2; finish n=50 p50 17.8 p95 19.6 max 54.2. Draw is ~95 % of each frame (event ≤ 0.7, paint ≤ 1.0 p95).
+- Proof keys and strokes arrive: key p + stroke → strokes 240→241; key v + stroke → no new stroke; typekeys hp + stroke → 242; key ctrl+z → 241 (build/mac-ssh/pnote-20261118-085512).

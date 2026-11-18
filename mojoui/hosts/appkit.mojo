@@ -3563,6 +3563,205 @@ def to_int(s: String) -> Int:
         return 0
 
 
+def to_float(s: String) -> Float64:
+    try:
+        return atof(s)
+    except:
+        return 0
+
+
+def web_key(name: String) -> String:
+    """A test step's key name as the web names it (what keyDown: sends): GDK's names (Return, BackSpace, Down…) mapped
+    as GTK's gdk_keyval and key_name map them; web names and characters pass through."""
+    var gdk: List[String] = ["Down", "Up", "Left", "Right", "Return", "KP_Enter", "Escape", "Tab", "ISO_Left_Tab",
+                             "BackSpace", "Delete", "Page_Down", "Page_Up", "Home", "End", "space"]
+    var web: List[String] = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Enter", "Enter", "Escape", "Tab", "Tab",
+                             "Backspace", "Delete", "PageDown", "PageUp", "Home", "End", " "]
+    for i in range(len(gdk)):
+        if name == gdk[i]:
+            return web[i]
+    return name
+
+
+def canvas_key_step[A: App](host_addr: Int, which: String, name: String, mods: Int):
+    """One KEY on the canvas tagged `which`, as keyDown: sends it (the canvas looked up again: a key may rebuild)."""
+    var host = host_at[A](host_addr)
+    var node = canvas_node_at(host[], which)
+    if node < 0:
+        return
+    var d = host[].rt.key(node, name, mods)
+    host[].apply(d, host_addr)
+
+
+def pct(xs: List[Float64], q: Float64) -> Float64:
+    """The q-th quantile of xs (0 when empty), as GTK's framebench takes it."""
+    if len(xs) == 0:
+        return 0
+    var v = xs.copy()
+    sort(v)
+    return v[min(len(v) - 1, Int(q * Float64(len(v))))]
+
+
+def one_decimal(v: Float64) -> String:
+    var tenths = Int(v * 10 + (0.5 if v >= 0 else -0.5))
+    var sign = "-" if tenths < 0 else ""
+    tenths = abs(tenths)
+    return sign + String(tenths // 10) + "." + String(tenths % 10)
+
+
+def pump_run_loop(seconds: Float64):
+    """Lets the run loop handle what's due (the window server's events, timers) for at most `seconds`."""
+    _ = msg(msg(cls("NSRunLoop"), "currentRunLoop"), "runMode:beforeDate:", ns_string("kCFRunLoopDefaultMode"),
+            msg(cls("NSDate"), "dateWithTimeIntervalSinceNow:", seconds))
+
+
+def frame_bench[A: App](host_addr: Int, rest: String):
+    """framebench:K=pan|zoom|draw|finish|type|grow,N (goal 75, GTK's recipes): N gestures on canvas K, one at a time
+    (PAN by 7,4 points, to and fro every 20; ZOOM by 1.01× around the middle, in then out; draw: one pen stroke of N
+    moves; finish: short strokes, press, three moves, release; type: N characters of "native mojo is fast "; grow: per
+    topic Tab (the first) or Enter, "t", Enter, then Space twice), each followed by the frame that shows it, done
+    synchronously. A frame's work = the gesture's handling (update and the diff, plus a frame event when the canvas asks
+    for them, as the tick sends) + the canvas's draw (the app's draw() into its pixels or the offered IOSurface, and the
+    picture handed to AppKit: a CGImage in the image view, or the IOSurface as a layer's contents) + the paint (the
+    window's displayIfNeeded and a CATransaction flush: the layer tree committed to the render server). The window
+    server's compositing after the commit isn't in it. The 60 Hz timer is stopped while it runs (its tick would draw
+    outside the timing). Prints GTK's FRAMEBENCH line; renderer= AppKit-IOSurface (every frame on the GPU's
+    IOSurface), AppKit-CPU (every frame a CGImage of the CPU's pixels) or AppKit-mixed."""
+    var host = host_at[A](host_addr)
+    var kv = split_at(rest, "=")
+    var spec = split_at(kv[1], ",")
+    var what = spec[0]
+    var count = max(to_int(spec[1]), 1)
+    var tag = kv[0]
+    var node = canvas_node_at(host[], tag)
+    var k = host[].canvas_at(node) if node >= 0 else -1
+    if k < 0:
+        print("TEST: no canvas", tag, flush=True)
+        return
+    var wait_by = Int(now_ns()) + 3_000_000_000  # (from a drawn, quiet canvas)
+    while not host[].idle() and Int(now_ns()) < wait_by:
+        pump_run_loop(0.005)
+    if host[].link != 0:
+        _ = msg(host[].link, "invalidate")
+        host[].link = 0
+    node = canvas_node_at(host[], tag)
+    k = host[].canvas_at(node) if node >= 0 else -1
+    if k < 0:
+        print("TEST: no canvas", tag, flush=True)
+        return
+    var b = msg[CGRect](host[].canvases[k].view, "bounds")
+    var w = b.width
+    var h = b.height
+    var grow_keys = List[String]()
+    if what == "grow":
+        for t in range(count):
+            grow_keys.append("Tab" if t == 0 else "Enter")
+            grow_keys.append("t")
+            grow_keys.append("Enter")
+        grow_keys.append(" ")
+        grow_keys.append(" ")
+        count = len(grow_keys)
+    var works = List[Float64]()
+    var events = List[Float64]()
+    var draws = List[Float64]()
+    var paints = List[Float64]()
+    var x = w * 0.3
+    var y = h * 0.3
+    var missed = 0
+    var on_gpu = 0
+    var on_cpu = 0
+    if what == "draw" or what == "pan":  # (a drag: press, the moves, release; the app's tool decides what it does)
+        host[].canvases[k].moved = False
+        host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
+        host[].canvases[k].moved = True
+        host[].draw_canvas(k, host_addr)
+    var window = host[].window
+    for i in range(count):
+        node = canvas_node_at(host[], tag)  # (a rebuild may have renumbered the screen)
+        k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            missed += 1
+            continue
+        var drawn0 = host[].canvases[k].drawn
+        var gpu0 = host[].canvases[k].gpu_frames
+        var t0 = Int(now_ns())
+        if what == "pan":
+            var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
+            host[].canvas_send(node, PAN, x, y, 7 * back, 4 * back, 1, host_addr)
+        elif what == "zoom":
+            host[].canvas_send(node, ZOOM, w / 2, h / 2, 0, 0, 1.01 if i < count // 2 else 1.0 / 1.01, host_addr)
+        elif what == "finish":  # (short strokes: press, three moves, release; each release adds a stroke to the page)
+            var step = i % 5
+            if step == 0:
+                x = w * (0.15 + 0.6 * Float64((i // 5) % 10) / 10.0)
+                y = h * (0.2 + 0.6 * Float64((i // 50) % 4) / 4.0)
+                host[].canvases[k].moved = False
+                host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.3)
+            elif step < 4:
+                x += 9.0
+                y += 3.0 * Float64(step)
+                host[].canvases[k].moved = True
+                host[].canvas_send(node, PAN, x, y, 9, 3, 1, host_addr, 0.3 + 0.2 * Float64(step))
+            else:
+                host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.5)
+        elif what == "type" or what == "grow":
+            var typed = String("native mojo is fast ")
+            var ch = String(typed[byte = i % 20 : i % 20 + 1])
+            if what == "grow":
+                ch = grow_keys[i]
+            var d = host[].rt.key(node, ch, 0)
+            host[].apply(d, host_addr)
+        else:  # draw: a wandering line across the page
+            x += 3.0 + Float64(i % 5) * 0.4
+            y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
+            host[].canvas_send(node, PAN, x, y, 3, 2, 1, host_addr, 0.3 + 0.6 * Float64(i % 50) / 50.0)
+        node = canvas_node_at(host[], tag)
+        k = host[].canvas_at(node) if node >= 0 else -1
+        if k >= 0 and host[].rt.shown.nodes[node].msg2 != 0:  # (the frame event the tick would send first)
+            var d = host[].rt.frame(node, 16667)
+            host[].apply(d, host_addr)
+            node = canvas_node_at(host[], tag)
+            k = host[].canvas_at(node) if node >= 0 else -1
+        var t1 = Int(now_ns())
+        var drew = False
+        if k >= 0:
+            if host[].canvases[k].drawn != drawn0:  # (a rebuild made a new canvas: its picture is drawn from scratch)
+                drawn0 = -1
+            host[].draw_canvas(k, host_addr)
+            drew = host[].canvases[k].drawn != drawn0
+        var t2 = Int(now_ns())
+        _ = msg(window, "displayIfNeeded")
+        _ = msg(cls("CATransaction"), "flush")
+        var t3 = Int(now_ns())
+        if not drew:
+            missed += 1
+        else:
+            if host[].canvases[k].gpu_frames != gpu0:
+                on_gpu += 1
+            else:
+                on_cpu += 1
+            var ev = Float64(t1 - t0) / 1e6
+            var dm = Float64(t2 - t1) / 1e6
+            var pm = Float64(t3 - t2) / 1e6
+            events.append(ev)
+            draws.append(dm)
+            paints.append(pm)
+            works.append(ev + dm + pm)
+        pump_run_loop(0)  # (the window server's events, untimed)
+    node = canvas_node_at(host[], tag)
+    if node >= 0 and (what == "pan" or what == "draw"):
+        host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
+    host[].wake()
+    var renderer = String("AppKit-IOSurface") if on_cpu == 0 and on_gpu > 0 else (String("AppKit-CPU") if on_gpu == 0 else String("AppKit-mixed"))
+    var scale = msg[Float64](window, "backingScaleFactor") if window != 0 else 0.0
+    print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=0 renderer=" + renderer
+          + " p50=" + one_decimal(pct(works, 0.5)) + " p95=" + one_decimal(pct(works, 0.95)) + " max=" + one_decimal(pct(works, 1.0))
+          + " event_p95=" + one_decimal(pct(events, 0.95)) + " draw_p95=" + one_decimal(pct(draws, 0.95))
+          + " paint_p95=" + one_decimal(pct(paints, 0.95)) + " draw_max=" + one_decimal(pct(draws, 1.0))
+          + " paint_max=" + one_decimal(pct(paints, 1.0)) + " gpu_frames=" + String(on_gpu) + " cpu_frames=" + String(on_cpu)
+          + " canvas=" + String(Int(w)) + "x" + String(Int(h)) + "pt@" + one_decimal(scale) + "x", flush=True)
+
+
 def find_node[A: App](host: AppKitHost[A], kind: Int, label: String, nth: Int, by_hint: Bool = False) -> Int:
     """The nth node of `kind` whose text (or hint) is `label` ("" = any), as the GTK host's test steps find it."""
     var seen = 0
@@ -3798,7 +3997,89 @@ def run_step[A: App](host_addr: Int, step: String):
             dx = Float64(to_int(xy[0]))
             dy = Float64(to_int(xy[1]))
         end_tiled_drag[A](host_addr, board, index, verb == "resize", dx, dy)  # (what tiled_pan does when a drag ends)
-    elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
+    elif verb == "key" or verb == "typekeys":  # key:K=shift+ctrl+alt+Name, typekeys:K=text (⏎ Enter, ⎋ Escape): canvas K's KEY gestures (GTK's words)
+        var node = canvas_node_at(host[], kv[0])
+        if node < 0:
+            print("TEST: no canvas", kv[0], flush=True)
+            return
+        if host[].rt.shown.nodes[node].size != 1:
+            print("TEST: canvas " + kv[0] + " doesn't take keys", flush=True)
+            return
+        var presses = List[String]()
+        var mods = 0
+        if verb == "typekeys":
+            for ch in kv[1].codepoint_slices():
+                var c = String(ch)
+                presses.append("Enter" if c == "⏎" else ("Escape" if c == "⎋" else c))
+        else:
+            var name = kv[1]
+            while True:  # (GTK's step bits shift, ctrl, alt → the app's SHIFT 1, CTRL 2, ALT 4, as keyDown: sends them)
+                if name.startswith("shift+"):
+                    mods |= 1
+                    var cut = String(name[byte=6:])
+                    name = cut
+                elif name.startswith("ctrl+"):
+                    mods |= 2
+                    var cut = String(name[byte=5:])
+                    name = cut
+                elif name.startswith("alt+"):
+                    mods |= 4
+                    var cut = String(name[byte=4:])
+                    name = cut
+                else:
+                    break
+            presses.append(web_key(name))
+        for p in presses:
+            canvas_key_step[A](host_addr, kv[0], p, mods)
+    elif verb == "stroke":  # stroke:K=x,y,p;x,y,p;…: a pen's press, moves and release (canvas points), each carrying its pressure
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            print("TEST: no canvas", kv[0], flush=True)
+            return
+        var pts = List[Tuple[Float64, Float64, Float64]]()
+        for part in kv[1].split(";"):
+            var a = split_at(String(part), ",")
+            var b = split_at(a[1], ",")
+            pts.append((to_float(a[0]), to_float(b[0]), to_float(b[1])))
+        if len(pts) == 0 or kv[1] == "":
+            print("TEST: an empty stroke", flush=True)
+            return
+        host[].canvases[k].moved = False
+        host[].canvas_send(node, PRESS, pts[0][0], pts[0][1], 0, 0, 1, host_addr, pts[0][2])
+        for j in range(1, len(pts)):
+            node = canvas_node_at(host[], kv[0])  # (a rebuild may have renumbered the screen)
+            k = host[].canvas_at(node) if node >= 0 else -1
+            if k < 0:
+                return
+            host[].canvases[k].moved = True
+            host[].canvas_send(node, PAN, pts[j][0], pts[j][1], pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1], 1, host_addr, pts[j][2])
+        var last = pts[len(pts) - 1]
+        node = canvas_node_at(host[], kv[0])
+        if node >= 0:
+            host[].canvas_send(node, RELEASE, last[0], last[1], 0, 0, 1, host_addr, last[2])
+    elif verb == "zoom" or verb == "wheel":  # zoom:K=f: ZOOM by f around the middle; wheel:K=dx,dy notches: WHEEL (a canvas whose scroll pans) or ZOOM (GTK's)
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            print("TEST: no canvas", kv[0], flush=True)
+            return
+        var b = msg[CGRect](host[].canvases[k].view, "bounds")
+        if verb == "zoom":
+            host[].canvas_send(node, ZOOM, b.width / 2, b.height / 2, 0, 0, to_float(kv[1]), host_addr)
+        else:
+            var d = split_at(kv[1], ",")
+            var dx = to_float(d[0])
+            var dy = to_float(d[1])
+            if host[].rt.shown.nodes[node].spacing == 1:  # (a notch = 40 points; dx, dy = how far the content moves)
+                host[].canvas_send(node, WHEEL, b.width / 2, b.height / 2, -dx * 40.0, -dy * 40.0, 1, host_addr)
+            else:
+                host[].canvas_send(node, ZOOM, b.width / 2, b.height / 2, 0, 0, 2.0 ** (-dy / 4.0), host_addr)
+    elif verb == "framebench":  # framebench:K=pan|zoom|draw|finish|type|grow,N: N gestures on canvas K, one frame each; percentiles of a frame's work
+        frame_bench[A](host_addr, rest)
+    elif verb == "quit":  # quit: the run ends after this step (GTK's word; the app's closing() runs on terminate)
+        host[].step_at = len(host[].steps)
+    elif verb == "resize" or verb == "window":  # resize:900x700 (window:WxH, GTK's word): the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         host[].asked_w = to_int(wh[0])
         host[].asked_h = to_int(wh[1])
@@ -4409,9 +4690,14 @@ def run[A: App]() -> c_int:
         host[].report.cause = "launch"
         host[].queue_snapshot(addr)
     if steps != "":  # MOJOUI_TEST="tap:Open the sample;resize:900x700;…": the steps run by themselves, then the app quits
-        for part in steps.split(";"):
-            if String(part) != "":
-                host[].steps.append(String(part))
+        for part in steps.split(";"):  # (GTK's test_steps: a `stroke:` step keeps its points, x,y,p;x,y,p;… parts with no ":";
+            var piece = String(part)  # here only parts that start as a number, so a bare `quit` after a stroke stays a step)
+            var last = len(host[].steps) - 1
+            var number = piece != "" and (piece.startswith("-") or piece.startswith(".") or (piece.as_bytes()[0] >= 48 and piece.as_bytes()[0] <= 57))
+            if last >= 0 and host[].steps[last].startswith("stroke:") and ":" not in piece and number:
+                host[].steps[last] += ";" + piece
+            elif piece != "":
+                host[].steps.append(piece)
         _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(2))
     _ = msg(app, "run")
     return 0
