@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 72 M2: the voice components, ears and mouth (2026-11-17)
+- **Setup:** worktree ../mojo-ui-g72-voice (branch g72-voice), the new `voice` pixi environment (Python 3.12: Kokoro needs < 3.13), GPU 1 (an RTX 3090 shared with another job's 27B LLM), a PulseAudio null sink for the speaker. `CUDA_VISIBLE_DEVICES=1 pixi run -e voice build/g72/test_voice` (built with `mojo build`, D-7216).
+- **Built:** `mojoui.speaker.Speaker` (playback thread, queue, flush on stop), `mojoui.voice.Voice` (Kokoro in process, clause by clause), `SpeechModel("parakeet")` (onnx_asr int8 on the GPU, same calls as Whisper), `mojoui.voice.Endpointer` (Silero VAD: START / BARGE / END), `mojoui.audio.resample`.
+- **Worked (build/g72/voice-bench.json):** TTS first audio 47-71 ms (limit 400); Parakeet hears the TTS'd sentence back at WER 0.0 (limit 0.10); speech end (the END event) to final text 153 ms best of five, 165 median (limit 300; the endpointer's own hangover is 384 ms on top); barge-in: the endpointer says BARGE 480 ms after the first word (5 voiced frames over the speaker), the event to silence on the sink's monitor 25 ms (limit 300), speaker.playing() is false when stop() returns.
+- **Broke and how it was fixed:** playing() stayed true right after stop() (the queue's read index moves when the worker flushes; it now counts what stop() dropped); the Hugging Face cache lacked Parakeet's int8 files (read the omx-local model folder in place); kokoro's Python < 3.13 (own environment); with the neighbour's LLM running on GPU 1, Parakeet took 0.9 s an utterance, not 0.14 s (D-7215); `mojo run` segfaults at exit with the models' threads alive, the built binary doesn't (D-7216).
+- **Means:** the mouth and ears fit the M4 budget (first audio 1.5 s after the speaker stops: 384 ms hangover + 0.15 s recognition + 0.07 s first audio leaves a wide margin for the LLM). Unverified: echo (the speaker's voice in the microphone can trip BARGE without headphones; the endpointer only knows `playing`, there is no echo cancellation), the web/Mac/iPhone speakers, GPU memory under 3 GB (Kokoro's torch peak is 0.66 GB; the whole process wasn't measured separately).
+- **Next:** M3 (the agent speaks AG-UI), then M4 wires these into the app.
+---
+
 ## Fix: the Linux download opens the file it is given (2026-11-16)
 - **Setup:** a fresh download of the linux-app release (sha256 db2a7475…), installed with its install.sh, run on a headless display before recording the launch video.
 - **Broke:** `./omxplorer path/to/file.csv` (the README) and the launcher entry's `%f` showed the Start screen: only scripts/omxplorer.sh opened a file, through OMX_OPEN.

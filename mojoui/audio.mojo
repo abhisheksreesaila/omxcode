@@ -17,7 +17,7 @@ from mojoui import libc
 from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
-from std.math import sqrt
+from std.math import sqrt, sin, cos
 from mojoui.clock import now_ns
 
 comptime RATE = 16000  # samples per second, mono
@@ -342,3 +342,37 @@ def best_match(rec: List[Float32], want: List[Float32]) -> Tuple[Float64, Int]:
             best = c
             at = lag
     return (best, at)
+
+
+def resample(x: List[Float32], src: Int, dst: Int) -> List[Float32]:
+    """`x` at `src` samples/s as `dst` samples/s: a Hann-windowed sinc, 16 taps each side (wider when it filters down), so
+    24 kHz speech goes to 16 kHz for a recogniser (or to a speaker's own rate) without folding the top octave back in."""
+    var out = List[Float32]()
+    if src == dst or src <= 0 or dst <= 0:
+        out.extend(x.copy())
+        return out^
+    comptime HALF = 16
+    comptime Q = 256  # kernel table steps per input sample
+    var cutoff = Float64(1) if dst >= src else Float64(dst) / Float64(src)
+    var width = Float64(HALF) / cutoff
+    var table = List[Float64](length=Int(width * Float64(Q)) + 2, fill=0.0)
+    var pi = Float64(3.141592653589793)
+    for k in range(len(table)):
+        var d = Float64(k) / Float64(Q)
+        var s = cutoff
+        if d > 0:
+            s = sin(pi * d * cutoff) / (pi * d)
+        table[k] = s * (0.5 + 0.5 * cos(pi * d / width)) if d < width else 0.0
+    var step = Float64(src) / Float64(dst)
+    var n_out = (len(x) * dst) // src
+    out.reserve(n_out)
+    var n = len(x)
+    for i in range(n_out):
+        var c = Float64(i) * step
+        var lo = max(0, Int(c - width) + 1)
+        var hi = min(n - 1, Int(c + width))
+        var acc = Float64(0)
+        for j in range(lo, hi + 1):
+            acc += Float64(x[j]) * table[Int(abs(Float64(j) - c) * Float64(Q))]
+        out.append(Float32(acc))
+    return out^

@@ -4,6 +4,8 @@
 #
 #   var model = SpeechModel()                              # openai/whisper-large-v3-turbo on the GPU, warmed up
 #   var text = model.transcribe(samples)                   # List[Float32] at 16 kHz -> text
+#   var ears = SpeechModel("parakeet")                     # Parakeet TDT 0.6B v3 int8 (onnx_asr), goal 72 M2: the same calls;
+#                                                          # $MOJOUI_PARAKEET_DIR names the folder of its .onnx files (the `voice` pixi env)
 #   var live = SpeechStream(model)                         # dictation: a thread of the backend's own does the work
 #   live.feed(mic.read(since))                             # returns at once
 #   for e in live.poll(): ...                              # SpeechEvent: PARTIAL (words so far) or FINAL (at a pause)

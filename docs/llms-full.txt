@@ -1077,6 +1077,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 |---|---|---|---|---|---|---|---|
 | Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Speech model in process | `mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Speaker | `mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Voice (text to speech) | `mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Speech model: Parakeet | `mojoui.speech: SpeechModel("parakeet") (Parakeet TDT 0.6B v3 int8, onnx_asr, GPU), same transcribe()/SpeechStream` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Endpointer (turn-taking) | `mojoui.voice: Endpointer().feed(samples, captured_ns, playing), poll() -> START / BARGE / END (Silero VAD)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 
 - Microphone (Web): the web host doesn't stream the browser's microphone to the app.
 - Microphone (Android): not built.
@@ -1086,6 +1090,26 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Speech model in process (Android): not built.
 - Speech model in process (Mac (AppKit)): builds; needs CPython with torch beside the app (MPS), never run.
 - Speech model in process (iPhone (UIKit)): no CPython on the phone.
+- Speaker (Linux (GTK)): tests/test_voice: heard on a PulseAudio null sink's monitor, silent 25 ms after stop().
+- Speaker (Web): the browser's AudioContext is goal 72 M5.
+- Speaker (Android): not built.
+- Speaker (Mac (AppKit)): builds; play() reports "no speaker on this host yet" (AVAudioEngine planned).
+- Speaker (iPhone (UIKit)): not built.
+- Voice (text to speech) (Linux (GTK)): tests/test_voice: first audio under 70 ms on a free 3090.
+- Voice (text to speech) (Web): the model needs CPython + torch in the app's process.
+- Voice (text to speech) (Android): not built.
+- Voice (text to speech) (Mac (AppKit)): builds; needs CPython with torch beside the app, never run.
+- Voice (text to speech) (iPhone (UIKit)): no CPython on the phone.
+- Speech model: Parakeet (Linux (GTK)): tests/test_voice: WER 0.0 on the TTS'd sentence, about 0.14 s an utterance on a free 3090.
+- Speech model: Parakeet (Web): the model needs CPython + onnxruntime in the app's process.
+- Speech model: Parakeet (Android): not built.
+- Speech model: Parakeet (Mac (AppKit)): builds; never run.
+- Speech model: Parakeet (iPhone (UIKit)): no CPython on the phone.
+- Endpointer (turn-taking) (Linux (GTK)): tests/test_voice: one START and one END per utterance, BARGE over a playing speaker.
+- Endpointer (turn-taking) (Web): needs CPython + torch in the app's process.
+- Endpointer (turn-taking) (Android): not built.
+- Endpointer (turn-taking) (Mac (AppKit)): builds; never run.
+- Endpointer (turn-taking) (iPhone (UIKit)): no CPython on the phone.
 
 ## Composite components (Mojo, built from the ones above)
 
