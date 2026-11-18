@@ -33,6 +33,7 @@ from mojoui.genui import catalog, validate, Spec, Prop, P_TEXT, P_ENUM, P_NUMBER
 from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT, J_STRING, J_NULL
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
 from mojoui.view import View, BUTTON, FIELD, TOGGLE, NO_MSG
+from mojoui import libc
 
 comptime DEFAULT_SYSTEM = (
     "You are a voice assistant that runs privately on the user's own computer. Your words are spoken aloud, so answer like "
@@ -668,7 +669,7 @@ struct LlmAgent(LocalAgent, Movable):
         while self.phase != PH_IDLE:
             var evs = self.step_with(runner)
             if len(evs) == 0:
-                _ = external_call["usleep", Int32](Int32(1000))
+                _ = libc.usleep(1000)
             for ref e in evs:
                 out.append(e)
         return out^
@@ -682,7 +683,7 @@ struct LlmAgent(LocalAgent, Movable):
             for c in self.take_calls():
                 self.answer(c.id, '{"error":"no app is connected to run this tool"}')
             if len(evs) == 0:
-                _ = external_call["usleep", Int32](Int32(1000))
+                _ = libc.usleep(1000)
             for ref e in evs:
                 out.append(e)
         return out^

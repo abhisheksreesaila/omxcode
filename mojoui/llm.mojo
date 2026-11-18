@@ -30,6 +30,7 @@ from std.os import getenv
 from mojoui.json import Json
 from mojoui.maxrt import _dlsym, _fn, _c_text, _exists
 from mojoui.wake import wake_write_fd
+from mojoui import libc
 
 comptime TEXT = 0  # a piece of the reply
 comptime REASONING = 1  # a piece of the model's thinking
@@ -219,7 +220,7 @@ struct Llm(Movable):
                     reply.done = e.copy()
                     return reply^
                 reply.events.append(e.copy())
-            _ = external_call["usleep", Int32](Int32(2000))
+            _ = libc.usleep(2000)
 
 
 def _event(line: String) raises -> LlmEvent:

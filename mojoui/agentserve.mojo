@@ -73,7 +73,7 @@ def _run_job[R: ToolRunner](addr: Int):
             cancelled = True
         var evs = agent[].step_with(runner[])
         if len(evs) == 0:
-            _ = external_call["usleep", Int32](Int32(1000))
+            _ = libc.usleep(1000)
         for ev in evs:
             pipe.write("data: " + ev + "\n\n")
     pipe.close()
