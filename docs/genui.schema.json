@@ -97,6 +97,9 @@
      "$ref": "#/$defs/components/Picture"
     },
     {
+     "$ref": "#/$defs/components/Sight"
+    },
+    {
      "$ref": "#/$defs/components/Icon"
     },
     {
@@ -1047,6 +1050,78 @@
     "required": [
      "component",
      "name"
+    ],
+    "additionalProperties": false
+   },
+   "Sight": {
+    "type": "object",
+    "description": "a picture the app holds, by name, with labelled boxes round the things in it (each box is a part of the card, named by its label, that a pointer can land on); coordinates are 0-1000 across the picture's width and height",
+    "properties": {
+     "component": {
+      "const": "Sight"
+     },
+     "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a picture the app holds, by name"
+     },
+     "boxes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "x0": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000
+        },
+        "y0": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000
+        },
+        "x1": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000
+        },
+        "y1": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000
+        }
+       },
+       "required": [
+        "label",
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "caption": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "height": {
+      "type": "number",
+      "minimum": 80,
+      "maximum": 600,
+      "description": "points"
+     }
+    },
+    "required": [
+     "component",
+     "name",
+     "boxes"
     ],
     "additionalProperties": false
    },

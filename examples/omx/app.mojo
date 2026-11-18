@@ -13,10 +13,13 @@
 #
 #   pictures, notes    mojoui.creator.Creator          make_comic / draw_picture (an image model on its own GPU, panel by panel on a card)
 #                                                      and find_in_notes (e5 embeddings by MAX, a card citing the files)
+#   the camera         mojoui.looker.Looker            look: the tablet's (or this machine's) camera, the model's own eyes in this process
+#                                                      (the vision projector), a card with the picture and labelled boxes
 #
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the card the model loads on, counted among the
-# cards the process can see (default 0), OMX_LLM_CTX = its context (default 65536); the voice models use the first visible
+# cards the process can see (default 0), OMX_LLM_CTX = its context (default 65536); OMX_MMPROJ = the vision projector that lets it see (default OMX_MODELS/mmproj-F16.gguf,
+# without which there is no `look`); the voice models use the first visible
 # card, so `CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1,0 OMX_LLM_GPU=1` puts the voice on card 1 and the brain on
 # card 0; OMX_LANE_SWITCH=1 shows the test button that flips the lane; OMX_CLOUD_CAP = cloud requests a session may make (3),
 # OMX_CLAUDE_CMD = the command that answers them (`claude`), MOJOUI_LEDGER = the record of what went out, MOJOUI_TODO = the to-do
@@ -24,6 +27,7 @@
 # (mojoui.audio: `file:a.wav@2.5` plays a recorded voice as the microphone). Run it with scripts/omx.sh, or on a tablet
 # with scripts/tablet.sh omx. Each turn prints OMX lines (what was heard, the reply, the card, the numbers) for the checker.
 
+from std.os.path import exists
 from mojoui.app import App, Event
 from mojoui.view import View, Overlay
 from mojoui.agui import Agent, EV_TEXT, EV_RUN_FINISHED, EV_RUN_ERROR
@@ -41,6 +45,7 @@ from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool
 from mojoui.pointer import Pointer, PointerView, Part, parse_point
 from mojoui.visual import Visual, VISUAL_SYSTEM, card_kind
 from mojoui.creator import Creator
+from mojoui.looker import Looker
 from mojoui.http import Request
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
@@ -66,6 +71,7 @@ comptime CARDS = 20_000  # the cards' controls (mojoui.agentui.Screens) and thei
 comptime CARD_CANVASES = 2000
 comptime CREATOR_MSG = 900  # the image server's replies (mojoui.creator)
 comptime CREATOR_CANVAS = 12_000  # the creator's cards' canvases
+comptime LOOK_CANVAS = 15_000  # the camera cards' canvases (mojoui.looker)
 
 
 @fieldwise_init
@@ -86,6 +92,7 @@ struct Main(App):
     var client: Agent  # the conversation as the screen keeps it (AG-UI messages, the cards' calls)
     var screens: Screens[]
     var creator: Creator  # comics, pictures and notes (mojoui.creator)
+    var looker: Looker  # the camera and what the model sees through it (mojoui.looker)
     var orb: Orb
     var pointer: Pointer  # the ring that moves to the part of a card she is naming
     var turn_card: Int  # the first card of this turn on the shelf: only this turn's cards are pointed at
@@ -129,7 +136,8 @@ struct Main(App):
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
             var ctx = Int(environment("OMX_LLM_CTX", "65536"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(VISUAL_SYSTEM) + String(ASSISTANT_SYSTEM))
+            var mmproj = environment("OMX_MMPROJ", models + "/mmproj-F16.gguf")
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx, mmproj=mmproj if exists(mmproj) else String("")), "Your name is omx. " + String(VISUAL_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
             Visual.register(self.llm.value())  # (the map and the diagram: stubs until they are built, mojoui.visual)
             self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
@@ -141,6 +149,7 @@ struct Main(App):
         self.screens = Screens(CARDS, CARD_CANVASES)
         var sd = environment("HOME") + "/Projects/omx-local"
         self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
+        self.looker = Looker(LOOK_CANVAS)
         self.orb = Orb()
         self.pointer = Pointer()
         self.turn_card = 0
@@ -232,12 +241,15 @@ struct Main(App):
     def closing(mut self):
         self.assist.cloud.close()  # (a running cloud request ends with the app)
         self.creator.closing()
+        self.looker.closing()
 
     def tools(self) -> List[AppTool]:
         """What the agent may call: the app's buttons (not the cards' own: those don't change the tool list when a card appears,
         so the model's prompt cache keeps) and the creator's tools."""
         var all = view_tools(self.page(False))
         for t in self.creator.tools():
+            all.append(t.copy())
+        for t in self.looker.tools(self.llm.value().llm.vision if self.llm else False):
             all.append(t.copy())
         return all^
 
@@ -272,6 +284,10 @@ struct Main(App):
         self.tell_points()
         self.creator.tick()
         for line in self.creator.take_log():
+            self.out("OMX " + line)
+        if self.llm:
+            self.looker.tick(self.llm.value().llm)
+        for line in self.looker.take_log():
             self.out("OMX " + line)
         self.pump_run()
         self.drive_assistant()
@@ -447,12 +463,17 @@ struct Main(App):
                 if self.creator.handles(c.name):
                     self.creator.call(c.id, c.name, c.arguments)
                     continue
+                if self.looker.handles(c.name):
+                    self.looker.call(c.id, c.arguments)
+                    continue
                 self.by_agent = True
                 var result = press(self, c.name, c.arguments)
                 self.by_agent = False
                 self.llm.value().answer(c.id, result)
                 self.llm.value().set_tools(self.tools())
             for a in self.creator.take_answers():
+                self.llm.value().answer(a.id, a.content, a.untrusted)
+            for a in self.looker.take_answers():
                 self.llm.value().answer(a.id, a.content, a.untrusted)
         elif self.queued:
             self.start_run()
@@ -522,7 +543,10 @@ struct Main(App):
         if not cards:
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), "", "", "", lane, List[View](), dock)
         if self.work:
-            var shelf = self.creator.views()  # (the creator's newest on top, then the assistant's own: the to-do list, the job, the news, then what the agent drew)
+            var shelf = self.looker.views()  # (what the camera showed, newest on top; then the creator's)
+            for v in self.creator.views():
+                shelf.append(v.copy())
+            # (the creator's newest on top, then the assistant's own: the to-do list, the job, the news, then what the agent drew)
             for v in self.assist.cards():
                 shelf.append(v.copy())
             for k in range(len(self.screens.uis) - 1, -1, -1):  # (newest on top)
@@ -547,5 +571,13 @@ struct Main(App):
             draw_rim(surface, self.look.palette, self.assist.cloud.framed)
         elif self.creator.owns_canvas(canvas):
             self.creator.draw(canvas, surface, self.look.palette)
+        elif self.looker.owns_canvas(canvas):
+            self.looker.draw(canvas, surface, self.look.palette)
         else:
             self.screens.draw(canvas, surface, self.look.palette, self.client.state)
+
+    def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+        """Where the part called `name` is on a card's canvas: a camera card's box by its label (mojoui.looker)."""
+        if self.looker.owns_canvas(canvas):
+            return self.looker.spot(canvas, name)
+        return (-1.0, -1.0)

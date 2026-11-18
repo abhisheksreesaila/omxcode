@@ -29,6 +29,8 @@
 #include "log.h"
 #include "ggml-backend.h"
 #include "json.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 
 #include <algorithm>
 #include <atomic>
@@ -38,6 +40,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <deque>
 #include <map>
 #include <memory>
@@ -68,6 +72,7 @@ struct Req {
     float temp = 0.7f;
     std::atomic<bool> cancel{false};
     clk::time_point t_submit = clk::now();
+    std::vector<std::vector<uint8_t>> imgs;   // the encoded files (jpeg, png ...) of the images the messages carry, in order (vision requests)
 
     // engine thread only, from admission on
     std::unique_ptr<common_chat_session> session;
@@ -76,6 +81,10 @@ struct Req {
     int32_t n_done = 0;             // prompt tokens already in the KV
     int32_t n_cached = 0;           // of those, the ones reused from the cache
     int32_t ck_at = -1;             // take a checkpoint when the KV holds this many tokens
+    bool mm = false;                // a vision request: its prompt went through mtmd and its sequence holds no reusable cache
+    int32_t pos_delta = 0;          // vision: positions in the KV run behind tokens by this much (M-RoPE images take fewer positions than cells)
+    double image_ms = 0;            // vision: the vision encoder's time for this request's images
+    int32_t image_tokens = 0;       // vision: tokens the images became
     int32_t i_logits = -1;          // index of this request's logits row in the batch being processed
     int32_t batched = 0;            // tokens of this request in the batch being processed (taken back when the batch doesn't fit)
     bool generating = false;
@@ -108,6 +117,11 @@ struct Engine {
     common_chat_templates_ptr tmpls;
     int n_ctx = 0, n_batch = 0, n_ubatch = 0;
     int wake_fd = -1;
+    ggml_backend_dev_t dev = nullptr;   // the GPU the model sits on (the vision encoder goes there too)
+    mtmd_context * mctx = nullptr;      // the vision projector (llm_vision), null for a text-only engine
+    std::map<int64_t, std::vector<uint8_t>> images;   // llm_image's files waiting for the chat that names them ("mem:N")
+    int64_t next_image = 1;
+    std::atomic<int64_t> last_image_us{0}, last_image_tokens{0};   // llm_info 2 and 3: the last vision request's encode time and image tokens
 
     std::mutex mu;
     std::condition_variable cv;
@@ -235,37 +249,10 @@ void fail_request(Engine * e, int s, Req & r, const std::string & why) {
     wake(e);
 }
 
-// Turn a queued request into a prefilling one: template, tokens, cache reuse. false: an error event was emitted.
-bool admit_inner(Engine * e, int s, Req & r) {
-    r.t_admit = clk::now();
-    if (e->fault.load() == 2) { e->fault = 0; throw std::runtime_error("test fault in admit"); }
-    try {
-        common_chat_templates_inputs in;
-        in.messages = common_chat_msgs_parse_oaicompat(common_json::parse(r.messages));
-        if (!r.tools.empty() && r.tools != "[]") in.tools = common_chat_tools_parse_oaicompat(common_json::parse(r.tools));
-        in.add_generation_prompt = true;
-        in.use_jinja = true;
-        in.enable_thinking = r.think;
-        in.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        r.session = std::make_unique<common_chat_session>(e->tmpls.get(), e->vocab, in);
-    } catch (const std::exception & ex) {
-        emit_error(e, r, std::string("chat template: ") + ex.what());
-        return false;
-    }
-    r.prompt.clear();
-    for (const auto & part : r.session->prompt().parts) {
-        auto t = common_tokenize(e->vocab, part.text, false, !part.is_input);
-        r.prompt.insert(r.prompt.end(), t.begin(), t.end());
-    }
-    const int32_t n = (int32_t) r.prompt.size();
-    if (n < 1 || n >= e->n_ctx - 8) {
-        emit_error(e, r, "prompt of " + std::to_string(n) + " tokens does not fit the context of " + std::to_string(e->n_ctx));
-        return false;
-    }
-
-    // the sequences share one context (a unified KV cache): the other sequences' tokens and this prompt must fit together. The
-    // conversation (sequence 0) outranks background work: that is stopped to make room, never the other way round, and a
-    // prompt that still doesn't fit is refused with its own error without touching what the sequence already holds.
+// the sequences share one context (a unified KV cache): the other sequences' tokens and this prompt of n cells must fit
+// together. The conversation (sequence 0) outranks background work: that is stopped to make room, never the other way
+// round, and a prompt that still doesn't fit is refused with its own error without touching what the sequence holds.
+bool room_for(Engine * e, int s, Req & r, int32_t n) {
     auto others_hold = [&]() {
         int64_t held = 0;
         for (size_t o = 0; o < e->seqs.size(); o++) if ((int) o != s) held += (int64_t) e->seqs[o].cached.size();
@@ -284,6 +271,149 @@ bool admit_inner(Engine * e, int s, Req & r) {
                          std::to_string((int64_t) e->n_ctx - others_hold()) + " free beside the other sequences");
         return false;
     }
+    return true;
+}
+
+bool make_sampler(Engine * e, Req & r) {
+    common_params_sampling sp;
+    sp.temp = r.temp;
+    sp.top_k = 20;
+    sp.top_p = 0.95f;
+    r.session->apply_sampling(sp);
+    r.smpl = common_sampler_init(e->model, sp);
+    if (!r.smpl) {
+        emit_error(e, r, "could not make the sampler");
+        return false;
+    }
+    return true;
+}
+
+void handle_token(Engine * e, int s, Req & r, llama_token tok);
+
+// A vision request (images in the messages): the prompt goes through mtmd (text chunks and image chunks), the whole of it is
+// read at once on the engine thread (the other sequences wait for that second), the sequence is emptied first and again
+// when the request ends (an image's cells can't be matched against a later prompt, so a vision request never reuses a
+// cache and never leaves one), and the first token is sampled here. From then on the request generates like any other.
+bool admit_mm(Engine * e, int s, Req & r) {
+    if (!e->mctx) { emit_error(e, r, "this model was loaded without a vision projector (mmproj)"); return false; }
+    const std::string marker = mtmd_default_marker();
+    std::vector<mtmd_bitmap *> bitmaps;
+    auto free_bitmaps = [&]() { for (auto * b : bitmaps) mtmd_bitmap_free(b); bitmaps.clear(); };
+    mtmd_helper_init_opt opt = mtmd_helper_init_opt_default();
+    for (const auto & img : r.imgs) {
+        auto w = mtmd_helper_bitmap_init_from_buf(e->mctx, img.data(), img.size(), false, opt);
+        if (!w.bitmap) { free_bitmaps(); emit_error(e, r, "an image could not be decoded (jpeg, png, bmp, gif are understood)"); return false; }
+        bitmaps.push_back(w.bitmap);
+    }
+    // the template's text with each media marker turned into its bitmap; what the template made of the person's own words
+    // (is_input) is tokenized without special tokens, as everywhere else
+    std::deque<mtmd_input_text> texts;
+    std::deque<std::string> owned;
+    std::vector<mtmd_input_part> parts;
+    size_t used = 0;
+    for (const auto & part : r.session->prompt().parts) {
+        const std::string & t = part.text;
+        size_t at = 0;
+        while (true) {
+            size_t m = t.find(marker, at);
+            std::string seg = t.substr(at, m == std::string::npos ? std::string::npos : m - at);
+            if (!seg.empty()) {
+                owned.push_back(seg);
+                texts.push_back({owned.back().data(), owned.back().size(), false, !part.is_input});
+                parts.push_back({&texts.back(), nullptr});
+            }
+            if (m == std::string::npos) break;
+            if (used >= bitmaps.size()) { free_bitmaps(); emit_error(e, r, "the prompt has more image markers than images"); return false; }
+            parts.push_back({nullptr, bitmaps[used++]});
+            at = m + marker.size();
+        }
+    }
+    if (used != bitmaps.size()) { free_bitmaps(); emit_error(e, r, "the chat template left " + std::to_string(bitmaps.size() - used) + " image(s) out of the prompt"); return false; }
+    std::vector<const mtmd_input_part *> ptrs;
+    for (const auto & p : parts) ptrs.push_back(&p);
+    mtmd_input_chunks * chunks = mtmd_input_chunks_init();
+    int32_t rc = mtmd_tokenize_from_parts(e->mctx, chunks, ptrs.data(), ptrs.size(), false);
+    if (rc != 0) { mtmd_input_chunks_free(chunks); free_bitmaps(); emit_error(e, r, "could not tokenize the prompt with its images (" + std::to_string(rc) + ")"); return false; }
+    const int32_t n = (int32_t) mtmd_helper_get_n_tokens(chunks);
+    const int32_t n_pos = (int32_t) mtmd_helper_get_n_pos(chunks);
+    if (!room_for(e, s, r, n)) { mtmd_input_chunks_free(chunks); free_bitmaps(); return false; }
+    if (!make_sampler(e, r)) { mtmd_input_chunks_free(chunks); free_bitmaps(); return false; }
+    seq_reset(e, s);
+    r.mm = true;
+    r.ck_at = -1;
+    llama_pos past = 0;
+    double enc_ms = 0;
+    int32_t img_tokens = 0;
+    int32_t res = 0;
+    const size_t nc = mtmd_input_chunks_size(chunks);
+    for (size_t i = 0; i < nc && res == 0; i++) {
+        const mtmd_input_chunk * c = mtmd_input_chunks_get(chunks, i);
+        const bool last = i + 1 == nc;
+        if (mtmd_input_chunk_get_type(c) == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+            auto t0 = clk::now();
+            res = mtmd_encode_chunk(e->mctx, c);
+            enc_ms += std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+            img_tokens += (int32_t) mtmd_input_chunk_get_n_tokens(c);
+            if (res == 0) res = mtmd_helper_decode_image_chunk(e->mctx, e->ctx, c, mtmd_get_output_embd(e->mctx), past, s, e->n_batch, &past, nullptr, nullptr);
+        } else {
+            res = mtmd_helper_eval_chunk_single(e->mctx, e->ctx, c, past, s, e->n_batch, last, &past);
+        }
+    }
+    llama_synchronize(e->ctx);
+    mtmd_input_chunks_free(chunks);
+    free_bitmaps();
+    if (res != 0) {
+        seq_reset(e, s);
+        emit_error(e, r, "the prompt with its images could not be read (" + std::to_string(res) + ")");
+        return false;
+    }
+    e->seqs[s].cached.assign((size_t) n, LLAMA_TOKEN_NULL);
+    r.prompt.assign((size_t) n, LLAMA_TOKEN_NULL);
+    r.n_done = n;
+    r.n_cached = 0;
+    r.pos_delta = n_pos - n;
+    r.image_ms = enc_ms;
+    r.image_tokens = img_tokens;
+    e->last_image_us = (int64_t) (enc_ms * 1000.0);
+    e->last_image_tokens = img_tokens;
+    r.generating = true;
+    r.t_prefilled = clk::now();
+    // the last chunk made the logits: the first token comes from them, here
+    llama_token tok = common_sampler_sample(r.smpl, e->ctx, -1);
+    handle_token(e, s, r, tok);
+    return true;
+}
+
+// Turn a queued request into a prefilling one: template, tokens, cache reuse. false: an error event was emitted.
+bool admit_inner(Engine * e, int s, Req & r) {
+    r.t_admit = clk::now();
+    if (e->fault.load() == 2) { e->fault = 0; throw std::runtime_error("test fault in admit"); }
+    try {
+        common_chat_templates_inputs in;
+        in.messages = common_chat_msgs_parse_oaicompat(common_json::parse(r.messages));
+        if (!r.tools.empty() && r.tools != "[]") in.tools = common_chat_tools_parse_oaicompat(common_json::parse(r.tools));
+        in.add_generation_prompt = true;
+        in.use_jinja = true;
+        in.enable_thinking = r.think;
+        in.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        r.session = std::make_unique<common_chat_session>(e->tmpls.get(), e->vocab, in);
+    } catch (const std::exception & ex) {
+        emit_error(e, r, std::string("chat template: ") + ex.what());
+        return false;
+    }
+    if (!r.imgs.empty()) return admit_mm(e, s, r);
+    r.prompt.clear();
+    for (const auto & part : r.session->prompt().parts) {
+        auto t = common_tokenize(e->vocab, part.text, false, !part.is_input);
+        r.prompt.insert(r.prompt.end(), t.begin(), t.end());
+    }
+    const int32_t n = (int32_t) r.prompt.size();
+    if (n < 1 || n >= e->n_ctx - 8) {
+        emit_error(e, r, "prompt of " + std::to_string(n) + " tokens does not fit the context of " + std::to_string(e->n_ctx));
+        return false;
+    }
+
+    if (!room_for(e, s, r, n)) return false;
 
     // where this prompt's generation prompt starts: the point the next turn will share (checkpoint there)
     int32_t gp = 0;
@@ -328,17 +458,7 @@ bool admit_inner(Engine * e, int s, Req & r) {
     r.n_done = r.n_cached = keep;
     if (r.ck_at <= keep) r.ck_at = -1;                       // already have it (or are past it)
 
-    common_params_sampling sp;
-    sp.temp = r.temp;
-    sp.top_k = 20;
-    sp.top_p = 0.95f;
-    r.session->apply_sampling(sp);
-    r.smpl = common_sampler_init(e->model, sp);
-    if (!r.smpl) {
-        emit_error(e, r, "could not make the sampler");
-        return false;
-    }
-    return true;
+    return make_sampler(e, r);
 }
 
 bool admit(Engine * e, int s, Req & r) {
@@ -379,6 +499,7 @@ void finish_inner(Engine * e, int s, Req & r, const char * reason) {
     emit(e, r, std::string("{\"t\":\"done\",\"reason\":\"") + reason + "\",\"n_prompt\":" + std::to_string(r.prompt.size()) +
                    ",\"n_cached\":" + std::to_string(r.n_cached) + ",\"n_gen\":" + std::to_string(r.n_gen) +
                    ",\"prefill_ms\":" + num(prefill) + ",\"ttft_ms\":" + num(ttft) + ",\"tps\":" + num(tps) + "}");
+    if (r.mm) seq_reset(e, s);                                // (a vision request leaves no cache: see admit_mm)
     if (getenv("MOJOUI_LLM_DEBUG"))
         fprintf(stderr, "llm: %d tokens: decode %.1f ms/token, sample %.2f, parse+emit %.2f\n", r.n_gen,
                 r.ms_decode / std::max(r.n_gen, 1), r.ms_sample / std::max(r.n_gen, 1), r.ms_parse / std::max(r.n_gen, 1));
@@ -489,7 +610,7 @@ void engine_pass(Engine * e, common_batch & batch) {
         if (r.generating) {
             r.batched = 1;
             sq.cached.push_back(r.last);
-            r.i_logits = batch.add(r.last, (llama_pos) (sq.cached.size() - 1), s, true);
+            r.i_logits = batch.add(r.last, (llama_pos) (sq.cached.size() - 1) + r.pos_delta, s, true);
         } else {
             int32_t n = (int32_t) r.prompt.size();
             int32_t take = std::min<int32_t>(n - r.n_done, e->n_ubatch);
@@ -606,6 +727,7 @@ int64_t llm_load(const char * path, int64_t gpu, int64_t n_ctx, int64_t n_seq, i
             if (dir && *dir) ggml_backend_load_all_from_path(dir); else ggml_backend_load_all();
         });
         llama_model_params mp = llama_model_default_params();
+        ggml_backend_dev_t dev_chosen = nullptr;
         ggml_backend_dev_t devs[2] = {nullptr, nullptr};
         if (gpu >= 0) {
             int seen = 0;
@@ -615,6 +737,7 @@ int64_t llm_load(const char * path, int64_t gpu, int64_t n_ctx, int64_t n_seq, i
             }
             if (!devs[0]) { set_error("no GPU number " + std::to_string(gpu)); return 0; }
             mp.devices = devs;
+            dev_chosen = devs[0];
             mp.n_gpu_layers = -1;
             mp.split_mode = LLAMA_SPLIT_MODE_NONE;
             mp.main_gpu = 0;
@@ -643,6 +766,7 @@ int64_t llm_load(const char * path, int64_t gpu, int64_t n_ctx, int64_t n_seq, i
         e->tmpls = common_chat_templates_init(e->model, "");
         if (!e->tmpls) { llama_free(e->ctx); llama_model_free(e->model); set_error("the model has no chat template"); return 0; }
         e->wake_fd = (int) wake_fd;
+        e->dev = dev_chosen;
         e->seqs.resize(cp.n_seq_max);
         Engine * raw = e.release();
         raw->th = std::thread(engine_main, raw);
@@ -660,11 +784,91 @@ int64_t llm_last_error(char * buf, int64_t cap) {
     return n;
 }
 
-// what: 0 = the context's size in tokens, 1 = the number of sequences
+// what: 0 = the context's size in tokens, 1 = the number of sequences, 2 = the last vision request's image encode time in
+// microseconds, 3 = the tokens its images became, 4 = 1 when a vision projector is loaded
 int64_t llm_info(int64_t h, int64_t what) {
     Engine * e = (Engine *) (intptr_t) h;
     if (!e) return -1;
-    return what == 0 ? e->n_ctx : what == 1 ? (int64_t) e->seqs.size() : -1;
+    return what == 0 ? e->n_ctx : what == 1 ? (int64_t) e->seqs.size() : what == 2 ? e->last_image_us.load() : what == 3 ? e->last_image_tokens.load() : what == 4 ? (e->mctx ? 1 : 0) : -1;
+}
+
+
+// Gives the engine its vision projector (the mmproj GGUF that goes with the model) on the model's own GPU. image_max_tokens
+// bounds what one image costs in context (0: the projector's own limit). 1 on success, 0 (llm_last_error says why) if not.
+int64_t llm_vision(int64_t h, const char * mmproj, int64_t image_max_tokens) {
+    Engine * e = (Engine *) (intptr_t) h;
+    if (!e) { set_error("bad handle"); return 0; }
+    try {
+        if (e->mctx) { mtmd_free(e->mctx); e->mctx = nullptr; }
+        if (!getenv("MOJOUI_LLM_LOG")) {
+            mtmd_log_set([](ggml_log_level lv, const char * text, void *) { if (lv == GGML_LOG_LEVEL_ERROR) fputs(text, stderr); }, nullptr);
+        }
+        mtmd_context_params mp = mtmd_context_params_default();
+        mp.use_gpu = e->dev != nullptr;
+        mp.device = e->dev;
+        mp.print_timings = false;
+        mp.n_threads = 4;
+        mp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        mp.warmup = true;
+        if (image_max_tokens > 0) mp.image_max_tokens = (int) image_max_tokens;
+        e->mctx = mtmd_init_from_file(mmproj, e->model, mp);
+        if (!e->mctx) { set_error(std::string("could not load the vision projector ") + mmproj); return 0; }
+        if (!mtmd_support_vision(e->mctx)) { mtmd_free(e->mctx); e->mctx = nullptr; set_error("that projector does not read images"); return 0; }
+        return 1;
+    } catch (const std::exception & ex) {
+        set_error(ex.what());
+        return 0;
+    }
+}
+
+// Hands the engine one encoded image (a jpeg, png, bmp or gif file's bytes). Returns its number N: a message's content part
+// {"type":"image_url","image_url":{"url":"mem:N"}} then carries it (it is used once, by the chat() that names it, and
+// forgotten after a minute otherwise). 0 on failure.
+int64_t llm_image(int64_t h, const char * data, int64_t len) {
+    Engine * e = (Engine *) (intptr_t) h;
+    if (!e || !data || len <= 0) { set_error("bad image"); return 0; }
+    std::lock_guard<std::mutex> l(e->mu);
+    if (e->images.size() > 16) e->images.erase(e->images.begin());   // (the oldest unclaimed one goes: a caller that never chats)
+    int64_t id = e->next_image++;
+    e->images[id].assign((const uint8_t *) data, (const uint8_t *) data + len);
+    return id;
+}
+
+// The image parts of a request's messages become media markers, their bytes go to the request in order. false: why is set.
+bool take_images(Engine * e, Req & r) {
+    if (r.messages.find("\"image_url\"") == std::string::npos) return true;
+    if (!e->mctx) { set_error("this model was loaded without a vision projector (mmproj): no images"); return false; }
+    common_json j = common_json::parse(r.messages);
+    if (!j.is_array()) { set_error("messages must be an array"); return false; }
+    for (auto & m : j) {
+        if (!m.is_object() || !m.contains("content") || !m["content"].is_array()) continue;
+        for (auto & p : m["content"]) {
+            if (!p.is_object() || p.value("type", "") != "image_url") continue;
+            std::string url = p.contains("image_url") && p["image_url"].is_object() ? p["image_url"].value("url", "") : "";
+            std::vector<uint8_t> bytes;
+            if (url.rfind("mem:", 0) == 0) {
+                int64_t id = atoll(url.c_str() + 4);
+                std::lock_guard<std::mutex> l(e->mu);
+                auto it = e->images.find(id);
+                if (it == e->images.end()) { set_error("image " + url + " is not there (used already, or never given)"); return false; }
+                bytes = std::move(it->second);
+                e->images.erase(it);
+            } else {
+                std::string path = url.rfind("file://", 0) == 0 ? url.substr(7) : url;
+                std::ifstream f(path, std::ios::binary);
+                if (path.empty() || path[0] != '/' || !f) { set_error("cannot read the image " + url + " (use mem:N or file:///absolute/path)"); return false; }
+                std::stringstream ss;
+                ss << f.rdbuf();
+                std::string b = ss.str();
+                bytes.assign(b.begin(), b.end());
+            }
+            if (bytes.empty()) { set_error("empty image " + url); return false; }
+            r.imgs.push_back(std::move(bytes));
+            p = common_json{{"type", "media_marker"}, {"text", std::string(mtmd_default_marker())}};
+        }
+    }
+    r.messages = j.dump();
+    return true;
 }
 
 int64_t llm_chat(int64_t h, int64_t seq, const char * msgs, int64_t msgs_len, const char * tools, int64_t tools_len,
@@ -673,6 +877,9 @@ int64_t llm_chat(int64_t h, int64_t seq, const char * msgs, int64_t msgs_len, co
     if (!e || seq < 0 || seq >= (int64_t) e->seqs.size()) { set_error("bad handle or sequence"); return 0; }
     auto r = std::make_shared<Req>();
     r->messages.assign(msgs, (size_t) msgs_len);
+    try {
+        if (!take_images(e, *r)) return 0;
+    } catch (const std::exception & ex) { set_error(std::string("messages: ") + ex.what()); return 0; }
     if (tools && tools_len > 0) r->tools.assign(tools, (size_t) tools_len);
     r->think = think != 0;
     r->max_tokens = (int) max_tokens;
@@ -750,6 +957,7 @@ void llm_free(int64_t h) {
     e->cv.notify_all();
     e->th.join();
     e->tmpls.reset();
+    if (e->mctx) mtmd_free(e->mctx);
     llama_free(e->ctx);
     llama_model_free(e->model);
     delete e;

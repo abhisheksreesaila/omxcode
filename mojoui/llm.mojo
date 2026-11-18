@@ -21,13 +21,25 @@
 # down the host's wake pipe (mojoui.wake) whenever events are waiting, so update() hears of them as App.jobs_message().
 # Library locations: $MOJOUI_LLM_LIB (the shim; default build/llm/libmojoui_llm.so), $MOJOUI_LLAMA_DIR (llama.cpp's
 # libraries when the shim finds them nowhere else; the shim's own rpath normally does), $MOJOUI_LLM_LOG=1 (llama.cpp's log).
+# Images (goal 77 M6): load with `mmproj=` (the vision projector's GGUF, which goes with the model) and a message's content may
+# carry pictures, which the engine reads through llama.cpp's mtmd on the model's own GPU:
+#   var llm = Llm(gguf, gpu=1, mmproj="models/mmproj-F16.gguf")
+#   var msg = llm.image_user(jpeg_or_png_bytes, "What does the sign say?")      # one user message: the picture, then the words
+#   var reply = llm.complete("[" + msg + "]")
+# `image(bytes)` alone gives the content part ({"type":"image_url","image_url":{"url":"mem:N"}}) for a message you build
+# yourself; the bytes are handed to the engine now and used by the first chat() that names them. A part may also name a file,
+# {"url":"file:///absolute/path.png"}, read when chat() is called. The cache rule: a request with images reads its whole prompt
+# (text and pictures) at once and neither reuses nor leaves a cached prefix, so it empties its sequence at the start and at the
+# end; run vision on a background sequence (seq=1) so the conversation's cache on sequence 0 survives. While it reads the
+# images the engine serves no other sequence (about a second for a camera frame). image_ms() and image_tokens() say what the
+# last vision request's pictures cost.
 # The temperature is passed in thousandths (0.7 -> 700); 0 samples greedily.
 # Hosts: Linux with a llama.cpp build (CUDA for a GPU; gpu=-1 for the CPU). Mac/iPhone/Android/web: not built.
 
 from std.ffi import external_call, c_char
 from std.memory import Pointer
 from std.os import getenv
-from mojoui.json import Json
+from mojoui.json import Json, json_string
 from mojoui.maxrt import _dlsym, _fn, _c_text, _exists
 from mojoui.wake import wake_write_fd
 from mojoui import libc
@@ -43,6 +55,7 @@ comptime _CHAT = def(Int, Int, Int, Int, Int, Int, Int, Int, Int) thin abi("C") 
 comptime _POLL = def(Int, Int, Int, Int) thin abi("C") -> Int
 comptime _ERR = def(Int, Int) thin abi("C") -> Int
 comptime _CANCEL = def(Int, Int) thin abi("C") -> NoneType
+comptime _FN3 = def(Int, Int, Int) thin abi("C") -> Int
 comptime _FREE = def(Int) thin abi("C") -> NoneType
 
 
@@ -108,8 +121,19 @@ struct Llm(Movable):
     var n_ctx: Int
     var n_seq: Int
     var path: String
+    var vision: Bool
 
-    def __init__(out self, path: String, gpu: Int = 0, n_ctx: Int = 32768, n_seq: Int = 2, kv_q8: Bool = True, flash: Bool = True) raises:
+    def __init__(
+        out self,
+        path: String,
+        gpu: Int = 0,
+        n_ctx: Int = 32768,
+        n_seq: Int = 2,
+        kv_q8: Bool = True,
+        flash: Bool = True,
+        mmproj: String = "",
+        image_max_tokens: Int = 0,
+    ) raises:
         """Loads the GGUF at `path` on GPU number `gpu` (-1: the CPU) with a context of `n_ctx` tokens shared by `n_seq`
         sequences (q8_0 KV cache and flash attention by default: about half the cache's memory). Raises why when it can't."""
         self.lib = _open(_shim_path())
@@ -117,6 +141,7 @@ struct Llm(Movable):
         self.n_ctx = 0
         self.n_seq = 0
         self.handle = 0
+        self.vision = False
         var p = path
         var load = _fn[_LOAD](_dlsym(self.lib, "llm_load"))
         self.handle = load(
@@ -127,10 +152,42 @@ struct Llm(Movable):
             raise Error("llm: " + _last_error(self.lib))
         self.n_ctx = _fn[_ERR](_dlsym(self.lib, "llm_info"))(self.handle, 0)
         self.n_seq = _fn[_ERR](_dlsym(self.lib, "llm_info"))(self.handle, 1)
+        if mmproj != "":
+            var mm = mmproj
+            var ok = _fn[_FN3](_dlsym(self.lib, "llm_vision"))(self.handle, Int(mm.as_c_string_span().unsafe_ptr()), image_max_tokens)
+            _ = mm^
+            if ok != 1:
+                var why = _last_error(self.lib)
+                _fn[_FREE](_dlsym(self.lib, "llm_free"))(self.handle)
+                self.handle = 0
+                raise Error("llm: " + why)
+            self.vision = True
 
     def __del__(deinit self):
         if self.handle != 0:
             _fn[_FREE](_dlsym(self.lib, "llm_free"))(self.handle)
+
+    def image(self, data: Span[UInt8, _]) raises -> String:
+        """Hands the engine one encoded picture (jpeg, png, bmp or gif bytes) and returns the message content part that names
+        it. Needs the model loaded with `mmproj=`."""
+        if not self.vision:
+            raise Error("llm: loaded without a vision projector (give Llm(..., mmproj=...))")
+        var n = _fn[_FN3](_dlsym(self.lib, "llm_image"))(self.handle, Int(data.unsafe_ptr()), len(data))
+        if n == 0:
+            raise Error("llm: " + _last_error(self.lib))
+        return '{"type":"image_url","image_url":{"url":"mem:' + String(n) + '"}}'
+
+    def image_user(self, data: Span[UInt8, _], text: String) raises -> String:
+        """A user message made of a picture and some words, as a JSON object for `messages_json`'s array."""
+        return '{"role":"user","content":[' + self.image(data) + ',{"type":"text","text":' + json_string(text) + "}]}"
+
+    def image_ms(self) -> Float64:
+        """The vision encoder's time for the last vision request's pictures, in milliseconds."""
+        return Float64(_fn[_ERR](_dlsym(self.lib, "llm_info"))(self.handle, 2)) / 1000.0
+
+    def image_tokens(self) -> Int:
+        """How many tokens the last vision request's pictures became."""
+        return _fn[_ERR](_dlsym(self.lib, "llm_info"))(self.handle, 3)
 
     def chat(
         self,

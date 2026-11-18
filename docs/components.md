@@ -148,6 +148,8 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Speech model: Parakeet | `mojoui.speech: SpeechModel("parakeet") (Parakeet TDT 0.6B v3 int8, onnx_asr, GPU), same transcribe()/SpeechStream` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Endpointer (turn-taking) | `mojoui.voice: Endpointer().feed(samples, captured_ns, playing), poll() -> START / BARGE / END (Silero VAD)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Voice loop (turn-taking) | `mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
+| Camera | `mojoui.camera: Camera().start(), snapshot(), tick() -> a new JPEG (jpeg, width, height); the browser's rear camera on the web host (a still only when asked, tag 3 of the /audio socket, mojoui.webcamera), this machine's V4L2 camera elsewhere` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
+| Camera card and look tool | `mojoui.looker: Looker.tools() / call() / tick(llm) / views() / spot(); mojoui.sight: draw_sight(), sight_spot() (a picture with boxes named by their labels); mojoui.grounding: Qwen's 0-1000 boxes validated into pixels; genui's Sight component` | 🔨 | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
@@ -199,6 +201,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Voice loop (turn-taking) (Android): not built.
 - Voice loop (turn-taking) (Mac (AppKit)): needs CPython with torch beside the app and a microphone host; never run.
 - Voice loop (turn-taking) (iPhone (UIKit)): no CPython on the phone.
+- Camera (Linux (GTK)): tests/test_camera desktop: this machine's webcam through ffmpeg/V4L2, 1280x720 JPEG, a fresh frame 190 ms after a request, its file deleted at stop().
+- Camera (Web): scripts/g77_camera_check.py (goal 77 M6): headless Chromium's fake camera plays the scene file, the page sends one still per request; tests/test_camera web: the hub.
+- Camera (Android): not built.
+- Camera (Mac (AppKit)): not built (AVFoundation capture planned).
+- Camera (iPhone (UIKit)): not built.
+- Camera card and look tool (Linux (GTK)): examples/omx compiles with it there; checked on the web host (the model side runs in-process the same way: tests/test_llm_vision).
+- Camera card and look tool (Web): scripts/g77_camera_check.py: "Where is the banana?" -> the card's banana box IoU 0.85 with the truth, the part on the banana, "What does the sign say?" -> PURPLE OTTER 42; docs/goals/77/m6-camera-banana.png.
+- Camera card and look tool (Android): plain canvases; never run with this app.
+- Camera card and look tool (Mac (AppKit)): builds; never run.
+- Camera card and look tool (iPhone (UIKit)): builds; never run.
 - Orb and cloud rim (Linux (GTK)): tests/test_orb; screenshots in docs/goals/72, light and dark.
 - Orb and cloud rim (Web): the same canvases in the browser (docs/goals/72/tablet.png).
 - Orb and cloud rim (Android): canvases run there; never drawn.

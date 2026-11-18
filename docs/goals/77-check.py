@@ -2,16 +2,23 @@
 
     pixi run python docs/goals/77-check.py [M0 M1 M2 M5 ...]          (default: every milestone)
 
-M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M5 visual first. M3 (map), M4 (isometric),
-M6 (camera) and M7 (polish) are other developers' and report BLOCKED("not built yet") until they land. The models run on GPU $G77_GPU
-(default 0); the machinery is goal 72's (docs/goals/72-check.py: the app on the headless display, typed turns, the null sink). Numbers: build/g77;
-pictures: docs/goals/77.
+M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M5 visual first, M6 the camera.
+M3 (map), M4 (isometric) and M7 (polish) are other developers' and report BLOCKED("not built yet") until they land. The language model of
+M1, M2 and M5 runs on GPU $G77_GPU (default 0); M6's (the model, its vision projector and the voice) on GPU $G77_VISION_GPU (default 1),
+PCI order as nvidia-smi counts. The machinery is goal 72's (docs/goals/72-check.py: the app on the headless display, typed turns, the null
+sink). Numbers: build/g77; pictures: docs/goals/77.
+
+M6 builds the shim with image input, draws (once) the scene's objects with the image model, runs the model's own tests
+(tests/test_llm_vision: reading words and grounding with the real Qwen3.8-27B and its projector), the camera's (tests/test_camera: the
+browser's hub, and this machine's webcam when there is one), genui's Sight component, and then the whole app: scripts/g77_camera_check.py
+drives examples/omx on the web host with Chromium's fake camera.
 """
 import importlib.util
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -333,12 +340,76 @@ def m5():
     return "PASS", line + "; speech on card turns at most 2 sentences"
 
 
+# ------------------------------------------------------------------------------------------------ M6: the camera
+
+VGPU = os.environ.get("G77_VISION_GPU", "1")
+VENV = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "LLM_GPU": VGPU, "G77_VISION_GPU": VGPU}
+
+
+def vsh(cmd, timeout=3600, env=None, **kw):
+    e = dict(os.environ)
+    e.update(env or {})
+    return subprocess.run(cmd, cwd=ROOT, env=e, capture_output=True, text=True, timeout=timeout, **kw)
+
+
+def vtail(r, n=700):
+    return (r.stdout + r.stderr)[-n:]
+
+
+def free_mib(index):
+    out = vsh(["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits"]).stdout.splitlines()
+    for line in out:
+        i, _, free = line.partition(",")
+        if i.strip() == str(index):
+            return int(free)
+    return 0
+
+
+def m6():
+    need_mib = 21000
+    if free_mib(VGPU) < need_mib:
+        return "BLOCKED", f"GPU {VGPU} has {free_mib(VGPU)} MiB free; the 27B model, its projector and the voice need {need_mib}"
+    for step in (["scripts/build_llm_shim.sh"], ["pixi", "run", "python", "scripts/g77_scene.py"]):
+        r = vsh(step)
+        if r.returncode:
+            return "FAIL", f"{' '.join(step)}: {vtail(r)}"
+    numbers = {}
+    # the framework's own tests
+    for name, extra in (("test_grounding", {}), ("test_camera", {}), ("test_llm_vision", VENV), ("test_genui", {})):
+        b = vsh(["scripts/mxbuild.sh", f"tests/{name}.mojo", "-o", f"build/{name}"])
+        if b.returncode:
+            return "FAIL", f"{name} doesn't build: {vtail(b, 900)}"
+        r = vsh([f"build/{name}"], env=extra, timeout=1800)
+        if r.returncode:
+            return "FAIL", f"{name}: {vtail(r, 900)}"
+        numbers[name] = [l for l in r.stdout.splitlines() if re.match(r"(vision|camera|grounding|sight|picture)\b", l)]
+    desk = [l for l in numbers["test_camera"] if l.startswith("camera desktop")]
+    desk_note = "" if desk and ": ok" in desk[0] else " (the desktop camera: BLOCKED, " + (desk[0] if desk else "no camera on this machine") + ")"
+    # the whole app, on the web host
+    b = vsh(["scripts/build.sh", "omx", "web"], 3600)
+    if b.returncode:
+        return "FAIL", "build omx web: " + vtail(b, 900)
+    r = vsh(["pixi", "run", "python", "scripts/g77_camera_check.py", "all"], 3600, VENV)
+    if r.returncode or "camera: all ok" not in r.stdout:
+        return "FAIL", vtail(r, 1200)
+    rep = json.loads((OUT / "camera.json").read_text())
+    s, t = rep["scene"], rep["text"]
+    vision = " ".join(numbers["test_llm_vision"])
+    m = re.search(r"worst IoU ([\d.]+) , mean answer time ([\d.]+) ms, mean image encode ([\d.]+) ms", vision)
+    (OUT / "m6.json").write_text(json.dumps({"camera": rep, "tests": numbers}, indent=1))
+    return "PASS", (f"\"Where is the banana?\" through the tablet's fake camera: the card's banana box IoU {s['iou']} (limit 0.4) with the truth, "
+                    f"the reply \"{s['reply']}\", the part on the banana at {s['spot_pts'][0]:.0f},{s['spot_pts'][1]:.0f} pt; look {s['ms']} ms "
+                    f"(frame {s['frame_ms']}, image encode {s['image_ms']} for {s['image_tokens']} tokens, model {s['read_ms']}); "
+                    f"{s['outward_bytes_sent']} bytes outward; the sign read \"{t['reply']}\"; in-process grounding on all three objects "
+                    f"(worst IoU {float(m.group(1)):.2f}, {float(m.group(2)):.0f} ms an answer); docs/goals/77/m6-camera-banana.png" + desk_note)
+
+
 def blocked(what):
     return lambda: ("BLOCKED", f"{what}: not built yet")
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": blocked("the map card (goal 77 M3)"), "M4": blocked("the isometric explainer (goal 77 M4)"),
-              "M5": m5, "M6": blocked("the camera (goal 77 M6)"), "M7": blocked("the polish (goal 77 M7)")}
+              "M5": m5, "M6": m6, "M7": blocked("the polish (goal 77 M7)")}
 
 
 def main():

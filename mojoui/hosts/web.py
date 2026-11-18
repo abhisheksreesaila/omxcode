@@ -2143,6 +2143,9 @@ def make_app(module_dir):
     audio = AUDIO and hasattr(mod, "audio_init")
     if audio:
         mod.audio_init()  # the hub an app's Microphone and Speaker talk to, before any session
+    camera = audio and hasattr(mod, "camera_init")
+    if camera:
+        mod.camera_init()  # the hub an app's Camera talks to (the page's rear camera, stills only when asked: docs/web-audio.md)
     files = host_files()
     by_name = {hashed: (data, media) for hashed, data, media in files.values()}
     fonts = {}
@@ -2544,7 +2547,7 @@ def make_app(module_dir):
         me = object()
         pcm = (ctypes.c_char * (1 + AUDIO_CHUNK))()
         addr = ctypes.addressof(pcm) + 1
-        state = {"mic": None, "told": False, "held": False, "flushes": mod.audio_flushes()}
+        state = {"mic": None, "told": False, "held": False, "flushes": mod.audio_flushes(), "cam": None, "snap": 0}
 
         async def pump():  # the app's side: wants and flushes now, speaker samples as the app queues them
             try:
@@ -2560,6 +2563,15 @@ def make_app(module_dir):
                             state["flushes"] = flushes
                             mod.audio_settle()
                             await ws.send_text('{"t":"flush"}')
+                        if camera:  # the camera: opened while an app wants it, a still each time one is asked for
+                            cam = bool(mod.camera_wants())
+                            if cam != state["cam"]:
+                                state["cam"] = cam
+                                await ws.send_text('{"t":"cam","on":%s}' % ("true" if cam else "false"))
+                            asked = mod.camera_request()
+                            if asked != state["snap"]:
+                                state["snap"] = asked
+                                await ws.send_text('{"t":"snap","id":%d}' % asked)
                         n = mod.audio_pull(addr, AUDIO_CHUNK)
                         if n:
                             pcm[0] = b"\x02"
@@ -2590,6 +2602,10 @@ def make_app(module_dir):
                 if data is not None:
                     if hub["active"] is me and data[:1] == b"\x01" and len(data) > 1:
                         mod.audio_push(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p).value + 1, len(data) - 1)
+                    elif camera and hub["active"] is me and data[:1] == b"\x03" and len(data) > 11 and data[9:11] == b"\xff\xd8":
+                        # a still: tag 3, the request it answers (u32), its width and height (u16, u16), then the JPEG (little-endian)
+                        asked, w, h = struct.unpack("<IHH", data[1:9])
+                        mod.camera_push(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p).value + 9, len(data) - 9, asked, w, h)
                     continue
                 try:
                     note = json.loads(msg.get("text") or "{}")
@@ -2600,10 +2616,14 @@ def make_app(module_dir):
                     first = hub["active"] is None
                     hub["active"] = me
                     state["mic"] = None
+                    state["cam"] = None
+                    state["snap"] = 0  # (a still asked for while no page was tapped is asked of this one now)
                     mod.audio_client(1 if first else 0)  # (the first page to be tapped drops what nobody heard)
                     state["flushes"] = mod.audio_flushes()
                 elif kind == "mic_fail" and hub["active"] is me and isinstance(note.get("code"), int):
                     mod.audio_fail(note["code"] if note["code"] in (101, 102, 103) else 102)
+                elif kind == "cam_fail" and camera and hub["active"] is me and isinstance(note.get("code"), int):
+                    mod.camera_fail(note["code"] if note["code"] in (101, 102, 103) else 102)
                 elif kind == "latency" and isinstance(note.get("us"), int):
                     mod.audio_latency(max(0, min(note["us"], 5_000_000)))
         except (WebSocketDisconnect, RuntimeError):
