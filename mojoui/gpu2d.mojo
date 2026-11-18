@@ -53,7 +53,8 @@
 #   A pixel whose centre is in the rect samples texel floor((centre − x) / w · pw) (and the same in y).
 #
 # POLY (POLY_FLOATS = 16): filled polygons, non-zero winding, by stencil and cover.
-#   0    first fan vertex   into Frame2D.fan (x, y pairs; triangles (p0, pi, pi+1), i = 1 … n − 2)
+#   0    first fan vertex   into Frame2D.fan (x, y pairs; n − 2 triangles zig-zagging in from both ends of the
+#                           outline, whose signed windings sum to the polygon's, as a fan from p0 would)
 #   1    fan vertices       3 · (n − 2)
 #   2    first point        into Frame2D.points (the polygon's points, x, y pairs)
 #   3    points             n
@@ -299,6 +300,37 @@ def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font) -> Frame2D:
 
 def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
     """build_batches into an existing frame, reusing its memory (a host keeps one Frame2D)."""
+    fill_layers(f, scene, atlas, font, 0, scene.layers())
+
+
+def _clip_op(mut clips: List[Float64], scene: Scene, op: Int, tx: Float64, ty: Float64, tk: Float64):
+    """OP_CLIP (push, intersected with the clip it's inside, in pixels) or OP_UNCLIP (pop) on the clip stack."""
+    var base = op * 6
+    if Int(scene.kinds[op]) == OP_CLIP:
+        var x0 = Float64(scene.nums[base]) * tk + tx
+        var y0 = Float64(scene.nums[base + 1]) * tk + ty
+        var x1 = x0 + Float64(scene.nums[base + 2]) * tk
+        var y1 = y0 + Float64(scene.nums[base + 3]) * tk
+        var n = len(clips)
+        if n > 0:
+            x0 = max(x0, clips[n - 4])
+            y0 = max(y0, clips[n - 3])
+            x1 = min(x1, clips[n - 2])
+            y1 = min(y1, clips[n - 1])
+        clips.append(x0)
+        clips.append(y0)
+        clips.append(x1)
+        clips.append(y1)
+    elif len(clips) > 0:
+        for _ in range(4):
+            _ = clips.pop()
+
+
+def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0):
+    """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
+    rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
+    skip_ops: layer `first`'s first ops left out (a layer that only grew, Scene.appends: just the new ops; the ops left
+    out must leave no clip open)."""
     f.clear()
     f.width = scene.w
     f.height = scene.h
@@ -306,7 +338,13 @@ def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
     for ref px in scene.images:
         f.pixels.append(px.copy())
     var clips = List[Float64](capacity=64)  # the clip stack in pixels, x0, y0, x1, y1 per entry (already intersected)
-    for layer in range(scene.layers()):
+    for layer in range(min(first, scene.layers())):  # (what earlier layers left open)
+        var span0 = scene.layer_range(layer)
+        for op in range(span0[0], span0[1]):
+            var kind0 = Int(scene.kinds[op])
+            if kind0 == OP_CLIP or kind0 == OP_UNCLIP:
+                _clip_op(clips, scene, op, scene.layer_tx[layer], scene.layer_ty[layer], scene.layer_tk[layer])
+    for layer in range(first, min(end, scene.layers())):
         var span = scene.layer_range(layer)
         var tx = scene.layer_tx[layer]
         var ty = scene.layer_ty[layer]
@@ -322,28 +360,11 @@ def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
         var c2 = NO_CLIP
         var c3 = NO_CLIP
         var clip_dirty = True
-        for op in range(span[0], span[1]):
+        for op in range(span[0] + (skip_ops if layer == first else 0), span[1]):
             var kind = Int(scene.kinds[op])
             var base = op * 6
             if kind == OP_CLIP or kind == OP_UNCLIP:
-                if kind == OP_CLIP:
-                    var x0 = Float64(scene.nums[base]) * tk + tx
-                    var y0 = Float64(scene.nums[base + 1]) * tk + ty
-                    var x1 = x0 + Float64(scene.nums[base + 2]) * tk
-                    var y1 = y0 + Float64(scene.nums[base + 3]) * tk
-                    var n = len(clips)
-                    if n > 0:
-                        x0 = max(x0, clips[n - 4])
-                        y0 = max(y0, clips[n - 3])
-                        x1 = min(x1, clips[n - 2])
-                        y1 = min(y1, clips[n - 1])
-                    clips.append(x0)
-                    clips.append(y0)
-                    clips.append(x1)
-                    clips.append(y1)
-                elif len(clips) > 0:
-                    for _ in range(4):
-                        _ = clips.pop()
+                _clip_op(clips, scene, op, tx, ty, tk)
                 clip_dirty = True
                 continue
             if clip_dirty:
@@ -415,15 +436,40 @@ def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
                     by0 = min(by0, y)
                     bx1 = max(bx1, x)
                     by1 = max(by1, y)
-                var fx = scene.path[p0]
-                var fy = scene.path[p0 + 1]
-                for z in range(1, n - 1):
-                    f.fan.append(fx)
-                    f.fan.append(fy)
-                    f.fan.append(scene.path[p0 + 2 * z])
-                    f.fan.append(scene.path[p0 + 2 * z + 1])
-                    f.fan.append(scene.path[p0 + 2 * z + 2])
-                    f.fan.append(scene.path[p0 + 2 * z + 3])
+                # n − 2 triangles zig-zagging in from both ends ((lo, lo+1, hi), then (lo, hi−1, hi), …): their edges
+                # inside the polygon cancel in pairs, so their signed windings add up to the polygon's (like a fan from
+                # p0), but a ribbon (an ink outline: one side out, the other back) is covered about once instead of
+                # being swept by long fan triangles: ~10× less stencil work for a stroke (goal 75 M2)
+                var lo = 0
+                var hi = n - 1
+                var upper = True
+                while hi - lo >= 2:
+                    var ia: Int
+                    var ib: Int
+                    if upper:
+                        ia = lo
+                        ib = lo + 1
+                        lo += 1
+                    else:
+                        ia = hi - 1
+                        ib = hi
+                        hi -= 1
+                    var ic = hi if upper else lo
+                    if upper:
+                        f.fan.append(scene.path[p0 + 2 * ia])
+                        f.fan.append(scene.path[p0 + 2 * ia + 1])
+                        f.fan.append(scene.path[p0 + 2 * ib])
+                        f.fan.append(scene.path[p0 + 2 * ib + 1])
+                        f.fan.append(scene.path[p0 + 2 * ic])
+                        f.fan.append(scene.path[p0 + 2 * ic + 1])
+                    else:
+                        f.fan.append(scene.path[p0 + 2 * ic])
+                        f.fan.append(scene.path[p0 + 2 * ic + 1])
+                        f.fan.append(scene.path[p0 + 2 * ia])
+                        f.fan.append(scene.path[p0 + 2 * ia + 1])
+                        f.fan.append(scene.path[p0 + 2 * ib])
+                        f.fan.append(scene.path[p0 + 2 * ib + 1])
+                    upper = not upper
                 f.polys.append(Float32(fan0))
                 f.polys.append(Float32(3 * (n - 2)))
                 f.polys.append(Float32(pt0))

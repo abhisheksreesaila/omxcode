@@ -1681,3 +1681,11 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7521 · fading topics are noted "leaving <id>", not "node <id>" · the node-notes-equal-shown proof holds mid-fade · yes
 - D-7522 · a removed topic keeps its box after an undo · so the undo's removal shrinks out instead of vanishing · yes
 - D-7523 · balance() is explicit (one undo step), not run on every layout; pnote's scene map calls it · sides are stored (the L flag) and a layout shouldn't change what the person chose · yes
+- D-7524 · gpu2d_merge reorders runs only where bounds prove no overlap (merge_runs), for any app, instead of changing how the mind map paints · identical pixels (canvas runs 49→23, map 30→10) · yes
+- D-7525 · the GL backend groups polygons by overlap depth (up to 512 per group) and sends each group with multi-draw (indirect on NVIDIA's GLES) · map stencil groups ~230→~70, GL draws ~490→144 a frame; no copies, appends possible · yes
+- D-7526 · a layer that only gained ops at its end is appended, not rebuilt · a finished stroke's frame goes from 7–10 ms of GL work to ~0.3 ms · yes
+- D-7527 · on drivers with mixed samples the canvas texture is drawn directly over an 8-sample stencil (no MSAA colour, no resolve); 8× MSAA with a resolve elsewhere · less memory traffic, same edges within the readback bounds · yes
+- D-7528 · framebench counts the GL work with GPU timer queries of that frame (MOJOUI_GPU2D_BENCH_WAIT=1 blocks on the fence instead) · counts our GPU work, not GTK's queued paint · yes
+- D-7529 · provably opaque frames go to GTK as an opaque texture format; GTK's GL renderer is asked for only while a .gpu() canvas is on screen · less work for GTK, nothing changes for other apps · yes
+- D-7530 · M2 passes 3 of 5 runs: the 2 failures are frames that never painted (whiteboard draw/finish) while other worktrees' jobs held load 5–70; every painted frame was in budget. framebench now prints missed_suspended and ring_full so the next stall names its cause · not a pass to wave through: re-run on a quiet machine before the report calls M2 done · yes
+- D-7531 · known gap: pan/zoom/draw framebench time the frame after the canvas draw, so GTK's paint of a new texture (~2 ms) isn't in those numbers (grow counts it); worst totals stay under 8.3 ms with it added · reported, not hidden · yes

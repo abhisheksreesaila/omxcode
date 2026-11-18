@@ -26,6 +26,8 @@ from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate
+from mojoui.gpu2d_gl import GPU2D
+from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
 from std.collections import Dict
@@ -522,6 +524,7 @@ struct GtkCanvas(Copyable, Movable):
     var pending_w: Int
     var pending_h: Int
     var pending_blended: Bool
+    var on_gpu: Bool  # the last frame went through the GPU 2D renderer (mojoui.gpu2d_gl), not GSK nodes
 
     def __init__(out self, node: Int, widget: Int):
         self.node = node
@@ -571,6 +574,7 @@ struct GtkCanvas(Copyable, Movable):
         self.pending_w = 0
         self.pending_h = 0
         self.pending_blended = False
+        self.on_gpu = False
 
 
 struct BoardChild(Copyable, Movable):
@@ -739,6 +743,13 @@ struct GtkHost[A: App](Movable):
     var cpu_copied: Int  # drawn on the GPU but copied to the CPU (the old path: no interop, or it failed)
     var present_ns: Int
     var present_lag: Bool  # MOJOUI_PRESENT_LAG=1: an animating canvas's GPU picture is shown a frame later (D-747)
+    # the GPU 2D renderer for Canvas(…).gpu() (goal 75, mojoui/gpu2d_gl.mojo): a GPU2D on the heap (its address; 0 until
+    # a .gpu() canvas first draws), the GDK GL context it draws in, whether it works (0 untried, 1 yes, -1 no: the
+    # canvases use GSK nodes), and framebench's ask to wait for the GPU in each frame (so its work is counted)
+    var g2d: Int
+    var g2d_ctx: Int
+    var g2d_state: Int
+    var g2d_wait: Bool
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -759,6 +770,10 @@ struct GtkHost[A: App](Movable):
         self.cpu_copied = 0
         self.present_ns = 0
         self.present_lag = getenv("MOJOUI_PRESENT_LAG") == "1"
+        self.g2d = 0
+        self.g2d_ctx = 0
+        self.g2d_state = 0
+        self.g2d_wait = False
         self.partial_ok = getenv("MOJOUI_NO_PARTIAL") == ""
         self.scene_mode = getenv("MOJOUI_SCENE") != "0"  # (the default since goal 27, D-261; 0: the pixel path)
         self.layouts = Dict[String, Int]()
@@ -3098,6 +3113,125 @@ struct GtkHost[A: App](Movable):
             print("mojoui: GPU canvas pictures go to the screen without a copy to the CPU (" + how + "; " + pr[].why + ")", flush=True)
         return True
 
+    def gpu2d_gpu_ms(mut self) -> Float64:
+        """The GPU time of the GPU 2D renderer's last frame timed (ms; -1 when GL has no timer queries or none was)."""
+        if self.g2d == 0 or self.g2d_ctx == 0:
+            return -1
+        var prev = external_call["gdk_gl_context_get_current", Int]()
+        external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
+        var ns = self.gpu2d()[].gl.gpu_time()
+        if prev != 0:
+            external_call["gdk_gl_context_make_current", NoneType](prev)
+        else:
+            external_call["gdk_gl_context_clear_current", NoneType]()
+        return Float64(ns) / 1e6 if ns >= 0 else -1.0
+
+    def gpu2d(self) -> Pointer[GPU2D, MutUntrackedOrigin]:
+        return Pointer[GPU2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
+
+    def gpu2d_ready(mut self) -> Bool:
+        """Whether .gpu() canvases draw with the GPU 2D renderer: the first time, makes a GDK GL context (GL 3.3 core or
+        GLES 3.0, whichever GDK gives) and starts the GL backend in it (shaders compiled, the atlas uploaded: nothing
+        compiles mid-frame), and tells the app which (mojoui.gpu2d_backend). No: GSK nodes, as every other canvas."""
+        if self.g2d_state != 0:
+            return self.g2d_state == 1
+        self.g2d_state = -1
+        var why = String("")
+        var rname = String("?")
+        var renderer = external_call["gtk_native_get_renderer", Int](self.window) if self.window != 0 else 0
+        if renderer != 0:
+            rname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](renderer)))
+        var gl_renderer = rname.find("GL") >= 0 or rname.find("Ngl") >= 0  # (GskGLRenderer, GskNglRenderer)
+        if not gl_renderer and getenv("MOJOUI_GPU2D") != "force":
+            why = "GTK's renderer is " + rname + ", which copies GL textures through the CPU (D-737)"
+            set_backend_name("cpu (" + why + ")")
+            print("mojoui: .gpu() canvases: GSK nodes (" + why + ")", flush=True)
+            return False
+        var display = external_call["gdk_display_get_default", Int]()
+        var err = List[Int](length=1, fill=0)
+        var ctx = external_call["gdk_display_create_gl_context", Int](display, Int(err.unsafe_ptr())) if display != 0 else 0
+        if ctx == 0 or external_call["gdk_gl_context_realize", c_int](ctx, Int(err.unsafe_ptr())) == 0:
+            var msg = c_str(Pointer[Int, MutUntrackedOrigin](unsafe_from_address=err[0] + 8)[]) if err[0] != 0 else String("")
+            why = "no GL on this display" + (" (" + msg + ")" if msg != "" else String(""))
+            if ctx != 0:
+                external_call["g_object_unref", NoneType](ctx)
+            ctx = 0
+        _ = len(err)
+        if ctx != 0:
+            var prev = external_call["gdk_gl_context_get_current", Int]()
+            external_call["gdk_gl_context_make_current", NoneType](ctx)
+            var es = external_call["gdk_gl_context_get_use_es", c_int](ctx) != 0
+            var g = alloc(Layout[GPU2D].single()).unsafe_leak()
+            g.unsafe_write(GPU2D())
+            if g[].start(es):
+                self.g2d = Int(g)
+                self.g2d_ctx = ctx
+                self.g2d_state = 1
+            else:
+                why = g[].gl.why.copy()
+                g[].gl.close()
+                g.unsafe_deinit_pointee()
+                g.unsafe_free()
+            if prev != 0:
+                external_call["gdk_gl_context_make_current", NoneType](prev)
+            else:
+                external_call["gdk_gl_context_clear_current", NoneType]()
+            if self.g2d_state != 1:
+                external_call["g_object_unref", NoneType](ctx)
+        if self.g2d_state == 1:
+            set_backend_name("gpu2d-GL (" + self.gpu2d()[].gl.why + "; shown by " + rname + ")")
+        else:
+            set_backend_name("cpu (" + why + "; GSK nodes on " + rname + ")")
+        print("mojoui: .gpu() canvases: " + ("the GPU 2D renderer, " + self.gpu2d()[].gl.why if self.g2d_state == 1 else "GSK nodes (" + why + ")"), flush=True)
+        return self.g2d_state == 1
+
+    def gpu2d_show(mut self, ci: Int, widget: Int, sc: Scene, w: Int, h: Int) -> Bool:
+        """The canvas's display list drawn by the GPU 2D renderer into a ring texture and shown as a GdkGLTexture
+        (GTK's release callback frees the slot; GTK waits on the frame's GL fence before sampling it). False: every
+        texture is still held, or GL failed (then .gpu() canvases go back to GSK nodes for good)."""
+        var g = self.gpu2d()
+        var prev = external_call["gdk_gl_context_get_current", Int]()
+        external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
+        var slot = g[].draw(sc, self.canvases[ci].prev, widget if self.canvases[ci].on_gpu else 0, w, h)
+        var t_wait = perf_counter_ns()
+        if slot >= 0 and self.g2d_wait:  # (framebench: the GPU's part of the frame counted in draw_ms)
+            g[].gl.wait(slot)
+        var wait_ns = Int(perf_counter_ns() - t_wait)
+        if prev != 0:
+            external_call["gdk_gl_context_make_current", NoneType](prev)
+        else:
+            external_call["gdk_gl_context_clear_current", NoneType]()
+        if slot < 0:
+            if not g[].gl.ok:
+                print("mojoui: the GPU 2D renderer failed (" + g[].gl.why + "): .gpu() canvases use GSK nodes from now on", flush=True)
+                self.g2d_state = -1
+                set_backend_name("cpu (the GPU 2D renderer failed: " + g[].gl.why + ")")
+            return False
+        if not self.canvases[ci].on_gpu:  # (from GSK nodes to the GPU path: the kept nodes and layer textures go)
+            self.canvases[ci].on_gpu = True
+            var staying = List[Bool](length=len(self.canvases), fill=True)
+            staying[ci] = False
+            self.release_canvases(staying)
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=g[].gl.busy_flag(slot))[] = 1
+        var b = external_call["gdk_gl_texture_builder_new", Int]()
+        external_call["gdk_gl_texture_builder_set_sync", NoneType](b, g[].gl.sync[slot])
+        external_call["gdk_gl_texture_builder_set_context", NoneType](b, self.g2d_ctx)
+        external_call["gdk_gl_texture_builder_set_id", NoneType](b, c_uint(g[].gl.tex[slot]))
+        external_call["gdk_gl_texture_builder_set_width", NoneType](b, c_int(w))
+        external_call["gdk_gl_texture_builder_set_height", NoneType](b, c_int(h))
+        # an opaque frame as GDK_MEMORY_R8G8B8X8 (GTK neither converts its alpha nor blends it), else GDK_MEMORY_R8G8B8A8
+        # (straight alpha, what the backend draws)
+        external_call["gdk_gl_texture_builder_set_format", NoneType](b, c_int(31 if g[].opaque and getenv("MOJOUI_GPU2D_OPAQUE") != "0" else 5))
+        var tex = external_call["gdk_gl_texture_builder_build", Int](b, on_gl_texture_released, g[].gl.busy_flag(slot))
+        external_call["g_object_unref", NoneType](b)
+        external_call["gtk_picture_set_paintable", NoneType](widget, tex)
+        external_call["g_object_unref", NoneType](tex)
+        if self.rt.trace:
+            print("TRACE: gpu2d " + String(w) + "x" + String(h) + " batches " + ms(g[].batch_ns) + " ms, GL " + ms(g[].render_ns) + " ms, GPU wait " + ms(wait_ns) + " ms, layers rebuilt "
+                  + String(g[].rebuilt) + " reused " + String(g[].reused) + " grown " + String(g[].grown) + " (runs " + String(g[].runs_built) + " -> " + String(g[].runs_merged) + "), uploaded " + String(g[].gl.uploaded // 1024) + " KB (" + ms(g[].gl.upload_ns) + " ms; polygon plan " + ms(g[].gl.plan_ns) + " ms), "
+                  + String(g[].gl.draws) + " draws, " + String(g[].gl.poly_groups) + " polygon groups")
+        return True
+
     def flush_pending(mut self, ci: Int, show: Bool):
         """MOJOUI_PRESENT_LAG=1 keeps a canvas's last GPU picture back a frame: when the canvas stops redrawing, show it
         (show=True); when a CPU picture replaces it, free its slot (review item 6)."""
@@ -3151,6 +3285,7 @@ struct GtkHost[A: App](Movable):
         var t1 = t0
         var drew_scene = False
         if self.scene_mode:  # the display list, drawn by GTK's own renderer (render nodes; GPU on a real display)
+            var on_gpu = self.rt.shown.nodes[node].hint == "gpu" and self.gpu2d_ready()  # (before the app draws: it may ask which)
             var sc = Scene(0, 0, 1)
             swap(sc, self.canvases[ci].spare)
             sc.reset(wpx, hpx, scale)
@@ -3161,7 +3296,17 @@ struct GtkHost[A: App](Movable):
                 d = r[1].copy()
                 again = sc.again
                 t1 = perf_counter_ns()
-                self.replay(ci, sc^, wpx, hpx)
+                if on_gpu and self.gpu2d_show(ci, widget, sc, wpx, hpx):
+                    if self.rt.trace:
+                        print("TRACE: gpu2d app draw_scene " + ms(Int(t1) - Int(t0)) + " ms, " + String(sc.ops()) + " ops")
+                    t1 = perf_counter_ns()  # (the GPU path: draw_ms is all of it, the app's draw, batches, GL and the wait)
+                    swap(self.canvases[ci].spare, self.canvases[ci].prev)  # (this frame's list is next frame's prev; the
+                    self.canvases[ci].prev = sc^  # old prev's memory is recycled)
+                else:
+                    if self.canvases[ci].on_gpu:  # (back from the GPU path: no kept nodes or textures match prev any more)
+                        self.canvases[ci].on_gpu = False
+                        self.canvases[ci].prev = Scene(0, 0, 1)
+                    self.replay(ci, sc^, wpx, hpx)
         if not drew_scene:
             if len(self.canvases[ci].pixels) != wpx * hpx:
                 self.canvases[ci].pixels = List[UInt32](length=wpx * hpx, fill=0)
@@ -4214,9 +4359,22 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if renderer != 0:
         var cname = external_call["g_type_name_from_instance", Int](renderer)
         rname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=cname))
+    # a GPU 2D canvas's GPU work is counted in draw_ms: its frames timed on the GPU (time-elapsed queries, read after
+    # the frame's raster below, which syncs the GPU) and the last one's (the frame draw_ms is the CPU time of) added; MOJOUI_GPU2D_BENCH_WAIT=1: instead each frame
+    # blocks until the GPU is done (that also counts whatever the GPU ran before it, e.g. GTK's last paint)
+    var g2d_timed = host[].g2d != 0 and host[].g2d_state == 1 and getenv("MOJOUI_GPU2D_BENCH_WAIT") != "1"
+    host[].g2d_wait = host[].g2d != 0 and not g2d_timed
+    if g2d_timed:
+        host[].gpu2d()[].gl.timing = True
+    var gpus = List[Float64]()
+    var missed_suspended = 0  # (missed frames while the window was suspended: hidden, another workspace)
+    var ring_full0 = host[].gpu2d()[].gl.full if host[].g2d != 0 else 0
     var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
     while (not host[].canvases_drawn() or busy() or host[].has_pending) and perf_counter_ns() < wait_by:
         pump()
+    if host[].canvases[ci].on_gpu:  # (the raster below, once untimed: GTK's GL renderer builds its offscreen path on the
+        # first gsk_renderer_render_texture (~196 ms, measured), a cost of this measurement, never of a frame on screen)
+        raster_once(host[].canvases[ci].widget, renderer)
     var w = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].canvases[ci].widget)))
     var h = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].canvases[ci].widget)))
     var works = List[Float64]()
@@ -4327,6 +4485,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 unchanged += 1
             else:
                 missed += 1
+                var surf = external_call["gtk_native_get_surface", Int](host[].window) if host[].window != 0 else 0
+                if surf != 0 and (Int(external_call["gdk_toplevel_get_state", c_int](surf)) & (1 << 16)) != 0:
+                    missed_suspended += 1  # (GDK_TOPLEVEL_STATE_SUSPENDED: the compositor isn't showing the window)
             continue
         var dm = host[].canvases[ci].draw_ms
         var pm = host[].frame_paints[len(host[].frame_paints) - 1]
@@ -4347,6 +4508,11 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                     external_call["g_object_unref", NoneType](tex)
                 external_call["gsk_render_node_unref", NoneType](root)
         var rm = Float64(Int(perf_counter_ns()) - Int(tr)) / 1e6
+        if g2d_timed:  # (the GPU time of the canvas's last frame: the one whose CPU time draw_ms holds)
+            var gms = host[].gpu2d_gpu_ms()
+            if gms >= 0:
+                dm += gms
+                gpus.append(gms)
         rasters.append(rm)
         sm += rm
         events.append(ev_ms)
@@ -4354,6 +4520,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         paints.append(pm)
         syncs.append(sm)
         works.append(ev_ms + dm + pm + sm)
+        if host[].rt.trace and (ev_ms + dm + pm + sm > 8.3 or getenv("MOJOUI_TRACE_FRAMES") == "1"):  # (a frame over the silky budget, or every frame: which one, and which part)
+            print("TRACE: slow bench frame " + String(i) + " kind " + String(kind) + ": event " + one_decimal(Float32(ev_ms)) + " draw " + one_decimal(Float32(dm))
+                  + " paint " + one_decimal(Float32(pm)) + " sync " + one_decimal(Float32(sm - rm)) + " raster " + one_decimal(Float32(rm)), flush=True)
         if kind == RELEASE:
             releases.append(works[len(works) - 1])
         elif prev_kind == RELEASE:
@@ -4372,6 +4541,18 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if what == "deepzoom":  # (back out, untimed)
         host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 1.0 / 8.0, host_addr)
         bench_wait[A](host_addr, ci, 3_000_000_000)
+    host[].g2d_wait = False
+    if g2d_timed:
+        host[].gpu2d()[].gl.timing = False
+        _ = host[].gpu2d_gpu_ms()
+    if host[].canvases[ci].on_gpu:
+        rname = "gpu2d-GL(" + rname + ")"
+    counts += " missed_suspended=" + String(missed_suspended)
+    if host[].g2d != 0:
+        counts += " ring_full=" + String(host[].gpu2d()[].gl.full - ring_full0)
+    if len(gpus) > 0:
+        counts += " gpu_p95=" + one_decimal(Float32(pct(gpus, 0.95))) + " gpu_max=" + one_decimal(Float32(pct(gpus, 1.0))) + (
+            " gpu_by=timer" if g2d_timed else " gpu_by=wait")
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
           + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
@@ -4379,6 +4560,23 @@ def frame_bench[A: App](host_addr: Int, rest: String):
           + " draw_max=" + one_decimal(Float32(pct(draws, 1.0))) + " raster_max=" + one_decimal(Float32(pct(rasters, 1.0)))
           + " release_p95=" + one_decimal(Float32(pct(releases, 0.95))) + " release_max=" + one_decimal(Float32(pct(releases, 1.0)))
           + " after_max=" + one_decimal(Float32(pct(afters, 1.0))) + counts, flush=True)
+
+
+def raster_once(widget: Int, renderer: Int):
+    """The picture's paintable rendered whole to a texture by the window's renderer (framebench's raster)."""
+    var paintable = external_call["gtk_picture_get_paintable", Int](widget)
+    if paintable == 0 or renderer == 0:
+        return
+    var w = Float64(Int(external_call["gtk_widget_get_width", c_int](widget)))
+    var h = Float64(Int(external_call["gtk_widget_get_height", c_int](widget)))
+    var snap = external_call["gtk_snapshot_new", Int]()
+    external_call["gdk_paintable_snapshot", NoneType](paintable, snap, w, h)
+    var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+    if root != 0:
+        var tex = external_call["gsk_renderer_render_texture", Int](renderer, root, 0)
+        if tex != 0:
+            external_call["g_object_unref", NoneType](tex)
+        external_call["gsk_render_node_unref", NoneType](root)
 
 
 def bench_wait[A: App](host_addr: Int, ci: Int, ns: Int):
@@ -7209,6 +7407,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     host[].rt.app.appearance(host[].dark_told == 1)  # (and again when the person switches)
     connect3(styles, "notify::dark", on_dark_changed[A], host_addr)
     host[].rt.shown = host[].rt.view()  # (its spacing tokens in the theme's points)
+    gpu2d_renderer(host[].rt.shown.nodes)  # (before the window is realized: GTK picks its renderer then)
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
@@ -7299,6 +7498,21 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         save_png(host[].window, shot)
     if testing or shot != "":
         external_call["g_application_quit", NoneType](gapp)
+
+
+def gpu2d_renderer(nodes: List[Node]):
+    """An app whose first screen has a Canvas(…).gpu() gets GTK's GL renderer (GSK_RENDERER=gl, unless set, or
+    MOJOUI_GPU2D=0): it samples the GPU 2D renderer's GL textures as they are, where GTK's Vulkan renderer copies each
+    one through the CPU on NVIDIA (D-737; ~30 ms a frame at 1699×1384, measured for goal 75). Apps without one keep
+    GTK's default renderer and an untouched environment (D-752)."""
+    if getenv("GSK_RENDERER") != "" or getenv("MOJOUI_GPU2D") == "0":
+        return
+    for ref n in nodes:
+        if n.kind == CANVAS and n.hint == "gpu":
+            var k = String("GSK_RENDERER")
+            var v = String("gl")
+            _ = external_call["setenv", c_int](k.as_c_string_span(), v.as_c_string_span(), c_int(0))
+            return
 
 
 def on_gl_texture_released(flag: Int) abi("C"):
@@ -7395,6 +7609,13 @@ def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
     (review item 4)."""
     var host = host_at[A](host_addr)
     host[].rt.closing()
+    if host[].g2d != 0 and host[].g2d_ctx != 0:  # (the GPU 2D renderer's GL objects, in their context, then the context)
+        external_call["gdk_gl_context_make_current", NoneType](host[].g2d_ctx)
+        host[].gpu2d()[].gl.close()
+        external_call["gdk_gl_context_clear_current", NoneType]()
+        external_call["g_object_unref", NoneType](host[].g2d_ctx)
+        host[].g2d_ctx = 0
+        host[].g2d_state = -1
     if host[].pres == 0 or host[].gl_ctx == 0:
         return
     external_call["gdk_gl_context_make_current", NoneType](host[].gl_ctx)

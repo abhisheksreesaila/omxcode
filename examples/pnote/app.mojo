@@ -30,6 +30,7 @@ from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, I
 from mojoui.mindmap import MindMap, MapView
 from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
+from mojoui.gpu2d_backend import backend_name
 from themes.liquid import liquid
 
 comptime NEW_PAGE = 1
@@ -157,6 +158,8 @@ def scene_map(n: Int) -> MindMap:
         var parent = 0 if k < 8 else ids[1 + Int(s % UInt32(len(ids) - 1))]
         var text = words[Int((s >> 5) % UInt32(len(words)))] + (" " + words[Int((s >> 11) % UInt32(len(words)))] if s % 3 == 0 else "")
         ids.append(m.add_child(parent, text, 0))
+    m.balance(0)  # (main branches spread evenly left and right, D-7523)
+    m.settle()
     m.clear_history()
     return m^
 
@@ -182,6 +185,8 @@ struct Row(Copyable, Movable):
 struct Main(App):
     var db: Optional[Database]
     var problem: String
+    var gpu: Bool  # the note's canvas asks for the GPU 2D renderer (Canvas(…).gpu()); PNOTE_GPU=0: GSK nodes (the baseline)
+    var gpu_told: Bool  # the `PNOTE GPU:` line is out (the first draw: by then the host knows which renderer it has)
     var rows: List[Row]  # every note, newest first
     var shown: List[Int]  # rows shown in the list (the search's hits)
     var query: String
@@ -219,6 +224,8 @@ struct Main(App):
     def __init__(out self):
         self.db = None
         self.problem = ""
+        self.gpu = environment("PNOTE_GPU", "1") != "0"
+        self.gpu_told = False
         self.rows = List[Row]()
         self.shown = List[Int]()
         self.query = ""
@@ -268,7 +275,9 @@ struct Main(App):
                 chars = 0
             var imp = environment("PNOTE_IMPORT", "")
             var scene = environment("PNOTE_SCENE", "")
-            print("PNOTE GPU: " + ("cpu (PNOTE_GPU=0)" if environment("PNOTE_GPU", "1") == "0" else "cpu (no GPU backend in this host yet)"), flush=True)
+            if not self.gpu:
+                print("PNOTE GPU: cpu (PNOTE_GPU=0)", flush=True)
+                self.gpu_told = True
             if scene == "whiteboard":
                 var l = whiteboard_layer(1000)
                 self.new_note(CANVAS, l.save_text())
@@ -787,7 +796,7 @@ struct Main(App):
         bar.append(Text(kind_name(self.open_kind), CAPTION))
         var main = VStack(
             HStack(bar^, spacing=8).fill().align(CENTER).padding(8, 16).tag("notebar"),
-            Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).grow().fill().tag("note"),
+            self.note_canvas(),
             spacing=0,
         ).grow().fill()
         var column = VStack(Sidebar(side^), Spacer(), spacing=0).width(280).fill().align(START).padding(8, 8).tag("side")
@@ -805,6 +814,20 @@ struct Main(App):
             items.append(Text("New page · New canvas · New map", CAPTION))
             return Overlay(body^, VStack(items^, spacing=4).padding(12, 12).tag("palette").pin(CENTER, START))
         return body^
+
+    def note_canvas(self) -> View:
+        var c = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True)
+        if self.gpu:
+            c = c^.gpu()
+        return c^.grow().fill().tag("note")
+
+    def tell_gpu(mut self):
+        """`PNOTE GPU: <backend> …` once, at the first draw (the host has chosen its renderer by then)."""
+        if self.gpu_told:
+            return
+        self.gpu_told = True
+        var name = backend_name()
+        print("PNOTE GPU: " + (name if name != "" else String("cpu (this host has no GPU 2D renderer)")), flush=True)
 
     # ------------------------------------------------ drawing
 
@@ -840,10 +863,12 @@ struct Main(App):
             self.map.paint(p, self.font, MapView((w / 2 + self.map_dx) * k, (h / 2 + self.map_dy) * k, k * self.map_k))
 
     def draw_scene(mut self, canvas: Int, mut scene: Scene) -> Bool:
+        self.tell_gpu()
         var k = scene.scale()
         self.paint(scene, Float64(scene.width()) / k, Float64(scene.height()) / k)
         return True
 
     def draw(mut self, canvas: Int, mut surface: Surface):
+        self.tell_gpu()
         var sp = SurfacePainter(Surface(surface.address, surface.width, surface.height, surface.scale))
         self.paint(sp, Float64(surface.width) / surface.scale, Float64(surface.height) / surface.scale)
