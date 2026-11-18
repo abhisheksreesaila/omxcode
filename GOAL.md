@@ -1,42 +1,41 @@
-# GOAL 72: omx, the voice app, rebuilt on omxcode (in-process, AG-UI, every button a tool)
+# GOAL 77: omx shows and points (visual answers for a kitchen counter)
 
-**End goal (owner, 2026-11-17):** "Now that I've proved how well it works… make the story about our stack… if you use omxcode,
-you have in-process stuff, you have AG-UI for free, you can generate complex interfaces because it runs on GPU already… every
-button is a tool, so MCP becomes a no-brainer… I would prefer all of them in Mojo… pick Qwen 27B… use that for your in-process
-calling… Parakeet and stuff, if not supported by Mojo or MAX, use llama.cpp for voice… convert the existing shell into a nice
-app that is native to our framework… adhering to that protocol [AG-UI] will help us scale… bring all the features about comic
-and stuff." The prototype is ~/Projects/omx-local (Python + JS, goals 1–4 PASS, 23/23 checks): it is the reference for
-behaviour and numbers, read-only. This goal proves the real stack. Next (not this goal): visual, pointy answers for a kitchen
-counter (maps, isometric explainers, "look at this").
+**End goal (owner, 2026-11-17/18):** "No one's going to read text… this is an app on a kitchen countertop, not an app on a big
+monitor… it has to be visual and it has to be pointy: open up a card, 'hey, look at this'… a trip is a map… any explanation,
+isometric… if someone asks the meaning she can print the word… open up the camera… segment and tell you what to do." Then:
+"yes go, isometrics can be simple." Goal 72 built the app on omxcode (examples/omx: in-process Qwen3.8-27B, AG-UI agent, voice,
+tablet). This goal makes its answers visual and pointed, framework first: every card and the pointer are generic components an
+agent can use in any omxcode app.
 
-Base: main cc33c9d7. Worktree ../mojo-ui-g72, branch goal-72-omx-voice. Decisions D-72xx. Goal 71's contract: docs/goals/71.md.
+Base: main eba2bbdc (goal 72 + 73). Worktree ../mojo-ui-g77, branch goal-77-show-and-point. Decisions D-77xx. Goal 72's
+contract: docs/goals/72.md. Reference prototype pieces (read-only): ~/Projects/omx-local/src/omxlocal/visual.py (word/map/
+explainer data + the clause-to-part pointer matcher), omx-local GOAL.md goal 5 (M24–M30).
 
 ## Milestones (framework first; the app only composes)
-| # | Milestone | Proof (`docs/goals/72-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (`docs/goals/77-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | Ground | GPUs, models and engines found (Qwen3.8-27B UD-Q4_K_M + MTP GGUF, Kokoro, Parakeet, Z-Image, from omx-local/models, read-only); libllama built with CUDA sm_86 reachable from the worktree; D-7201 (why the brain isn't MAX on the 3090s) recorded with the evidence |
-| M1 | `mojoui.llm`: a local LLM in-process | a framework component (no app code) that loads a GGUF on a chosen GPU through libllama (a small C shim: scalars and pointers only), streams tokens to the UI as events from a worker thread, keeps the conversation's prompt cache between turns, applies the model's own chat template, parses tool calls, cancels mid-reply, and runs a second sequence for background work. tests/test_llm: Paris; a tool call with JSON args parsed; cancel stops within 100 ms; decode ≥ 40 tok/s on one 3090; second-turn time to first token ≤ 0.5× the first (cache kept); in-process first token ≤ the same prompt through llama-server HTTP |
-| M2 | `mojoui.voice`: ears and mouth | `Speaker` (audio out: PulseAudio on Linux, the browser on the web host), `Voice` TTS (Kokoro, in-process), Parakeet as a `SpeechModel` backend (in-process), an endpointer with barge-in. tests/test_voice: TTS first audio ≤ 400 ms; Parakeet hears the TTS back with WER ≤ 0.10; speech end → final text ≤ 300 ms; barge-in stops the speaker within 300 ms |
-| M3 | The agent speaks AG-UI | a voice agent as an in-process `LocalAgent` over `mojoui.llm`: every reply is AG-UI events (RUN_*, TEXT_MESSAGE_*, TOOL_CALL_*, STATE_*, render_ui cards from the catalog), its tools are the app's own buttons (the agent host, D-162) plus render_ui; the same agent is served as an AG-UI HTTP/SSE endpoint so any AG-UI client can use it. Proof: the official `ag-ui-protocol` client runs against the endpoint and every event validates; an in-app run renders a card; the app's buttons appear as its tools |
-| M4 | The app, `examples/omx` | composed only of framework parts, Liquid: the orb that listens and speaks, captions, a shelf of cards (render_ui), the lane chip, the cloud frame. Voice loop on the desktop (GTK): a recorded question → spoken answer, first audio ≤ 1.5 s after the speaker stops, the answer right; an interruption stops it ≤ 500 ms; screenshots; the app-lint passes (no host imports, colours or pixel sizes in the app) |
-| M5 | The tablet | the web host carries the browser's mic in and the speaker out, behind a pairing key, served on the tailnet (`tailscale serve` → loopback). Proof: Chromium with a fake mic over https://<machine>.ts.net: question → spoken answer ≤ 2 s; no key → refused; tablet-width screenshot |
-| M6 | The features come home | to-do (store, voice ticks), news cards, comics (Picture from agent-made images; Z-Image on card 2), find in my notes (in-process embeddings via MAX, cited), think-it-through jobs (the second sequence), the cloud lane (`claude -p`, orange frame). Proof: omx-local's M15–M17 and M21–M23 scenarios, ported, pass on the new app |
-| M7 | Nothing regressed | the component matrix regenerated; goal 71's check (M5 inside it); decisions lint; omx-local untouched |
+| M0 | Ground | disk ≥ 40 GB free, both GPUs free of other work, playwright Chromium, goal 72's M4 still passes on this base |
+| M1 | She points | a framework pointer: cards declare named parts (tags); while a reply is spoken, each clause that names a part sends an AG-UI CUSTOM `point` event timed to where in that clause's audio the name is said; the pointer (a soft ring, a spring) moves to the part and the orb's eyes look at it; GTK and the web host. Proof: a card with 3 named parts walked through aloud → ≥ 3 points, each on a part that exists, each shown within 250 ms of the audio that names it (measured against the speaker's play clock); a screenshot mid-point with the ring on its target |
+| M2 | Word card | "What does X mean?" → a Word card (the word typed out big, how it sounds, part of speech, meaning, one example), the voice says the gist and points at word → meaning → example. Proof: 3 of 3 words, the meaning judged right by the model against a reference; points land; phone screenshot |
+| M3 | Map card | trips and places → a map with real tiles (fetched from the web, cached on disk, marked "web"), numbered stops in the order spoken, a route line; stops placed by the model and checked against a geocoder; the map flies to each stop as it is named. Proof: 2 of 2 trips (a city day, a three-city trip) give ≥ 3 stops each within 25 km of the truth; points fly to stops; tablet screenshot |
+| M4 | Simple isometric explainer | "How does X work?" → a small isometric diagram (3–6 blocks, arrows, numbered steps) drawn by a generic Iso component; steps point block by block. Proof: 3 of 3 concepts give ≥ 3 blocks, ≥ 2 links, ≥ 3 steps naming blocks that exist; points follow the steps; screenshot |
+| M5 | Visual first | the agent prefers a card for anything it can show and keeps speech to one or two sentences that refer to it (system prompt + tool descriptions, no app logic). Proof: ≥ 9 of 10 routing utterances land on the right card kind (map / word / iso / table / to-do / none); spoken replies on card turns ≤ 2 sentences |
+| M6 | The camera | the tablet's camera (web host, the reserved tag-3 frames) and a desktop camera if present are a framework Camera; "what am I looking at / what should I do" sends the frame to Qwen's own eyes in-process (mojoui.llm gains image input through llama.cpp's mtmd); the card shows the frame with boxes round the things that matter and the pointer lands on the one she names. Proof: a fake-camera scene with objects at known places: the asked-for object's box overlaps the truth (IoU ≥ 0.4), the answer names it, the point lands on it; screenshot |
+| M7 | Looks like the prototype, nothing regressed | the shelf's cards, the bar and the dock reach the prototype's polish (Liquid: glass bar, card depth, the table styled; side-by-side shots with omx-local's), goal 72's M3–M6 still pass, component matrix current, lints |
 
 ## Done means
-72-check PASS for M0–M7 (a BLOCKED says exactly what is missing), a fresh reviewer subagent passes it, docs/goals/72-report.md
-with numbers (in-process vs HTTP, voice latency, the prototype's numbers beside them) and screenshots, EXPERIMENTS.md.
-Committed after each passing milestone; merged to main locally after the reviewer passes; not pushed.
+77-check PASS for M0–M7 (a BLOCKED says exactly what is missing), a fresh reviewer subagent passes it, docs/goals/77-report.md
+with numbers and screenshots, EXPERIMENTS.md. Committed after each passing milestone; merged to main locally after the reviewer
+passes; pushed only under the owner's standing rule (reviewer PASS + green checks).
 
 ## Out of bounds
-Editing omx-local (read its code, models and engines only); other worktrees; pushing; pip (pixi only); lowering a proof or
-deleting a test; the visual/pointing skills (next goal); GPU 1 beyond the creator layout (D-7293): the brain on GPU 0, the voice and the pictures on GPU 1, as goal 4's creator tier had it; D-7250 stopped the prototype to free GPU 0, so nothing of omx-local runs, and the app gives both cards back when it ends.
+Editing omx-local (read only); other worktrees (goals 73–76 belong to other threads); pip (pixi only); lowering a proof or
+deleting a test; sending the camera's frames anywhere off this machine; map tiles and geocoding are the only web calls added,
+marked "web" on the card.
 
 ## Assumptions (instead of asking)
-- The brain is Qwen3.8-27B 4-bit through libllama in-process (D-7201): MAX 26.7 knows Qwen3.8-27B but only as bf16 (54 GB,
-  more than both 3090s), fp8 (no Ampere path shown; a small FP8 Qwen failed in MAX here) or NVFP4 (Blackwell only), and GPTQ
-  for Qwen3.5 "is not implemented yet". MAX is used where it fits: embeddings (maxrt packs).
-- Voice models run in-process through Python interop the way `mojoui.speech` already runs Whisper (the owner allowed
-  llama.cpp-class engines for voice when MAX has no path).
-- The tablet uses the web host in its browser (the Android host lacks timers, HTTP and mic; never run on a device).
-- Budget: 200 turns, stop with a report if blocked.
+- Map tiles: OpenStreetMap-compatible raster tiles with a polite User-Agent and a disk cache (personal, low volume); geocoding:
+  Nominatim, one request a second, cached; both go through the framework's HTTPS client.
+- "Segment" starts as boxes from Qwen's own grounding; the owner's phone segmentation model plugs in later as a model plugin.
+- Points ride AG-UI as CUSTOM events, so any AG-UI client can follow them.
+- Budget: 200 turns.
