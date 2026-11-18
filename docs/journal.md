@@ -1429,3 +1429,10 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Links autocomplete: mojoui.links `complete`, chips under the field, omxplorer feeds videos' and folders' columns. tests/test_link_complete.mojo; docs/goals/73/m1.py PASS on GTK headless (real widgets) and the web host (agent tools).
 - Bug found by the proof: after Return the Links field showed the old link text again (a held change from the chip's own set_text, sent after the rebuild; D-7304). Fixed in the GTK host.
 - Not run: AppKit/iPhone (chips are plain Buttons; the AppKit test-step parser still looks fields up by hint only); no web-host picture (the agent host has no pixels); tests/test_links.mojo needs python duckdb, missing in this env.
+
+## 2026-11-18 (goal 76 M1)
+- Ribbon as mojoui.ribbon; `.hidden()` on every host but Android; Inspector's ✕; examples/ribbon in Liquid. tests/test_ribbon.mojo; docs/goals/76/m1.py PASS: GTK headless (a hidden tab's Chart tapped by title, Ctrl+B from a hidden menu, Details docks a panel, ✕ closes it, compact) and the web (Chromium shots + the agent calling a hidden tool).
+- First GTK band measured 81 pt for 78 asked: Liquid's toolbar surface adds 2 + 2 padding and its edge line. The check allows the theme's padding but fails when tabs differ.
+- The web dump showed no RIBBON: lines (the web host doesn't relay the app's prints): the check reads the page's own words instead.
+- regions: listed hidden bands with odd boxes (-5,-1 12x5): mojoui.regions now skips hidden nodes; the agent's outline marks them "not shown" and its texts() skips them.
+- drive.py's tap: prefers a shown button (a ribbon's same-titled tool on a hidden tab would time out Playwright's click).

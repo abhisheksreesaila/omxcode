@@ -57,7 +57,7 @@ def view_to_json(v: View) -> String:
         out += ',"fills":' + ("true" if n.fills else "false") + ',"align_items":' + String(n.align_items)
         out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"a11y_name":' + json_str(explicit_name(n))
         out += ',"width_from_parent":' + ("true" if n.width_from_parent else "false") + ',"height_from_parent":' + ("true" if n.height_from_parent else "false")
-        out += ',"x":' + String(n.x) + ',"y":' + String(n.y) + (',"arrive":true' if n.arrives else "")
+        out += ',"x":' + String(n.x) + ',"y":' + String(n.y) + (',"arrive":true' if n.arrives else "") + (',"hidden":true' if n.hidden else "")
         out += ',"options":['
         for j in range(len(n.options)):
             if j > 0:

@@ -1400,6 +1400,9 @@ def render(s, i, sid):
         el.attrs["style"] = (old + ";" if old else "") + ";".join(css)
     if n["name"]:
         el.attrs["data-tag"] = n["name"]
+    if n.get("hidden"):  # (.hidden(): in the page, not shown; agents still reach its controls, D-7601)
+        el.attrs["hidden"] = True
+        el.attrs["style"] = (el.attrs.get("style", "") + ";display:none").lstrip(";")
     if n.get("arrive"):  # (.arrive(): a spring the first time it's inserted; mojoui.css .mojoui-arrive)
         el.attrs["class"] = (el.attrs.get("class", "") + " mojoui-arrive").strip()
     if n.get("tip"):

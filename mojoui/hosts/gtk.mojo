@@ -909,6 +909,8 @@ struct GtkHost[A: App](Movable):
     def apply_layout(mut self, i: Int, w: Int) -> Int:
         """Maps node i's own layout settings onto its GTK widget; returns what goes into the parent."""
         var node = self.rt.shown.nodes[i].copy()
+        if node.hidden:  # (.hidden(): in the tree, not drawn; its signals still fire for test steps, D-7601)
+            external_call["gtk_widget_set_visible", NoneType](w, c_int(0))
         if node.pad_v != 0 or node.pad_h != 0:
             add_class(w, self.padding_class(node.pad_v, node.pad_h))
         if node.name != "":  # a tagged view can be styled by the design's CSS (.mui-tag-toolbar)
@@ -952,6 +954,8 @@ struct GtkHost[A: App](Movable):
             external_call["adw_clamp_set_maximum_size", NoneType](clamp, c_int(cap))
             external_call["adw_clamp_set_tightening_threshold", NoneType](clamp, c_int(cap))
             external_call["adw_clamp_set_child", NoneType](clamp, w)
+            if node.hidden:
+                external_call["gtk_widget_set_visible", NoneType](clamp, c_int(0))
             return clamp
         return w
 

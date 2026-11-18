@@ -945,11 +945,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips, ribbon |
 | `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips, ribbon |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, ribbon |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, ribbon |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
@@ -964,7 +964,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot, keeper |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, console, keeper |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, console, keeper, ribbon |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
@@ -972,9 +972,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gpu, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media, sketch |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
-| `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
-| `Menu` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
-| `Item` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
+| `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit, ribbon |
+| `Menu` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit, ribbon |
+| `Item` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit, ribbon |
 | `ContextMenu` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Dialog` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Toast` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | kit |
@@ -1004,6 +1004,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas frames (animation) | `on_frame` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
+| Hidden (in the tree, not drawn; agents and test steps still reach it) | `View.hidden()` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ |
 | Arrive on a spring | `View.arrive(): fades and rises in once (AdwSpringAnimation; a CSS spring)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Canvas: pen pressure | `event.pressure on PRESS, PAN, RELEASE (0: none)` | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Canvas: scroll pans | `Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
@@ -1099,11 +1100,12 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, dashboard, maccheck, media, mxstudio, omxplorer, workbook |
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
-| `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer, ribbon |
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
 | `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
+| `Ribbon (tabs of captioned tool groups; the other tabs' tools hidden, still reachable)` | `mojoui/ribbon.mojo` | Toolbar button (icon over label), Icon toggle shown pressed, File picker, Hidden (in the tree, not drawn; agents and test steps still reach it), Divider, Tooltips | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ | ribbon |
 | `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
@@ -1206,12 +1208,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 190 | 10 | 0 |
-| Web | 174 | 9 | 17 |
-| Android | 19 | 64 | 117 |
-| Mac (AppKit) | 5 | 164 | 31 |
-| iPhone (UIKit) | 0 | 135 | 65 |
-| Agent (MCP) | 66 | 45 | 89 |
+| Linux (GTK) | 191 | 11 | 0 |
+| Web | 176 | 9 | 17 |
+| Android | 19 | 64 | 119 |
+| Mac (AppKit) | 5 | 165 | 32 |
+| iPhone (UIKit) | 0 | 136 | 66 |
+| Agent (MCP) | 67 | 45 | 90 |
 
 ## Inside one app, not components yet (the debt)
 

@@ -8,7 +8,7 @@
 #   ])
 
 from mojoui.view import (View, Text, Button, Segmented, HStack, VStack, Spacer, Divider, Card, Scroll, Grid, CAPTION, HEADLINE, SUBTLE,
-                         ICON_ONLY, CENTER, STRETCH, START)
+                         ICON_ONLY, CENTER, STRETCH, START, NO_MSG)
 
 
 def StatCards(stats: List[Tuple[String, String]]) -> View:
@@ -60,18 +60,21 @@ def Stepper(value: String, on_less: Int, on_more: Int) -> View:
     return HStack(Button("−", on_less, SUBTLE), Text(value), Button("+", on_more, SUBTLE), spacing=4).align(CENTER)
 
 
-def Inspector(tabs: List[String], selected: Int, on_tab: Int, sections: List[View], width: Int = 300, height: Int = 600) -> View:
+def Inspector(tabs: List[String], selected: Int, on_tab: Int, sections: List[View], width: Int = 300, height: Int = 600,
+              on_close: Int = NO_MSG) -> View:
     """The panel: tabs across the top (Table · Cell · Text · Arrange), then sections divided by hairlines; the
-    sections scroll when they're taller than `height` (a table with many columns)."""
+    sections scroll when they're taller than `height` (a table with many columns). With `on_close`, a ✕ at the head's
+    end closes it (a docked panel the app opens on request, goal 76: tagged "panel-close")."""
     var body = List[View]()
     for k in range(len(sections)):
         if k > 0:
             body.append(Divider())
         body.append(sections[k].copy())
     var all = List[View]()
-    if len(tabs) == 1:  # (one page: its name as a title, not a switch with one choice)
-        all.append(Text(tabs[0], HEADLINE).tag("inspector-title"))
+    var head = Text(tabs[0], HEADLINE).tag("inspector-title") if len(tabs) == 1 else Segmented(tabs, selected, on_tab).fill()  # (one page: its name as a title, not a switch with one choice)
+    if on_close != NO_MSG:
+        all.append(HStack(head^.grow(), Button("Close panel", on_close, ICON_ONLY, icon="close").tooltip("Close this panel (Esc)").tag("panel-close"), spacing=6).fill().align(CENTER))
     else:
-        all.append(Segmented(tabs, selected, on_tab).fill())
+        all.append(head^)
     all.append(Scroll(VStack(body^, spacing=14).fill(), height=height).fill().grow())  # (it takes the card's room, and scrolls when that's less)
     return Card(all^, spacing=14).width(width).grow().tag("inspector")

@@ -39,12 +39,12 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips"],  # (clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot", "clips"],  # (clips: goal 71 M2, docs/goals/71/clipgrid_web.py; kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips", "ribbon"],  # (ribbon: goal 76 M1; clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot", "clips", "ribbon"],  # (ribbon: goal 76 M1; clips: goal 71 M2, docs/goals/71/clipgrid_web.py; kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
-    "Agent (MCP)": ["kit", "omxplorer", "widgets"],  # (widgets: goal 34b M0, the agent attached to the web and GTK hosts)
+    "Agent (MCP)": ["kit", "omxplorer", "widgets", "ribbon"],  # (ribbon: goal 76 M1, its hidden tabs' tools; widgets: goal 34b M0, the agent attached to the web and GTK hosts)
 }
 
 # Variants, gestures, layout and design languages: (name, the API, a pattern that shows a host implements it,
@@ -61,6 +61,7 @@ FEATURES = [
     ("Canvas: pan, zoom, tap", "on_gesture: PAN, ZOOM, TAP", r"\bPAN\b|PAN =", "lens"),
     ("Canvas: press, release, double", "PRESS, RELEASE, DOUBLE", r"\bDOUBLE\b|DOUBLE =", "workbook"),
     ("Canvas frames (animation)", "on_frame", r"tick|SET_FRAMES|on_frame", "lens"),
+    ("Hidden (in the tree, not drawn; agents and test steps still reach it)", "View.hidden()", r"node\.hidden|n\.get\(\"hidden\"\)", "ribbon"),
     ("Arrive on a spring", "View.arrive(): fades and rises in once (AdwSpringAnimation; a CSS spring)", r"\.arrives\b|mojoui-arrive", "agentchat"),
     ("Canvas: pen pressure", "event.pressure on PRESS, PAN, RELEASE (0: none)", r"pressure", "sketch"),
     ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
@@ -144,6 +145,7 @@ COMPOSITES = [
     ("Format toggles (Bold, Italic, Align…)", "mojoui/sheetchrome.mojo", ["Icon toggle shown pressed", "Lucide icon set", "Tooltips", "Divider"], "toggles="),
     ("Bottom tabs, renamed in place", "mojoui/sheetchrome.mojo", ["Button", "In-place editor", "Quiet buttons"], "BottomTabs("),
     ("Rail (a slim column of icon tools beside the sheet: role sidebar)", "mojoui/sheetchrome.mojo", ["Button with an icon", "Tooltips", "VStack"], "Rail("),
+    ("Ribbon (tabs of captioned tool groups; the other tabs' tools hidden, still reachable)", "mojoui/ribbon.mojo", ["Toolbar button (icon over label)", "Icon toggle shown pressed", "File picker", "Hidden (in the tree, not drawn; agents and test steps still reach it)", "Divider", "Tooltips"], "Ribbon("),
     ("Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)", "mojoui/regions.mojo", [], "regions("),
     ("Cell styles (bold, italic, underline, strikethrough, colours, alignment)", "mojoui/cellstyle.mojo", ["Canvas"], "restyle("),
     ("Island (the window's living status: work, results, undo, errors)", "mojoui/island.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas frames (animation)"], "IslandView("),

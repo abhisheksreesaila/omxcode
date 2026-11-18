@@ -240,7 +240,9 @@ def step(page, s):
         page.keyboard.press(rest)
     elif verb == "tap":
         title, _, nth = rest.partition("@")
-        by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
+        by_title = page.locator("[data-kind=button]:visible").filter(has_text=exact(title))  # (a shown one first: a ribbon's other tabs are hidden, D-7601)
+        if not by_title.count():
+            by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
         if not by_title.count():  # (no button with that title: the one tagged so, as GTK's step and an agent name it)
             by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
         if not by_title.count():  # (an Image(on_tap) tagged so: a tappable picture, goal 71)
