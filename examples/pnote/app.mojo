@@ -15,6 +15,7 @@ from mojoui import (
     PROMINENT, SUBTLE, TOOL, TOOL_ON, NO_MSG,
 )
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
+from mojoui.overlays import Clipboard
 from mojoui.canvas import rgba
 from mojoui.scene import Scene, SurfacePainter, Painter
 from mojoui.text import Font
@@ -711,7 +712,7 @@ struct Main(App):
             spacing=0,
         ).grow().fill()
         var column = VStack(Sidebar(side^), Spacer(), spacing=0).width(280).fill().align(START).padding(8, 8).tag("side")
-        var body = HStack(column^, main^, spacing=0).grow().fill()
+        var body = HStack(column^, main^, Clipboard(self.page.ed.clip, self.page.ed.clip_version), spacing=0).grow().fill()
         if self.palette:
             var hits = self.palette_hits()
             var items = List[View]()

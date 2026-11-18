@@ -45,7 +45,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Toast` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | kit |
 | `Popover` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit, console |
-| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer, console |
+| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer, console, pnote |
 | `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
