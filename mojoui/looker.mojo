@@ -7,7 +7,9 @@
 #   # tick (30 ms):       looker.tick(llm)       (takes the frame, asks the model, reads its answer; never waits)
 #   #                     for a in looker.take_answers(): agent.answer(a.id, a.content, a.untrusted)
 #   #                     for line in looker.take_log(): print line
-#   # the shelf:          looker.views() (newest first); draw(): looker.draw(canvas, surface, palette); looker.spot(canvas, name)
+#   # the shelf:          looker.views() (newest first); draw(): looker.draw(canvas, surface, palette)
+#   # pointing:           looker.parts(since) (the boxes of the looks after `since` = looker.serial when the turn began, each a
+#   #                     part named by its label, mojoui.pointer.area_part): add them to the voice loop's parts and pointer.know()
 #   # the app ends:       looker.closing()
 #
 # One look: the camera is asked for a still (mojoui.camera: the page's rear camera on the web host, the machine's own camera
@@ -33,7 +35,8 @@ from mojoui.json import Json, json_string
 from mojoui.llm import Llm, TEXT, DONE, ERROR
 from mojoui.llmagent import AppTool, T_CALL
 from mojoui.picture import Picture
-from mojoui.sight import draw_sight, sight_spot
+from mojoui.pointer import Part, area_part, names_for, part_name
+from mojoui.sight import draw_sight
 from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.trust import fence
@@ -47,25 +50,25 @@ comptime CANVAS_HEIGHT = 240
 
 
 struct LookCard(Movable):
+    var name: String  # the card's name in point events ("look3"): its picture's view is tagged name + ".picture"
+    var serial: Int
     var question: String
     var answer: String
     var sight: Sight
     var path: String  # the frame on disk until it is decoded
     var opening: Optional[Picture]
     var held: Optional[ArcPointer[Picture]]
-    var pts_w: Float64  # the canvas's size in points as last drawn (spot() needs it)
-    var pts_h: Float64
     var ms: Int
 
-    def __init__(out self, question: String, var sight: Sight):
+    def __init__(out self, serial: Int, question: String, var sight: Sight):
+        self.name = "look" + String(serial)
+        self.serial = serial
         self.question = question
         self.answer = String("")
         self.sight = sight^
         self.path = String("")
         self.opening = None
         self.held = None
-        self.pts_w = 0.0
-        self.pts_h = 0.0
         self.ms = 0
 
 
@@ -243,12 +246,12 @@ struct Looker(Movable):
         var where = String("")  # (each box as label:x0,y0,x1,y1 in the frame's pixels: what a checker compares with the truth)
         for b in sight.boxes:
             where += ("|" if where != "" else "") + b.label.replace(" ", "_") + ":" + String(Int(b.x0)) + "," + String(Int(b.y0)) + "," + String(Int(b.x1)) + "," + String(Int(b.y1))
-        var card = LookCard(self.question, sight^)
+        self.serial += 1
+        var card = LookCard(self.serial, self.question, sight^)
         card.answer = answer
         card.ms = ms
         try:
             makedirs(self.dir, exist_ok=True)
-            self.serial += 1
             card.path = self.dir + "/look-" + String(self.serial) + ".jpg"
             var f = open(card.path, "w")
             f.write_bytes(Span(self.jpeg))
@@ -300,7 +303,7 @@ struct Looker(Movable):
             var rows = List[View]()
             rows.append(Text("Looking", CAPTION))
             rows.append(Text(self.cards[k].answer if self.cards[k].answer != "" else self.cards[k].question, HEADLINE))
-            rows.append(Canvas(self.canvas_base + k, self.version).passthrough().fill().height(CANVAS_HEIGHT).tag("look"))
+            rows.append(Canvas(self.canvas_base + k, self.version).passthrough().fill().height(CANVAS_HEIGHT).tag(self.cards[k].name + ".picture"))
             out.append(Card(rows^, spacing=8).fill().tag("look-card"))
         return out^
 
@@ -311,18 +314,24 @@ struct Looker(Movable):
         var k = canvas - self.canvas_base
         if k < 0 or k >= len(self.cards):
             return
-        self.cards[k].pts_w = Float64(s.width) / s.scale
-        self.cards[k].pts_h = Float64(s.height) / s.scale
         if self.cards[k].held:
             ref pic = self.cards[k].held.value()[]
             draw_sight(s, pic.pixels, pic.width, pic.height, self.cards[k].sight.boxes, self.font, p, 0)
         else:
             s.fill(p.card)
 
-    def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
-        """Where the box labelled `name` is on the card's canvas, in points from its top-left ((-1, -1): none)."""
-        var k = canvas - self.canvas_base
-        if k < 0 or k >= len(self.cards):
-            return (-1.0, -1.0)
-        ref c = self.cards[k]
-        return sight_spot(c.sight.boxes, c.sight.width, c.sight.height, c.pts_w, c.pts_h, name)
+    def parts(self, since: Int = 0) -> List[Part]:
+        """The boxes of the looks after `since` (a serial: looker.serial when the turn began) as parts a pointer can land on: each
+        named by its label (all of it, or a word of it no other box shares), found in the card's picture (`name.picture`)."""
+        var out = List[Part]()
+        for k in range(len(self.cards)):
+            ref c = self.cards[k]
+            if c.serial <= since:
+                continue
+            var labels = List[String]()
+            for b in c.sight.boxes:
+                labels.append(b.label)
+            for b in c.sight.boxes:
+                out.append(area_part(c.name, part_name(b.label), names_for(b.label, labels), c.name + ".picture", b.x0, b.y0, b.x1, b.y1,
+                                     c.sight.width, c.sight.height))
+        return out^

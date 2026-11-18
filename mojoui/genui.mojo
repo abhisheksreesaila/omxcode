@@ -48,7 +48,7 @@ from mojoui.album import Album
 from mojoui.grounding import Box
 from mojoui.sight import draw_sight
 from mojoui.disclosure import Disclosure
-from mojoui.pointer import Part
+from mojoui.pointer import Part, area_part, names_for, part_name
 from mojoui.wordcard import WordCard, word_parts, draw_word
 from mojoui.canvas import Surface
 from mojoui.text import Font
@@ -1203,7 +1203,10 @@ struct GenUi[H: Hub = NoData](Movable):
             return Breadcrumbs(self.texts_of(n, "items"), self.msg(n))
         if comp == "Picture" or comp == "Sight":
             var parts = List[View]()
-            parts.append(Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200))))
+            var picture = Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200)))
+            if comp == "Sight":  # (its boxes are parts the pointer finds in this view: parts())
+                picture = picture^.tag(self.sight_tag(self.canvas_of.get(n, 0)))
+            parts.append(picture^)
             if self.json.get(n, "caption") >= 0:
                 parts.append(Text(self.str(n, "caption"), style=CAPTION))
             return VStack(parts^, spacing=SPACE_XS).align(START).fill()
@@ -1328,7 +1331,19 @@ struct GenUi[H: Hub = NoData](Movable):
             if self.kinds[k] == CV_WORD:
                 for pt in word_parts(self.card, self.str(n, "word"), self.str(n, "sounds"), self.str(n, "origin")):
                     out.append(pt.copy())
+            elif self.kinds[k] == CV_SIGHT and self.shown[k] >= 0:  # each box, named by its label, in the picture's view
+                ref pic = self.album.pictures[self.shown[k]][]
+                var boxes = self.sight_boxes(n, pic.width, pic.height)
+                var labels = List[String]()
+                for b in boxes:
+                    labels.append(b.label)
+                for b in boxes:
+                    out.append(area_part(self.card, part_name(b.label), names_for(b.label, labels), self.sight_tag(k), b.x0, b.y0, b.x1, b.y1, pic.width, pic.height))
         return out^
+
+    def sight_tag(self, k: Int) -> String:
+        """The tag of canvas k's view when it is a Sight ("card2.picture1"): where the pointer finds its boxes."""
+        return self.card + ".picture" + String(k)
 
     def draws(self, canvas: Int) -> Bool:
         return canvas >= self.canvas_base and canvas < self.canvas_base + len(self.canvases)

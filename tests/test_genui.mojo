@@ -14,6 +14,7 @@ from mojoui.album import Album
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from themes.omxqua import omxqua
+from mojoui.pointer import fitted_rect
 
 comptime TAGUS = "examples/agentchat/pictures/tagus.jpg"
 
@@ -21,6 +22,13 @@ comptime TAGUS = "examples/agentchat/pictures/tagus.jpg"
 def says(v: View, word: String) -> Bool:
     for ref n in v.nodes:
         if (n.kind == TEXT or n.kind == BUTTON) and n.text.find(word) >= 0:
+            return True
+    return False
+
+
+def says_tag(v: View, tag: String) -> Bool:
+    for ref n in v.nodes:
+        if n.name == tag:
             return True
     return False
 
@@ -76,6 +84,16 @@ def main() raises:
     # the sample's box is 120,300..640,520 of 1000 on a 1200x800 picture fitted to 300x200 (scale 0.25): its left edge is at x = 36 (2 px wide)
     assert_equal(sight_surface.get(37, 80), pal.series[0])
     assert_true(sight_surface.get(60, 80) != pal.series[0], "inside the box is the picture, not a fill")
+    # its boxes are parts the pointer lands on: named by the label, found in the picture's view (tagged card + ".picture" + canvas)
+    sight.card = "card4"
+    var sparts = sight.parts()
+    assert_equal(len(sparts), 1)
+    assert_equal(sparts[0].tag(), "card4.bridge")
+    assert_equal(sparts[0].inside, "card4.picture0")
+    assert_true(says_tag(sight.view(blank, 0), "card4.picture0"), "the picture's view carries the tag the part is found in")
+    var on = fitted_rect([0.0, 0.0, 300.0, 200.0], sparts[0].area)  # (the same 300x200 canvas: the box drawn at x = 36)
+    assert_equal(Int(on[0]), 36)
+    assert_equal(Int(on[0] + on[2]), 192)
     assert_true(GenUi('{"ui":{"component":"Sight","name":"eiffel","boxes":[{"label":"a","x0":1,"y0":1,"x1":5,"y1":5}]}}', 10_000, 100, album=album).problem.find("unknown picture") >= 0, "an unknown picture")
     assert_true(GenUi('{"ui":{"component":"Sight","name":"tagus","boxes":[{"label":"a","x0":1,"y0":1,"x1":5,"y1":2000}]}}', 10_000, 100, album=album).problem.find("bad prop") >= 0, "a box outside the picture")
     assert_true(GenUi('{"ui":{"component":"Sight","name":"tagus","boxes":[]}}', 10_000, 100, album=album).problem.find("bad prop") >= 0, "no boxes")

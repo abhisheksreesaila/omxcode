@@ -1,6 +1,6 @@
 # mojoui.pointer (goal 77 M1): which parts a spoken clause names, and where in it; the AG-UI `point` event.
 from std.testing import assert_equal, assert_true
-from mojoui.pointer import Part, Hit, match_clause, names_for, point_event, parse_point, norm
+from mojoui.pointer import Part, Hit, Pointer, match_clause, names_for, point_event, parse_point, norm, area_part, part_name, fitted_rect
 
 
 def word_parts() -> List[Part]:
@@ -56,4 +56,24 @@ def main() raises:
     assert_equal(back.value().card, "card1")
     assert_equal(back.value().at, 0.42)
     assert_true(not Bool(parse_point('{"type":"CUSTOM","name":"suggestions","value":[]}')))
+    # a part that is a box in a picture (a camera card's banana): found in its picture's view, the picture drawn fitted and centred
+    assert_equal(part_name("Water Bottle"), "water-bottle")
+    var banana = area_part("look1", "banana", ["banana"], "look1.picture", 50.0, 0.0, 100.0, 50.0, 200, 100)
+    assert_equal(banana.tag(), "look1.banana")
+    var r = fitted_rect([10.0, 20.0, 400.0, 100.0], banana.area)  # (200x100 in 400x100: scale 1, 100 points of margin each side)
+    assert_equal(r[0], 160.0)
+    assert_equal(r[1], 20.0)
+    assert_equal(r[2], 50.0)
+    assert_equal(r[3], 50.0)
+    var tall = fitted_rect([0.0, 0.0, 100.0, 300.0], banana.area)  # (200x100 in 100x300: scale 0.5, centred vertically)
+    assert_equal(tall[0], 25.0)
+    assert_equal(tall[1], 125.0)
+    assert_equal(len(fitted_rect(List[Float64](), banana.area)), 0)  # (the picture's view isn't on screen)
+    var ring = Pointer()
+    var known: List[Part] = [banana.copy(), Part("card1", "word", ["ephemeral"], False, True)]
+    ring.know(known)
+    assert_equal(len(ring.areas), 1)  # (only the boxes: a view part is found by its own tag)
+    assert_equal(len(ring.where("look1.banana")), 0)  # (no host here: nothing on screen)
+    # a clause naming the box's label points at it
+    assert_equal(hit_parts(match_clause("The banana is on the left of the counter.", known)), "banana")
     print("pointer: ok")

@@ -1,10 +1,9 @@
 # mojoui.sight: a picture with labelled boxes round the things in it (goal 77 M6, D-7770). Every box is a named part of the
-# card, named by its label, so a pointer can land on "banana" (spot()). The same drawing serves the camera card (mojoui.looker)
-# and genui's "Sight" component (an agent shows a held picture with boxes it names).
+# card, named by its label, so the pointer can land on "banana" (mojoui.pointer.area_part: the card lists its boxes as parts).
+# The same drawing serves the camera card (mojoui.looker) and genui's "Sight" component (an agent shows a held picture with
+# boxes it names).
 #
 #   draw_sight(surface, pixels, w, h, boxes, font, palette, focus=-1)   # the picture fitted, the boxes over it; `focus` is drawn bolder
-#   sight_spot(boxes, w, h, surface_w_pt, surface_h_pt, name)           # the centre of the box labelled `name`, in points from the
-#                                                                       # canvas's top-left ((-1, -1): none)
 #
 # Boxes are in the picture's own pixels (mojoui.grounding.Box); the picture is drawn aspect-fitted, so the boxes are scaled and
 # offset the same way (mojoui.picture.fitted_box). Labels sit on a chip at the box's top-left (below the edge when the box
@@ -50,18 +49,3 @@ def draw_sight(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, boxes: Li
         var cy = y0 if y0 - h < top else y0 - h  # (the chip sits above the box unless the picture's edge is there)
         rect(s, x0, cy, w, h, colour, 6.0 * u)
         font.draw(s, b.label, x0 + 6.0 * u, cy + h / 2.0 + size * 0.35, size, rgba(255, 255, 255), MEDIUM)
-
-
-def sight_spot(boxes: List[Box], pw: Int, ph: Int, width_pt: Float64, height_pt: Float64, name: String) -> Tuple[Float64, Float64]:
-    """Where the box labelled `name` is on a canvas width_pt x height_pt points showing the picture fitted: its centre, in
-    points from the canvas's top-left; (-1, -1) when no box has that label."""
-    if pw <= 0 or ph <= 0:
-        return (-1.0, -1.0)
-    var k = min(width_pt / Float64(pw), height_pt / Float64(ph))
-    var left = (width_pt - Float64(pw) * k) / 2.0
-    var top = (height_pt - Float64(ph) * k) / 2.0
-    var want = name.lower()
-    for b in boxes:
-        if b.label.lower() == want:
-            return (left + b.cx() * k, top + b.cy() * k)
-    return (-1.0, -1.0)

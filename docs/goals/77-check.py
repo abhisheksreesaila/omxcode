@@ -11,7 +11,8 @@ sink). Numbers: build/g77; pictures: docs/goals/77.
 M6 builds the shim with image input, draws (once) the scene's objects with the image model, runs the model's own tests
 (tests/test_llm_vision: reading words and grounding with the real Qwen3.8-27B and its projector), the camera's (tests/test_camera: the
 browser's hub, and this machine's webcam when there is one), genui's Sight component, and then the whole app: scripts/g77_camera_check.py
-drives examples/omx on the web host with Chromium's fake camera.
+drives examples/omx on the web host with Chromium's fake camera; the reply that names the banana moves the pointer's ring onto the card's
+banana box, and the ring's centre must be inside the banana's true box (as the app drew it and as its pixels show in the browser).
 """
 import importlib.util
 import json
@@ -203,11 +204,21 @@ def bench(**kv):
 
 
 def card_args(ev, turn):
-    """The arguments of the turn's render_ui calls, as dicts (what the model put on the card)."""
+    """Every component on the turn's cards, as dicts (what the model put on the card): the root and everything inside it, since
+    the visual-first prompt puts each card's content in a Card (D-7716, D-7734)."""
     out = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            out.append(node)
+            for child in node.get("children", []) or []:
+                walk(child)
+            if isinstance(node.get("child"), dict):
+                walk(node["child"])
+
     for e in of(ev, "CARD", turn):  # (the CARD line carries the card as the agent built it)
         try:
-            out.append(json.loads(e.get("text", "")))
+            walk(json.loads(e.get("text", "")))
         except ValueError:
             pass
     return out
@@ -216,6 +227,17 @@ def card_args(ev, turn):
 def subsequence(want, got):
     it = iter(got)
     return all(any(w == g for g in it) for w in want)
+
+
+WRONG_MEANINGS = [("ubiquitous", "rare and hard to find."), ("ephemeral", "lasting forever; permanent.")]
+
+
+def judge_question(word, meaning):
+    """Is a card's meaning right for the word, against a dictionary's (D-7734): the same sense, however it is worded or how much it
+    adds; the controls (WRONG_MEANINGS) must come back "no"."""
+    return (f"Judge this. A dictionary says the word {word} means: {WORDS[word]}. A card says it means: {meaning} "
+            f"Is the card's meaning a correct meaning of {word}, the same sense as the dictionary's even if it is worded differently "
+            f"or says a little more? Answer with one word only, yes or no.")
 
 
 def m2():
@@ -256,7 +278,9 @@ def m2():
         jt = []
         for c in cards:
             got = str(c["card"].get("meaning", "")).replace(";", ",").replace("=", " is ")
-            jt.append(f"Judge this. A dictionary says the word {c['word']} means: {WORDS[c['word']]}. A card says it means: {got} Do they mean the same thing? Answer with one word only, yes or no.")
+            jt.append(judge_question(c["word"], got))
+        for w, wrong in WRONG_MEANINGS:  # (controls: a wrong meaning must be judged wrong, or a "yes" proves nothing)
+            jt.append(judge_question(w, wrong))
         with g72.NullSink():
             jev, _ = typed_turns(jt)
         for i, c in enumerate(cards, 1):
@@ -264,6 +288,11 @@ def m2():
             judged[c["word"]] = reply
             if not reply.strip().lower().startswith("yes"):
                 probs.append(f"{c['word']}: the model judged the card's meaning {c['card'].get('meaning')!r} against {WORDS[c['word']]!r}: {reply!r}")
+        for j, (w, wrong) in enumerate(WRONG_MEANINGS, len(cards) + 1):
+            reply = (of(jev, "REPLY", j) or [{}])[0].get("text", "")
+            judged[f"control {w}: {wrong}"] = reply
+            if not reply.strip().lower().startswith("no"):
+                probs.append(f"the judge passed a wrong meaning of {w} ({wrong!r}): {reply!r}, so its yes proves nothing")
     for w in words:
         for k in ("", "_mid", "_mid2"):
             src = OUT / f"m2_{w}{k}.png"
@@ -375,14 +404,14 @@ def m6():
             return "FAIL", f"{' '.join(step)}: {vtail(r)}"
     numbers = {}
     # the framework's own tests
-    for name, extra in (("test_grounding", {}), ("test_camera", {}), ("test_llm_vision", VENV), ("test_genui", {})):
+    for name, extra in (("test_grounding", {}), ("test_camera", {}), ("test_llm_vision", VENV), ("test_genui", {}), ("test_pointer", {})):
         b = vsh(["scripts/mxbuild.sh", f"tests/{name}.mojo", "-o", f"build/{name}"])
         if b.returncode:
             return "FAIL", f"{name} doesn't build: {vtail(b, 900)}"
         r = vsh([f"build/{name}"], env=extra, timeout=1800)
         if r.returncode:
             return "FAIL", f"{name}: {vtail(r, 900)}"
-        numbers[name] = [l for l in r.stdout.splitlines() if re.match(r"(vision|camera|grounding|sight|picture)\b", l)]
+        numbers[name] = [l for l in r.stdout.splitlines() if re.match(r"(vision|camera|grounding|sight|picture|pointer)\b", l)]
     desk = [l for l in numbers["test_camera"] if l.startswith("camera desktop")]
     desk_note = "" if desk and ": ok" in desk[0] else " (the desktop camera: BLOCKED, " + (desk[0] if desk else "no camera on this machine") + ")"
     # the whole app, on the web host
@@ -398,7 +427,8 @@ def m6():
     m = re.search(r"worst IoU ([\d.]+) , mean answer time ([\d.]+) ms, mean image encode ([\d.]+) ms", vision)
     (OUT / "m6.json").write_text(json.dumps({"camera": rep, "tests": numbers}, indent=1))
     return "PASS", (f"\"Where is the banana?\" through the tablet's fake camera: the card's banana box IoU {s['iou']} (limit 0.4) with the truth, "
-                    f"the reply \"{s['reply']}\", the part on the banana at {s['spot_pts'][0]:.0f},{s['spot_pts'][1]:.0f} pt; look {s['ms']} ms "
+                    f"the reply \"{s['reply']}\", the pointer's ring on the banana while it was said (centre {s['ring_app_px'][0]:.0f},{s['ring_app_px'][1]:.0f} by the app, "
+                    f"{s['ring_pixels_px'][0]:.0f},{s['ring_pixels_px'][1]:.0f} by its pixels, inside the true box {[round(v) for v in s['truth_px']]}, {s['point_lag_ms']} ms after its audio); look {s['ms']} ms "
                     f"(frame {s['frame_ms']}, image encode {s['image_ms']} for {s['image_tokens']} tokens, model {s['read_ms']}); "
                     f"{s['outward_bytes_sent']} bytes outward; the sign read \"{t['reply']}\"; in-process grounding on all three objects "
                     f"(worst IoU {float(m.group(1)):.2f}, {float(m.group(2)):.0f} ms an answer); docs/goals/77/m6-camera-banana.png" + desk_note)

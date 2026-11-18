@@ -9,11 +9,14 @@
 #                                                         clause (0…1) the name is said. Names beat cues (a clause about a stop is
 #                                                         about the stop, not about a generic "is a"). A `weak` part (the word itself,
 #                                                         which is said in passing) doesn't stop the cues from counting.
+#   area_part(card, part, names, inside, x0, y0, x1, y1, w, h)   a part that is a box in a picture drawn fitted inside the view
+#                                                         tagged `inside` (a camera card's boxes): no view of its own
 #   names_for(label, others) -> List[String]              how speech may name a thing with a label: all of it, or a distinctive word of
 #                                                         it no other label shares (maps and diagrams build their parts with it)
 #   point_event(card, part, at_ms) -> String              the AG-UI CUSTOM event; parse_point(text) reads it back
 #
 #   Pointer: update(): pointer.go(card + "." + part)      draw(): pointer.draw(surface, palette)   view(): PointerView(canvas, pointer.version())
+#            pointer.know(parts): the parts on screen (the same list the voice loop gets), so a box in a picture can be found
 #   The ring lives on a clear Canvas over the whole page (put it in an Overlay, like mojoui.orb.RimView). Where the part is comes
 #   from mojoui.geometry.rect_of (GTK; the web host reports the rects of the tagged views it shows). It follows the part when the part
 #   moves (a scroll, a resize): the target is read again every frame. The part's tint and the ring are one drawing.
@@ -35,14 +38,25 @@ comptime RING_WIDTH = 2.4  # points
 comptime GLOW = 9.0  # points: the soft edge outside the ring
 
 
-@fieldwise_init
 struct Part(Copyable, Movable):
-    """One pointable part of a card."""
+    """One pointable part of a card: a view tagged tag(), or a box in a picture drawn inside a tagged view (`inside`)."""
     var card: String  # which card ("card2")
     var part: String  # which part ("meaning")
     var names: List[String]  # how speech names it
     var cue: Bool  # `names` are cue words ("means", "for example"): they count only where no part was named
     var weak: Bool  # named by its own text (the word itself), which is said in passing: cues still count after it
+    var inside: String  # "": the part is its own view; else the tag of the view whose drawing holds it (a photo's canvas)
+    var area: List[Float64]  # with `inside`: [x0, y0, x1, y1, width, height], the box in the picture's own pixels and the
+                             # picture's size; the picture is drawn as large as fits, centred (mojoui.picture.draw_fitted)
+
+    def __init__(out self, card: String, part: String, names: List[String], cue: Bool = False, weak: Bool = False):
+        self.card = card
+        self.part = part
+        self.names = names.copy()
+        self.cue = cue
+        self.weak = weak
+        self.inside = String("")
+        self.area = List[Float64]()
 
     def tag(self) -> String:
         return self.card + "." + self.part
@@ -50,6 +64,32 @@ struct Part(Copyable, Movable):
 
 def part(card: String, name: String, names: List[String], cue: Bool = False, weak: Bool = False) -> Part:
     return Part(card, name, names.copy(), cue, weak)
+
+
+def area_part(card: String, name: String, names: List[String], inside: String, x0: Float64, y0: Float64, x1: Float64, y1: Float64,
+              width: Int, height: Int) -> Part:
+    """A part that is a box in a picture: (x0, y0)-(x1, y1) in the picture's pixels, the picture width x height drawn fitted and
+    centred in the view tagged `inside` (a camera card's boxes, a Sight's)."""
+    var p = Part(card, name, names.copy())
+    p.inside = inside
+    p.area = [x0, y0, x1, y1, Float64(width), Float64(height)]
+    return p^
+
+
+def part_name(label: String) -> String:
+    """A label as a part's name: lower case, words joined by "-" ("Water bottle" -> "water-bottle"): a tag has no spaces."""
+    return String(norm(label).strip()).replace(" ", "-")
+
+
+def fitted_rect(view: List[Float64], area: List[Float64]) -> List[Float64]:
+    """Where an area part's box is: [x, y, w, h] in the units of `view` ([x, y, w, h] of the view that draws the picture fitted
+    and centred); [] when either is malformed."""
+    if len(view) < 4 or len(area) < 6 or area[4] <= 0.0 or area[5] <= 0.0:
+        return List[Float64]()
+    var k = min(view[2] / area[4], view[3] / area[5])
+    var left = view[0] + (view[2] - area[4] * k) / 2.0
+    var top = view[1] + (view[3] - area[5] * k) / 2.0
+    return [left + area[0] * k, top + area[1] * k, (area[2] - area[0]) * k, (area[3] - area[1]) * k]
 
 
 @fieldwise_init
@@ -272,6 +312,7 @@ struct Pointer(Movable):
     var shown_stamp: Int
     var seen: Int  # how many times a ring has been shown (go() calls drawn)
     var rect: List[Float64]  # the target's rect as last found, in points from the layer's corner (empty: not found)
+    var areas: List[Part]  # the parts on screen that are boxes in a picture (know()): found through the picture's view
 
     def __init__(out self):
         self.tag = ""
@@ -290,6 +331,21 @@ struct Pointer(Movable):
         self.shown_stamp = -1
         self.seen = 0
         self.rect = List[Float64]()
+        self.areas = List[Part]()
+
+    def know(mut self, parts: List[Part]):
+        """The parts on screen: those that are boxes in a picture are found through their picture's view."""
+        self.areas = List[Part]()
+        for p in parts:
+            if p.inside != "":
+                self.areas.append(p.copy())
+
+    def where(self, tag: String) -> List[Float64]:
+        """The part tagged `tag` in window points ([x, y, w, h]): its view's rect, or its box in its picture's view; [] unknown."""
+        for a in self.areas:
+            if a.tag() == tag:
+                return fitted_rect(rect_of(a.inside), a.area)
+        return rect_of(tag)
 
     def go(mut self, tag: String):
         """Point at the view tagged `tag` (a part's card + "." + part)."""
@@ -323,7 +379,7 @@ struct Pointer(Movable):
         if self.tag == "" or self.on.value < 0.02:
             return (0.0, 0.0, 0.0)
         var a = rect_of(from_tag)
-        var b = rect_of(self.tag)
+        var b = self.where(self.tag)
         if len(a) < 4 or len(b) < 4:
             return (0.0, 0.0, 0.0)
         var dx = (b[0] + b[2] / 2.0) - (a[0] + a[2] / 2.0)
@@ -336,7 +392,7 @@ struct Pointer(Movable):
     def locate(mut self) -> Bool:
         """The target's rect from the host, in points from the layer's corner; False when the host can't say (the part isn't on
         screen: a card scrolled off, not built yet)."""
-        var r = rect_of(self.tag)
+        var r = self.where(self.tag)
         if len(r) < 4:
             self.rect = List[Float64]()
             return False

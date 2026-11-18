@@ -448,7 +448,7 @@ SERVICES = [
       "Web": ("✅", "scripts/g77_camera_check.py (goal 77 M6): headless Chromium's fake camera plays the scene file, the page sends one still per request; tests/test_camera web: the hub"),
       "Android": ("❌", "not built"), "Mac (AppKit)": ("❌", "not built (AVFoundation capture planned)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
-    ("Camera card and look tool", "mojoui.looker: Looker.tools() / call() / tick(llm) / views() / spot(); mojoui.sight: draw_sight(), sight_spot() (a picture with boxes named by their labels); mojoui.grounding: Qwen's 0-1000 boxes validated into pixels; genui's Sight component", "",
+    ("Camera card and look tool", "mojoui.looker: Looker.tools() / call() / tick(llm) / views() / parts(since) (each box a pointer part: mojoui.pointer.area_part); mojoui.sight: draw_sight() (a picture with boxes named by their labels); mojoui.grounding: Qwen's 0-1000 boxes validated into pixels; genui's Sight component", "",
      {"Linux (GTK)": ("🔨", "examples/omx compiles with it there; checked on the web host (the model side runs in-process the same way: tests/test_llm_vision)"),
       "Web": ("✅", "scripts/g77_camera_check.py: \"Where is the banana?\" -> the card's banana box IoU 0.85 with the truth, the part on the banana, \"What does the sign say?\" -> PURPLE OTTER 42; docs/goals/77/m6-camera-banana.png"),
       "Android": ("🔨", "plain canvases; never run with this app"), "Mac (AppKit)": ("🔨", "builds; never run"),

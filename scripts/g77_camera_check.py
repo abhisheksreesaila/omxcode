@@ -5,8 +5,10 @@ a file (--use-file-for-fake-video-capture: the scenes of scripts/g77_scene.py), 
 
 Proves, for the scene (a mug, a banana and a bottle at known places):
   - "Where is the banana?": the app calls `look`, the page's camera gives a still, the model reads it in this process, the card's
-    box for the banana overlaps the truth (IoU >= 0.4), the card's part "banana" (App.spot, the pointer's way in) is on the
-    banana, and the spoken reply names it;
+    box for the banana overlaps the truth (IoU >= 0.4), the spoken reply names it, and while it is said the pointer's ring lands on
+    the banana: the box is a part of the card named by its label (mojoui.pointer.area_part), the ring's centre is inside the
+    banana's true box twice over: where the app says it drew the ring (its `OMX POINT` line) and where the ring's pixels are in the
+    browser (a screenshot while it shows against one after it has faded);
   - the frame never leaves the machine: during the turn the host process opens no connection to anything but loopback and
     sends fewer bytes outward than a tenth of the frame's size, and the page makes no request to another origin;
 and for a picture of words ("What does the sign say?"): PURPLE OTTER 42 read through the same path.
@@ -22,6 +24,8 @@ import tempfile
 import time
 import wave
 from pathlib import Path
+
+from PIL import Image, ImageChops
 
 from playwright.sync_api import sync_playwright
 
@@ -127,14 +131,37 @@ class Host:
             self.proc.kill()
 
 
-def tablet(host, video, shot, question, spot_name=None):
-    """One page as the tablet (camera = `video`) and one typed question; what the host printed and the page showed."""
+def ring_centre(during, after, region):
+    """Where the ring is in a screenshot: the centre of mass of what differs from a screenshot after it faded, within `region`
+    (x0, y0, x1, y1, viewport pixels), weighted by how much; (x, y, weight) or None when nothing differs."""
+    a, b = Image.open(during).convert("RGB"), Image.open(after).convert("RGB")
+    x0, y0, x1, y1 = (int(max(v, 0)) for v in region)
+    x1, y1 = min(x1, a.width), min(y1, a.height)
+    d = ImageChops.difference(a.crop((x0, y0, x1, y1)), b.crop((x0, y0, x1, y1))).convert("L")
+    px = d.load()
+    sw = sx = sy = 0.0
+    for yy in range(d.height):
+        for xx in range(d.width):
+            v = px[xx, yy]
+            if v > 12:  # (a little more than JPEG-free noise: the canvas frames are PNG, the page is still)
+                sw += v
+                sx += v * xx
+                sy += v * yy
+    if sw <= 0:
+        return None
+    return (x0 + sx / sw, y0 + sy / sw, sw)
+
+
+def tablet(host, video, shot, question, point_name=None):
+    """One page as the tablet (camera = `video`) and one typed question; what the host printed and the page showed. With
+    `point_name`: screenshots while the ring is on the part of that name, and one after it has faded."""
     quiet = Path(tempfile.mkdtemp(prefix="g77sil-")) / "silence.wav"
     silence(quiet)
     flags = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", f"--use-file-for-fake-video-capture={video}",
              f"--use-file-for-fake-audio-capture={quiet}", "--autoplay-policy=no-user-gesture-required", "--no-sandbox"]
     foreign, result = [], {}
     first_look = len(lines(host.log, "LOOK"))
+    first_point = len(lines(host.log, "POINT"))
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM, headless=True, args=flags)
         ctx = browser.new_context(viewport={"width": 820, "height": 1180}, permissions=["camera", "microphone"])
@@ -157,33 +184,73 @@ def tablet(host, video, shot, question, spot_name=None):
         t0 = time.time()
         box.press("Enter")
         seen = {}
+        want = re.compile(rf"tag=look\d+\.{re.escape(point_name)}\b") if point_name else None
+        shots, point = [], None  # (while the ring is on the part: [(png, how many POINT lines when taken)]), its POINT line
+        SHOTS.mkdir(parents=True, exist_ok=True)
+
+        def points():
+            return lines(host.log, "POINT")[first_point:]
 
         def done():
+            nonlocal point
             for k, v in host.outward().items():
                 seen[k] = max(v, seen.get(k, 0))
-            return len(lines(host.log, "LOOK")) > first_look and lines(host.log, "REPLY")
+            pts = points()
+            if want and point is None:
+                hit = [l for l in pts if want.search(l)]
+                if hit:
+                    point = hit[0]
+                    for n in range(5):  # (the ring grows in from the box's middle and holds 4.5 s: shots over its first second)
+                        page.wait_for_timeout(120 if n == 0 else 220)
+                        png = OUT / f"camera-point-{n}.png"
+                        page.screenshot(path=str(png))
+                        shots.append((png, len(points())))
+            finished = len(lines(host.log, "LOOK")) > first_look and lines(host.log, "REPLY")
+            if not want:
+                return finished
+            # (with a point to measure: also until the ring has faded, 7 s after the last point, so the 'after' shot has no ring)
+            return finished and point is not None and time.time() - last_point_time(pts) > 7.0
 
-        wait_for(done, 240, "the answer to the question", 0.2)
+        last = {"n": 0, "t": time.time()}
+
+        def last_point_time(pts):
+            if len(pts) != last["n"]:
+                last["n"], last["t"] = len(pts), time.time()
+            return last["t"]
+
+        try:
+            wait_for(done, 240, "the answer to the question" + (f" and a point at the {point_name}" if want else ""), 0.05)
+        except AssertionError:
+            if want and point is None and len(lines(host.log, "LOOK")) > first_look and lines(host.log, "REPLY"):
+                raise AssertionError(f"no point at the {point_name}: points {points()} | reply {lines(host.log, 'REPLY')[-1:]}")
+            raise
         page.wait_for_timeout(1500)
         result["turn_s"] = round(time.time() - t0, 1)
-        SHOTS.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SHOTS / shot))
         canvases = page.locator("[data-kind=canvas]")
-        card = None
         for i in range(canvases.count()):
             bb = canvases.nth(i).bounding_box()
             if bb and bb["height"] == 240:  # (mojoui.looker's CANVAS_HEIGHT: the camera card; the orb is 84)
-                card = canvases.nth(i)
                 result["canvas"] = bb
-        if card is not None and spot_name:
-            node, sid = card.get_attribute("data-node"), card.get_attribute("data-sid")
-            at = page.evaluate("async ([sid, n, name]) => (await fetch(`/spot/${sid}/${n}?name=${encodeURIComponent(name)}`)).text()", [sid, node, spot_name])
-            sx, sy = (float(v) for v in at.strip('"').split(","))
-            result["spot"] = [sx, sy]
-            if sx >= 0:  # a crosshair where the part is (the checker's own, not the pointer's), for the picture
-                page.evaluate("([x, y]) => { const d = document.createElement('div'); d.style.cssText = `position:fixed;left:${x - 14}px;top:${y - 14}px;width:28px;height:28px;border:3px solid #e11;border-radius:50%;pointer-events:none;z-index:99999`; document.body.appendChild(d); }",
-                              [result["canvas"]["x"] + sx, result["canvas"]["y"] + sy])
-                page.screenshot(path=str(SHOTS / shot.replace(".png", "-spot.png")))
+        if want:
+            layer = page.locator("[data-tag=pointer]").first.bounding_box()
+            result["layer"] = layer
+            result["point"] = point
+            c = result["canvas"]
+            region = (c["x"] - 30, c["y"] - 30, c["x"] + c["width"] + 30, c["y"] + c["height"] + 30)
+            after = SHOTS / shot
+            fresh = [png for png, n in shots if n == shots[0][1]] or [shots[0][0]]  # (shots before the ring moved on to another part)
+            found = [(ring_centre(png, after, region), png) for png in fresh]
+            found = [(rc, png) for rc, png in found if rc]
+            assert found, "no ring in the screenshots taken while it was on the " + point_name
+            (rx, ry, _), png = max(found, key=lambda f: f[0][2])
+            result["ring_pixels"] = [round(rx, 1), round(ry, 1)]
+            Image.open(png).save(SHOTS / shot.replace(".png", "-point.png"))
+            m = re.search(r"ring=(-?\d+),(-?\d+),(\d+),(\d+)", point)
+            assert m, "the POINT line has no ring rect: " + point
+            x, y, w, h = (int(v) for v in m.groups())
+            result["ring_app"] = [layer["x"] + x + w / 2, layer["y"] + y + h / 2]
+            result["lag_ms"] = int(re.search(r"lag_ms=(-?\d+)", point).group(1))
         browser.close()
     new = {k: v for k, v in seen.items() if k not in before}
     grown = {k: v - before[k] for k, v in seen.items() if k in before and v > before[k]}
@@ -200,7 +267,7 @@ def scene(report):
     want = {o["name"]: o["box"] for o in truth["objects"]}
     host = Host("scene")
     try:
-        r = tablet(host, OUT / "scene.y4m", "m6-camera-banana.png", "Where is the banana?", "banana")
+        r = tablet(host, OUT / "scene.y4m", "m6-camera-banana.png", "Where is the banana?", point_name="banana")
     finally:
         host.close()
     look = r["look"][-1]
@@ -210,19 +277,23 @@ def scene(report):
     assert score >= IOU_MIN, f"IoU {score:.2f} < {IOU_MIN}"
     assert "banana" in r["reply"].lower(), "the reply doesn't name the banana: " + r["reply"]
     assert look["source"] == "browser"
-    k = min(r["canvas"]["width"] / 1280, r["canvas"]["height"] / 720)  # the card's picture is fitted in its canvas
-    left, top = (r["canvas"]["width"] - 1280 * k) / 2, (r["canvas"]["height"] - 720 * k) / 2
+    c = r["canvas"]  # the card's picture is fitted in its canvas: the banana's true box in the browser's viewport pixels
+    k = min(c["width"] / 1280, c["height"] / 720)
+    left, top = c["x"] + (c["width"] - 1280 * k) / 2, c["y"] + (c["height"] - 720 * k) / 2
     tb = want["banana"]
-    sx, sy = r["spot"]
-    assert left + tb[0] * k <= sx <= left + tb[2] * k and top + tb[1] * k <= sy <= top + tb[3] * k, f"the part 'banana' is at {r['spot']}, off the banana's {tb}"
+    truth = [left + tb[0] * k, top + tb[1] * k, left + tb[2] * k, top + tb[3] * k]
+    for how in ("ring_app", "ring_pixels"):
+        x, y = r[how]
+        assert truth[0] <= x <= truth[2] and truth[1] <= y <= truth[3], f"the ring's centre ({how}) is at {x:.0f},{y:.0f}, off the banana's box {[round(v) for v in truth]}"
     assert not r["new_outward_connections"], "the host opened connections outward: " + str(r["new_outward_connections"])
     assert r["outward_bytes_sent"] < frame // 10, f"{r['outward_bytes_sent']} bytes went outward during the turn (a frame is {frame})"
     assert not r["foreign_requests"], r["foreign_requests"]
     report["scene"] = {"question": "Where is the banana?", "iou": round(score, 3), "reply": r["reply"], "card_text": look["text"], "labels": look["labels"],
-                       "boxes": look["boxes"], "truth": want, "spot_pts": r["spot"], "turn_s": r["turn_s"], "ms": int(look["ms"]),
+                       "boxes": look["boxes"], "truth": want, "truth_px": [round(v, 1) for v in truth], "ring_app_px": [round(v, 1) for v in r["ring_app"]],
+                       "ring_pixels_px": r["ring_pixels"], "point": r["point"], "point_lag_ms": r["lag_ms"], "turn_s": r["turn_s"], "ms": int(look["ms"]),
                        "frame_ms": int(look["frame_ms"]), "read_ms": int(look["read_ms"]), "image_ms": int(look["image_ms"]),
                        "image_tokens": int(look["image_tokens"]), "outward_bytes_sent": r["outward_bytes_sent"], "frame_bytes": frame}
-    return f"banana IoU {score:.2f}, reply \"{r['reply']}\", look {look['ms']} ms (frame {look['frame_ms']}, image encode {look['image_ms']}, read {look['read_ms']}), spot {r['spot']} on the banana, {r['outward_bytes_sent']} bytes outward"
+    return f"banana IoU {score:.2f}, reply \"{r['reply']}\", look {look['ms']} ms (frame {look['frame_ms']}, image encode {look['image_ms']}, read {look['read_ms']}), the ring on the banana (app {r['ring_app'][0]:.0f},{r['ring_app'][1]:.0f}, pixels {r['ring_pixels'][0]:.0f},{r['ring_pixels'][1]:.0f} px inside {[round(v) for v in truth]}, lag {r['lag_ms']} ms), {r['outward_bytes_sent']} bytes outward"
 
 
 def text(report):

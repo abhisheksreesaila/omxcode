@@ -14,7 +14,8 @@
 #   pictures, notes    mojoui.creator.Creator          make_comic / draw_picture (an image model on its own GPU, panel by panel on a card)
 #                                                      and find_in_notes (e5 embeddings by MAX, a card citing the files)
 #   the camera         mojoui.looker.Looker            look: the tablet's (or this machine's) camera, the model's own eyes in this process
-#                                                      (the vision projector), a card with the picture and labelled boxes
+#                                                      (the vision projector), a card with the picture and labelled boxes; each box is a
+#                                                      part the pointer lands on when the reply names it ("the banana is on the left")
 #
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the card the model loads on, counted among the
@@ -97,6 +98,8 @@ struct Main(App):
     var pointer: Pointer  # the ring that moves to the part of a card she is naming
     var turn_card: Int  # the first card of this turn on the shelf: only this turn's cards are pointed at
     var parts_seen: Int  # how many cards the loop's parts were last made from
+    var turn_look: Int  # the camera's look serial when this turn began: only this turn's looks are pointed at
+    var looks_seen: Int  # the look serial the loop's parts were last made from
     var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var look: Theme
     var suggestions: List[String]
@@ -154,6 +157,8 @@ struct Main(App):
         self.pointer = Pointer()
         self.turn_card = 0
         self.parts_seen = 0
+        self.turn_look = 0
+        self.looks_seen = 0
         self.marks = List[PointMark]()
         self.look = liquid(False)
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
@@ -321,6 +326,8 @@ struct Main(App):
         self.work = True
         self.turn_card = len(self.screens.uis)  # (this turn's cards are the ones she points at)
         self.parts_seen = -1
+        self.turn_look = self.looker.serial
+        self.looks_seen = -1
         self.loop.parts = List[Part]()
         self.turns += 1
         self.creator.turn_began()
@@ -356,13 +363,27 @@ struct Main(App):
 
     def tell_points(mut self):
         """The ring has been drawn on a point: its lag from the audio that names the part is printed (what the checker reads)."""
-        if self.parts_seen != len(self.screens.uis):  # (a card arrived: the parts she may point at are this turn's cards')
+        if self.parts_seen != len(self.screens.uis) or self.looks_seen != self.looker.serial:  # (a card arrived: the parts she may point at are this turn's cards')
             self.parts_seen = len(self.screens.uis)
-            self.loop.parts = self.screens.parts(self.turn_card)
+            self.looks_seen = self.looker.serial
+            var parts = self.screens.parts(self.turn_card)
+            for pt in self.looker.parts(self.turn_look):  # (the camera card's boxes, named by their labels)
+                parts.append(pt.copy())
+            self.pointer.know(parts)
+            self.loop.parts = parts^
         if len(self.marks) > 0 and self.pointer.shown_stamp >= self.marks[0].stamp and self.pointer.shown_ns > 0:
             var m = self.marks.pop(0)
             self.out("OMX POINT: turn=" + String(self.turns) + " tag=" + m.tag + " lag_ms=" + String(Int(Float64(self.pointer.shown_ns - m.due_ns) / 1e6))
-                     + " sent_ms=" + String(Int(Float64(m.sent_ns - m.due_ns) / 1e6)) + " seen=" + String(self.pointer.seen))
+                     + " sent_ms=" + String(Int(Float64(m.sent_ns - m.due_ns) / 1e6)) + " seen=" + String(self.pointer.seen) + " ring=" + self.ring_text())
+
+    def ring_text(self) -> String:
+        """What the ring is drawn round: x,y,w,h in points from the ring layer's corner ("-": not found)."""
+        if len(self.pointer.rect) < 4:
+            return "-"
+        var out = String("")
+        for i in range(4):
+            out += ("," if i > 0 else "") + String(Int(self.pointer.rect[i] + 0.5))
+        return out
 
     # --- the cloud lane: only when the person names it (mojoui.cloudlane.CloudTurn keeps the turn; the app says and shows) -----
 
@@ -575,9 +596,3 @@ struct Main(App):
             self.looker.draw(canvas, surface, self.look.palette)
         else:
             self.screens.draw(canvas, surface, self.look.palette, self.client.state)
-
-    def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
-        """Where the part called `name` is on a card's canvas: a camera card's box by its label (mojoui.looker)."""
-        if self.looker.owns_canvas(canvas):
-            return self.looker.spot(canvas, name)
-        return (-1.0, -1.0)
