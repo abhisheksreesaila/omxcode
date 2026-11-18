@@ -338,6 +338,26 @@ def raw_of(ev, kind):
     return [e["raw"] for e in of(ev, kind)]
 
 
+def wait_gpu(index, need_mib, timeout=1200):
+    """Until card `index` has `need_mib` free (another session's model may be loading there): the brain is 15 GB and a failed
+    load would look like a broken app."""
+    t0 = time.time()
+    while True:
+        out = sh(["nvidia-smi", "-i", str(index), "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"], 30).stdout.strip()
+        try:
+            used, total = (int(x) for x in out.split(","))
+        except ValueError:
+            return
+        if total - used >= need_mib or time.time() - t0 > timeout:
+            return
+        time.sleep(15)
+
+
+def run6(source, steps, env=None, **kw):
+    wait_gpu(BRAIN_GPU, 20000)
+    return run_app(source, steps, env=env, **kw)
+
+
 def m6_units():
     out = []
     for name in ("todo", "news", "cloudlane"):
@@ -368,7 +388,7 @@ def m6_todo():
              + turn("What is left on my to do list?")
              + "tick:todo-1;wait:1500;" + f"shot:{OUT}/todo_ticked.png;wait:300")
     with NullSink():
-        ev, r = run_app(SILENT, steps, env=env)
+        ev, r = run6(SILENT, steps, env=env)
     pic("todo_five.png"), pic("todo_ticked.png")
     probs, said = [], []
     items = json.loads(store.read_text())["items"] if store.exists() else []
@@ -396,7 +416,7 @@ def m6_todo():
         said.append(f"'what's left' -> {rep[3]!r}")
     # restart: a new process reads the same file
     with NullSink():
-        ev2, r2 = run_app(SILENT, TYPED_OPEN + turn("How many things are still open on my to do list?") + "waitfor:3 left of 5=1000;wait:300", env=env)
+        ev2, r2 = run6(SILENT, TYPED_OPEN + turn("How many things are still open on my to do list?") + "waitfor:3 left of 5=1000;wait:300", env=env)
     rep2 = replies(ev2)
     if not re.search(r"\bthree\b|\b3\b", rep2.get(1, ""), re.I) or "WAITED: 3 left of 5" not in r2.stdout:
         probs.append(f"after a restart: answered {rep2.get(1)!r}, card '3 left of 5' {'shown' if 'WAITED: 3 left of 5' in r2.stdout else 'not shown'}")
@@ -414,7 +434,7 @@ def m6_news():
     topics = ["What is happening with SpaceX?", "What is the latest news about the Linux kernel?"]
     steps = TYPED_OPEN + turn(topics[0]) + f"shot:{OUT}/news_one.png;wait:300;" + turn(topics[1]) + f"shot:{OUT}/news_two.png;wait:300"
     with NullSink():
-        ev, r = run_app(SILENT, steps, env={**SPLIT})
+        ev, r = run6(SILENT, steps, env={**SPLIT})
     pic("news_one.png"), pic("news_two.png")
     probs, said = [], []
     news = [e for e in of(ev, "NEWS") if "failed" not in e["raw"]]
@@ -456,7 +476,7 @@ def m6_jobs():
              + "waitfor:Dismiss=420000;wait:9000;" + f"shot:{OUT}/job_done.png;wait:300;" + turn(follow, 90000))
     with NullSink() as sink:
         sink.record(OUT / "m6-jobs.wav")
-        ev, r = run_app("file:W/q1.wav@25", steps, env={**SPLIT}, timeout=900)
+        ev, r = run6("file:W/q1.wav@25", steps, env={**SPLIT}, timeout=900)
         sink.stop_recording()
     pic("job_running.png"), pic("job_done.png")
     probs, said = [], []
@@ -542,7 +562,7 @@ def m6_cloud():
              + f"shot:{OUT}/frame_cloud.png;wait:300;waitfor:Local · Qwen 27B=120000;wait:1500;shot:{OUT}/frame_after.png;wait:300")
     with NullSink() as sink:
         sink.record(OUT / "m6-cloud.wav")
-        ev, r = run_app(SILENT, steps, env=env, timeout=600)
+        ev, r = run6(SILENT, steps, env=env, timeout=600)
         sink.stop_recording()
     for n in ("frame_local.png", "frame_cloud.png", "frame_after.png"):
         pic(n)

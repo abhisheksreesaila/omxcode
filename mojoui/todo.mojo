@@ -243,7 +243,7 @@ def TodoCard(items: List[TodoItem], tick: Int) -> View:
     rows.append(Text("Nothing here yet" if len(items) == 0 else (String(open) + " left of " + String(len(items))), CAPTION))
     for i in range(len(items)):
         rows.append(Toggle(items[i].text, items[i].done, tick + i).tag("todo-" + String(i + 1)))
-    return Card(rows^).tag("todo")
+    return Card(rows^).tag("todo").fill()
 
 
 # ---------------------------------------------------------------------------------------------------------------------

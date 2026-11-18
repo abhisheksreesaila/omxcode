@@ -93,8 +93,10 @@ build_linux() {
     local env; env="$(pwd)/.pixi/envs/$pyenv"
     local lib; lib="$(ls "$env"/lib/libpython3*.so.1.0 | head -1)"
     mv "$out/$EX" "$out/$EX.bin"
-    printf '#!/bin/sh\n# the app on the %s environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
-      "$pyenv" "$lib" "$env" "$env" "$EX" > "$out/$EX"
+    local flare_dir=""  # (Flare looks for its shims in $CONDA_PREFIX/lib, which is this environment now: tell it where they are)
+    if grep -qx flare "examples/$EX/needs" 2>/dev/null; then flare_dir=" FLARE_LIB_DIR=\"$(pwd)/build/flare/lib\""; fi
+    printf '#!/bin/sh\n# the app on the %s environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"%s\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
+      "$pyenv" "$lib" "$env" "$env" "$flare_dir" "$EX" > "$out/$EX"
     chmod +x "$out/$EX"
   fi
   stamp "$out"; echo "   $out/$EX"

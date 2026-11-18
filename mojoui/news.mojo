@@ -248,4 +248,4 @@ def NewsCard(topic: String, items: List[Headline]) -> View:
         runs.append(Link(h.title, h.url))
         runs.append(Plain("  " + h.source + (" · " + when if when != "" else String(""))))
         rows.append(Paragraph(runs^, role="news-item"))
-    return Card(rows^).tag("news")
+    return Card(rows^).tag("news").fill()

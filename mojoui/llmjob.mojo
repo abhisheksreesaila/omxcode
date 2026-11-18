@@ -183,7 +183,7 @@ def ThinkCard(job: ThinkJob, dismiss: Int = NO_MSG) -> View:
         rows.append(Text(job.error, CAPTION))
     if job.state != JOB_RUNNING and dismiss != NO_MSG:
         rows.append(Button("Dismiss", dismiss, SUBTLE))
-    return Card(rows^).tag("job")
+    return Card(rows^).tag("job").fill()
 
 
 def job_notice(job: ThinkJob) -> String:
