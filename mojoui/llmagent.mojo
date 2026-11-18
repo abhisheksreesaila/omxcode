@@ -163,6 +163,34 @@ def screen_text(view: View) -> String:
     return out^
 
 
+def press[A: App](mut app: A, name: String, args: String) -> String:
+    """One call of an app's tool, on the app itself (an app that holds its own agent answers take_calls() with
+    `press(self, c.name, c.arguments)`): the control's event goes to update(), the result says what is on screen now."""
+    for t in view_tools(app.view()):
+        if t.name != name:
+            continue
+        if t.kind == T_BUTTON:
+            app.update(Event(t.msg, "", 0))
+        else:
+            try:
+                var j = Json.parse(args)
+                if t.kind == T_TEXT:
+                    if j.get(0, "text") < 0:
+                        return '{"error":"' + name + ' needs \\"text\\""}'
+                    app.update(Event(t.msg, j.text(j.get(0, "text")), 0))
+                else:
+                    if j.get(0, "on") < 0:
+                        return '{"error":"' + name + ' needs \\"on\\""}'
+                    app.update(Event(t.msg, "", 1 if j.flag(j.get(0, "on")) else 0))
+            except:
+                return '{"error":"the arguments aren\'t JSON"}'
+        return '{"ok":true,"screen":' + json_string(screen_text(app.view())) + "}"
+    var names = String("")
+    for t in view_tools(app.view()):
+        names += (t.name if names == "" else ", " + t.name)
+    return '{"error":"no such tool: ' + name + '; there are: ' + names + '"}'
+
+
 struct AppRunner[A: App](ToolRunner):
     """Any App as an agent's tools: its buttons, text fields and toggles (view_tools). A call becomes the event a person's
     tap would send, update() runs it, and the result says what is on screen now."""
@@ -176,29 +204,7 @@ struct AppRunner[A: App](ToolRunner):
         return view_tools(self.app.view())
 
     def run_tool(mut self, name: String, args: String) -> String:
-        for t in view_tools(self.app.view()):
-            if t.name != name:
-                continue
-            if t.kind == T_BUTTON:
-                self.app.update(Event(t.msg, "", 0))
-            else:
-                try:
-                    var j = Json.parse(args)
-                    if t.kind == T_TEXT:
-                        if j.get(0, "text") < 0:
-                            return '{"error":"' + name + ' needs \\"text\\""}'
-                        self.app.update(Event(t.msg, j.text(j.get(0, "text")), 0))
-                    else:
-                        if j.get(0, "on") < 0:
-                            return '{"error":"' + name + ' needs \\"on\\""}'
-                        self.app.update(Event(t.msg, "", 1 if j.flag(j.get(0, "on")) else 0))
-                except:
-                    return '{"error":"the arguments aren\'t JSON"}'
-            return '{"ok":true,"screen":' + json_string(screen_text(self.app.view())) + "}"
-        var names = String("")
-        for t in view_tools(self.app.view()):
-            names += (t.name if names == "" else ", " + t.name)
-        return '{"error":"no such tool: ' + name + '; there are: ' + names + '"}'
+        return press(self.app, name, args)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -399,6 +405,21 @@ struct LlmAgent(LocalAgent, Movable):
             out.append(_ev("STATE_SNAPSHOT", ',"snapshot":{"agent":' + agent_state + "}"))
         self.start_step(out)
         return out^
+
+    def prime(mut self, input: String):
+        """Warms the prompt cache with the system prompt and the tools of `input` (a RunAgentInput with no messages yet:
+        Agent.input_json()), by asking for one token nobody reads: the first real turn then reads only what it adds (the
+        model's prompt head is the same, so the cache holds it) instead of paying ~2 s for the 3 000 tokens of tools. Call
+        it once the tools are set (set_tools) and before the first run; a no-op while a run is in flight."""
+        if self.phase != PH_IDLE:
+            return
+        try:
+            var j = Json.parse(input)
+            self.tools_json = self.build_tools(j, j.get(0, "tools"))
+            var msgs = '[{"role":"system","content":' + json_string(self.system) + "}]"
+            _ = self.llm.chat(msgs, self.tools_json, 0, self.think, 1, 0.0)
+        except:
+            pass  # (a warm-up that fails costs the first turn its cache, nothing else)
 
     def take_messages(mut self, j: Json, ms: Int) raises:
         if ms < 0 or j.kind(ms) != J_ARRAY:

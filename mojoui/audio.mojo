@@ -11,6 +11,10 @@
 # microphone, carried over the host's audio socket (mojoui.webaudio); a page that is open and tapped is the microphone.
 # Mac / iPhone: not built yet (start() marks the microphone failed with a reason: AVAudioEngine is the planned path); it
 # compiles there, so apps that use it still build.
+# A recorded voice for a microphone (tests, demos, a checker that has no person): $MOJOUI_AUDIO_SOURCE (or Microphone(source))
+# of the form `file:<a.wav>[@<seconds>][,<b.wav>[@<seconds>]…]` plays 16 kHz 16-bit mono files into the capture ring at
+# their offsets from start(), in real time and mixed over silence, through the very same worker, stamps and level as the
+# sound server's source (no PulseAudio needed). The ring runs on after the last file: an unattended app hears silence.
 # Also here: load_wav (16-bit PCM .wav -> floats) and best_match (normalised cross-correlation at the best lag).
 
 from std.atomic import Atomic
@@ -92,8 +96,62 @@ def _release(words: Int):
         _P(unsafe_from_address=words).unsafe_free()
 
 
+def _source_text(words: Int) -> String:
+    var addr = Int(_A.load(_word(words, W_SOURCE)))
+    var out = String("")
+    if addr == 0:
+        return out^
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var k = 0
+    while p[k] != 0:
+        out += chr(Int(p[k]))
+        k += 1
+    return out^
+
+
+def _capture_files(words: Int, spec: String) raises:
+    """The `file:` source: the recorded files, each from its offset, paced like a live source (20 ms a chunk)."""
+    var files = List[List[Float32]]()
+    var starts = List[Int]()
+    for part in spec.split(","):
+        var item = String(part)
+        var at = item.rfind("@")
+        var path = String(item[byte = :at]) if at >= 0 else item
+        var secs = Float64(String(item[byte = at + 1 :])) if at >= 0 else 0.0
+        files.append(load_wav(path))
+        starts.append(Int(secs * Float64(RATE)))
+    _A.store(_word(words, W_STATE), 1)
+    var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING))))
+    var t0 = now_ns()
+    var k = 0
+    while _A.load(_word(words, W_STOP)) == 0:
+        var due = t0 + (k + 1) * (CHUNK * 1_000_000_000 // RATE)
+        while now_ns() < due:
+            _ = libc.usleep(1000)
+        var total = Int(_A.load(_word(words, W_TOTAL)))
+        var sq = Float64(0)
+        for i in range(CHUNK):
+            var v = Float32(0)
+            for f in range(len(files)):
+                var j = total + i - starts[f]
+                if j >= 0 and j < len(files[f]):
+                    v += files[f][j]
+            ring.unsafe_offset((total + i) % RING)[] = v
+            sq += Float64(v) * Float64(v)
+        _A.store(_word(words, W_LEVEL), Int64(sqrt(sq / CHUNK) * 1e6))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        _A.store(_word(words, W_TIME), Int64(now_ns()))
+        _A.store(_word(words, W_TOTAL), Int64(total + CHUNK))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        k += 1
+
+
 def _capture(words: Int) raises:
     """The worker: open a record stream, then read 20 ms at a time into the ring until asked to stop."""
+    var source = _source_text(words)
+    if source.startswith("file:"):
+        _capture_files(words, String(source[byte = 5 :]))
+        return
     var handle = OwnedDLHandle("libpulse-simple.so.0")  # (the standard library's dlopen: see gtk_webview, D-1413)
     var lib = 0  # (RTLD_GLOBAL: its symbols are found anywhere while `handle` holds it)
     var spec = unsafe_alloc[Int32](4)  # pa_sample_spec { int32 format; uint32 rate; uint8 channels }

@@ -77,13 +77,16 @@ build_linux() {
   # Machine-local, not relocatable: the launcher hard-codes this checkout's absolute .pixi/envs/speech paths, and the
   # build runs `pixi install -e speech` (torch + CUDA wheels, several GB) first. Moving the checkout or copying the
   # build elsewhere needs a rebuild there.
-  if grep -qx speech "examples/$EX/needs" 2>/dev/null; then
-    pixi install -e speech >/dev/null
-    local env; env="$(pwd)/.pixi/envs/speech"
+  # `voice` (goal 72: Kokoro, Parakeet and Silero in the app's process: CPython 3.12) does the same on the `voice` environment.
+  local pyenv=""
+  for candidate in speech voice; do grep -qx "$candidate" "examples/$EX/needs" 2>/dev/null && pyenv="$candidate"; done
+  if [ -n "$pyenv" ]; then
+    pixi install -e "$pyenv" >/dev/null
+    local env; env="$(pwd)/.pixi/envs/$pyenv"
     local lib; lib="$(ls "$env"/lib/libpython3*.so.1.0 | head -1)"
     mv "$out/$EX" "$out/$EX.bin"
-    printf '#!/bin/sh\n# the app on the speech environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
-      "$lib" "$env" "$env" "$EX" > "$out/$EX"
+    printf '#!/bin/sh\n# the app on the %s environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
+      "$pyenv" "$lib" "$env" "$env" "$EX" > "$out/$EX"
     chmod +x "$out/$EX"
   fi
   stamp "$out"; echo "   $out/$EX"

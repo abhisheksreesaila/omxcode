@@ -42,6 +42,7 @@ struct Screens[H: Hub = NoData](Movable):
     var font: Font  # one for every screen's canvases (a Font costs ~1 ms to make)
     var hub: Self.H  # the app's datasets, for screens that name one (goal 48 M5: mojoui.datahub)
     var album: Album  # the app's pictures, for screens that name one (mojoui.album)
+    var refused: List[String]  # calls adopt() saw refused by an in-process agent (it told its model; nothing is shown)
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi[Self.H]]()
@@ -57,6 +58,7 @@ struct Screens[H: Hub = NoData](Movable):
         self.hub = Self.H()
         self.album = Album()
         self.font = Font()
+        self.refused = List[String]()
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -187,6 +189,43 @@ struct Screens[H: Hub = NoData](Movable):
             self.gave_up = True
             return False
         return True
+
+    def adopt(mut self, agent: Agent, tool: String = "render_ui") -> Int:
+        """For an agent that runs `tool` itself (mojoui.llmagent.LlmAgent validates render_ui and answers it in the run):
+        a screen for every finished call that was answered and not refused, once each, oldest first. Returns how many
+        were added (redraw when it isn't 0). take() is for agents whose client answers the call."""
+        var added = 0
+        for ref m in agent.messages:
+            for ref c in m.calls:
+                if c.name != tool or not c.done or self.index_of(c.id) >= 0 or self.was_refused(c.id):
+                    continue
+                var answer = String("")
+                for ref r in agent.messages:
+                    if r.role == "tool" and r.tool_call_id == c.id:
+                        answer = r.content
+                if answer == "":
+                    continue  # (its result hasn't come yet)
+                if answer.startswith('{"error"') or len(self.uis) >= self.max:
+                    self.refused.append(c.id)
+                    continue
+                var k = len(self.uis)
+                var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+                if ui.problem != "":
+                    self.refused.append(c.id)
+                    continue
+                self.uis.append(ui^)
+                self.calls.append(c.id)
+                self.messages.append(m.id)
+                self.live.append(False)
+                self.sizes.append(c.arguments.byte_length())
+                added += 1
+        return added
+
+    def was_refused(self, call_id: String) -> Bool:
+        for r in self.refused:
+            if r == call_id:
+                return True
+        return False
 
     def owns(self, message: Int) -> Bool:
         return message >= self.base and message < self.base + len(self.uis) * MAX_CONTROLS
