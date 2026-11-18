@@ -1,7 +1,7 @@
 # mojoui.comic + mojoui.imagegen + mojoui.creator without an image model (goal 72 M6, D-7280..D-7284): the plan a model hands in
 # is checked and turned into the prompts; a drawing reply's PNG is found inside its JSON; the agent's three tools answer
 # what a model can act on (a bad plan, no painter, a path outside the notes); a notes question puts a card that cites the
-# right file on the shelf and marks the turn tainted; the album takes a picture under a safe, unique name.
+# right file on the shelf and gives the model the passages as fenced untrusted text; the album takes a picture under a safe, unique name.
 #   NOTES_PACK=build/packs/e5small build/test_creator   (after scripts/mxbuild.sh tests/test_creator.mojo -o build/test_creator)
 from std.testing import assert_equal, assert_true
 from std.os import getenv
@@ -86,14 +86,16 @@ def main() raises:
     assert_equal(len(c.cards), 1)
     assert_equal(c.cards[0].kind, CARD_NOTES)
     assert_equal(c.cards[0].files[0], "health/dentist.md")
-    assert_true(c.tainted, "reading notes taints the turn")
+    assert_true(a[0].untrusted, "what the notes held goes to the model as untrusted text (the agent taints the turn)")
+    assert_true(a[0].content.find('<untrusted source=\\"notes\\">') >= 0 and a[0].content.find("</untrusted>") >= 0, "and fenced: " + a[0].content)
     c.turn_began()
-    assert_true(not c.tainted, "a new turn starts clean")
     c.call("n2", "find_in_notes", '{"question":"How do I configure a Kubernetes ingress controller?"}')
     for _ in range(200):
         c.tick()
         if len(c.answers) > 0:
             break
-    assert_equal(c.take_answers()[0].content, '{"result":"Nothing in the notes matches that.","note":"Say so; do not guess."}')
+    var none = c.take_answers()
+    assert_equal(none[0].content, '{"result":"Nothing in the notes matches that.","note":"Say so; do not guess."}')
+    assert_true(not none[0].untrusted, "nothing was read, so nothing is untrusted")
     assert_equal(len(c.cards), 1)
     print("creator: ok")

@@ -31,6 +31,7 @@ from mojoui.app import App, Event
 from mojoui.clock import now_ns
 from mojoui.genui import catalog, validate, Spec, Prop, P_TEXT, P_ENUM, P_NUMBER, P_TEXTS, P_NUMBERS, P_ROWS, P_POINTER, P_WORD, P_CHILDREN, P_BOOL, P_POINTS, P_ITEMS
 from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT, J_STRING, J_NULL
+from mojoui.trust import Trust
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
 from mojoui.view import View, BUTTON, FIELD, TOGGLE, NO_MSG
 from mojoui import libc
@@ -324,6 +325,7 @@ struct LlmAgent(LocalAgent, Movable):
     var used: Int  # tools called this run
     var warm_id: Int  # the warm-up request prime() made, until its end is seen (0: none)
     var runs: Int
+    var trust: Trust  # what a turn that has read untrusted text may not do (mojoui.trust, D-7301)
 
     def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 1200, temperature: Float64 = 0.3):
         self.llm = llm^
@@ -358,6 +360,7 @@ struct LlmAgent(LocalAgent, Movable):
         self.used = 0
         self.warm_id = 0
         self.runs = 0
+        self.trust = Trust()
 
     def add_function(mut self, var f: ToolFn):
         """Registers a plain Mojo function as a tool (c)."""
@@ -392,6 +395,7 @@ struct LlmAgent(LocalAgent, Movable):
             out.append(_ev("RUN_ERROR", ',"message":"a run is already in progress","code":"busy"'))
             return out^
         self.runs += 1
+        self.trust.new_turn()  # (a run starts with the person's words: nothing untrusted has been read in it yet)
         self.t_begin = now_ns()
         self.first_text_ms = -1.0
         self.step = 0
@@ -643,6 +647,14 @@ struct LlmAgent(LocalAgent, Movable):
     def route(mut self, mut out: List[String], i: Int):
         """Who answers call i: this agent (render_ui, a registered function, an unknown name) or the app or the client."""
         var c = self.step_calls[i].copy()
+        var is_control = False
+        for ref t in self.app_tools:
+            if t.name == c.name:
+                is_control = True
+        var refusal = self.trust.check(c.name, is_control)
+        if refusal != "":  # (after notes or news were read this turn: what reaches out or changes things needs the person's yes)
+            out.append(self.answered(i, '{"error":' + json_string(refusal) + "}"))
+            return
         if c.name == RENDER_UI and self.has_ui:
             var why = validate(c.arguments)
             out.append(self.answered(i, '{"shown":true}' if why == "" else '{"error":' + json_string("refused: " + why) + "}"))
@@ -680,10 +692,14 @@ struct LlmAgent(LocalAgent, Movable):
                 out.append(self.step_calls[i].copy())
         return out^
 
-    def answer(mut self, call_id: String, content: String):
-        """The app's result for a call take_calls() handed over: it goes to the model and out as TOOL_CALL_RESULT."""
+    def answer(mut self, call_id: String, content: String, untrusted: Bool = False):
+        """The app's result for a call take_calls() handed over: it goes to the model and out as TOOL_CALL_RESULT. `untrusted`:
+        the result holds text from outside (notes, headlines): the rest of the turn may not use tools that reach out or change
+        things without the person's yes (agent.trust)."""
         for i in range(len(self.step_calls)):
             if self.step_calls[i].id == call_id and self.step_state[i] == 3:
+                if untrusted:
+                    self.trust.taint()
                 self.outbox.append(self.answered(i, content))
 
     def settle(mut self, mut out: List[String]):

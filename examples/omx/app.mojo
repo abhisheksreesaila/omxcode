@@ -123,6 +123,8 @@ struct Main(App):
             var ctx = Int(environment("OMX_LLM_CTX", "65536"))
             self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
+            self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
+            self.llm.value().trust.allow("type")
         except e:
             self.note = "the language model didn't load: " + String(e)
         self.client = Agent("", 0, 0, "omx")
@@ -416,7 +418,7 @@ struct Main(App):
                 self.llm.value().answer(c.id, result)
                 self.llm.value().set_tools(self.tools())
             for a in self.creator.take_answers():
-                self.llm.value().answer(a.id, a.content)
+                self.llm.value().answer(a.id, a.content, a.untrusted)
         elif self.queued:
             self.start_run()
 
