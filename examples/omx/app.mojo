@@ -87,6 +87,7 @@ struct Main(App):
     var last_state: Int
     var shelf_version: Int
     var primed: Bool  # the model has been asked for its prompt cache (LlmAgent.prime)
+    var by_agent: Bool  # a button is being pressed by the model's tool call
     var cloud_turn: Bool  # the question went to the cloud model and its answer is awaited
     var cloud_done: Bool  # ... and has come back: the frame stays until it has been said
     var cloud_text: String
@@ -97,6 +98,7 @@ struct Main(App):
     def __init__(out self):
         self.http = Http()
         self.assist = Assistant(TODO, NEWS)
+        self.by_agent = False
         self.cloud_turn = False
         self.cloud_done = False
         self.cloud_text = ""
@@ -111,7 +113,7 @@ struct Main(App):
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
             var ctx = Int(environment("OMX_LLM_CTX", "65536"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM), max_tokens=1200)
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
         except e:
             self.note = "the language model didn't load: " + String(e)
@@ -175,7 +177,8 @@ struct Main(App):
             self.draft = ""
         elif m == STOP:
             self.loop.stop_speaking()
-            self.cancel_run()
+            if not self.by_agent:  # (the model pressing it is inside the run it would cancel: it goes on and answers)
+                self.cancel_run()
             self.cancel_cloud()
         elif m == LANE:
             self.cloud = not self.cloud
@@ -370,10 +373,13 @@ struct Main(App):
                 self.take(ev)
             var calls = self.llm.value().take_calls()
             for c in calls:  # (the assistant's slow tools, then the app's own buttons, as the agent pressed them)
+                print("OMX TOOL: " + c.name + " " + c.arguments, flush=True)
                 if self.assist.is_tool(c.name):
                     self.assist.run_tool(c, self.llm.value(), self.http)
                     continue
+                self.by_agent = True
                 var result = press(self, c.name, c.arguments)
+                self.by_agent = False
                 self.llm.value().answer(c.id, result)
                 self.llm.value().set_tools(view_tools(self.page(False)))
         elif self.queued:

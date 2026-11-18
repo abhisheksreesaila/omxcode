@@ -43,7 +43,7 @@ def VoiceDock(muted: Bool, typing: Bool, draft: String, mute: Int, type_: Int, s
     row.append(Button("Unmute" if muted else "Mute", mute, PROMINENT if muted else PLAIN).tag("mute").tooltip(
         "Turn the microphone off or on. Off, the assistant hears nothing."))
     row.append(Button("Close keyboard" if typing else "Type", type_, PLAIN).tag("type").tooltip("Show or hide the box for typing a question."))
-    row.append(Button("Stop", stop, PLAIN if busy else SUBTLE).tag("stop").tooltip("Stop speaking and drop the answer being made."))
+    row.append(Button("Stop", stop, PLAIN if busy else SUBTLE).tag("stop").tooltip("Stop the voice at once and drop the answer being made. Only when the user asks you to be quiet and asks nothing else: never to answer a question."))
     var col = List[View]()
     if typing:
         col.append(TextField(draft, "Type to omx", on_draft, on_send).tag("question").tooltip("Type a question and press Enter."))

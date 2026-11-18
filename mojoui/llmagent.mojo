@@ -324,7 +324,7 @@ struct LlmAgent(LocalAgent, Movable):
     var warm_id: Int  # the warm-up request prime() made, until its end is seen (0: none)
     var runs: Int
 
-    def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 512, temperature: Float64 = 0.3):
+    def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 1200, temperature: Float64 = 0.3):
         self.llm = llm^
         self.system = system
         self.think = think
