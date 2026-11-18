@@ -1,10 +1,11 @@
 # mojoui.todo (goal 72 M6): a list in a file that the tools and the tick boxes edit, found by number or by words, kept across a restart.
 #   scripts/mxbuild.sh tests/test_todo.mojo -o build/test_todo && build/test_todo
-from std.os import setenv, unlink
+from std.os import setenv, unlink, makedirs, listdir
 from std.os.path import exists
 from std.testing import assert_equal, assert_true
 from mojoui.todo import TodoList, todo_add, todo_done, todo_remove, todo_list, todo_functions, TodoCard, todo_path
 from mojoui.view import TOGGLE
+from mojoui import libc
 
 
 def main() raises:
@@ -75,4 +76,47 @@ def main() raises:
         names += f.name + ","
     assert_equal(names, "todo_add,todo_done,todo_remove,todo_list,")
     unlink(path)
+
+    # a file that can't be read is kept, never written over (D-7306): the garbage moves aside and a new list starts
+    with open(path, "w") as f:
+        f.write("not json {{ the person's own notes?")
+    var odd = TodoList(path)
+    assert_equal(len(odd.items), 0)
+    assert_true(odd.note.find("couldn't be read") >= 0 and odd.note.find("kept as " + path + ".bad-") >= 0, odd.note)
+    assert_true(not exists(path))
+    r = todo_add('{"items":["buy milk"]}')
+    assert_true(r.startswith('{"added":1,"list":{"open":1,"items":["1. buy milk"]'), r)
+    var kept = String("")
+    for name in listdir("/tmp"):
+        if name.startswith("mojoui-test-todo.json.bad-"):
+            with open("/tmp/" + name, "r") as f:
+                kept = f.read()
+            unlink("/tmp/" + name)
+    assert_equal(kept, "not json {{ the person's own notes?")
+    unlink(path)
+    # JSON that isn't a to-do list is not ours either
+    with open(path, "w") as f:
+        f.write('{"shopping":["eggs"]}')
+    assert_true(TodoList(path).note.find("it has no list of items") >= 0)
+    for name in listdir("/tmp"):
+        if name.startswith("mojoui-test-todo.json.bad-"):
+            unlink("/tmp/" + name)
+    # an unreadable file that can't be moved aside (a folder nobody may write to) stays exactly as it is, and the tool says so
+    makedirs("/tmp/mojoui-test-todo-ro", exist_ok=True)
+    var ro = String("/tmp/mojoui-test-todo-ro/todo.json")
+    with open(ro, "w") as f:
+        f.write("garbage")
+    _ = libc.chmod("/tmp/mojoui-test-todo-ro", 0o500)
+    _ = setenv("MOJOUI_TODO", ro, True)
+    r = todo_add('{"items":["buy milk"]}')
+    assert_true(r.startswith('{"error":"I couldn\'t save the list: the to-do file couldn\'t be read'), r)
+    _ = libc.chmod("/tmp/mojoui-test-todo-ro", 0o700)
+    with open(ro, "r") as f:
+        assert_equal(f.read(), "garbage")
+    unlink(ro)
+    # a save that fails is said, not swallowed: the model is told the change was not kept
+    _ = setenv("MOJOUI_TODO", "/proc/no-such-folder/todo.json", True)
+    r = todo_add('{"items":["buy milk"]}')
+    assert_true(r.startswith('{"error":"I couldn\'t save the list: '), r)
+    assert_true(r.find("The change was not kept; tell the user.") >= 0, r)
     print("todo: ok")

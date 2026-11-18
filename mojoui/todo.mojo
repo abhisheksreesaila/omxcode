@@ -7,6 +7,9 @@
 #   TodoCard(list.items, TICK)                   # the card: a tick box per thing (message TICK + its index), "n left"
 #   todo_functions()                             # the agent's tools: todo_add (several at once), todo_done, todo_remove, todo_list
 #
+# A save that fails is said (list.save_error; the tools answer "I couldn't save the list: …"), and a file that can't be read
+# (not JSON, not a list of items) is moved aside to todo.json.bad-<time> before anything is written, never overwritten (D-7306).
+#
 # The tools keep no state of their own: each call opens the file, changes it and says what is on the list now, so a tool the
 # model calls and a tick box the person taps edit the same thing, and a list survives the app (or the agent) restarting. An
 # app notices the model's change with refresh() on its timer and shows TodoCard from its items.
@@ -15,6 +18,7 @@ from std.os import makedirs
 from std.os.path import exists
 from mojoui.utf8 import head
 from mojoui import libc
+from mojoui.clock import wall_seconds
 from mojoui.json import Json, json_string, J_ARRAY, J_STRING, J_NUMBER
 from mojoui.llmagent import ToolFn
 from mojoui.shared import environment
@@ -74,11 +78,17 @@ struct TodoList(Movable):
     var path: String
     var items: List[TodoItem]
     var seen_stamp: Int  # the file's modified time (ns) as last read or written
+    var save_error: String  # why the last save didn't happen ("" when it did)
+    var note: String  # what happened to a file that couldn't be read ("" when it could)
+    var blocked: Bool  # the file can't be read and can't be moved aside: nothing is written
 
     def __init__(out self, path: String):
         self.path = path
         self.items = List[TodoItem]()
         self.seen_stamp = 0
+        self.save_error = String("")
+        self.note = String("")
+        self.blocked = False
         self.load()
 
     # --- the file -------------------------------------------------------------------------------------------------
@@ -86,6 +96,8 @@ struct TodoList(Movable):
     def load(mut self):
         self.items = List[TodoItem]()
         self.seen_stamp = file_stamp(self.path)[0]
+        self.note = String("")
+        self.blocked = False
         if not exists(self.path):
             return
         try:
@@ -94,18 +106,39 @@ struct TodoList(Movable):
                 text = f.read()
             var j = Json.parse(text)
             var xs = j.get(0, "items")
-            if xs >= 0 and j.kind(xs) == J_ARRAY:
-                for i in range(min(j.size(xs), MAX_ITEMS)):
-                    var x = j.at(xs, i)
-                    self.items.append(TodoItem(j.text(j.get(x, "text")), j.flag(j.get(x, "done"))))
-        except:
-            self.items = List[TodoItem]()  # (a file that isn't ours reads as an empty list; the next save replaces it)
+            if xs < 0 or j.kind(xs) != J_ARRAY:
+                raise Error("it has no list of items")
+            for i in range(min(j.size(xs), MAX_ITEMS)):
+                var x = j.at(xs, i)
+                self.items.append(TodoItem(j.text(j.get(x, "text")), j.flag(j.get(x, "done"))))
+        except e:
+            self.items = List[TodoItem]()  # (a file that isn't ours: kept aside, never written over)
+            self.set_aside(String(e))
 
-    def save(mut self):
+    def set_aside(mut self, why: String):
+        """The file couldn't be read: it moves to <path>.bad-<time> (the first name that is free) and the list starts empty."""
+        var stamp = String(Int(wall_seconds()))
+        var to = self.path + ".bad-" + stamp
+        var k = 2
+        while exists(to):
+            to = self.path + ".bad-" + stamp + "-" + String(k)
+            k += 1
+        if libc.rename(self.path, to) == 0:
+            self.note = "the to-do file couldn't be read (" + why + "); it was kept as " + to + " and this list starts empty"
+        else:
+            self.note = "the to-do file couldn't be read (" + why + ") and couldn't be set aside, so nothing will be written over it"
+            self.blocked = True
+        self.seen_stamp = file_stamp(self.path)[0]
+
+    def save(mut self) -> Bool:
         var out = String('{"items":[')
         for i in range(len(self.items)):
             out += ("," if i > 0 else "") + '{"text":' + json_string(self.items[i].text) + ',"done":' + ("true" if self.items[i].done else "false") + "}"
         out += "]}"
+        if self.blocked:  # (an unreadable file that couldn't be moved aside stays as it is)
+            self.save_error = self.note
+            return False
+        self.save_error = String("")
         try:
             var slash = self.path.rfind("/")
             if slash > 0:
@@ -113,10 +146,12 @@ struct TodoList(Movable):
             var tmp = self.path + ".tmp"
             with open(tmp, "w") as f:
                 f.write(out)
-            _ = libc.rename(tmp, self.path)
-        except:
-            pass
+            if libc.rename(tmp, self.path) != 0:
+                self.save_error = "the file couldn't be moved into place"
+        except e:
+            self.save_error = String(e)
         self.seen_stamp = file_stamp(self.path)[0]
+        return self.save_error == ""
 
     def refresh(mut self) -> Bool:
         """Reads the file again when someone else changed it since (a tool call while the screen was showing it)."""
@@ -225,7 +260,7 @@ struct TodoList(Movable):
         var out = String('{"open":') + String(self.open_count()) + ',"items":['
         for i in range(len(self.items)):
             out += ("," if i > 0 else "") + json_string(String(i + 1) + ". " + self.items[i].text + (" (done)" if self.items[i].done else ""))
-        return out + "]}"
+        return out + "]" + (',"note":' + json_string(self.note) if self.note != "" else "") + "}"
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -260,6 +295,11 @@ def _which(j: Json) -> String:
     return String("")
 
 
+def _unsaved(list: TodoList) -> String:
+    """The tool's answer when the list changed in memory but the file couldn't be written: the model must not say it is done."""
+    return '{"error":' + json_string("I couldn't save the list: " + list.save_error + ". The change was not kept; tell the user.") + ',"list":' + list.describe() + "}"
+
+
 def todo_add(args: String) -> String:
     try:
         var j = Json.parse(args)
@@ -277,6 +317,8 @@ def todo_add(args: String) -> String:
         var n = list.add(texts)
         if n == 0:
             return '{"error":"nothing to add: give items as a list of short phrases"}'
+        if list.save_error != "":
+            return _unsaved(list)
         return '{"added":' + String(n) + ',"list":' + list.describe() + "}"
     except e:
         return '{"error":' + json_string("the arguments aren't JSON: " + String(e)) + "}"
@@ -292,6 +334,8 @@ def todo_done(args: String) -> String:
             return '{"error":"more than one thing fits; use its number","list":' + list.describe() + "}"
         if i < 0:
             return '{"error":"nothing on the list fits that; use its number","list":' + list.describe() + "}"
+        if list.save_error != "":
+            return _unsaved(list)
         return '{"ticked":' + json_string(list.items[i].text) + ',"list":' + list.describe() + "}"
     except e:
         return '{"error":' + json_string("the arguments aren't JSON: " + String(e)) + "}"
@@ -305,6 +349,8 @@ def todo_remove(args: String) -> String:
         var gone = list.remove(which)
         if gone == "":
             return '{"error":"nothing on the list fits that; use its number","list":' + list.describe() + "}"
+        if list.save_error != "":
+            return _unsaved(list)
         return '{"removed":' + json_string(gone) + ',"list":' + list.describe() + "}"
     except e:
         return '{"error":' + json_string("the arguments aren't JSON: " + String(e)) + "}"
