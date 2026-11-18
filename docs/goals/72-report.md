@@ -6,7 +6,9 @@ the last full run in `build/g72/check-full.txt`). Decisions D-7200 to D-7293 in 
 
 ## Where the checks stand
 
-`build/g72/check-full.txt`: M0 to M6 PASS (M1 with the HTTP baseline and the two-sequence room test, M3 with the AG-UI client and the
+**Update 2026-11-18: M7 PASS.** After the owner cleared disk space, `docs/goals/72-check.py M7` ran in full (1776 s): goal 71 M5 PASS (goal 68 M0–M6, with goal 47 M0–M8, 59 M1–M2, 62 M1, components, message ranges, seek lint), the component matrix current, decisions and libc lints ok, omx-local untouched. (The e5-small notes pack, once a link into a removed build folder, was rebuilt first.) So M0–M7 all PASS.
+
+Earlier state, kept for the record: `build/g72/check-full.txt`: M0 to M6 PASS (M1 with the HTTP baseline and the two-sequence room test, M3 with the AG-UI client and the
 84-turn compaction, M6 with every sub-scenario). **M7 is BLOCKED, for one part only:** goal 71's M5 runs goal 68, whose robot data and
 videos are tens of GB, and this machine had 1.9 GB free (`G72_M7_SKIP_71=1` says so in the line). The rest of M7 passes: the component
 matrix is current, the decisions lint (1613 numbers), the libc lint, omx-local untouched (HEAD 8b6bcd0, no edits). Goal 68's earlier failures
