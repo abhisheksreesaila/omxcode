@@ -37,8 +37,8 @@ def main() raises:
 
     # 1. reading words in a picture: the PNG says PURPLE OTTER 42
     var otter = read_all("build/g77/otter.png")
-    assert_equal(image_size(otter)[0], 1024)
-    assert_equal(image_size(otter)[1], 512)
+    assert_equal(image_size(otter)[0], 1280)
+    assert_equal(image_size(otter)[1], 720)
     var t0 = now_ns()
     var read = llm.complete("[" + llm.image_user(otter, "Read the words in the picture exactly, in capital letters, nothing else.") + "]", seq=1, max_tokens=40, temperature=0.0)
     var read_ms = ms_since(t0)

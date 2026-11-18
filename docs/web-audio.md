@@ -28,8 +28,8 @@ speaker.stop()                 # the page's queue is flushed within ~100 ms (mea
 - **Transport: one WebSocket, `/audio`**, on the web host's own server (uvicorn). It is already there, it is full duplex, it
   keeps the order of frames and messages (a flush can never pass the samples before it), and it works through
   `tailscale serve` unchanged. Binary frames start with a tag byte: `1` microphone (16-bit mono, 16 kHz, up), `2` speaker
-  (16-bit mono, 24 kHz, down), `3` is kept for the camera (the next goal). JSON text frames carry the rest:
-  `claim`, `latency`, `mic_fail` up; `mic`, `flush`, `tap`, `bumped` down.
+  (16-bit mono, 24 kHz, down), `3` a camera still (up; goal 77 M6, below). JSON text frames carry the rest:
+  `claim`, `latency`, `mic_fail`, `cam_fail` up; `mic`, `flush`, `tap`, `bumped`, `cam`, `snap` down.
 - **The hub** (`mojoui/webaudio.mojo`) is one block of memory per server process: the browser's microphone is a set of
   capture words in the layout `Microphone` already reads, the speaker's are the layout `Speaker` already writes. `Microphone`
   and `Speaker` find the hub (mojoui.shared slot 89) when they start and use it instead of the sound server; on the GTK host,
@@ -39,6 +39,24 @@ speaker.stop()                 # the page's queue is flushed within ~100 ms (mea
 - **Speaker lead:** the host hands the page at most 600 ms of unplayed audio, so a `stop()` is a flush of at most that, and
   `queued_ms()` still means something. `playing()` counts what the page has been given until the time it would have ended.
 - **Not in the public copy:** `MOJOUI_PUBLIC=1` has no `/audio`, no hub and no pairing (it has its own rules, docs/web-public.md).
+
+## The camera (goal 77 M6)
+
+An app that uses `Camera` (mojoui.camera) needs no change either: on the web host its camera is the page's rear camera, on a
+desktop the machine's own (ffmpeg on Video4Linux). The same socket carries it, but never as a stream:
+
+```
+ app: cam.start()      -> {"t":"cam","on":true}   -> the page opens getUserMedia({video: facingMode environment, ideal 1280x720})
+ app: cam.snapshot()   -> {"t":"snap","id":N}     -> the page draws the current video frame to a canvas, JPEG at 0.85
+ page: tag 3 frame      = 0x03 | u32 N | u16 width | u16 height (little-endian) | the JPEG   -> mojoui.webcamera's hub -> cam.tick()
+ app: cam.stop()       -> {"t":"cam","on":false}  -> the page closes the camera (its light goes out)
+ page: {"t":"cam_fail","code":101|102|103}        -> refused / none found / not allowed here: cam.problem says so
+```
+
+The camera belongs to the page that was tapped last, as the microphone does (a page that is not the claimed one is told
+`bumped` and lets go of it). A still answers the request it carries; an older still never answers a newer request. Nothing is
+kept: the hub holds the newest JPEG (two buffers of 4 MiB, the number published last), and the app's card shows it. The hub
+is mojoui.shared slot 186. Proof: scripts/g77_camera_check.py (headless Chromium's fake camera playing a file), tests/test_camera.
 
 ## The tap
 

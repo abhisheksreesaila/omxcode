@@ -1,0 +1,68 @@
+{
+ "scene": {
+  "question": "Where is the banana?",
+  "iou": 0.848,
+  "reply": "The banana is in the middle, between the cup and the bottle.",
+  "card_text": "The banana is in the middle, between the red cup and the green bottle.",
+  "labels": "banana,",
+  "boxes": {
+   "banana": [
+    549,
+    220,
+    835,
+    535
+   ],
+   "cup": [
+    168,
+    274,
+    400,
+    478
+   ],
+   "bottle": [
+    988,
+    138,
+    1084,
+    500
+   ]
+  },
+  "truth": {
+   "mug": [
+    171,
+    275,
+    422,
+    484
+   ],
+   "banana": [
+    550,
+    222,
+    856,
+    563
+   ],
+   "bottle": [
+    990,
+    138,
+    1113,
+    504
+   ]
+  },
+  "spot_pts": [
+   391.49333333333334,
+   126.0
+  ],
+  "turn_s": 8.8,
+  "ms": 4139,
+  "frame_ms": 272,
+  "read_ms": 3867,
+  "image_ms": 180,
+  "image_tokens": 880,
+  "outward_bytes_sent": 0,
+  "frame_bytes": 44073
+ },
+ "text": {
+  "question": "What does the sign say?",
+  "reply": "The sign says \"Purple Otter 42.\"",
+  "card_text": "The sign says \"PURPLE OTTER 42\".",
+  "turn_s": 7.1,
+  "ms": 2549
+ }
+}

@@ -45,6 +45,8 @@ from mojoui.rowsource import Rows
 from mojoui.numformat import grouped
 from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
+from mojoui.grounding import Box
+from mojoui.sight import draw_sight
 from mojoui.disclosure import Disclosure
 from mojoui.canvas import Surface
 from mojoui.text import Font
@@ -219,6 +221,12 @@ def catalog() -> List[Spec]:
     out.append(Spec("Picture", "a picture the app holds, by name (see the run's context; never pixels or a link), fitted, with an optional caption", [
         Prop("name", P_WORD, True, 0, 0, List[String](), "a picture the app holds, by name", List[Field]()),
         text("caption", 200), number("height", 80, 600, False, "points")]))
+    out.append(Spec("Sight", "a picture the app holds, by name, with labelled boxes round the things in it (each box is a part of the card, named by its label, that a pointer can land on); coordinates are 0-1000 across the picture's width and height", [
+        Prop("name", P_WORD, True, 0, 0, List[String](), "a picture the app holds, by name", List[Field]()),
+        items("boxes", 1, 8, [Field("label", P_TEXT, True, 40, 0, List[String]()),
+                              Field("x0", P_NUMBER, True, 1000, 0, List[String]()), Field("y0", P_NUMBER, True, 1000, 0, List[String]()),
+                              Field("x1", P_NUMBER, True, 1000, 0, List[String]()), Field("y1", P_NUMBER, True, 1000, 0, List[String]())], True),
+        text("caption", 200), number("height", 80, 600, False, "points")]))
     out.append(Spec("Icon", "a Lucide icon by name (\"map-pin\", \"calendar\", \"check\")", [text("name", 40, True), number("size", 12, 64)]))
     # inputs
     out.append(Spec("Button", "a button that reports its action", [
@@ -254,6 +262,8 @@ def sample(name: String) -> String:
         n = '{"component":"Disclosure","title":"Getting around","open":true,"children":[{"component":"Text","text":"Tram 28 from Martim Moniz."}]}'
     elif name == "Picture":
         n = '{"component":"Picture","name":"tagus","caption":"The Tagus at sunset","height":160}'
+    elif name == "Sight":
+        n = '{"component":"Sight","name":"tagus","boxes":[{"label":"bridge","x0":120,"y0":300,"x1":640,"y1":520}],"caption":"The bridge","height":200}'
     elif name == "Divider" or name == "Spacer":
         n = '{"component":"' + name + '"}'
     elif name == "Text":
@@ -730,6 +740,7 @@ comptime CV_KPI = 2
 comptime CV_MAP = 3
 comptime CV_GRID = 4
 comptime CV_PICTURE = 5
+comptime CV_SIGHT = 6
 
 
 @fieldwise_init
@@ -763,6 +774,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_GRID
     if comp == "Picture":
         return CV_PICTURE
+    if comp == "Sight":
+        return CV_SIGHT
     return -1
 
 
@@ -903,8 +916,8 @@ struct GenUi[H: Hub = NoData](Movable):
                 self.problem = "bad prop: a DataGrid needs columns and rows, or a dataset"
             elif kind == CV_CHART and source < 0 and (self.json.get(n, "labels") < 0 or self.json.get(n, "values") < 0):
                 self.problem = "bad prop: a ChartView needs labels and values, or a dataset with group_by"
-            var picture = self.album.find(self.str(n, "name")) if kind == CV_PICTURE else -1
-            if kind == CV_PICTURE and picture < 0:
+            var picture = self.album.find(self.str(n, "name")) if kind == CV_PICTURE or kind == CV_SIGHT else -1
+            if (kind == CV_PICTURE or kind == CV_SIGHT) and picture < 0:
                 self.problem = "unknown picture " + json_string(self.str(n, "name")) + " (the app holds: " + self.album.names_text() + ")"
             self.shown.append(picture)
             self.sources.append(source)
@@ -920,6 +933,17 @@ struct GenUi[H: Hub = NoData](Movable):
         var ch = self.json.get(n, "children")
         for i in range(self.json.size(ch)):
             self.index(self.json.at(ch, i))
+
+    def sight_boxes(self, n: Int, width: Int, height: Int) -> List[Box]:
+        """A Sight's boxes (0-1000 across the picture) in the picture's pixels."""
+        var out = List[Box]()
+        var boxes = self.json.get(n, "boxes")
+        for i in range(self.json.size(boxes)):
+            var b = self.json.at(boxes, i)
+            var sx = Float64(width) / 1000.0
+            var sy = Float64(height) / 1000.0
+            out.append(Box(self.str(b, "label"), self.num(b, "x0", 0) * sx, self.num(b, "y0", 0) * sy, self.num(b, "x1", 0) * sx, self.num(b, "y1", 0) * sy))
+        return out^
 
     def chart_of(self, n: Int) -> ChartView:
         var c = ChartView(self.str(n, "title"), self.texts_of(n, "labels"), self.numbers_of(n, "values"),
@@ -1155,7 +1179,7 @@ struct GenUi[H: Hub = NoData](Movable):
             return Timeline(stages)
         if comp == "Breadcrumbs":
             return Breadcrumbs(self.texts_of(n, "items"), self.msg(n))
-        if comp == "Picture":
+        if comp == "Picture" or comp == "Sight":
             var parts = List[View]()
             parts.append(Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200))))
             if self.json.get(n, "caption") >= 0:
@@ -1300,6 +1324,11 @@ struct GenUi[H: Hub = NoData](Movable):
             surface.fill(p.card)
             if self.shown[k] >= 0:
                 self.album.draw(self.shown[k], surface, p.card)
+        elif kind == CV_SIGHT:
+            surface.fill(p.card)
+            if self.shown[k] >= 0:
+                ref pic = self.album.pictures[self.shown[k]][]
+                draw_sight(surface, pic.pixels, pic.width, pic.height, self.sight_boxes(n, pic.width, pic.height), font, p)
         elif kind == CV_GRID:
             if self.sources[k] >= 0:
                 self.hub.draw_grid(self.sources[k], self.grids[k], surface, font, p)

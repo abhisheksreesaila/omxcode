@@ -1,8 +1,10 @@
 // The page's audio (goal 72 M5, docs/web-audio.md): the browser's microphone goes to the app, the app's speaker plays here.
 // One WebSocket, /audio, carries both; the page only opens it when the host says so (#mojoui-root[data-audio], never in the
 // public copy). Binary frames start with a tag byte: 1 = microphone (16-bit mono, 16 kHz, up), 2 = speaker (16-bit mono,
-// 24 kHz, down); 3 is kept for the camera. Text frames are JSON: {t: claim | latency | mic_fail} up, {t: mic | flush | tap |
-// bumped} down.
+// 24 kHz, down); 3 = a camera still (goal 77 M6, up: u32 request id, u16 width, u16 height, little-endian, then the JPEG).
+// Text frames are JSON: {t: claim | latency | mic_fail | cam_fail} up, {t: mic | flush | tap | bumped | cam | snap} down. The
+// camera (the rear one, when there is one) is opened while the app wants it ({t:cam,on}) and a still is sent only when the app
+// asks for one ({t:snap,id}): never a stream, and nothing goes anywhere but this socket.
 //
 // A browser plays no sound until the person has touched the page, so the first tap, key or click anywhere (the app's own
 // microphone button is one) turns audio on and makes this page the one the app hears and speaks through; until then, if an
@@ -13,7 +15,7 @@
   let ws = null, ctx = null, gain = null, analyser = null, claimed = false, bumped = false;
   let micStream = null, micNode = null, micSrc = null, micWanted = false, micBusy = false;
   let nextAt = 0, sources = [], pill = null;
-  const stats = { scheduledMs: 0, flushes: [], micFrames: 0, micSamples: 0, played: 0, micError: '', frames: 0, underruns: 0 };
+  const stats = { scheduledMs: 0, flushes: [], micFrames: 0, micSamples: 0, played: 0, micError: '', frames: 0, underruns: 0, camFrames: 0, camError: '' };
   const root = () => document.getElementById('mojoui-root');
   const send = o => { if (ws && ws.readyState === 1) ws.send(typeof o === 'string' ? o : JSON.stringify(o)); };
 
@@ -86,11 +88,50 @@
     micStream = micNode = micSrc = null;
   };
 
+  // the page's camera, while an app has started its Camera; a still goes up only when asked for
+  let camStream = null, camVideo = null, camWanted = false, camBusy = false, snapAsked = 0;
+  const camOn = async () => {
+    if (camStream || camBusy) return;
+    camBusy = true;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return send({ t: 'cam_fail', code: 103 });
+      camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+      if (!camWanted) { camStream.getTracks().forEach(t => t.stop()); camStream = null; return; }
+      camVideo = document.createElement('video');
+      camVideo.muted = true; camVideo.playsInline = true; camVideo.srcObject = camStream;
+      await camVideo.play();
+      if (snapAsked) snap(snapAsked);  // (a still was asked for while the camera was opening)
+    } catch (e) {
+      stats.camError = String((e && e.name) || e);
+      send({ t: 'cam_fail', code: e && e.name === 'NotAllowedError' ? 101 : (e && e.name === 'NotFoundError' ? 102 : 103) });
+    } finally { camBusy = false; }
+  };
+  const camOff = () => {
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    if (camVideo) { camVideo.pause(); camVideo.srcObject = null; }
+    camStream = camVideo = null;
+  };
+  const snap = id => {
+    if (!camVideo || !camVideo.videoWidth || camVideo.readyState < 2) { snapAsked = id; return; }  // (taken when the camera has a picture)
+    snapAsked = 0;
+    const w = camVideo.videoWidth, h = camVideo.videoHeight, c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(camVideo, 0, 0, w, h);
+    c.toBlob(async blob => {
+      if (!blob || !ws || ws.readyState !== 1) return;
+      const jpeg = new Uint8Array(await blob.arrayBuffer()), out = new Uint8Array(9 + jpeg.length), dv = new DataView(out.buffer);
+      out[0] = 3; dv.setUint32(1, id, true); dv.setUint16(5, w, true); dv.setUint16(7, h, true); out.set(jpeg, 9);
+      ws.send(out); stats.camFrames += 1;
+    }, 'image/jpeg', 0.85);
+  };
+
   const control = m => {
-    if (m.t === 'mic') { micWanted = !!m.on; if (micWanted) micOn(); else micOff(); }
+    if (m.t === 'cam') { camWanted = !!m.on; if (camWanted) camOn(); else camOff(); }
+    else if (m.t === 'snap') snap(m.id);
+    else if (m.t === 'mic') { micWanted = !!m.on; if (micWanted) micOn(); else micOff(); }
     else if (m.t === 'flush') flush();
     else if (m.t === 'tap') showPill(!claimed || !ctx || ctx.state !== 'running');
-    else if (m.t === 'bumped') { bumped = true; claimed = false; micOff(); flush(); }
+    else if (m.t === 'bumped') { bumped = true; claimed = false; micOff(); camOff(); flush(); }
   };
 
   const connect = () => {
@@ -102,7 +143,7 @@
       const b = new Uint8Array(e.data);
       if (b[0] === 2) play(b.subarray(1));
     };
-    ws.onclose = () => { micOff(); flush(); if (!bumped) setTimeout(connect, 1500); };
+    ws.onclose = () => { micOff(); camOff(); flush(); if (!bumped) setTimeout(connect, 1500); };
   };
 
   // the first touch: audio may start now, and this page is the one the app uses
@@ -121,7 +162,7 @@
     for (const n of ['pointerdown', 'keydown', 'touchend']) document.addEventListener(n, enable, true);
   });
   document.addEventListener('click', e => { if (e.target && e.target.id === 'mojoui-audio-pill') enable(); });
-  addEventListener('pagehide', () => { micOff(); if (ws) ws.close(); });
+  addEventListener('pagehide', () => { micOff(); camOff(); if (ws) ws.close(); });
 
   window.mojouiAudio = {
     stats: () => {
@@ -134,7 +175,7 @@
         for (let i = 1; i < d.length; i++) if ((d[i - 1] < 0) !== (d[i] < 0)) crossings++;
         hz = crossings * ctx.sampleRate / d.length / 2;
       }
-      return Object.assign({}, stats, { rms, hz, ctx: ctx ? ctx.state : 'none', ahead: ctx ? Math.max(0, nextAt - ctx.currentTime) * 1000 : 0, micOn: !!micStream, claimed });
+      return Object.assign({}, stats, { rms, hz, ctx: ctx ? ctx.state : 'none', ahead: ctx ? Math.max(0, nextAt - ctx.currentTime) * 1000 : 0, micOn: !!micStream, camOn: !!camStream, claimed });
     },
     now: () => performance.now(),
   };

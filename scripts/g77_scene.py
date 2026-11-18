@@ -5,7 +5,7 @@
 Draws each object once with the Z-Image sd-server (on GPU $G77_SD_GPU, default 1; cached in <out>/objects, so a second run
 doesn't start the server), pastes them onto a white 1280x720 counter at fixed places, and writes
   <out>/scene.png        the picture
-  <out>/scene.y4m        the same picture as a 5-frame video, the file Chromium's fake camera plays
+  <out>/scene.y4m, otter.y4m   the pictures as 5-frame videos, the files Chromium's fake camera plays
   <out>/truth.json       {"objects": [{"name", "box": [x0, y0, x1, y1]}], "width", "height"}  (pixels; the tight box of what
                          was drawn, measured from the object's own picture, not asked of any model)
 """
@@ -83,16 +83,33 @@ def tight_box(img):
     return int(cols.min()), int(rows.min()), int(cols.max()) + 1, int(rows.max()) + 1
 
 
-def text_picture(out_dir):
+def text_picture(out_dir):  # (1280x720 like the scene)
     """A picture of words, for the reading case: PURPLE OTTER 42 in big purple letters on cream."""
     from PIL import ImageDraw, ImageFont
-    img = Image.new("RGB", (1024, 512), (250, 244, 228))
+    img = Image.new("RGB", (W, H), (250, 244, 228))
     d = ImageDraw.Draw(img)
-    font = ImageFont.truetype(str(ROOT / "mojoui/hosts/static/fonts/Inter-SemiBold.ttf"), 118)
+    font = ImageFont.truetype(str(ROOT / "mojoui/hosts/static/fonts/Inter-SemiBold.ttf"), 150)
     for i, line in enumerate(("PURPLE", "OTTER 42")):
         w = d.textlength(line, font=font)
-        d.text(((1024 - w) / 2, 70 + i * 170), line, fill=(110, 40, 160), font=font)
+        d.text(((W - w) / 2, 150 + i * 220), line, fill=(110, 40, 160), font=font)
     img.save(out_dir / "otter.png")
+    y4m(img, out_dir / "otter.y4m")
+
+
+def y4m(img, path):
+    """The picture as a 5-frame yuv420 video, the file Chromium's fake camera plays in a loop."""
+    rgb = np.asarray(img.convert("RGB").resize((W, H))).astype(np.float32)
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    yy = (0.299 * r + 0.587 * g + 0.114 * b).clip(0, 255).astype(np.uint8)
+    u = ((b - yy) * 0.564 + 128).clip(0, 255)
+    v = ((r - yy) * 0.713 + 128).clip(0, 255)
+    u = u.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3)).astype(np.uint8)
+    v = v.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3)).astype(np.uint8)
+    frame = b"FRAME\n" + yy.tobytes() + u.tobytes() + v.tobytes()
+    with open(path, "wb") as f:
+        f.write(f"YUV4MPEG2 W{W} H{H} F5:1 Ip A1:1 C420jpeg\n".encode())
+        for _ in range(5):
+            f.write(frame)
 
 
 def build(out_dir):
@@ -108,20 +125,9 @@ def build(out_dir):
         truth.append({"name": name, "box": [round(x + x0 * s), round(y + y0 * s), round(x + x1 * s), round(y + y1 * s)]})
     text_picture(out_dir)
     canvas.save(out_dir / "scene.png")
+    canvas.save(out_dir / "scene.jpg", quality=88)
     (out_dir / "truth.json").write_text(json.dumps({"objects": truth, "width": W, "height": H}, indent=1))
-    # the fake camera's video: the same frame five times, as yuv420 (Chromium plays the file in a loop)
-    rgb = np.asarray(canvas).astype(np.float32)
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    yy = (0.299 * r + 0.587 * g + 0.114 * b).clip(0, 255).astype(np.uint8)
-    u = ((b - yy) * 0.564 + 128).clip(0, 255)
-    v = ((r - yy) * 0.713 + 128).clip(0, 255)
-    u = u.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3)).astype(np.uint8)
-    v = v.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3)).astype(np.uint8)
-    frame = b"FRAME\n" + yy.tobytes() + u.tobytes() + v.tobytes()
-    with open(out_dir / "scene.y4m", "wb") as f:
-        f.write(f"YUV4MPEG2 W{W} H{H} F5:1 Ip A1:1 C420jpeg\n".encode())
-        for _ in range(5):
-            f.write(frame)
+    y4m(canvas, out_dir / "scene.y4m")
     return truth
 
 

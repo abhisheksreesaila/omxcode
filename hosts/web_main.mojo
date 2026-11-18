@@ -7,6 +7,7 @@ from std.python.bindings import PythonModuleBuilder
 from app import Main
 from mojoui.shared import shared_loads
 from mojoui import webaudio
+from mojoui import webcamera
 from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot, web_hosted, web_take_download
 
 
@@ -54,6 +55,11 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[audio_settle]("audio_settle", docstring="After a flush: the page holds nothing now.")
         m.def_function[audio_fail]("audio_fail", docstring="The page's microphone failed (101 refused, 102 none, 103 not allowed here).")
         m.def_function[audio_latency]("audio_latency", docstring="The page's own output delay in microseconds.")
+        m.def_function[camera_init]("camera_init", docstring="The camera hub (mojoui.webcamera), once per process: an app's Camera then looks through the page's. Not called in the public copy.")
+        m.def_function[camera_wants]("camera_wants", docstring="1 while an app wants the camera (the page opens its rear camera).")
+        m.def_function[camera_request]("camera_request", docstring="The id of the newest still an app asked for (the host tells the page when it grows).")
+        m.def_function[camera_push]("camera_push", docstring="The page's still: (address, bytes, request id, width, height) of a JPEG.")
+        m.def_function[camera_fail]("camera_fail", docstring="The page's camera failed (101 refused, 102 none, 103 not allowed here).")
         return m.finalize()
     except e:
         abort(String("mojoui: couldn't create the Python module: ", e))
@@ -227,4 +233,26 @@ def audio_fail(code: PythonObject) raises -> PythonObject:
 
 def audio_latency(us: PythonObject) raises -> PythonObject:
     webaudio.audio_latency(Int(py=us))
+    return PythonObject(0)
+
+
+def camera_init() raises -> PythonObject:
+    return PythonObject(webcamera.camera_init())
+
+
+def camera_wants() raises -> PythonObject:
+    return PythonObject(webcamera.camera_wants())
+
+
+def camera_request() raises -> PythonObject:
+    return PythonObject(webcamera.camera_request())
+
+
+def camera_push(addr: PythonObject, nbytes: PythonObject, id: PythonObject, width: PythonObject, height: PythonObject) raises -> PythonObject:
+    webcamera.camera_push(Int(py=addr), Int(py=nbytes), Int(py=id), Int(py=width), Int(py=height))
+    return PythonObject(0)
+
+
+def camera_fail(code: PythonObject) raises -> PythonObject:
+    webcamera.camera_fail(Int(py=code))
     return PythonObject(0)
