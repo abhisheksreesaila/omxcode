@@ -2,13 +2,13 @@
  "app": "Personal Note",
  "slug": "personalnote",
  "path": "/home/abhisheksreesaila/Projects/personalnotev2",
- "one_line": "A local notebook: canvas, page and mind-map notes with ink, voice, keyword and meaning search, secure notes and agent edits (FastHTML + JS).",
- "verdict": "Not the same way today: storage, search, voice, background work and the shell are there and often faster, but the editing heart (objects on a canvas, Markdown on a canvas, mind maps, ink tied to text) is missing.",
+ "one_line": "A local notebook: canvas, page and mind-map notes with ink, voice, keyword and meaning search, secure notes and agent edits (FastHTML + JS). The owner's rule for omxcode: every editor native Mojo, drawn on a Canvas, no JS.",
+ "verdict": "Not the same way today: storage, search, voice, HTTPS, child programs, background work and the shell are there and often faster, and undo has landed (goal 74 M1), but the editing heart (a native text editor, Markdown, objects on a canvas, mind maps, ink tied to text) is not built yet.",
  "buildable_today": "partly",
  "counts": {
-  "have": 18,
-  "partial": 22,
-  "missing": 13
+  "have": 19,
+  "partial": 23,
+  "missing": 11
  },
  "features": [
   {
@@ -29,7 +29,13 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "examples/sketch/app.mojo",
+    "mojoui/canvas.mojo",
+    "tests/test_canvas.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -49,14 +55,20 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/ink.mojo",
+    "tests/test_ink.mojo",
+    "examples/sketch/app.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
    "feature": "Objects on the canvas: text boxes, stickies, shapes, pictures; select, move, resize, rotate, lock, z-order, nudge, select all",
    "app_file": "src/modules/canvas-leafer/scene.js:22",
-   "omx_piece": "none (Board moves and resizes whole cards; Painter draws shapes)",
-   "evidence": "grep: no selection handles, rotation or z-order in mojoui",
+   "omx_piece": "none yet (Board moves and resizes whole cards; Painter in mojoui/scene.mojo draws shapes). Goal 74 M4 builds mojoui.objectlayer; it isn't on this branch yet",
+   "evidence": "grep: no selection handles, rotation or z-order in mojoui; mojoui/objectlayer.mojo not present",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -67,9 +79,15 @@
    "status": "missing",
    "gap": "ObjectLayer: a canvas of objects with hit tests, selection handles, rotate, z-order, lock, marquee",
    "size": "L",
-   "eta": "Dec 2026",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/scene.mojo",
+    "mojoui/canvas.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -85,38 +103,48 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "Connectors inside ObjectLayer (anchor to objects, re-route on move)",
+   "gap": "Connectors inside ObjectLayer (anchor to objects, re-route on move); goal 74 M4",
    "size": "M",
-   "eta": "Dec 2026",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/peek.mojo",
+    "mojoui/scene.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
    "feature": "Undo and redo with edits merged",
    "app_file": "src/core/document/history.js:10",
-   "omx_piece": "none generic; each app keeps its own (sketch, mediatimeline, the island's Undo face)",
-   "evidence": "grep: no History/Undo type in mojoui",
+   "omx_piece": "mojoui.history: History[T] with Undoable steps, coalescing by time window and merge, the redo branch dropped on a new edit, a cap; Snapshot[T] for whole-value steps",
+   "evidence": "tests/test_history.mojo (run in this audit: history ok, coalesce ok, cap ok); goal 74 M1, D-7406",
    "hosts": {
     "linux": "✅",
-    "web": "✅",
+    "web": "🔨",
     "mac": "🔨",
     "ios": "🔨",
     "android": "🔨"
    },
-   "status": "partial",
-   "gap": "History: a generic undo stack of before/after values with coalescing",
-   "size": "S",
-   "eta": "this week",
-   "blocks": true,
-   "demo": false
+   "status": "have",
+   "gap": "Each editor decides what a step is (textedit, objectlayer and mindmap each push theirs); the old apps' own stacks (sketch, mediatimeline) aren't moved onto it yet",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/history.mojo",
+    "tests/test_history.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
    "feature": "Markdown text drawn on the canvas (headings, lists, task boxes, code, quotes)",
    "app_file": "src/modules/canvas-leafer/markdown-editor.js:142",
-   "omx_piece": "mojoui.markdown parse_markdown + Paragraph; mojoui.linebreak",
-   "evidence": "tests/test_markdown.mojo; renders as views, not into a Painter",
+   "omx_piece": "mojoui.markdown parse_markdown + Paragraph (toolkit views, not a Painter); mojoui.linebreak. Goal 74 M3 builds mojoui.mdedit",
+   "evidence": "tests/test_markdown.mojo; renders as views (Text, VStack), not into a Painter; mojoui/mdedit.mojo not present",
    "hosts": {
     "linux": "✅",
     "web": "✅",
@@ -125,18 +153,25 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "Draw parsed Markdown into a Painter at any zoom (wrap with linebreak)",
+   "gap": "Native version: draw parsed Markdown into a Painter at any zoom (wrap with linebreak): mojoui.mdedit, goal 74 M3",
    "size": "M",
-   "eta": "Nov 2026",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": false,
+   "files": [
+    "mojoui/markdown.mojo",
+    "mojoui/linebreak.mojo",
+    "mojoui/paragraph.mojo",
+    "tests/test_markdown.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
    "feature": "Edit canvas text in place, Markdown symbols hidden except on the caret's line",
    "app_file": "src/modules/canvas-leafer/markdown-editor.js:142",
-   "omx_piece": "TextField(…).focused() in-place editor (single line, used by DataGrid); mx-editor (CodeMirror 6) widget",
-   "evidence": "docs/components.md: In-place editor ✅ GTK/web",
+   "omx_piece": "TextField(…).focused() (a toolkit widget, single line, used by DataGrid); mx-editor (CodeMirror 6 WebComponent). Goal 74 M2 builds mojoui.textedit",
+   "evidence": "docs/components.md: In-place editor ✅ GTK/web; mx-editor ✅ GTK/web; mojoui/textedit.mojo not present",
    "hosts": {
     "linux": "✅",
     "web": "✅",
@@ -145,11 +180,17 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "Multi-line in-place editor laid exactly over canvas text; live-preview Markdown",
+   "gap": "Native version: a multi-line editor drawn on a Canvas through a Painter (caret, selection, wrap, hit tests, undo on mojoui.history): mojoui.textedit, goal 74 M2, then live-preview Markdown in mdedit",
    "size": "M",
-   "eta": "Nov 2026",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": false,
+   "files": [
+    "mojoui/widgets/editor.ts",
+    "mojoui/webcomponent.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -165,18 +206,23 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "Text anchors: a range of words → its boxes after layout (shared with page ink)",
+   "gap": "Text anchors: a range of words → its boxes after layout (needs textedit's layout; shared with page ink). After goal 74",
    "size": "M",
    "eta": "Dec 2026",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/ink.mojo",
+    "mojoui/linebreak.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
    "feature": "Insert pictures (picker, drop, paste), shrink to 1,400 px off the UI thread, stored by SHA-256",
    "app_file": "src/modules/canvas-leafer/media.js:4",
-   "omx_piece": "FilePicker, DropTarget, Picture (decoded on a thread), ImageOps scale",
-   "evidence": "docs/components.md: Picture ✅ GTK/web; DropTarget 🔨 GTK",
+   "omx_piece": "FilePicker, DropTarget, Picture (decoded on a thread), ImageOps crop and scale (GPU or CPU), mojoui.hash SHA-256 in plain Mojo, jobs for the off-thread work",
+   "evidence": "docs/components.md: Picture ✅ GTK/web; DropTarget 🔨 GTK; Clipboard text only; tests/test_hash.mojo",
    "hosts": {
     "linux": "🔨",
     "web": "🔨",
@@ -185,11 +231,18 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "Paste a picture from the clipboard (Clipboard is text only); a SHA-256 helper",
+   "gap": "Paste a picture from the clipboard (Clipboard is text only); the store-by-SHA-256 glue is app code on mojoui.hash",
    "size": "S",
    "eta": "this week",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/picture.mojo",
+    "mojoui/imageops.mojo",
+    "mojoui/hash.mojo",
+    "mojoui/jobs.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -209,7 +262,13 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/canvas.mojo",
+    "tests/test_canvas.mojo",
+    "tests/test_gpu_canvas_gate.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -229,7 +288,12 @@
    "size": "M",
    "eta": "Dec 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/packpdf.mojo",
+    "tests/test_packpdf.mojo"
+   ]
   },
   {
    "area": "Canvas notes",
@@ -249,14 +313,18 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/png.mojo"
+   ]
   },
   {
    "area": "Page notes",
    "feature": "Markdown page editor (GFM tables, task lists, styled source, spellcheck)",
    "app_file": "src/page/page-editor.js:4",
    "omx_piece": "mx-editor WebComponent (the same CodeMirror 6)",
-   "evidence": "docs/components.md: mx-editor ✅ GTK/web, 🔨 Mac; docs/js.md §6",
+   "evidence": "docs/components.md: mx-editor ✅ GTK/web, 🔨 Mac; docs/js.md §6. The owner decided editors are native Mojo, never CodeMirror",
    "hosts": {
     "linux": "✅",
     "web": "✅",
@@ -265,11 +333,17 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "Markdown + GFM language in the mx-editor bundle, spellcheck on; native rich text would be L",
-   "size": "S",
-   "eta": "this week",
+   "gap": "Native version: textedit + mdedit on a Canvas (GFM tables, task lists, styled source, spellcheck still to come); goal 74 M2 and M3",
+   "size": "L",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": false,
+   "files": [
+    "mojoui/widgets/editor.ts",
+    "mojoui/webcomponent.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Page notes",
@@ -285,11 +359,16 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "Ink layer over a text view, using the text anchors above",
+   "gap": "Ink layer over a native text view, using the text anchors above (a native canvas over a WebKit view is not the plan any more: the text is drawn natively)",
    "size": "L",
    "eta": "Dec 2026",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/ink.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Page notes",
@@ -309,14 +388,19 @@
    "size": "S",
    "eta": "this week",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "docs/components.md",
+    "mojoui/hosts/gtk.mojo"
+   ]
   },
   {
    "area": "Mind maps",
    "feature": "Mind map editor: tree layout, curved tapered branches, Tab/Enter/F2 keys, collapse, focus, clean up",
    "app_file": "src/mindmap/editor.js:62",
-   "omx_piece": "Canvas, Painter.polygon, Canvas KEY, Spring",
-   "evidence": "pieces exist; no tree layout or map component",
+   "omx_piece": "Canvas, Painter (mojoui/scene.mojo), Canvas KEY, Spring. Goal 74 M5 builds mojoui.mindmap",
+   "evidence": "pieces exist; no tree layout or map component; mojoui/mindmap.mojo not present",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -325,11 +409,17 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "MindMap: tree layout + ribbon branches + node editing keys, on a Canvas",
+   "gap": "MindMap: tree layout + ribbon branches + node editing keys, on a Canvas (goal 74 M5)",
    "size": "L",
-   "eta": "Dec 2026",
+   "eta": "goal 74",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/scene.mojo",
+    "mojoui/spring.mojo",
+    "mojoui/canvas.mojo"
+   ]
   },
   {
    "area": "Mind maps",
@@ -349,14 +439,19 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/ink.mojo",
+    "mojoui/audio.mojo"
+   ]
   },
   {
    "area": "Mind maps",
    "feature": "Due dates and reminders: a notification, missed ones on launch, click jumps to the node",
    "app_file": "reminders.py:7",
-   "omx_piece": "DatePicker, App.every, mojoui.notify, App.background",
-   "evidence": "tests/test_tray.mojo 'notify: ok' (run in this audit on a private bus); goal 45",
+   "omx_piece": "DatePicker, App.every, mojoui.notify, App.background; mojoui.schedule (cron and words in a time zone, missed slots caught up once) is the server-side version",
+   "evidence": "tests/test_tray.mojo 'notify: ok' (private bus); tests/test_schedule.mojo; goal 45; goal 66 M3",
    "hosts": {
     "linux": "✅",
     "web": "❌",
@@ -369,7 +464,14 @@
    "size": "S",
    "eta": "this week",
    "blocks": false,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/notify.mojo",
+    "mojoui/schedule.mojo",
+    "tests/test_tray.mojo",
+    "tests/test_schedule.mojo"
+   ]
   },
   {
    "area": "Organise",
@@ -389,7 +491,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/sidebar.mojo",
+    "tests/test_sidebar.mojo"
+   ]
   },
   {
    "area": "Organise",
@@ -409,7 +516,13 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/dragdrop.mojo",
+    "tests/test_dragdrop.mojo",
+    "mojoui/peek.mojo"
+   ]
   },
   {
    "area": "Organise",
@@ -429,7 +542,12 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/icons_data.mojo",
+    "mojoui/view.mojo"
+   ]
   },
   {
    "area": "Organise",
@@ -449,7 +567,13 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/overlays.mojo",
+    "mojoui/menus.mojo",
+    "tests/test_menus.mojo"
+   ]
   },
   {
    "area": "Search",
@@ -469,7 +593,13 @@
    "size": "S",
    "eta": "this week",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/fields.mojo",
+    "mojoui/results.mojo",
+    "mojoui/overlays.mojo"
+   ]
   },
   {
    "area": "Search",
@@ -489,14 +619,19 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/sqlite.mojo",
+    "tests/test_sqlite.mojo"
+   ]
   },
   {
    "area": "Search",
    "feature": "Search by meaning: local embeddings, background indexer, score cut-off",
    "app_file": "meaning_rank.py:28",
-   "omx_piece": "mojoui.vectors (GPU top-k) + mojoui.meaning (bge-small in process)",
-   "evidence": "branch goal-44-recall, checker 5/5; NOT merged into main",
+   "omx_piece": "mojoui.textembed (on main: MiniLM-L6 sentence vectors in the app's own process through mojoui.maxrt, goal 51 M1; what classify() compares) + mojoui.vectors (GPU top-k) and mojoui.meaning (bge-small) only on branch goal-44-recall",
+   "evidence": "tests/test_textembed.mojo; branch goal-44-recall, checker 6/6; `git merge-base --is-ancestor goal-44-recall HEAD` says NOT merged; mojoui/vectors.mojo is not on main",
    "hosts": {
     "linux": "✅",
     "web": "❌",
@@ -505,38 +640,52 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "Merge goal 44; port the cut-off rule; a model download step",
+   "gap": "Merge goal 44 (the top-k store and the background indexer); port the cut-off rule; a model download step (mojoui.hf can fetch it)",
    "size": "S",
    "eta": "this week",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/textembed.mojo",
+    "tests/test_textembed.mojo",
+    "mojoui/sqlite.mojo"
+   ]
   },
   {
    "area": "Search",
    "feature": "Download models in the app with SHA-256 checks and resume",
    "app_file": "search_runtime.py:3",
-   "omx_piece": "mojoui.http (http:// only, no TLS, no redirects)",
-   "evidence": "docs/http.md:69,96",
+   "omx_piece": "mojoui.hf (search, list files with LFS sha256, download with progress, resume and cancel) over mojoui.http_flare (https:// through OpenSSL, redirects, -D MOJOUI_FLARE); mojoui.hash SHA-256",
+   "evidence": "tests/test_hf.mojo (live Hub: sizes, sha256, a resumed part, goal 55 M1); tests/test_https.mojo; docs/components.md: HTTPS ✅ Linux only",
    "hosts": {
-    "linux": "❌",
+    "linux": "✅",
     "web": "❌",
     "mac": "❌",
     "ios": "❌",
     "android": "❌"
    },
-   "status": "missing",
-   "gap": "HTTPS client (load the system's libcurl at run time, as sqlite does)",
-   "size": "M",
+   "status": "partial",
+   "gap": "Check the finished file against its listed SHA-256 (mojoui.hash is there; the hf download doesn't compare yet); Flare is off on iPhone and Android and unrun on the Mac",
+   "size": "S",
    "eta": "Nov 2026",
-   "blocks": true,
-   "demo": false
+   "blocks": false,
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/hf.mojo",
+    "mojoui/http_flare.mojo",
+    "mojoui/hash.mojo",
+    "tests/test_hf.mojo",
+    "tests/test_https.mojo"
+   ]
   },
   {
    "area": "AI",
    "feature": "AI settings: Claude Code CLI, Azure or OpenAI-compatible; a Test button",
    "app_file": "ai_settings.py:47",
-   "omx_piece": "InspectorPage/NavRow forms; mojoui.http; mojoui.agui",
-   "evidence": "no HTTPS; no API to start a process",
+   "omx_piece": "InspectorPage/NavRow forms; mojoui.http_flare (HTTPS); mojoui.process (start and supervise a program: log, health check, stop the group); mojoui.agui",
+   "evidence": "tests/test_process.mojo, tests/test_https.mojo; docs/components.md: child processes ✅ Linux, HTTPS ✅ Linux",
    "hosts": {
     "linux": "✅",
     "web": "✅",
@@ -545,18 +694,26 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "HTTPS client + Process (start a program, read its output on a thread)",
-   "size": "M",
+   "gap": "A provider-settings composite with a Test button (a request off the UI thread, the answer on the island); secrets belong in a keychain that isn't built",
+   "size": "S",
    "eta": "Nov 2026",
-   "blocks": true,
-   "demo": false
+   "blocks": false,
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/inspector.mojo",
+    "mojoui/process.mojo",
+    "mojoui/http_flare.mojo",
+    "mojoui/agui.mojo",
+    "tests/test_process.mojo"
+   ]
   },
   {
    "area": "AI",
    "feature": "Jam: talk over a mind map, an LLM adds branches, reacts and suggests",
    "app_file": "jam_brain.py:82",
    "omx_piece": "mojoui.speech + mojoui.agui",
-   "evidence": "needs MindMap, HTTPS, Process",
+   "evidence": "needs MindMap (goal 74 M5); HTTPS and Process now exist (mojoui/http_flare.mojo, mojoui/process.mojo)",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -565,18 +722,24 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "Composes MindMap + HTTPS + Process; nothing new beyond them",
+   "gap": "Composes MindMap + HTTPS + Process; nothing new beyond MindMap",
    "size": "M",
    "eta": "Dec 2026",
    "blocks": true,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/speech.mojo",
+    "mojoui/agui.mojo",
+    "mojoui/process.mojo"
+   ]
   },
   {
    "area": "AI",
    "feature": "Agent edits: Show what changed, Undo by three-way merge",
    "app_file": "agent_edit.py:13",
    "omx_piece": "Agent host (every app is MCP tools: screen, act, read)",
-   "evidence": "docs/agent.md; Agent column in components.md",
+   "evidence": "docs/agent.md; Agent column in components.md; mojoui.diff and mojoui.jsonpatch are there for the merge",
    "hosts": {
     "linux": "✅",
     "web": "✅",
@@ -589,7 +752,15 @@
    "size": "M",
    "eta": "Dec 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "docs/agent.md",
+    "mojoui/hosts/agent_link.mojo",
+    "mojoui/diff.mojo",
+    "mojoui/jsonpatch.mojo",
+    "tests/test_agent_link.mojo"
+   ]
   },
   {
    "area": "AI",
@@ -609,7 +780,14 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/watch.mojo",
+    "mojoui/wake.mojo",
+    "mojoui/chip.mojo",
+    "tests/test_watch.mojo"
+   ]
   },
   {
    "area": "AI",
@@ -629,7 +807,13 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "docs/agent.md",
+    "mojoui/hosts/agent_link.mojo",
+    "tests/test_agent_link.mojo"
+   ]
   },
   {
    "area": "Voice",
@@ -649,7 +833,15 @@
    "size": "M",
    "eta": "2027",
    "blocks": false,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/speech.mojo",
+    "mojoui/audio.mojo",
+    "tests/test_speech.mojo",
+    "tests/test_audio.mojo",
+    "examples/dictate/app.mojo"
+   ]
   },
   {
    "area": "Portability",
@@ -669,7 +861,13 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/json.mojo",
+    "tests/test_json.mojo",
+    "mojoui/sqlite.mojo"
+   ]
   },
   {
    "area": "Portability",
@@ -689,14 +887,19 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/json.mojo",
+    "tests/test_json.mojo"
+   ]
   },
   {
    "area": "Portability",
    "feature": "Markdown + assets ZIP; Obsidian vault export and import",
    "app_file": "vault.py:41",
-   "omx_piece": "none",
-   "evidence": "grep: no zip in mojoui",
+   "omx_piece": "none for zip (mojoui.static serves gzip replies; mojoui.files has paths and the recent list)",
+   "evidence": "grep: no zip reader or writer in mojoui",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -709,34 +912,48 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/static.mojo",
+    "mojoui/files.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Portability",
    "feature": "X bookmarks: OAuth PKCE sign-in, hourly sync into notes",
    "app_file": "x_bookmarks.py:3",
-   "omx_piece": "mojoui.http, App.every",
-   "evidence": "no TLS, no OAuth, no keychain",
+   "omx_piece": "mojoui.signin (a desktop app's sign-in: loopback redirect, PKCE, one-shot listener) + mojoui.crypto pkce_challenge + mojoui.apiclient (bearer, OAuth, retries, paging) over HTTPS + App.every / mojoui.schedule for the hourly sync",
+   "evidence": "tests/test_crypto.mojo (PKCE), tests/test_apiclient.mojo; goals 57 and 66 talk to Stripe and Google over HTTPS; no X API client",
    "hosts": {
-    "linux": "❌",
+    "linux": "✅",
     "web": "❌",
-    "mac": "❌",
+    "mac": "🔨",
     "ios": "❌",
     "android": "❌"
    },
-   "status": "missing",
-   "gap": "HTTPS + an OAuth PKCE helper with a loopback callback + SecretStore",
+   "status": "partial",
+   "gap": "An X bookmarks client on apiclient; the tokens need a keychain (SecretStore, not built)",
    "size": "M",
    "eta": "Dec 2026",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/signin.mojo",
+    "mojoui/crypto.mojo",
+    "mojoui/apiclient.mojo",
+    "mojoui/http_flare.mojo",
+    "mojoui/schedule.mojo"
+   ]
   },
   {
    "area": "Security",
    "feature": "Secure notes: AES-256-GCM, scrypt passphrase, recovery key, lock after 5 idle minutes",
    "app_file": "secure_crypto.py:20",
-   "omx_piece": "none",
-   "evidence": "grep: no crypto in mojoui",
+   "omx_piece": "mojoui.crypto has HMAC-SHA256, OS random, base64url, constant-time compare, signed seals, PKCE; NOT AES-GCM and NOT scrypt",
+   "evidence": "mojoui/crypto.mojo header: seals are 'signed, not hidden'; grep: no AES, scrypt or HKDF in mojoui",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -745,18 +962,24 @@
     "android": "❌"
    },
    "status": "missing",
-   "gap": "mojoui.crypto: AES-GCM, scrypt, HKDF from the system's libcrypto at run time",
+   "gap": "AES-256-GCM, scrypt and HKDF (the system's libcrypto at run time, or plain Mojo), a recovery key, an idle lock",
    "size": "M",
    "eta": "Nov 2026",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/crypto.mojo",
+    "tests/test_crypto.mojo",
+    "mojoui/hash.mojo"
+   ]
   },
   {
    "area": "Security",
    "feature": "Keys and API tokens in the keychain",
    "app_file": "secret_store.py:27",
    "omx_piece": "none",
-   "evidence": "grep: no keychain/libsecret",
+   "evidence": "grep: no keychain or libsecret in mojoui",
    "hosts": {
     "linux": "❌",
     "web": "❌",
@@ -769,7 +992,12 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": true,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/crypto.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Security",
@@ -789,14 +1017,19 @@
    "size": "M",
    "eta": "2027",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "docs/components.md",
+    "mojoui/hosts/appkit.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
    "feature": "One instance; a second launch brings the window forward",
    "app_file": "desktop.py:58",
-   "omx_piece": "Background apps hand over to the running one",
-   "evidence": "goal 45 M1 (second launch opened the running one)",
+   "omx_piece": "App.one_instance() (a GApplication id on the session bus); background apps hand over to the running one",
+   "evidence": "mojoui/app.mojo one_instance docstring; goal 45 M1; docs/components.md: One instance ✅ Linux only",
    "hosts": {
     "linux": "✅",
     "web": "❌",
@@ -805,11 +1038,17 @@
     "android": "❌"
    },
    "status": "partial",
-   "gap": "One instance for every app, not only background apps",
+   "gap": "one_instance() is any app's to declare, but only the GTK host honours it; Mac, web and the phones start every launch on its own",
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/app.mojo",
+    "mojoui/hosts/gtk.mojo",
+    "examples/keeper/app.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
@@ -829,7 +1068,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/app.mojo",
+    "mojoui/hosts/gtk.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
@@ -849,7 +1093,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/menus.mojo",
+    "tests/test_menus.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
@@ -869,7 +1118,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/plugins.mojo",
+    "mojoui/view.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
@@ -889,7 +1143,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/inspector.mojo",
+    "mojoui/fields.mojo"
+   ]
   },
   {
    "area": "Desktop shell",
@@ -909,7 +1168,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "examples/slowcheck/app.mojo",
+    "docs/ui-threads.md"
+   ]
   },
   {
    "area": "Look and feel",
@@ -929,7 +1193,13 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": true
+   "demo": true,
+   "native": true,
+   "files": [
+    "mojoui/theme.mojo",
+    "mojoui/look.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Look and feel",
@@ -949,7 +1219,11 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/spring.mojo"
+   ]
   },
   {
    "area": "Look and feel",
@@ -969,7 +1243,12 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/island.mojo",
+    "tests/test_island.mojo"
+   ]
   },
   {
    "area": "Look and feel",
@@ -989,7 +1268,13 @@
    "size": null,
    "eta": null,
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/overlays.mojo",
+    "mojoui/confirm.mojo",
+    "mojoui/island.mojo"
+   ]
   },
   {
    "area": "Keyboard and touch",
@@ -1009,7 +1294,13 @@
    "size": "S",
    "eta": "this week",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "examples/sketch/app.mojo",
+    "mojoui/menus.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Keyboard and touch",
@@ -1029,13 +1320,19 @@
    "size": "M",
    "eta": "2027",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/app.mojo",
+    "mojoui/hosts/android.mojo",
+    "docs/components.md"
+   ]
   },
   {
    "area": "Keyboard and touch",
    "feature": "Narrow screens: bottom bar, sheets under 800 px",
    "app_file": "src/main.js:4277",
-   "omx_piece": "Board phone-width list; Sidebar chips when compact",
+   "omx_piece": "Board phone-width list; Sidebar chips when compact; mojoui.tiling keeps cards as a tiling window manager does (no overlap)",
    "evidence": "docs/components.md: Board: phone-width list ✅ GTK/web",
    "hosts": {
     "linux": "✅",
@@ -1049,7 +1346,14 @@
    "size": "S",
    "eta": "Nov 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "mojoui/sidebar.mojo",
+    "mojoui/boardtiles.mojo",
+    "mojoui/tiling.mojo",
+    "tests/test_tiling.mojo"
+   ]
   },
   {
    "area": "Shipping",
@@ -1069,7 +1373,12 @@
    "size": "M",
    "eta": "Dec 2026",
    "blocks": false,
-   "demo": false
+   "demo": false,
+   "native": true,
+   "files": [
+    "scripts/build.sh",
+    "docs/probes.md"
+   ]
   }
  ],
  "wins": [
@@ -1079,7 +1388,7 @@
   },
   {
    "what": "Search by meaning in one process on the GPU",
-   "evidence": "Recall: top-10 over 1M in 2.2 ms, 7.7 ms p95 as you type (goal 44, unmerged branch). Personal Note scores in a Python loop; at 1M its per-row loop takes seconds per query (D-1519, 3 queries). The side C race against its llama.cpp helper has no recorded result yet: unproven."
+   "evidence": "Recall: top-10 over 1M in 2.2 ms, 7.7 ms p95 as you type (goal 44, unmerged branch; only mojoui.textembed is on main). Personal Note scores in a Python loop; at 1M its per-row loop takes seconds per query (D-1519, 3 queries). The side C race against its llama.cpp helper has no recorded result yet: unproven."
   },
   {
    "what": "Dictation latency",
@@ -1098,55 +1407,75 @@
    "evidence": "Every omxcode app is MCP tools through the agent host (docs/agent.md); Personal Note hand-wrote a 470-line CLI and 60 routes."
   },
   {
+   "what": "HTTPS, child programs and schedules in the same process",
+   "evidence": "mojoui.http_flare (https://), mojoui.process (start, health-check, stop a model server's whole group), mojoui.schedule (cron in a time zone, missed slots caught up once), mojoui.hf (resumable model downloads). Goals 50, 55, 66. Personal Note reaches the same things through a Python server and its helpers over loopback; no speed race recorded."
+  },
+  {
    "what": "One program instead of three",
    "evidence": "Personal Note is Python server + JS page + llama.cpp + nemo-speech processes over loopback; omxcode runs UI, search, embeddings and speech in one process (docs/probes.md). Fewer moving parts is measured in lines only in goal 44 M5, not yet recorded."
   }
  ],
  "top_gaps": [
   {
-   "gap": "Search by meaning not on main; no command palette",
+   "gap": "Search by meaning not on main (only the embedder is); no command palette",
    "piece": "merge goal 44 + CommandPalette composite + the cut-off rule",
    "size": "S",
    "eta": "this week",
+   "in_goal_74": false,
    "unblocks": [
     "Search by meaning: local embeddings, background indexer, score cut-off",
     "Omnibar (Ctrl+K): grouped results, filters, preview, arrow keys, actions"
    ]
   },
   {
-   "gap": "No generic undo",
-   "piece": "mojoui.history",
+   "gap": "DONE: no generic undo",
+   "piece": "mojoui.history (goal 74 M1)",
    "size": "S",
-   "eta": "this week",
+   "eta": "done",
+   "in_goal_74": true,
    "unblocks": [
     "Undo and redo with edits merged"
+   ]
+  },
+  {
+   "gap": "No native multi-line editor",
+   "piece": "mojoui.textedit: a text editor drawn on a Canvas through a Painter (caret, selection, wrap, hit tests, undo)",
+   "size": "M",
+   "eta": "goal 74",
+   "in_goal_74": true,
+   "unblocks": [
+    "Edit canvas text in place, Markdown symbols hidden except on the caret's line",
+    "Markdown page editor (GFM tables, task lists, styled source, spellcheck)"
+   ]
+  },
+  {
+   "gap": "No Markdown drawn natively",
+   "piece": "mojoui.mdedit: Markdown into a Painter, live preview with symbols hidden off the caret's line, task boxes",
+   "size": "M",
+   "eta": "goal 74",
+   "in_goal_74": true,
+   "unblocks": [
+    "Markdown text drawn on the canvas (headings, lists, task boxes, code, quotes)",
+    "Markdown page editor (GFM tables, task lists, styled source, spellcheck)"
    ]
   },
   {
    "gap": "No objects on a canvas (select, move, resize, rotate, z-order, connectors)",
    "piece": "mojoui.objectlayer (with connectors)",
    "size": "L",
-   "eta": "Dec 2026",
+   "eta": "goal 74",
+   "in_goal_74": true,
    "unblocks": [
     "Objects on the canvas: text boxes, stickies, shapes, pictures; select, move, resize, rotate, lock, z-order, nudge, select all",
     "Arrows between objects that re-route when an end moves"
    ]
   },
   {
-   "gap": "No Markdown text drawn and edited on a canvas",
-   "piece": "Markdown into a Painter + a multi-line in-place editor",
-   "size": "M",
-   "eta": "Nov 2026",
-   "unblocks": [
-    "Markdown text drawn on the canvas (headings, lists, task boxes, code, quotes)",
-    "Edit canvas text in place, Markdown symbols hidden except on the caret's line"
-   ]
-  },
-  {
    "gap": "No mind map",
    "piece": "mojoui.mindmap (tree layout, ribbon branches, node keys)",
    "size": "L",
-   "eta": "Dec 2026",
+   "eta": "goal 74",
+   "in_goal_74": true,
    "unblocks": [
     "Mind map editor: tree layout, curved tapered branches, Tab/Enter/F2 keys, collapse, focus, clean up",
     "Jam: talk over a mind map, an LLM adds branches, reacts and suggests"
@@ -1154,19 +1483,43 @@
   },
   {
    "gap": "No ink anchored to text",
-   "piece": "text anchors + an ink layer over a text view",
+   "piece": "text anchors + an ink layer over the native text view",
    "size": "L",
-   "eta": "Dec 2026",
+   "eta": "after goal 74",
+   "in_goal_74": false,
    "unblocks": [
     "Ink over the page: pen draws, finger scrolls, drawings folded behind a word",
     "Ink marks anchored to words that follow the text when it reflows"
    ]
   },
   {
+   "gap": "No encryption beyond HMAC, and no keychain",
+   "piece": "AES-256-GCM + scrypt + HKDF (libcrypto at run time) + SecretStore (libsecret / Keychain)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "in_goal_74": false,
+   "unblocks": [
+    "Secure notes: AES-256-GCM, scrypt passphrase, recovery key, lock after 5 idle minutes",
+    "Keys and API tokens in the keychain",
+    "X bookmarks: OAuth PKCE sign-in, hourly sync into notes"
+   ]
+  },
+  {
+   "gap": "No zip",
+   "piece": "mojoui.zip",
+   "size": "S",
+   "eta": "Dec 2026",
+   "in_goal_74": false,
+   "unblocks": [
+    "Markdown + assets ZIP; Obsidian vault export and import"
+   ]
+  },
+  {
    "gap": "Small platform hooks",
    "piece": "notification actions, App.fullscreen, clipboard pictures, window-wide shortcuts, a short sound",
    "size": "S",
-   "eta": "this week",
+   "eta": "Dec 2026",
+   "in_goal_74": false,
    "unblocks": [
     "Due dates and reminders: a notification, missed ones on launch, click jumps to the node",
     "Focus mode: words only, full screen, word count",
@@ -1174,34 +1527,28 @@
    ]
   },
   {
-   "gap": "No HTTPS and no way to start a program",
-   "piece": "HTTPS via the system's libcurl at run time + mojoui.process",
+   "gap": "Provider-settings Test button; Jam; hash check on model downloads",
+   "piece": "small composites on HTTPS + Process (already built) and MindMap",
    "size": "M",
-   "eta": "Nov 2026",
+   "eta": "Dec 2026",
+   "in_goal_74": false,
    "unblocks": [
-    "Download models in the app with SHA-256 checks and resume",
     "AI settings: Claude Code CLI, Azure or OpenAI-compatible; a Test button",
-    "X bookmarks: OAuth PKCE sign-in, hourly sync into notes"
+    "Jam: talk over a mind map, an LLM adds branches, reacts and suggests",
+    "Download models in the app with SHA-256 checks and resume"
    ]
   },
   {
-   "gap": "No encryption and no keychain",
-   "piece": "mojoui.crypto (libcrypto at run time) + SecretStore (libsecret / Keychain)",
+   "gap": "No print dialog",
+   "piece": "the system's print dialog (GtkPrintOperation / NSPrintOperation) with page setup",
    "size": "M",
-   "eta": "Nov 2026",
+   "eta": "Dec 2026",
+   "in_goal_74": false,
    "unblocks": [
-    "Secure notes: AES-256-GCM, scrypt passphrase, recovery key, lock after 5 idle minutes",
-    "Keys and API tokens in the keychain"
-   ]
-  },
-  {
-   "gap": "No zip",
-   "piece": "mojoui.zip",
-   "size": "S",
-   "eta": "Nov 2026",
-   "unblocks": [
-    "Markdown + assets ZIP; Obsidian vault export and import"
+    "Print preview and print, Letter or A4"
    ]
   }
- ]
+ ],
+ "date": "2026-11-17",
+ "base": "cc33c9d7"
 }

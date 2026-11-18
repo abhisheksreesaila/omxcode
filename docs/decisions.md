@@ -1630,3 +1630,5 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7404 · the race (M7) uses Personal Note's own benchmark-leafer.mjs and its own seeded 600-object note, imported into pnote · its own yardstick is the fairest; a loss is reported, not hidden · yes
 - D-7405 · `framebench:…=type,N` (keystrokes, one frame each) is added to the GTK host for the page race · the existing framebench measures pan/zoom/draw only · yes
 - D-7406 · mojoui.history keeps editor-defined steps (trait Undoable with merge) rather than whole-state snapshots only; Snapshot[T] covers small values · a 1M-character text can't be snapshotted per keystroke · yes
+- D-7407 · textedit lays out lazily per paragraph and paints from an anchor (top paragraph + offset), so nothing is wrapped at open and nothing sums over the whole text per frame · 1M characters open in ~2 ms, a keystroke ~0.02 ms into a Scene (the host's pixel work is measured in M7) · yes
+- D-7408 · a paragraph's look comes from a Styler (spans with size, weight, colour, slant, hidden; indent, block, marker) · mdedit, mind-map labels and canvas text boxes all draw through the same editor · yes
