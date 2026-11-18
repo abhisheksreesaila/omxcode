@@ -213,7 +213,7 @@ def main() raises:
     print("edges drop: ok (pipe " + String(size) + " bytes; threads " + String(before) + " → " + String(after) + "; " + String(Int(took)) + " ms with the writes)", flush=True)
 
     # a file system that doesn't say what an entry is (DT_UNKNOWN, 0): the entry is looked at without following a link, so a
-    # symlink to a folder (here one that points out of the watched tree) is never descended into (D-7307)
+    # symlink to a folder (here one that points out of the watched tree) is never descended into (D-7258)
     var root4 = temp_dir()
     var outside = temp_dir()
     write(outside + "/secret.txt", "x")

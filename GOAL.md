@@ -30,7 +30,7 @@ Committed after each passing milestone; merged to main locally after the reviewe
 
 ## Out of bounds
 Editing omx-local (read its code, models and engines only); other worktrees; pushing; pip (pixi only); lowering a proof or
-deleting a test; the visual/pointing skills (next goal); GPU 1 beyond the creator layout (D-7315): the brain on GPU 0, the voice and the pictures on GPU 1, as goal 4's creator tier had it; D-7250 stopped the prototype to free GPU 0, so nothing of omx-local runs, and the app gives both cards back when it ends.
+deleting a test; the visual/pointing skills (next goal); GPU 1 beyond the creator layout (D-7293): the brain on GPU 0, the voice and the pictures on GPU 1, as goal 4's creator tier had it; D-7250 stopped the prototype to free GPU 0, so nothing of omx-local runs, and the app gives both cards back when it ends.
 
 ## Assumptions (instead of asking)
 - The brain is Qwen3.8-27B 4-bit through libllama in-process (D-7201): MAX 26.7 knows Qwen3.8-27B but only as bf16 (54 GB,

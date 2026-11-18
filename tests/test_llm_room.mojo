@@ -1,4 +1,4 @@
-# mojoui.llm on a context too small for both sequences (goal 72 review, D-7309): the two sequences share one context (2048 tokens
+# mojoui.llm on a context too small for both sequences (goal 72 review, D-7276): the two sequences share one context (2048 tokens
 # here), so a background request that doesn't fit beside the conversation is refused with its own error and the conversation
 # keeps its cache; and a conversation request that doesn't fit beside what the background holds stops the background to make room.
 #   scripts/mxbuild.sh tests/test_llm_room.mojo -o build/test_llm_room && LLM_GPU=0 build/test_llm_room

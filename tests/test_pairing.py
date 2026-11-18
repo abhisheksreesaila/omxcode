@@ -63,12 +63,12 @@ def main():
     assert ask(host="evil.example:5001")[1] == 403
     # a page on another site (its Origin is not the Host) is refused even from here
     assert ask(origin="http://evil.example")[1] == 403
-    # D-7300: "Origin: null" (a sandboxed iframe, a file:// page) is a foreign page, even from loopback with no key: the page
+    # D-7251: "Origin: null" (a sandboxed iframe, a file:// page) is a foreign page, even from loopback with no key: the page
     # and the audio socket are both refused
     assert ask(origin="null")[1] == 403
     assert ask(kind="websocket", origin="null")[:2] == ("websocket.close", 1008)
     assert ask(kind="websocket", origin="null", path="/audio")[:2] == ("websocket.close", 1008)
-    # D-7300: the redirect after the key goes to a relative path on this host, never "//evil.example/"
+    # D-7251: the redirect after the key goes to a relative path on this host, never "//evil.example/"
     _, status, heads = ask(host="ablearn.tail53f36c.ts.net:8444", proxy=True, query=("k=" + KEY).encode(), path="//evil.example/x")
     assert status == 303 and heads[b"location"] == b"/evil.example/x"
     # behind `tailscale serve`: the peer is loopback but a proxy header is on the request, so nobody is local

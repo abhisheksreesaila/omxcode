@@ -77,7 +77,7 @@ def main() raises:
     assert_equal(names, "todo_add,todo_done,todo_remove,todo_list,")
     unlink(path)
 
-    # a file that can't be read is kept, never written over (D-7306): the garbage moves aside and a new list starts
+    # a file that can't be read is kept, never written over (D-7257): the garbage moves aside and a new list starts
     with open(path, "w") as f:
         f.write("not json {{ the person's own notes?")
     var odd = TodoList(path)

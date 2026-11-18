@@ -1,7 +1,7 @@
 # Goal 72 report: omx, the voice app, rebuilt on omxcode
 
 Branch `goal-72-omx-voice` (base main cc33c9d7). Check: `pixi run python docs/goals/72-check.py` (M0 to M7; numbers in `build/g72/*.json`,
-the last full run in `build/g72/check-full.txt`). Decisions D-7200 to D-7315 in `docs/decisions.md`. The prototype this reproduces is
+the last full run in `build/g72/check-full.txt`). Decisions D-7200 to D-7293 in `docs/decisions.md`. The prototype this reproduces is
 `~/Projects/omx-local` (Python and JavaScript, goals 1 to 4, 23 of 23 checks); it was only read.
 
 ## Where the checks stand
@@ -20,9 +20,9 @@ The framework first; the app only composes.
 
 | Piece | What it is | Proved by |
 |---|---|---|
-| `mojoui.llm` + `bridge/llm_shim.cpp` | Qwen3.8-27B (UD-Q4_K_M) through libllama in the app's own process: one engine thread, tokens to the UI as events, the prompt cache kept between turns (checkpoints for the hybrid model), the model's own chat template, parsed tool calls, cancel, a second sequence for background work. Survives what one request throws (D-7302). | tests/test_llm, test_llm_room |
+| `mojoui.llm` + `bridge/llm_shim.cpp` | Qwen3.8-27B (UD-Q4_K_M) through libllama in the app's own process: one engine thread, tokens to the UI as events, the prompt cache kept between turns (checkpoints for the hybrid model), the model's own chat template, parsed tool calls, cancel, a second sequence for background work. Survives what one request throws (D-7253). | tests/test_llm, test_llm_room |
 | `mojoui.voice`, `mojoui.speaker`, `mojoui.voiceloop` | Kokoro TTS, Parakeet speech to text (in-process, through Python interop as `mojoui.speech` runs Whisper), Silero endpointing, barge-in, PulseAudio out; the browser's microphone and speaker on the web host (one WebSocket, `docs/web-audio.md`) | tests/test_voice, tests/test_web_audio.py |
-| `mojoui.llmagent` | an AG-UI agent whose brain is the in-process model (`LocalAgent`): RUN_*, TEXT_MESSAGE_*, TOOL_CALL_*, STATE_*, `render_ui` cards from the catalog; the app's buttons are its tools (the agent host's rule, D-162); a conversation that never fills (D-7314); text from outside is data (D-7301) | tests/test_llmagent, test_compact, test_trust |
+| `mojoui.llmagent` | an AG-UI agent whose brain is the in-process model (`LocalAgent`): RUN_*, TEXT_MESSAGE_*, TOOL_CALL_*, STATE_*, `render_ui` cards from the catalog; the app's buttons are its tools (the agent host's rule, D-162); a conversation that never fills (D-7292); text from outside is data (D-7252) | tests/test_llmagent, test_compact, test_trust |
 | `mojoui.agentserve` | the same agent as an AG-UI HTTP/SSE endpoint | the official `ag-ui-protocol` client, `scripts/agui_llm_check.py` |
 | `mojoui.assistant`, `todo`, `news`, `llmjob`, `cloudlane` | to-do (a file, the voice and the tick boxes edit it), news cards, think-it-through jobs on the second sequence, the cloud lane (`claude -p`, only when named, capped, the record written first, a turn state machine `CloudTurn`) | tests/test_todo, test_news, test_llmjob, test_cloudlane, test_assistant |
 | `mojoui.creator`, `comic`, `imagegen`, `notes`, `album` | comics and pictures (stable-diffusion.cpp as a supervised child on its own GPU, panel by panel on a card), find in my notes (e5-small by MAX in the process, an incremental cached index, one folder only, cited) | tests/test_creator, test_imagegen, test_notes |
@@ -57,7 +57,7 @@ Last full run, this machine (two RTX 3090s: the brain on GPU 0, the voice, embed
 
 ## The review round (this branch's last commits)
 
-A reviewer's findings, each fixed at its root with a behaviour test (D-7300 to D-7315):
+A reviewer's findings, each fixed at its root with a behaviour test (D-7251 to D-7293):
 
 - `Origin: null` is a foreign page (page and `/audio` socket refused); the key redirect stays on a relative path; `tablet.sh` sets
   `MOJOUI_BEHIND_PROXY`; one live audio page per process, a second tab says why; the audio pump logs once when it stops.
@@ -73,7 +73,7 @@ A reviewer's findings, each fixed at its root with a behaviour test (D-7300 to D
   `Album.hold` is capped; the to-do file reports a failed save and sets an unreadable file aside; the watcher never follows a link out.
 
 ## Honest gaps
-- **Open item: taint lasts one turn (D-7317).** Notes and news are fenced and refused tools need a spoken yes within the turn that read them, but the fenced text stays in the history until it is condensed; a planted instruction is held back in later turns only by the fence and the model's judgement. Not tested yet.
+- **Open item: taint lasts one turn (D-7295).** Notes and news are fenced and refused tools need a spoken yes within the turn that read them, but the fenced text stays in the history until it is condensed; a planted instruction is held back in later turns only by the fence and the model's judgement. Not tested yet.
 - **Open item: one-word drift at turn 57.** In one of three runs of the long compaction script at temperature 0.3, replies drifted into single words from turn 57, not at a condensing; the test runs greedy. Unexplained; may hide a summary-quality issue.
 - **Test-only hook:** `llm_test_fault` in bridge/llm_shim.cpp exists only so tests can force faults; it does nothing unless a test calls it.
 
@@ -84,9 +84,9 @@ A reviewer's findings, each fixed at its root with a behaviour test (D-7300 to D
   check's own line says "after the endpointer's quiet"; it is after the last voiced sample.
 - **No MTP in the process yet.** 43 tok/s is the no-MTP speed; the prototype's 74 tok/s needs the MTP head, which `mojoui.llm` does not drive.
 - **MAX is not the brain** (D-7201): MAX 26.7 knows Qwen3.8-27B only as bf16 (54 GB, more than both 3090s), fp8 (no Ampere path shown, a small FP8 Qwen failed here) or NVFP4 (Blackwell). MAX runs where it fits: the notes' embeddings.
-- **One tab at a time.** A second tab ends the first, with a message (D-7310): one model, one microphone and one speaker per process. Sharing the model between sessions was not built.
+- **One tab at a time.** A second tab ends the first, with a message (D-7277): one model, one microphone and one speaker per process. Sharing the model between sessions was not built.
 - **Echo without headphones.** The speaker and the microphone share a room; barge-in works with the browser's echo cancellation on the tablet and is checked on the desktop with a file as the microphone, not with a person in the room.
-- **Not provoked by a test:** the decode-time branch of a full shared context (D-7309); a long natural conversation (the compaction test is a scripted one). One run in three of that script at temperature 0.3 drifted into one-word replies from turn 57, unrelated to a condensing; the test runs greedy. Not investigated further.
+- **Not provoked by a test:** the decode-time branch of a full shared context (D-7276); a long natural conversation (the compaction test is a scripted one). One run in three of that script at temperature 0.3 drifted into one-word replies from turn 57, unrelated to a condensing; the test runs greedy. Not investigated further.
 - `start_over()` is in the agent; no button in the app calls it yet.
 
 ## Screenshots

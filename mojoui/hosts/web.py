@@ -2654,7 +2654,7 @@ def make_app(module_dir):
             made()
             sessions[sid] = s
             if not PUBLIC:
-                keep = 1 if audio else MAX_SESSIONS  # (D-7310: an app with sound has one microphone, one speaker and one model per process)
+                keep = 1 if audio else MAX_SESSIONS  # (D-7277: an app with sound has one microphone, one speaker and one model per process)
                 gone += list(sessions.items())[:max(0, len(sessions) - keep)]  # (local: the oldest tab gives way)
         for old_sid, old in gone:
             end_session(old_sid, old, "Another page opened this app, so this one stopped: the microphone, the speaker and the model "

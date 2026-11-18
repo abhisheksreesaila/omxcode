@@ -168,7 +168,7 @@ def main():
                  "--autoplay-policy=no-user-gesture-required", "--no-sandbox"]
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=CHROMIUM, headless=True, args=flags)
-            # D-7310: one live page per process: a second tab takes over, and the first says so (it doesn't keep a second copy
+            # D-7277: one live page per process: a second tab takes over, and the first says so (it doesn't keep a second copy
             # of the app and its model alive)
             ctx = browser.new_context(permissions=["microphone"])
             first = ctx.new_page()

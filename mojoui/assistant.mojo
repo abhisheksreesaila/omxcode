@@ -108,7 +108,7 @@ struct Assistant(Movable):
         """Offers the model its tools (do it before agent.prime(): they are part of the prompt the cache holds)."""
         for f in todo_functions():
             agent.add_function(f.copy())
-        agent.trust.guard("todo_remove")  # (D-7301: after notes or news were read in a turn, what removes, ticks off or reaches out needs the person's yes)
+        agent.trust.guard("todo_remove")  # (D-7252: after notes or news were read in a turn, what removes, ticks off or reaches out needs the person's yes)
         agent.trust.guard("todo_done")
         agent.trust.guard(NEWS_TOOL)
         agent.add_deferred(

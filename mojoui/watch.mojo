@@ -178,7 +178,7 @@ def entry_mode(path: String) -> Int:
 
 def entry_kind(d_type: Int, full: String) -> Int:
     """What a directory entry is, from readdir's d_type; when the file system doesn't say (DT_UNKNOWN, 0) the entry is looked at
-    without following a link (D-7307): a symlink to a folder is OTHER, not a folder to descend into."""
+    without following a link (D-7258): a symlink to a folder is OTHER, not a folder to descend into."""
     if d_type == 4:
         return KIND_DIR
     if d_type == 8:

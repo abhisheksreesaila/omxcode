@@ -98,7 +98,7 @@ def main() raises:
     assert_equal(wait(lane), ASK_DONE)
     lane.idle()
     assert_equal(lane.begin("one more", "opus"), "I've reached the limit of 2 cloud requests for this session")
-    assert_equal(len(String(cloud_ledger()).split("\n")), 5)  # (D-7303: "sent" before it left, the outcome after) four rows and the empty tail
+    assert_equal(len(String(cloud_ledger()).split("\n")), 5)  # (D-7254: "sent" before it left, the outcome after) four rows and the empty tail
     assert_true('"outcome":"sent"' in cloud_ledger())
     assert_equal(stat(ledger).st_mode & 0o777, 0o600)  # the record is the person's alone
 

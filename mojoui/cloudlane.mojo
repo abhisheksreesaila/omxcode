@@ -17,7 +17,7 @@
 # here. $OMX_CLAUDE_CMD names the command (default `claude`; a test points it at a script), $OMX_CLOUD_MODEL the default
 # model (`opus`). Linux and Mac (mojoui.process).
 #
-# The record is written before anything leaves (D-7303): a "sent" row first, and when it can't be written (no folder, a full
+# The record is written before anything leaves (D-7254): a "sent" row first, and when it can't be written (no folder, a full
 # disk) nothing is sent and the person is told; the outcome follows as a second row. The file is mode 0600 (it holds the start
 # of what was asked). The prompt follows `--`, so words that begin with a dash can't be read as the command's own options. A
 # stopped request is signalled at once and reaped later, so cancel() never waits on the UI thread.
@@ -310,7 +310,7 @@ struct CloudLane(Movable):
             argv.append(text)
             self.proc = Process.start(argv, self.log, cwd=cwd)
         except e:
-            _ = ledger_add(model, "not started", 0, 0, 0.0, "")  # (the "sent" row above over-reports: say it never left; D-7316)
+            _ = ledger_add(model, "not started", 0, 0, 0.0, "")  # (the "sent" row above over-reports: say it never left; D-7294)
             return String("I couldn't start the cloud command: " + String(e))
         self.used += 1
         self.model = model
@@ -396,7 +396,7 @@ struct CloudLane(Movable):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# the cloud lane as a turn of the conversation (D-7304: this was the app's own state machine; an app only composes it)
+# the cloud lane as a turn of the conversation (D-7255: this was the app's own state machine; an app only composes it)
 # ---------------------------------------------------------------------------------------------------------------------
 
 comptime STEP_NONE = 0

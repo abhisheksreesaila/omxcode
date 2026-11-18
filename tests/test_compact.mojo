@@ -1,4 +1,4 @@
-# mojoui.llmagent's "never full" (goal 72 review, D-7314): a long scripted conversation on a small context (8192 tokens, so the
+# mojoui.llmagent's "never full" (goal 72 review, D-7292): a long scripted conversation on a small context (8192 tokens, so the
 # budget is 3276) never fails with "does not fit". The older turns are condensed by the model's second sequence between turns,
 # a fact told in the very first turn is still recalled after several condensings, the first words of late turns come as fast
 # as those of early ones (the cache is warmed for the condensed history while nobody waits), and start_over() forgets it all.

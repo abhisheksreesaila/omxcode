@@ -8,7 +8,7 @@
 #   todo_functions()                             # the agent's tools: todo_add (several at once), todo_done, todo_remove, todo_list
 #
 # A save that fails is said (list.save_error; the tools answer "I couldn't save the list: …"), and a file that can't be read
-# (not JSON, not a list of items) is moved aside to todo.json.bad-<time> before anything is written, never overwritten (D-7306).
+# (not JSON, not a list of items) is moved aside to todo.json.bad-<time> before anything is written, never overwritten (D-7257).
 #
 # The tools keep no state of their own: each call opens the file, changes it and says what is on the list now, so a tool the
 # model calls and a tick box the person taps edit the same thing, and a list survives the app (or the agent) restarting. An

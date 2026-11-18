@@ -26,7 +26,7 @@
 # The conversation (sequence 0 of the Llm) and its prompt cache live as long as the agent: a run adds only what's new (the
 # input's messages whose ids the agent hasn't seen). `think` is fixed per agent (the cache breaks when it changes).
 #
-# Never full (D-7314): the conversation is kept inside a budget (compact_fraction of the context, 40 %). Between turns,
+# Never full (D-7292): the conversation is kept inside a budget (compact_fraction of the context, 40 %). Between turns,
 # agent.maintain() (the app calls it on its tick; begin() calls it too) notices the history has outgrown it, has the model's
 # second sequence condense the older turns into a short summary (a cut only at a user message, so a tool call and its result
 # are never parted), and, once the agent is idle, swaps the summary in for them and warms the prompt cache for the new history,
@@ -353,7 +353,7 @@ struct LlmAgent(LocalAgent, Movable):
     var compactions: Int
     var compact_ms: Float64  # how long the last condensing took, from its start to the swap
     var summ_start_ns: Int
-    var trust: Trust  # what a turn that has read untrusted text may not do (mojoui.trust, D-7301)
+    var trust: Trust  # what a turn that has read untrusted text may not do (mojoui.trust, D-7252)
 
     def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 1200, temperature: Float64 = 0.3):
         self.llm = llm^
@@ -698,7 +698,7 @@ struct LlmAgent(LocalAgent, Movable):
                 if role == "assistant" and content == "Understood." and i == 1:
                     continue
                 if role == "tool":
-                    if FENCE_END in content:  # (untrusted text, notes or news: never carried into the summary, which is trusted history; D-7316)
+                    if FENCE_END in content:  # (untrusted text, notes or news: never carried into the summary, which is trusted history; D-7294)
                         out += "Tool result: (passages from an outside source; not kept)\n"
                     else:
                         out += "Tool result: " + head(content, 500) + "\n"

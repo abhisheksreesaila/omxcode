@@ -1,4 +1,4 @@
-# mojoui.utf8 (goal 72 review, D-7312): a cut to a byte size never ends in the middle of a character.
+# mojoui.utf8 (goal 72 review, D-7279): a cut to a byte size never ends in the middle of a character.
 #   pixi run mojo build -I . -I vendor tests/test_utf8.mojo -o build/test_utf8 && build/test_utf8
 from std.testing import assert_equal
 from mojoui.utf8 import head, boundary, tail

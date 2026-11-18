@@ -144,7 +144,7 @@ struct Main(App):
 
     def out(self, line: String):
         """A line for the checker (what was heard, said and called, with its numbers). What the person said, what was answered and
-        what a tool was given stays off stdout unless OMX_TRACE=1: an app's output is read by whoever runs it (D-7305)."""
+        what a tool was given stays off stdout unless OMX_TRACE=1: an app's output is read by whoever runs it (D-7256)."""
         if self.trace:
             print(line, flush=True)
 

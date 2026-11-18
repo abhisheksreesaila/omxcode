@@ -1,4 +1,4 @@
-# mojoui.trust (goal 72 review, D-7301): what a turn that has read notes or news may and may not do, the fence round text from
+# mojoui.trust (goal 72 review, D-7252): what a turn that has read notes or news may and may not do, the fence round text from
 # outside, and the plain words a news topic is cut down to.
 #   pixi run mojo build -I . -I vendor tests/test_trust.mojo -o build/test_trust && build/test_trust
 from std.testing import assert_equal, assert_true

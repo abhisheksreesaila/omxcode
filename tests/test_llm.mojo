@@ -147,7 +147,7 @@ def main() raises:
     assert_true(r2.done.n_cached >= r1.done.n_prompt - 8, "the second turn reuses the first's prompt: " + String(r2.done.n_cached))
     assert_true(r2.done.ttft_ms <= 0.5 * r1.done.ttft_ms, "turn 2 ttft " + String(r2.done.ttft_ms) + " <= half of " + String(r1.done.ttft_ms))
 
-    # 5b. D-7302: whatever goes wrong inside the engine for one request ends that request with an error and nothing else. Each
+    # 5b. D-7253: whatever goes wrong inside the engine for one request ends that request with an error and nothing else. Each
     # fault (the token feed, the admission, the end of the reply) hits the next request; the one after it, and a request on the
     # other sequence in the same moment, answer as if nothing had happened.
     for what in range(1, 4):
@@ -177,7 +177,7 @@ def main() raises:
         assert_true(after1.text.find("Madrid") >= 0, "the other sequence answers after fault " + String(what) + ": " + after1.text)
         print("llm fault", what, ": ok |", bad)
 
-    # 5c. D-7302: a request nobody polls to its end is forgotten when it is cancelled (the engine kept it for ever before)
+    # 5c. D-7253: a request nobody polls to its end is forgotten when it is cancelled (the engine kept it for ever before)
     _ = llm.test_fault(0)
     var abandoned = llm.chat("[" + msg("user", "Say hi.") + "]", seq=0, max_tokens=4)
     sleep_ms(2500)  # (it has finished by now, and nobody read it)
@@ -227,7 +227,7 @@ def main() raises:
         if i > 0:  # (the first one warms the cache)
             in_proc.append(r.done.ttft_ms)
     var http_ms = List[Float64]()
-    # (D-7311: the baseline is part of the proof, never skipped: no LLM_HTTP means a failed test, not a quiet pass)
+    # (D-7278: the baseline is part of the proof, never skipped: no LLM_HTTP means a failed test, not a quiet pass)
     assert_true(http_url != "", "no HTTP baseline: set LLM_HTTP to a running llama-server with the same model (the checker starts one)")
     if True:
         makedirs("build/g72", exist_ok=True)

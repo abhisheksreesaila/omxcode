@@ -12,7 +12,7 @@ from mojoui.json import json_string
 from mojoui.canvas import Surface
 
 
-comptime MAX_HELD = 24  # pictures made at run time that an agent may still name; the oldest let go beyond this (D-7313)
+comptime MAX_HELD = 24  # pictures made at run time that an agent may still name; the oldest let go beyond this (D-7291)
 
 
 struct Album(Copyable, Movable, Defaultable):

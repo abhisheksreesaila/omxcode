@@ -97,7 +97,7 @@ def main() raises:
     assert_true(len(wifi) == 1, "the new passage is found")
     assert_equal(wifi[0].file, "home/garden.md")
     assert_true(wifi[0].text.find("blue-heron-42") >= 0, wifi[0].text)
-    # D-7308: a big folder never holds the UI thread. The fixtures fifty times over and a note of nearly a megabyte: every
+    # D-7259: a big folder never holds the UI thread. The fixtures fifty times over and a note of nearly a megabyte: every
     # index tick (step) stays under 16 ms, a search over all of it too, and a question's look at the folder (refresh) reads
     # nothing again when nothing changed, and only the new note when one was added.
     var big = "build/g72/notes-big"

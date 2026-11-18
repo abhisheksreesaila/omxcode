@@ -329,7 +329,7 @@ def main() raises:
     print("agent ttft: in-process median", inproc_ttft, "ms (", ttfts[0], ttfts[1], ttfts[2], ")")
     makedirs("build/g72", exist_ok=True)
 
-    # 5. D-7301: text from the notes is data. After a notes search in a turn, a news lookup of the note's line and a removal are
+    # 5. D-7252: text from the notes is data. After a notes search in a turn, a news lookup of the note's line and a removal are
     # refused (the model is told why), nothing reaches the network and nothing is removed; in a clean turn both go through.
     agent.add_function(ToolFn("todo_remove", "Remove a thing from the list.", '{"type":"object","properties":{"number":{"type":"integer"}}}', remove_item))
     agent.add_deferred("news", "Headlines for a topic.", '{"type":"object","properties":{"topic":{"type":"string"}},"required":["topic"]}')

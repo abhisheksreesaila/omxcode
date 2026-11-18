@@ -1,4 +1,4 @@
-# mojoui.utf8: cutting text by bytes without cutting a character in two (goal 72 review, D-7312).
+# mojoui.utf8: cutting text by bytes without cutting a character in two (goal 72 review, D-7279).
 #
 #   head("héllo", 2)  ->  "h"        (the é is two bytes: it doesn't fit in the second, so it stays out)
 #   head("héllo", 3)  ->  "hé"

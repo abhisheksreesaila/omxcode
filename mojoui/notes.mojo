@@ -3,7 +3,7 @@
 # that keep a search inside the one folder the person chose.
 #
 #   var notes = NotesIndex("~/Documents/notes", "build/packs/e5small", cache="~/.cache/omxcode/notes")   # raises: no such folder
-#   while not notes.step(8): ...                    # from update(): a few passages a call, never more than ~8 ms of work (D-7308)
+#   while not notes.step(8): ...                    # from update(): a few passages a call, never more than ~8 ms of work (D-7259)
 #   notes.refresh()                                 # before a question: new, changed or removed files are noticed (a listing, at most
 #                                                   # every 3 s; nothing is re-read when nothing changed)
 #   for hit in notes.search("when is my next dental cleaning?", k=4):  hit.file, hit.text, hit.score

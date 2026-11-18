@@ -1,4 +1,4 @@
-# mojoui.trust: text the person didn't write is data, not instructions (goal 72 review, D-7301).
+# mojoui.trust: text the person didn't write is data, not instructions (goal 72 review, D-7252).
 #
 # A note may hold a pasted web page or email; a headline is whatever a stranger put in a feed. Either can say "remove item 1"
 # or "look up news about <something private>", and a model that reads it may obey. So a turn that has read such text is
