@@ -319,6 +319,7 @@ struct LlmAgent(LocalAgent, Movable):
     var t_begin: Int
     var first_text_ms: Float64  # begin() to the first TEXT_MESSAGE_CONTENT (-1: none yet)
     var used: Int  # tools called this run
+    var warm_id: Int  # the warm-up request prime() made, until its end is seen (0: none)
     var runs: Int
 
     def __init__(out self, var llm: Llm, system: String = DEFAULT_SYSTEM, think: Bool = False, max_steps: Int = 5, max_tokens: Int = 512, temperature: Float64 = 0.3):
@@ -351,6 +352,7 @@ struct LlmAgent(LocalAgent, Movable):
         self.t_begin = 0
         self.first_text_ms = -1.0
         self.used = 0
+        self.warm_id = 0
         self.runs = 0
 
     def add_function(mut self, var f: ToolFn):
@@ -417,9 +419,22 @@ struct LlmAgent(LocalAgent, Movable):
             var j = Json.parse(input)
             self.tools_json = self.build_tools(j, j.get(0, "tools"))
             var msgs = '[{"role":"system","content":' + json_string(self.system) + "}]"
-            _ = self.llm.chat(msgs, self.tools_json, 0, self.think, 1, 0.0)
+            self.warm_id = self.llm.chat(msgs, self.tools_json, 0, self.think, 1, 0.0)
         except:
             pass  # (a warm-up that fails costs the first turn its cache, nothing else)
+
+    def warm(mut self) -> Bool:
+        """True once prime()'s warm-up has finished (or there was none): the prompt cache holds the head. An app holds its
+        microphone back until then, so the first question never meets a cold cache."""
+        if self.warm_id == 0:
+            return True
+        try:
+            for e in self.llm.poll(self.warm_id):
+                if e.kind == DONE or e.kind == ERROR:
+                    self.warm_id = 0
+        except:
+            self.warm_id = 0
+        return self.warm_id == 0
 
     def take_messages(mut self, j: Json, ms: Int) raises:
         if ms < 0 or j.kind(ms) != J_ARRAY:

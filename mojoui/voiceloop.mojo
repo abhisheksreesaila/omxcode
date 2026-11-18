@@ -104,6 +104,7 @@ struct VoiceLoop(Movable):
     var ep: Optional[Endpointer]
     var barge: Bool  # speech over the speaker interrupts it
     var muted: Bool  # the microphone is on but nothing is heard (the app's mute button)
+    var hold: Bool  # the app isn't ready for the first question (its model is still warming): READY and the microphone wait
     var loaded: Bool
     var failed_told: Bool
     var _state: Int
@@ -152,6 +153,7 @@ struct VoiceLoop(Movable):
         self.stream = None
         self.barge = True
         self.muted = False
+        self.hold = False
         self.loaded = False
         self.failed_told = False
         self._state = LOOP_LOADING
@@ -244,7 +246,7 @@ struct VoiceLoop(Movable):
                 self.failed_told = True
                 out.append(LoopEvent(FAILED, "the voice: " + voice.why(), now_ns(), 0.0, False))
                 return
-            if not (ears.ready() and voice.ready()):
+            if not (ears.ready() and voice.ready()) or self.hold:
                 return
             self.stream = SpeechStream(ears)
         except e:

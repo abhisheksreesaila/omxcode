@@ -193,7 +193,7 @@ def _run_binary(build_cmd, run_cmd, env=None, want=None, timeout=3600):
 
 
 def m1():
-    return _run_binary(["scripts/mxbuild.sh", "build", "tests/test_llm.mojo", "-o", "build/test_llm"], ["build/test_llm"], {"LLM_GPU": GPU}, "llm ")
+    return _run_binary(["scripts/mxbuild.sh", "tests/test_llm.mojo", "-o", "build/test_llm"], ["build/test_llm"], {"LLM_GPU": GPU}, "llm ")
 
 
 def m2():

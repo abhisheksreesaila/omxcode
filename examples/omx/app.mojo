@@ -159,6 +159,7 @@ struct Main(App):
             self.primed = True
             self.llm.value().set_tools(view_tools(self.page(False)))
             self.llm.value().prime(self.client.input_json())
+        self.loop.hold = self.llm.value().warm() == False if self.llm else False  # (the first question meets a warm prompt cache)
         for ref e in self.loop.tick():
             if e.kind == READY:
                 print("OMX READY: gpu=" + self.loop.gpu(), flush=True)

@@ -26,8 +26,25 @@ def main():
     folder = os.environ.get("MOJOUI_PARAKEET_DIR") or None
     asr = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", folder, quantization="int8",
                               providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
-    # the recording holds silence round the speech and may hold two replies: the whole thing, in one go (Parakeet takes minutes)
-    print("HEARD: " + str(asr.recognize(pcm, sample_rate=16000)).strip())
+    # the recording is mostly silence round and between replies: each stretch of sound (gaps over 1.5 s split them) is read on its own
+    loud = np.nonzero(np.abs(pcm) > 0.01)[0]
+    spans, start, prev = [], None, None
+    for i in loud:
+        if start is None:
+            start = prev = i
+        elif i - prev > 24000:
+            spans.append((start, prev))
+            start = prev = i
+        else:
+            prev = i
+    if start is not None:
+        spans.append((start, prev))
+    words = []
+    for a, b in spans:
+        seg = pcm[max(0, a - 8000): b + 8000]
+        if len(seg) >= 3200:
+            words.append(str(asr.recognize(seg, sample_rate=16000)).strip())
+    print("HEARD: " + " ".join(w for w in words if w))
 
 
 if __name__ == "__main__":
