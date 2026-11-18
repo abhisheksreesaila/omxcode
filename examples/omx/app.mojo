@@ -18,6 +18,8 @@
 #   the camera         mojoui.looker.Looker            look: the tablet's (or this machine's) camera, the model's own eyes in this process
 #                                                      (the vision projector), a card with the picture and labelled boxes; each box is a
 #                                                      part the pointer lands on when the reply names it ("the banana is on the left")
+#   how things work    mojoui.explain + mojoui.iso     explain: a small isometric diagram card (blocks, arrows, numbered steps); each block
+#                                                      is a part the pointer lands on as the walkthrough names it, and it rises
 #
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the card the model loads on, counted among the
@@ -144,7 +146,7 @@ struct Main(App):
             var mmproj = environment("OMX_MMPROJ", models + "/mmproj-F16.gguf")
             self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx, mmproj=mmproj if exists(mmproj) else String("")), "Your name is omx. " + String(VISUAL_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
-            Visual.register(self.llm.value())  # (the map card's show_map, and the diagram's stub until it is built: mojoui.visual)
+            Visual.register(self.llm.value())  # (the map card's show_map and the diagram's explain: mojoui.visual)
             self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
             self.llm.value().trust.allow("type")
         except e:
@@ -291,6 +293,7 @@ struct Main(App):
         self.tell_points()
         for line in self.screens.take_log():  # (what the cards did: a map's checked stops, its tiles, its flights)
             self.out("OMX " + line)
+        self.screens.point_at(self.pointer.tag)  # (a pointed-at block rises, its step is marked)
         self.creator.tick()
         for line in self.creator.take_log():
             self.out("OMX " + line)
@@ -535,7 +538,7 @@ struct Main(App):
                 if self.thought_through and self.assist.jobs_started == self.jobs_before:  # (asked to think it through, the model didn't: the job starts anyway)
                     self.thought_through = False
                     self.assist.start_job("", self.heard, "", self.llm.value())
-        if self.screens.adopt(self.client) > 0:
+        if self.screens.adopt(self.client) > 0:  # (render_ui's cards, and the card tools': show_map's maps, explain's diagrams)
             self.shelf_version += 1
             self.out("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
                      + String(len(self.screens.uis)) + " cardkind=" + card_kind("", self.screens.uis[len(self.screens.uis) - 1].summary()) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary() + " text=" + self.card_json())

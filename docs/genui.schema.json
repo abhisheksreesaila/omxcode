@@ -103,6 +103,9 @@
      "$ref": "#/$defs/components/Sight"
     },
     {
+     "$ref": "#/$defs/components/Iso"
+    },
+    {
      "$ref": "#/$defs/components/Icon"
     },
     {
@@ -1184,6 +1187,117 @@
      "component",
      "name",
      "boxes"
+    ],
+    "additionalProperties": false
+   },
+   "Iso": {
+    "type": "object",
+    "description": "how something works as a small isometric diagram: 3 to 6 blocks (the things involved, each a short label and a kind), arrows between them with short labels, and numbered steps in order, each naming the block it happens at by its label (the explain tool builds it)",
+    "properties": {
+     "component": {
+      "const": "Iso"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "blocks": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 6,
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string",
+         "maxLength": 32
+        },
+        "kind": {
+         "enum": [
+          "process",
+          "device",
+          "store",
+          "person",
+          "place",
+          "energy",
+          "thing"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "maxLength": 40
+        }
+       },
+       "required": [
+        "label"
+       ],
+       "additionalProperties": false
+      },
+      "description": "the things involved, in the order things happen"
+     },
+     "links": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 10,
+      "items": {
+       "type": "object",
+       "properties": {
+        "from": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "to": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "label": {
+         "type": "string",
+         "maxLength": 28
+        }
+       },
+       "required": [
+        "from",
+        "to"
+       ],
+       "additionalProperties": false
+      },
+      "description": "arrows: from and to name blocks by label"
+     },
+     "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+       "type": "object",
+       "properties": {
+        "block": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "text": {
+         "type": "string",
+         "maxLength": 140
+        }
+       },
+       "required": [
+        "block",
+        "text"
+       ],
+       "additionalProperties": false
+      },
+      "description": "what happens, in order: block names a block by its label, text is one short sentence"
+     },
+     "height": {
+      "type": "number",
+      "minimum": 160,
+      "maximum": 600,
+      "description": "points: the drawing's"
+     }
+    },
+    "required": [
+     "component",
+     "blocks",
+     "steps"
     ],
     "additionalProperties": false
    },

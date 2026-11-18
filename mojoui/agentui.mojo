@@ -14,6 +14,8 @@
 
 from mojoui.agui import Agent
 from mojoui.tripmap import SHOW_MAP, trip_ui
+from mojoui.explain import EXPLAIN
+from mojoui.iso import explain_ui
 from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui, LOADING_UI
 from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
@@ -30,11 +32,19 @@ comptime MAX_SCREENS = 40
 
 
 def tool_card(name: String, args: String) -> String:
-    """A card tool's call (an agent tool that shows one card from its arguments: show_map) as render_ui's JSON; "" when `name`
-    isn't one or its arguments can't be read. adopt() shows these beside render_ui's own screens (goal 77 M3)."""
+    """A card tool's call (an agent tool that shows one card from its arguments: show_map's map, explain's isometric diagram) as
+    render_ui's JSON; "" when `name` isn't one or its arguments can't be read. adopt() shows these beside render_ui's own screens
+    (goal 77 M3, M4; D-7735), so an app needs no code per card tool."""
     if name == SHOW_MAP:
         return trip_ui(args)
+    if name == EXPLAIN:
+        return explain_ui(args)
     return ""
+
+
+def _as_is(args: String) -> String:
+    return args
+
 comptime MAX_RETRIES = 3  # reruns after refused UI in a row; then take() stops asking and gave_up says so (D-725)
 
 
@@ -209,10 +219,15 @@ struct Screens[H: Hub = NoData](Movable):
         """For an agent that runs `tool` itself (mojoui.llmagent.LlmAgent validates render_ui and answers it in the run):
         a screen for every finished call that was answered and not refused, once each, oldest first. Returns how many
         were added (redraw when it isn't 0). take() is for agents whose client answers the call."""
+        return self.adopt_with(agent, tool, _as_is)
+
+    def adopt_with(mut self, agent: Agent, tool: String, card: def(String) thin -> String) -> Int:
+        """adopt() for an app's own card tool whose arguments aren't render_ui's: `card` turns them into render_ui's ({"ui": …}).
+        The framework's card tools (show_map, explain) need neither: tool_card() turns theirs."""
         var added = 0
         for ref m in agent.messages:
             for ref c in m.calls:
-                var made = tool_card(c.name, c.arguments) if c.name != tool and c.done else String("")  # (a card tool: show_map's map)
+                var made = tool_card(c.name, c.arguments) if c.name != tool and c.done else String("")  # (a card tool: show_map's map, explain's diagram)
                 if (c.name != tool and made == "") or not c.done or self.index_of(c.id) >= 0 or self.was_refused(c.id):
                     continue
                 var answer = String("")
@@ -225,7 +240,7 @@ struct Screens[H: Hub = NoData](Movable):
                     self.refused.append(c.id)
                     continue
                 var k = len(self.uis)
-                var ui = GenUi[Self.H](made if made != "" else c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+                var ui = GenUi[Self.H](made if made != "" else card(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
                 if ui.problem != "":
                     self.refused.append(c.id)
                     continue
@@ -288,6 +303,12 @@ struct Screens[H: Hub = NoData](Movable):
             for line in self.uis[k].take_log():
                 out.append(line)
         return out^
+
+    def point_at(mut self, tag: String):
+        """The pointer is on the part tagged `tag` ("" on nothing): the card it belongs to may answer (a block rises, a step is
+        marked: GenUi.point_at)."""
+        for k in range(len(self.uis)):
+            self.uis[k].point_at(tag)
 
     def of_message(self, message_id: String) -> List[Int]:
         var out = List[Int]()

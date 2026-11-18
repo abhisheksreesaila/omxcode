@@ -4,8 +4,9 @@
 
 M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M3 the map card (two trips on GTK at
 tablet size, then on the web host in headless Chromium: stops within 25 km of hand-entered truth, points that fly the map and put the
-ring on the marker, tiles in the browser), M5 visual first, M6 the camera. M4 (isometric) and M7 (polish) are other developers' and
-report BLOCKED("not built yet") until they land. The language model of
+ring on the marker, tiles in the browser), M4 the isometric explainer (three "how does X work?" questions at phone width, the last in
+Liquid dark), M5 visual first, M6 the camera. M7 (polish) is another developer's and reports BLOCKED("not built yet") until it lands.
+The language model of
 M1, M2 and M5 runs on GPU $G77_GPU (default 0); M6's (the model, its vision projector and the voice) on GPU $G77_VISION_GPU (default 1),
 PCI order as nvidia-smi counts. The machinery is goal 72's (docs/goals/72-check.py: the app on the headless display, typed turns, the null
 sink). Numbers: build/g77; pictures: docs/goals/77.
@@ -539,8 +540,161 @@ def m5():
     if probs or len(right) < 9:
         return "FAIL", line + ("; " + "; ".join(probs) if probs else "")
     if stubs:
-        return "BLOCKED", line + f"; speech on card turns at most 2 sentences. Only the missing tools block it: {', '.join(stubs)} still answer 'not available yet' (map: M3, isometric: M4), so those cards cannot be proved"
+        return "BLOCKED", line + f"; speech on card turns at most 2 sentences. Only the missing tools block it: {', '.join(stubs)} still answer 'not available yet' (" + ", ".join({"show_map": "map: M3", "explain": "isometric: M4"}[n] for n in stubs) + "), so those cards cannot be proved"
     return "PASS", line + "; speech on card turns at most 2 sentences"
+
+
+# ------------------------------------------------------------------------------------------------ M4: the isometric explainer
+
+CONCEPTS = ["How does a heat pump work?", "How does a bill become a law?", "How does Wi-Fi get the internet to my phone?"]
+ISO_ENV = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID"}  # (GPU $G77_GPU as nvidia-smi counts it)
+
+
+def iso_norm(s):
+    return " " + " ".join(re.sub(r"[^0-9a-z\u0080-\uffff]+", " ", str(s).lower()).split()) + " "
+
+
+def iso_part(labels, i):
+    """mojoui.iso's part name for block i: its label in lower case, words joined by "-" (a repeated label gets its number)."""
+    name = iso_norm(labels[i]).strip().replace(" ", "-")
+    return name + f"-{i + 1}" if any(iso_norm(labels[k]).strip().replace(" ", "-") == name for k in range(i)) else name
+
+
+def iso_find(blocks, ref):
+    """The block a step or link names, as mojoui.iso resolves it: its id or label, a label said inside it, or it inside a label."""
+    want = iso_norm(ref)
+    if not want.strip():
+        return -1
+    for i, b in enumerate(blocks):
+        if (b.get("id") and iso_norm(b["id"]) == want) or iso_norm(b.get("label", "")) == want:
+            return i
+    for i, b in enumerate(blocks):
+        if iso_norm(b.get("label", "")) in want:
+            return i
+    for i, b in enumerate(blocks):
+        if want in iso_norm(b.get("label", "")):
+            return i
+    return -1
+
+
+def ring_pixels(path, after, dark):
+    """How much of the ring a screenshot shows: pixels near the theme's accent that differ from the shot taken after the ring has
+    faded (the step badges and the text box's focus are accent too, and are in both)."""
+    from PIL import Image
+
+    im = Image.open(path).convert("RGB")
+    ref = Image.open(after).convert("RGB") if after.exists() and Image.open(after).size == im.size else None
+    px, rp = im.load(), (ref.load() if ref else None)
+    want = (60, 196, 207) if dark else (14, 124, 134)
+    n = 0
+    for y in range(90, im.height - 90, 2):
+        for x in range(0, im.width, 2):
+            c = px[x, y]
+            if sum(abs(a - b) for a, b in zip(c, want)) < 90 and (rp is None or sum(abs(a - b) for a, b in zip(c, rp[x, y])) > 40):
+                n += 1
+    return n
+
+
+def lcs(a, b):
+    """The longest common subsequence's length: how many points land on step blocks in the steps' order."""
+    t = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a)):
+        for j in range(len(b)):
+            t[i + 1][j + 1] = t[i][j] + 1 if a[i] == b[j] else max(t[i][j + 1], t[i + 1][j])
+    return t[-1][-1]
+
+
+def m4():
+    why = build()
+    if why:
+        return "FAIL", why
+    probs, said, rows = [], [], []
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
+    for old in OUT.glob("m4_*.png"):
+        old.unlink()
+    fresh_todo()
+    steps = g72.TYPED_OPEN
+    for i, q in enumerate(CONCEPTS, 1):
+        dark = i == len(CONCEPTS)  # (the last concept in Liquid dark: one run gives phone shots in both)
+        # (the status line shows the silent microphone's note, not "Speaking", in these runs: the shots are timed from the question,
+        # 6 to about 45 s, which covers the diagram's tool call and the walkthrough; then a shot after the ring has faded)
+        steps += ("scheme:dark;wait:600;" if dark else "") + f"enter:Type to omx={q};wait:6000;"
+        steps += "".join(f"shot:{OUT}/m4_{i}_{k:02d}.png;wait:450;" for k in range(72)) + "waitfor:Listening=170000;wait:6000;"
+        steps += f"shot:{OUT}/m4_{i}_after.png;"
+    env = dict(CTX)
+    env.update(ISO_ENV)
+    with g72.NullSink():
+        ev, r = g72.run_app(g72.SILENT, steps, window="390x844", env=env, timeout=60 * 12 * len(CONCEPTS))
+    failed = [f for f in of(ev, "FAILED") if not f.get("raw", "").startswith("microphone")]
+    if failed:
+        probs.append("the app failed: " + failed[0].get("raw", ""))
+    all_lags = []
+    for i, q in enumerate(CONCEPTS, 1):
+        kind = turn_kind(ev, i)
+        isos = [a for a in card_args(ev, i) if a.get("component") == "Iso"]
+        reply = (of(ev, "REPLY", i) or [{}])[0].get("text", "")
+        row = {"asked": q, "kind": kind, "reply": reply, "sentences": sentences(reply)}
+        rows.append(row)
+        if kind != "iso":
+            probs.append(f"{q!r}: went for {kind or 'no card'}, not explain (reply {reply!r})")
+        if not isos:
+            probs.append(f"{q!r}: no Iso card")
+            continue
+        iso = isos[-1]
+        blocks = [b for b in iso.get("blocks", []) if isinstance(b, dict) and str(b.get("label", "")).strip()]
+        labels = [b["label"] for b in blocks]
+        links = [l for l in iso.get("links", []) if iso_find(blocks, l.get("from", "")) >= 0 and iso_find(blocks, l.get("to", "")) >= 0]
+        steps_ = [s_ for s_ in iso.get("steps", []) if iso_find(blocks, s_.get("block", "")) >= 0]
+        step_blocks = [iso_find(blocks, s_.get("block", "")) for s_ in steps_]
+        parts = {iso_part(labels, k): k for k in range(len(labels))}
+        card = None
+        pts = []
+        for e in of(ev, "POINT", i):
+            tag = str(e.get("tag", ""))
+            c, _, part = tag.partition(".")
+            if part in parts and (card is None or c == card):
+                card = c
+                pts.append((parts[part], e["lag_ms"]))
+        pointed = [b for b, _ in pts]
+        lags = [l for _, l in pts]
+        all_lags += lags
+        in_order = lcs(pointed, step_blocks)
+        follows = in_order >= min(3, len(step_blocks))
+        row.update(title=iso.get("title"), blocks=labels, links=len(links), steps=len(steps_), step_blocks=[labels[b] for b in step_blocks],
+                   points=[labels[b] for b in pointed], lags=lags, follows=follows, in_step_order=in_order)
+        if len(blocks) < 3:
+            probs.append(f"{q!r}: {len(blocks)} blocks")
+        if len(links) < 2:
+            probs.append(f"{q!r}: {len(links)} links between its blocks")
+        if len(steps_) < 3:
+            probs.append(f"{q!r}: {len(steps_)} steps naming a block ({len(iso.get('steps', []))} given)")
+        if len(pts) < 3:
+            probs.append(f"{q!r}: {len(pts)} points on blocks, need 3 (reply {reply!r}; points {[e.get('tag') for e in of(ev, 'POINT', i)]})")
+        if pts and not follows:
+            probs.append(f"{q!r}: only {in_order} of the points {row['points']} land on the steps' blocks {row['step_blocks']} in their order (need 3)")
+        if lags and max(abs(x) for x in lags) > LAG_LIMIT_MS:
+            probs.append(f"{q!r}: a point was shown {max(lags, key=abs)} ms from its audio (limit {LAG_LIMIT_MS})")
+        # the screenshot: the one mid-walkthrough with the most of the ring on it
+        shots_ = sorted(OUT.glob(f"m4_{i}_[0-9]*.png"))
+        if shots_:
+            dark = i == len(CONCEPTS)
+            ring = {f: ring_pixels(f, OUT / f"m4_{i}_after.png", dark) for f in shots_}
+            best = max(shots_, key=lambda f: ring[f])
+            row["ring_pixels"] = ring[best]
+            if ring[best] < 150:
+                probs.append(f"{q!r}: no screenshot shows the ring ({ring[best]} ring pixels at best)")
+            name = f"iso_phone_{'dark' if dark else 'light'}_{i}.png"
+            shutil.copy(best, SHOTS / name)
+            row["shot"] = f"docs/goals/77/{name}"
+        else:
+            probs.append(f"{q!r}: no screenshot")
+    bench(m4=rows, m4_lags_ms=all_lags)
+    (OUT / "m4.json").write_text(json.dumps(rows, indent=1))
+    said.append("; ".join(f"{x['asked']!r}: {len(x.get('blocks', []))} blocks, {x.get('links', 0)} links, {x.get('steps', 0)} steps, points {x.get('points')} "
+                          f"({x.get('in_step_order')} in step order), lags {x.get('lags')} ms, reply {x['sentences']} sentences" for x in rows))
+    said.append("phone screenshots (light, light, dark): " + ", ".join(x.get("shot", "-") for x in rows))
+    return ("FAIL", "; ".join(probs) + " | " + " | ".join(said)) if probs else ("PASS", " | ".join(said))
 
 
 # ------------------------------------------------------------------------------------------------ M6: the camera
@@ -612,7 +766,7 @@ def blocked(what):
     return lambda: ("BLOCKED", f"{what}: not built yet")
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": blocked("the isometric explainer (goal 77 M4)"),
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4,
               "M5": m5, "M6": m6, "M7": blocked("the polish (goal 77 M7)")}
 
 
