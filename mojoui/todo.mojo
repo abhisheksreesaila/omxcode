@@ -88,7 +88,7 @@ struct TodoList(Movable):
         if not exists(self.path):
             return
         try:
-            var text = String("")
+            var text: String
             with open(self.path, "r") as f:
                 text = f.read()
             var j = Json.parse(text)

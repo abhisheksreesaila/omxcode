@@ -338,6 +338,30 @@ struct VoiceLoop(Movable):
 
     # --- the reply's side ----------------------------------------------------------------------------------------
 
+    def idle(self) -> Bool:
+        """Nobody is talking and nothing is being said: the person isn't speaking, no turn is open, the speaker is quiet."""
+        return self.loaded and self._state == LOOP_LISTENING and not self.active and not self.recognising and not self.speaker.playing()
+
+    def announce(mut self, text: String) -> Bool:
+        """Says `text` on its own (a job that finished, a heads-up), as a turn of its own: only when idle() (False: nothing
+        was said, ask again later). The person's next words interrupt it like any reply."""
+        if not self.idle():
+            return False
+        self.heard_ns = now_ns()  # (first_audio_ms counts from here: there were no words to answer)
+        self.active = True
+        self.spoken = False
+        self.handed = False
+        self.said = 0
+        self.finished = 0
+        self.closed = False
+        self.pending = String("")
+        self.first_ns = 0
+        self.dispatch_ns = now_ns()
+        self._state = LOOP_THINKING
+        self.say(text + " ")
+        self.end_reply()
+        return True
+
     def say(mut self, delta: String):
         """The reply's next words as the model produces them: each complete sentence goes to the mouth."""
         if not self.loaded:

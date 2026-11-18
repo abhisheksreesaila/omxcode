@@ -50,8 +50,16 @@ build_linux() {
   local out="build/$EX/linux"; mkdir -p "$out"; rm -f "$out/$EX"
   echo "== Linux ($EX): GTK4 + libadwaita"
   local debug=(); [ "${MOJOUI_DEBUG:-}" = 1 ] && debug=(-D MOJOUI_DEBUG) && echo "   (debug build: WebKit's inspector for widget views, source maps)"
+  # An app whose needs file says flare talks https (mojoui.http through Flare: TLS 1.2/1.3 via OpenSSL, redirects, compression):
+  # Flare's shims are built first (scripts/flare_ffi.sh) and found beside the binary or in build/flare/lib (goal 72 M6, D-7262).
+  local flare=()
+  if grep -qx flare "examples/$EX/needs" 2>/dev/null; then
+    bash scripts/flare_ffi.sh >/dev/null
+    flare=(-D MOJOUI_FLARE -Xlinker -rpath -Xlinker '$ORIGIN' -Xlinker -rpath -Xlinker "$PWD/build/flare/lib")
+    echo "   (https through Flare)"
+  fi
   mojo_build hosts/linux_main.mojo "${debug[@]}" -o "$out/$EX" \
-    -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
+    -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}" "${flare[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
   companions "$out" || return 1
   # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,

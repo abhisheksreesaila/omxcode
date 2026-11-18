@@ -23,23 +23,27 @@ def VoiceChips(phrases: List[String], first_msg: Int) -> View:
     return VStack(items^, spacing=8).align(CENTER)
 
 
-def VoiceLane(local: String, cloud: String, on_cloud: Bool, switch: Int) -> View:
+def VoiceLane(local: String, cloud: String, on_cloud: Bool, switch: Int, show_switch: Bool = False) -> View:
     """The lane chip: which model answers, `local` (on this machine, a green dot) or `cloud` (an orange one; the app also
-    shows mojoui.orb's rim while it is), and the button that switches between them."""
+    shows mojoui.orb's rim while it is). The lane follows what the person asked for (mojoui.cloudlane), so the switch is a
+    test hook, not a control: it is on the screen (and an agent's tool `lane`) only when `show_switch`."""
     var items = List[View]()
     items.append(Badge(cloud if on_cloud else local, BADGE_WARN if on_cloud else BADGE_OK, dot=True))
-    items.append(Button("Switch lane", switch, SUBTLE).tag("lane").tooltip("Switch the lane the answers come from, this machine or the cloud."))
+    if show_switch:
+        items.append(Button("Switch lane", switch, SUBTLE).tag("lane").tooltip("Switch the lane the answers come from, this machine or the cloud."))
     return HStack(items^, spacing=8).align(CENTER)
 
 
-def VoiceDock(muted: Bool, typing: Bool, draft: String, mute: Int, type_: Int, stop: Int, on_draft: Int, on_send: Int) -> View:
+def VoiceDock(muted: Bool, typing: Bool, draft: String, mute: Int, type_: Int, stop: Int, on_draft: Int, on_send: Int, busy: Bool = True) -> View:
     """The row of controls under both screens: mute/unmute the microphone, open/close the typed input, stop the reply. While
-    typing, the field takes the row above them. Each button's tag is the tool name an agent calls it by."""
+    typing, the field takes the row above them. Each button's tag is the tool name an agent calls it by. `busy`: something is
+    being said or made, so Stop is a button like the others; otherwise it wears the quiet style (the framework's look for
+    "nothing to do": there is no disabled flag on a button, and its tool stays, so the model's prompt cache keeps)."""
     var row = List[View]()
     row.append(Button("Unmute" if muted else "Mute", mute, PROMINENT if muted else PLAIN).tag("mute").tooltip(
         "Turn the microphone off or on. Off, the assistant hears nothing."))
     row.append(Button("Close keyboard" if typing else "Type", type_, PLAIN).tag("type").tooltip("Show or hide the box for typing a question."))
-    row.append(Button("Stop", stop, SUBTLE, icon="square").tag("stop").tooltip("Stop speaking and drop the answer being made."))
+    row.append(Button("Stop", stop, PLAIN if busy else SUBTLE).tag("stop").tooltip("Stop speaking and drop the answer being made."))
     var col = List[View]()
     if typing:
         col.append(TextField(draft, "Type to omx", on_draft, on_send).tag("question").tooltip("Type a question and press Enter."))

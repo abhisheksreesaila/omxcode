@@ -17,7 +17,7 @@ from mojoui.clock import now_ns
 from mojoui.json import json_string
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
 from mojoui.paragraph import Paragraph, Plain, Run
-from mojoui.view import View, Text, Card, HEADLINE, CAPTION
+from mojoui.view import View, Text, Button, Card, HEADLINE, CAPTION, SUBTLE, NO_MSG
 
 comptime JOB_RUNNING = 0
 comptime JOB_DONE = 1
@@ -166,9 +166,10 @@ struct ThinkJob(Movable):
             self.fail("cancelled")
 
 
-def ThinkCard(job: ThinkJob) -> View:
+def ThinkCard(job: ThinkJob, dismiss: Int = NO_MSG) -> View:
     """The job as a card: its title; "Thinking 0:42" while it works, "Thought for 1:12" and the answer when it is done; the
-    error when it failed. Build it from the job each time: the clock is the job's, so it ticks in place."""
+    error when it failed, and (given a message) a Dismiss button once it has ended. Build it from the job each time: the clock is
+    the job's, so it ticks in place."""
     var rows = List[View]()
     rows.append(Text(job.title if job.title != "" else String("Thinking it through"), HEADLINE))
     if job.state == JOB_RUNNING:
@@ -180,6 +181,8 @@ def ThinkCard(job: ThinkJob) -> View:
         rows.append(Paragraph(runs^, role="job-answer"))
     else:
         rows.append(Text(job.error, CAPTION))
+    if job.state != JOB_RUNNING and dismiss != NO_MSG:
+        rows.append(Button("Dismiss", dismiss, SUBTLE))
     return Card(rows^).tag("job")
 
 

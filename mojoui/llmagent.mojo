@@ -47,6 +47,7 @@ comptime DEFAULT_SYSTEM = (
 comptime T_BUTTON = 0  # an app control: pressing it (its message)
 comptime T_TEXT = 1  # a text field: `text` argument
 comptime T_TOGGLE = 2  # a switch: `on` argument
+comptime T_DEFERRED = 3  # a tool the app answers later (a network request, a background job): take_calls hands it over, answer() ends it
 
 comptime PH_IDLE = 0
 comptime PH_MODEL = 1  # the model is producing a step
@@ -298,6 +299,7 @@ struct LlmAgent(LocalAgent, Movable):
     var temperature: Float64
     var functions: List[ToolFn]
     var app_tools: List[AppTool]
+    var deferred: List[AppTool]  # tools the app answers later (add_deferred)
     var history: List[String]  # the conversation as OpenAI messages (sequence 0 of the Llm: its prompt cache follows it)
     var seen: List[String]  # message ids and tool-call ids already in the history
     var phase: Int
@@ -331,6 +333,7 @@ struct LlmAgent(LocalAgent, Movable):
         self.temperature = temperature
         self.functions = List[ToolFn]()
         self.app_tools = List[AppTool]()
+        self.deferred = List[AppTool]()
         self.history = List[String]()
         self.seen = List[String]()
         self.phase = PH_IDLE
@@ -358,6 +361,18 @@ struct LlmAgent(LocalAgent, Movable):
     def add_function(mut self, var f: ToolFn):
         """Registers a plain Mojo function as a tool (c)."""
         self.functions.append(f^)
+
+    def add_deferred(mut self, name: String, description: String, parameters: String):
+        """Registers a tool the app answers later: a call is handed over by take_calls() like a button's, but the app may take as
+        long as it needs (a network request, a background job) and ends it with answer(). The run waits meanwhile; nothing
+        else does. Register before prime(): the tools are part of the prompt the cache holds."""
+        self.deferred.append(AppTool(name, description, parameters, 0, T_DEFERRED))
+
+    def remember(mut self, role: String, text: String):
+        """Adds a message to the conversation outside a run (a background job's answer, a cloud model's reply): at the end,
+        before the next turn's words, so the prompt cache's prefix stays. Ignored while a run is in flight."""
+        if self.phase == PH_IDLE and text != "":
+            self.history.append('{"role":' + json_string(role) + ',"content":' + json_string(text) + "}")
 
     def set_tools(mut self, var tools: List[AppTool]):
         """The app's controls as tools now (b); give them before begin() and again after each answer(): a press changes the screen."""
@@ -483,6 +498,8 @@ struct LlmAgent(LocalAgent, Movable):
                     _add_tool(out, name, j.text(j.get(t, "description")), j.dump(p) if p >= 0 else String('{"type":"object","properties":{}}'))
                     self.client_tools.append(name)
         for ref t in self.app_tools:
+            _add_tool(out, t.name, t.description, t.parameters)
+        for ref t in self.deferred:
             _add_tool(out, t.name, t.description, t.parameters)
         for ref f in self.functions:
             _add_tool(out, f.name, f.description, f.parameters)
@@ -625,6 +642,9 @@ struct LlmAgent(LocalAgent, Movable):
         for ref t in self.app_tools:
             if t.name == c.name:
                 return  # (waits: the app runs it; take_calls hands it over)
+        for ref t in self.deferred:
+            if t.name == c.name:
+                return  # (waits: the app answers it when it can)
         for ref n in self.client_tools:
             if n == c.name:
                 self.step_state[i] = 2  # (the client runs it: the run ends with the call, its answer comes with the next run)
