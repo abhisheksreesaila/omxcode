@@ -137,7 +137,6 @@ def run_app(source, steps, window=None, record=None, timeout=300):
         if not m:
             continue
         kv, rest = {}, m.group(2)
-        t = re.search(r" text=(.*)$| shape=(.*)$", rest)
         text_at = rest.find(" text=")
         if text_at >= 0:
             kv["text"], rest = rest[text_at + 6:], rest[:text_at]
@@ -288,7 +287,17 @@ def m4():
 
 
 def m5():
-    return "BLOCKED", "the web half is run by scripts/omx_tablet_check.py (see M5 below); not implemented in this file yet"
+    """The same app on the web host, through the tailnet's name (scripts/omx_tablet_check.py): no key refused, the question heard and
+    answered aloud within 2 s, a tablet-width picture. Needs tailscale up on this machine and build/g72/wav (M4's)."""
+    if not shutil.which("tailscale") or sh(["tailscale", "status"]).returncode:
+        return "BLOCKED", "tailscale isn't running on this machine"
+    ensure_wavs()
+    r = sh(["pixi", "run", "python", "scripts/omx_tablet_check.py"], 1800, {"G72_GPU": GPU})
+    if r.returncode or "omx_tablet: ok" not in r.stdout:
+        return "FAIL", tail(r, 700)
+    rep = json.loads((OUT / "omx-tablet.json").read_text())
+    return "PASS", (f"over https://{rep['machine']}: no key -> {rep['no_key_page_status']} (page) and {rep['no_key_socket_status']} (socket); the key moved into a cookie; "
+                    f"question -> first spoken audio {rep['question_to_first_audio_s']} s (limit {rep['limit_s']}); tablet-width picture docs/goals/72/tablet.png")
 
 
 def m6():

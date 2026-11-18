@@ -129,6 +129,7 @@ def main():
               const o = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
               navigator.mediaDevices.getUserMedia = c => o(c).then(s => { window.__micOpen = window.__micOpen || performance.now(); return s; });
             """)
+            page.on("response", lambda r: print("response", r.status, r.url[:80], flush=True))
             page.goto(base + f"/?k={key}", timeout=180000)  # (the app is made on the first visit: the models load first)
             page.mouse.click(10, 10)  # the tap that turns sound on (D-7234)
             assert "?k=" not in page.url and page.url.startswith(base), page.url
@@ -148,7 +149,14 @@ def main():
             report["question_to_first_audio_s"] = round(answer_s, 3)
             report["limit_s"] = LIMIT_S
             assert answer_s <= LIMIT_S, f"{answer_s:.2f} s after the question's last word (limit {LIMIT_S})"
-            page.wait_for_timeout(2500)  # (the page shows the answer words)
+            texts = []
+            for _ in range(40):  # (the page shows the answer words: the app's updates reach it as patches)
+                page.wait_for_timeout(500)
+                t = page.evaluate("() => document.body.innerText")
+                texts.append(t[:60].replace(chr(10), ' | '))
+                if 'paris' in t.lower():
+                    break
+            report['page_text_over_time'] = texts[::4]
             SHOTS.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(SHOTS / "tablet.png"))
             shutil.copy(SHOTS / "tablet.png", OUT / "tablet.png")

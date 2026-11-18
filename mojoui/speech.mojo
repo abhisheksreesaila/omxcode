@@ -63,8 +63,9 @@ def _give_up_lock() raises:
     comptime if CompilationTarget.is_linux():
         if getenv(_SAVED, "") != "":
             return
-        _ = dl_call[Int](0, "PyEval_SaveThread")
-        _ = setenv(_SAVED, "1")
+        if getenv("MOJOUI_PY_HOSTED", "") == "":  # (a Python process that loaded us, the web host, owns its own lock: calls in
+            _ = dl_call[Int](0, "PyEval_SaveThread")  # arrive with it held and PyGILState_Ensure just counts; releasing it
+        _ = setenv(_SAVED, "1")  # here would crash the caller, D-7246)
     else:
         raise Error(_NOT_HERE)
 

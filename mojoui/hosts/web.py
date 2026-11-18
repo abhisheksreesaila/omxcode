@@ -40,6 +40,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # (the host's own modules, also when a test loads this file by path)
 import pairing
 
+os.environ["MOJOUI_PY_HOSTED"] = "1"  # the app's Python work (mojoui.speech, voice) shares this interpreter's lock: speech.mojo, D-7246
+
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
