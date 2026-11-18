@@ -89,7 +89,7 @@ struct Main(App):
         self.loop = VoiceLoop(parakeet_dir=models + "/parakeet-tdt-0.6b-v3")
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu), "Your name is omx. " + String(DEFAULT_SYSTEM), max_tokens=1000)
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu), "Your name is omx. " + String(DEFAULT_SYSTEM))
         except e:
             self.note = "the language model didn't load: " + String(e)
         self.client = Agent("", 0, 0, "omx")

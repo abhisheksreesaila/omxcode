@@ -31,7 +31,7 @@ from mojoui.picture import Picture, draw_fitted
 from mojoui.album import Album
 from mojoui.canvas import Surface
 from mojoui.theme import Palette
-from mojoui.view import View, Card, Text, HStack, VStack, Canvas, HEADLINE, CAPTION, BODY
+from mojoui.view import View, Card, Text, HStack, VStack, Canvas, HEADLINE, CAPTION, BODY, START
 from mojoui.llmagent import AppTool, T_CALL, slug
 from mojoui.imagegen import ImageServer, png_of, save_file, IMG_FAILED, IMG_OFF
 from mojoui.comic import ComicPlan, comic_tool, picture_tool, picture_prompt, PANELS
@@ -255,7 +255,7 @@ struct Creator(Movable):
         return out^
 
     def refuse(mut self, id: String, why: String):
-        self.log.append("REFUSED: " + why)
+        self.log.append("REFUSED: text=" + why)
         self.answers.append(Answer(id, '{"error":' + json_string(why) + "}"))
 
     def cant_draw(self) -> String:
@@ -284,7 +284,7 @@ struct Creator(Movable):
         for i in range(PANELS):
             self.cards[k].slots.append(Slot(plan.captions[i], plan.prompt(i), seed + i))
             self.queue.append((k, i))
-        self.log.append("COMIC: planned title=" + plan.title + " ms=" + String(self.since_turn()))
+        self.log.append("COMIC: planned ms=" + String(self.since_turn()) + " text=" + plan.title)
         self.answers.append(Answer(id, '{"started":true,"note":"The comic card is on screen and fills in panel by panel, about 20 seconds. Say in one short sentence that you are drawing it; the panels appear by themselves."}'))
 
     def start_picture(mut self, id: String, args: String):
@@ -301,7 +301,7 @@ struct Creator(Movable):
         if subject == "":
             self.refuse(id, 'draw_picture needs a "subject": what to draw, in a sentence')
             return
-        var k = self.new_card(CARD_PICTURE, subject if subject.byte_length() <= 80 else String(subject[byte = :80]))
+        var k = self.new_card(CARD_PICTURE, _title_of(subject))
         self.cards[k].slots.append(Slot("", picture_prompt(subject), Int(now_ns() % 2_000_000_000)))
         self.queue.append((k, 0))
         self.answers.append(Answer(id, '{"started":true,"note":"The picture card is on screen; the picture appears in a few seconds. Say in one short sentence that you are drawing it."}'))
@@ -431,8 +431,8 @@ struct Creator(Movable):
                 var s = self.searching.pop(0)
                 var t0 = now_ns()
                 var hits = self.notes.value().search(s[1], s[2], 4)
-                self.log.append("NOTES: question=" + s[1] + " hits=" + String(len(hits)) + " first=" + (hits[0].file if len(hits) > 0 else String("-"))
-                                + " search_ms=" + String((now_ns() - t0) // 1_000_000) + " ms=" + String(self.since_turn()))
+                self.log.append("NOTES: hits=" + String(len(hits)) + " first=" + (hits[0].file if len(hits) > 0 else String("-"))
+                                + " search_ms=" + String((now_ns() - t0) // 1_000_000) + " ms=" + String(self.since_turn()) + " text=" + s[1])
                 self.answers.append(Answer(s[0], self.found(s[1], hits)))
         except e:
             while len(self.searching) > 0:
@@ -495,7 +495,7 @@ struct Creator(Movable):
             rows.append(Text("From your notes", CAPTION))
             rows.append(Text(card.question, HEADLINE))
             for i in range(len(card.files)):
-                rows.append(VStack(Text(card.files[i], BODY).tag("note-file"), Text(card.texts[i], CAPTION), spacing=2))
+                rows.append(VStack(Text(card.files[i], BODY).tag("note-file"), Text(card.texts[i], CAPTION), spacing=2).align(START))
             return Card(rows^, spacing=10).tag("notes-card")
         if card.kind == CARD_PICTURE:
             var side = Canvas(card.canvas0, self.version).passthrough().width(PICTURE_SIDE).height(PICTURE_SIDE).tag("picture")
@@ -549,17 +549,35 @@ struct Creator(Movable):
         _shimmer(s, p.raised, p.line, slot.problem == "")
 
 
-def _snippet(text: String, most: Int) -> String:
-    var flat = String("")
-    for b in text.as_bytes():
-        flat += " " if (b == 10 or b == 13) else chr(Int(b))
-    if flat.byte_length() <= most:
-        return flat
-    var n = most
-    var bytes = flat.as_bytes()
-    while n > 0 and (Int(bytes[n]) & 0xC0) == 0x80:
+def _title_of(subject: String) -> String:
+    """A card's title from the subject: the first 60 bytes at a word end, "…" when cut."""
+    if subject.byte_length() <= 60:
+        return subject
+    var n = 60
+    var b = subject.as_bytes()
+    while n > 20 and b[n] != 32:
         n -= 1
-    return String(flat[byte = :n]) + "…"
+    return String(subject[byte = :n]) + "…"
+
+
+def _snippet(text: String, most: Int) -> String:
+    """The passage on one line for the card: line breaks as spaces, a Markdown heading's "#" dropped, at most `most` bytes
+    (never through a character), "…" when cut."""
+    var out = List[UInt8]()
+    var line_start = True
+    for b in text.as_bytes():
+        if line_start and (b == 35 or b == 32):
+            continue
+        line_start = b == 10 or b == 13
+        out.append(32 if line_start else b)
+    var n = len(out)
+    var cut = n > most
+    if cut:
+        n = most
+        while n > 0 and (Int(out[n]) & 0xC0) == 0x80:
+            n -= 1
+    var flat = String(from_utf8_lossy=Span(out)[0:n])
+    return flat + "…" if cut else flat
 
 
 def _mix(a: UInt32, b: UInt32, t: Float64) -> UInt32:
