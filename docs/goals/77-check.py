@@ -366,7 +366,7 @@ def m5():
     if probs or len(right) < 9:
         return "FAIL", line + ("; " + "; ".join(probs) if probs else "")
     if stubs:
-        return "BLOCKED", line + f"; speech on card turns at most 2 sentences. Only the missing tools block it: {', '.join(stubs)} still answer 'not available yet' (map: M3, isometric: M4), so those cards cannot be proved"
+        return "BLOCKED", line + f"; speech on card turns at most 2 sentences. Only the missing tools block it: {', '.join(stubs)} still answer 'not available yet' (" + ", ".join({"show_map": "map: M3", "explain": "isometric: M4"}[n] for n in stubs) + "), so those cards cannot be proved"
     return "PASS", line + "; speech on card turns at most 2 sentences"
 
 
