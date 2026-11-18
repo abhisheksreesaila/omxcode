@@ -7,8 +7,10 @@
 #   mic.total(); mic.level(); mic.running(); mic.failed(); mic.stop()
 #
 # Linux: libpulse-simple (the PulseAudio API; PipeWire serves it through pipewire-pulse), opened with dlopen so neither
-# `mojo run` nor a build needs a link flag. Mac / iPhone / web: not built yet (start() marks the microphone failed with
-# a reason: AVAudioEngine is the planned path); it compiles there, so apps that use it still build.
+# `mojo run` nor a build needs a link flag. Web host (goal 72 M5): the same calls, but the samples are the browser's
+# microphone, carried over the host's audio socket (mojoui.webaudio); a page that is open and tapped is the microphone.
+# Mac / iPhone: not built yet (start() marks the microphone failed with a reason: AVAudioEngine is the planned path); it
+# compiles there, so apps that use it still build.
 # Also here: load_wav (16-bit PCM .wav -> floats) and best_match (normalised cross-correlation at the best lag).
 
 from std.atomic import Atomic
@@ -19,6 +21,7 @@ from std.os import getenv
 from std.sys import CompilationTarget
 from std.math import sqrt, sin, cos
 from mojoui.clock import now_ns
+from mojoui.shared import get_shared
 
 comptime RATE = 16000  # samples per second, mono
 comptime CHUNK = 320  # samples per read from the sound server: 20 ms
@@ -37,6 +40,17 @@ comptime W_SOURCE = 7  # a NUL-terminated copy of the source name, or 0 (default
 comptime W_TIME = 8  # now_ns() when the newest chunk landed
 comptime W_SEQ = 9  # odd while the worker updates W_TIME and W_TOTAL together (a reader retries, for at most STAMP_WAIT_NS: captured_ns)
 comptime W_WORDS = 10
+# The web host's hub (mojoui.webaudio): one block of words per process, found through mojoui.shared. The browser's microphone
+# is a set of capture words (the same layout, W_*), the speaker's words follow (mojoui.speaker's S_*), then the hub's own.
+comptime SLOT_WEB_AUDIO = 89
+comptime HUB_SPEAKER = W_WORDS  # the speaker's words start here (S_WORDS = 14)
+comptime HUB_CTL = W_WORDS + 14
+comptime H_MIC_WANT = 0  # 1 while an app has started its Microphone (the page opens its microphone)
+comptime H_CLIENTS = 1  # pages with an audio socket
+comptime H_WORDS = 4
+comptime E_REFUSED = 101  # W_ERR when the page's microphone failed: the person said no
+comptime E_NONE = 102  # ...no microphone found
+comptime E_INSECURE = 103  # ...the page isn't allowed one (not https or localhost)
 comptime STAMP_WAIT_NS = 2_000_000  # captured_ns stops retrying an odd W_SEQ after 2 ms (the writer's update is 3 stores)
 
 
@@ -151,18 +165,32 @@ struct Microphone(Movable):
     var source: String
     var started: Bool
     var reason: String  # why it failed, in words (empty while fine)
+    var web: Bool  # the browser's microphone (the web host's hub): `words` are the hub's, and total() counts from base
+    var base: Int  # the hub's sample count when this microphone started
 
     def __init__(out self, source: String = ""):
         self.source = source if source.byte_length() > 0 else getenv("MOJOUI_AUDIO_SOURCE", "")
         self.words = 0
         self.started = False
         self.reason = ""
+        self.web = False
+        self.base = 0
 
     def start(mut self):
         """Starts capture on its own thread and returns at once. Safe to call once; samples arrive through read()."""
         if self.started:
             return
         self.started = True
+        var hub = get_shared(SLOT_WEB_AUDIO)
+        if hub != 0:  # the web host: the page's microphone, not the sound server's
+            self.web = True
+            self.words = hub
+            self.base = Int(_A.load(_word(hub, W_TOTAL)))
+            _A.store(_word(hub, W_ERR), 0)
+            if Int(_A.load(_word(hub, W_STATE))) != 1:
+                _A.store(_word(hub, W_STATE), 0)
+            _A.store(_word(hub + 8 * HUB_CTL, H_MIC_WANT), 1)
+            return
         comptime if not CompilationTarget.is_linux():
             self.reason = "no microphone on this host yet (Mac: AVAudioEngine, planned)"
         else:
@@ -197,6 +225,13 @@ struct Microphone(Movable):
         """Why it failed, in words."""
         if self.reason:
             return self.reason
+        if self.web and self._state() == -1:
+            var c = Int(_A.load(_word(self.words, W_ERR)))
+            if c == E_REFUSED:
+                return "the browser's microphone was refused: allow it for this page"
+            if c == E_INSECURE:
+                return "this page isn't allowed a microphone: open it over https (or on localhost)"
+            return "the browser found no microphone"
         if self.words != 0 and self._state() == -1:
             var e = Int(_A.load(_word(self.words, W_ERR)))
             if self.total() > 0:
@@ -207,7 +242,7 @@ struct Microphone(Movable):
 
     def total(self) -> Int:
         """Samples captured since start()."""
-        return Int(_A.load(_word(self.words, W_TOTAL))) if self.words != 0 else 0
+        return Int(_A.load(_word(self.words, W_TOTAL))) - self.base if self.words != 0 else 0
 
     def captured_ns(self, index: Int) -> Int:
         """When sample `index` (absolute) was captured, on now_ns()'s clock (from when its 20 ms chunk landed)."""
@@ -228,7 +263,7 @@ struct Microphone(Movable):
                     give_up = now + STAMP_WAIT_NS
                 elif now >= give_up:
                     break  # (the unpaired values are off by one 20 ms chunk at most; clamped to now below)
-        var at = t - ((total - 1 - index) * 1_000_000_000) // RATE
+        var at = t - ((total - 1 - index - self.base) * 1_000_000_000) // RATE
         return at if paired else min(at, now_ns())
 
     def level(self) -> Float64:
@@ -240,8 +275,8 @@ struct Microphone(Movable):
         var out = List[Float32]()
         if self.words == 0:
             return out^
-        var total = self.total()
-        var start = max(since, total - RING)
+        var total = self.total() + self.base  # (absolute, in the ring's own count)
+        var start = max(since + self.base, total - RING)
         if start >= total:
             return out^
         out.reserve(total - start)
@@ -252,11 +287,19 @@ struct Microphone(Movable):
 
     def stop(mut self):
         """Asks the worker to stop (it does after its current 20 ms read). Never waits."""
-        if self.words != 0:
+        if self.web:
+            _A.store(_word(self.words + 8 * HUB_CTL, H_MIC_WANT), 0)
+            if Int(_A.load(_word(self.words, W_STATE))) == 1:
+                _A.store(_word(self.words, W_STATE), 2)
+        elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
 
     def __deinit__(deinit self):
-        if self.words != 0:
+        if self.web:  # (the hub's words are the process's: nothing to free)
+            _A.store(_word(self.words + 8 * HUB_CTL, H_MIC_WANT), 0)
+            if Int(_A.load(_word(self.words, W_STATE))) == 1:
+                _A.store(_word(self.words, W_STATE), 2)
+        elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
             _release(self.words)
 

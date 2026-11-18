@@ -125,7 +125,7 @@ def main():
         web = load_web()
         from starlette.testclient import TestClient
         app = web.make_app(module_dir)
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:  # (this machine: no pairing key, goal 72 M5)
             for kind in (base, base.parent / "downloads"):
                 assert not (kind / "gone1").exists(), f"{kind.name}: a gone server's folder survived the start"
                 assert not (kind / "old1").exists(), f"{kind.name}: an unowned folder 3 days old survived the start"

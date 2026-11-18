@@ -406,7 +406,7 @@ def feature_cell(host, src, pattern, example, name=""):
 # example whose checks run it, per host: (state, why) for the hosts where it isn't simply "run by that example's check").
 SERVICES = [
     ("Microphone", "mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread", "dictate",
-     {"Linux (GTK)": None, "Web": ("❌", "the web host doesn't stream the browser's microphone to the app"),
+     {"Linux (GTK)": None, "Web": ("✅", "tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too"),
       "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; start() reports \"no microphone on this host yet\" (AVAudioEngine planned)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
     ("Speech model in process", "mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)", "dictate",
@@ -420,7 +420,7 @@ SERVICES = [
     # Goal 72 M2 (the voice components, run by tests/test_voice.mojo in the `voice` pixi environment, GPU 1 + a null sink)
     ("Speaker", "mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread", "",
      {"Linux (GTK)": ("✅", "tests/test_voice: heard on a PulseAudio null sink's monitor, silent 25 ms after stop()"),
-      "Web": ("❌", "the browser's AudioContext is goal 72 M5"), "Android": ("❌", "not built"),
+      "Web": ("✅", "tests/test_web_audio.py: the browser's AudioContext plays it gap-free (440 Hz at the right level), stop() flushes the page in 16 ms"), "Android": ("❌", "not built"),
       "Mac (AppKit)": ("🔨", "builds; play() reports \"no speaker on this host yet\" (AVAudioEngine planned)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
     ("Voice (text to speech)", "mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause", "",
