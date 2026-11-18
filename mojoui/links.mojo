@@ -390,6 +390,17 @@ struct CardRows(Copyable, Movable):
         return Reaction(self.card, REACT_SELECT, rows^, -1.0, -1, -1, 0, 0, 0, 0)
 
 
+comptime CHIP_ROOM = 252  # a row of chips in a 300-point inspector (its padding taken off)
+comptime CHIP_PAD = 28  # a chip's padding and border, both sides
+comptime CHIP_CHAR = 8  # a body-text character's width, rounded up (Inter at 14 averages under 7)
+comptime CHIP_GAP = 6
+
+
+def chip_width(label: String) -> Int:
+    """A chip's width, estimated on the safe side: wide enough for any host's font (a row never overflows its panel)."""
+    return CHIP_PAD + CHIP_CHAR * label.byte_length()
+
+
 def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
     """A link from how it reads: "orders.order_id = clip.mp4.code" (key), "sensor_log.t ~ clip.mp4.t +1.2"
     (time: offset in seconds, optional "×scale"). A card's name may hold dots; the column is after the last one."""
@@ -434,10 +445,12 @@ struct Links(Movable, Sized):
     # guess, so a row of the answer follows like a row of its source; never listed, never joined (D-1262)
     var cards: List[String]  # the cards a person can name in a link, as the app spells them (`know`, `know_card`), and …
     var card_columns: Dict[String, List[String]]  # … what each has: the completions' source (a video's file / t / frame too)
+    var chip_room: Int  # how wide a row of chips may be, in points (the panel's inside: the app sets it when its panel differs)
     var schemas: Dict[String, List[String]]  # per table (its SQL name), the columns it has (`know`): a key link's column
     # must be one of them (D-1341); a table not known yet is checked when it becomes known (`know`, `resolve`)
 
     def __init__(out self, msg_base: Int = 0):
+        self.chip_room = CHIP_ROOM
         self.schemas = Dict[String, List[String]]()
         self.cards = List[String]()
         self.card_columns = Dict[String, List[String]]()
@@ -530,18 +543,30 @@ struct Links(Movable, Sized):
         return self._complete_end(s, String(""), True)
 
     def chips(self) -> View:
-        """The completions of the draft as tappable chips under the field (three to a row; an agent sees each as a tool,
+        """The completions of the draft as tappable chips under the field (rows packed to `chip_room` points by a cautious
+        estimate of each chip's width, chip_width; an agent sees each as a tool,
         "link-pick-k"); tapping one makes the draft its text. Empty when nothing could come next."""
         var rows = List[View]()
         var row = List[View]()
+        var used = 0
         var found = self.complete(self.draft)
         for k in range(len(found)):
-            row.append(Button(found[k].label, self.msg_base + LINKS_PICK + k, PLAIN).tag("link-pick-" + String(k)).tooltip(
-                "Put " + found[k].text + " in the link"))
-            if len(row) == 3 or k == len(found) - 1:
-                rows.append(HStack(row, spacing=6).fill().align(CENTER))
+            var label = found[k].label
+            var w = chip_width(label)
+            if w > self.chip_room:  # (one name longer than the panel: shortened, the tooltip and the draft keep it whole)
+                var keep = max(1, (self.chip_room - CHIP_PAD) // CHIP_CHAR - 1)
+                label = String(label[byte=0:keep]) + "…"
+                w = self.chip_room
+            if len(row) > 0 and used + CHIP_GAP + w > self.chip_room:  # (rows packed by width: never wider than the panel)
+                rows.append(HStack(row, spacing=CHIP_GAP).fill().align(CENTER))
                 row = List[View]()
-        return VStack(rows, spacing=6).fill().align(START).tag("link-chips")
+                used = 0
+            used += (CHIP_GAP if len(row) > 0 else 0) + w
+            row.append(Button(label, self.msg_base + LINKS_PICK + k, PLAIN).tag("link-pick-" + String(k)).tooltip(
+                "Put " + found[k].text + " in the link"))
+        if len(row) > 0:
+            rows.append(HStack(row, spacing=CHIP_GAP).fill().align(CENTER))
+        return VStack(rows, spacing=CHIP_GAP).fill().align(START).tag("link-chips")
 
     def check(self, link: Link) raises:
         """Raises when a key link's end names a column its table doesn't have (as far as `know` was told), or a column

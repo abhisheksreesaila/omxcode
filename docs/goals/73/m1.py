@@ -186,6 +186,23 @@ def web():
             c.p.kill()
 
 
+def panel_edge(png, y=500, inside=1250):
+    """Where the inspector starts in a shot: walking left on row y from a point inside the (empty, white) panel, the first
+    pixel that isn't the panel's white, plus one."""
+    from PIL import Image
+    im = Image.open(png).convert("RGB")
+    for x in range(inside, 0, -1):
+        if min(im.getpixel((x, y))) < 250:
+            return x + 1
+    return -1
+
+
+def steady_panel():
+    """The chips never widen the Links panel (a row of three long names pushed it 12 points over the card beside it)."""
+    a, b = panel_edge(OUT / "gtk-1-empty.png"), panel_edge(OUT / "gtk-6-telemetry-columns.png")
+    return "" if a > 0 and a == b else f"the Links panel moved when the chips came: starts at x={a} empty, x={b} with telemetry's columns"
+
+
 def check():
     OUT.mkdir(parents=True, exist_ok=True)
     why = unit()
@@ -194,10 +211,13 @@ def check():
     why = gtk()
     if why:
         return False, why
+    why = steady_panel()
+    if why:
+        return False, why
     why = web()
     if why:
         return False, why
-    return True, "completions: unit test ok; GTK and the web host offer fleet. / episode / telemetry. from typed prefixes and link fleet.episode = telemetry.episode from chips + Return"
+    return True, "the panel holds its width with chips; completions: unit test ok; GTK and the web host offer fleet. / episode / telemetry. from typed prefixes and link fleet.episode = telemetry.episode from chips + Return"
 
 
 if __name__ == "__main__":

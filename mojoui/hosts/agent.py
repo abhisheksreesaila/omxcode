@@ -123,6 +123,11 @@ class Link:
 
     def ok(self, op):
         r = self.call(op)
+        waited = 0.0
+        while not r.get("ok") and "ask again" in (r.get("error") or "") and waited < 10.0:  # (the GTK host mid-rebuild says so;
+            time.sleep(0.05)  # it is free again on its next idle turn: goal 73, a link made just as a row's video card opened)
+            waited += 0.05
+            r = self.call(op)
         if not r.get("ok"):
             raise ValueError(r.get("error") or f"the host refused {op.get('op')}")
         return r
