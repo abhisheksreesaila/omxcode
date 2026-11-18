@@ -2550,12 +2550,18 @@ struct GtkHost[A: App](Movable):
         # where the card really is (on the page, or stacked in the narrow list): its widget's bounds
         var rect = List[Float32](length=4, fill=0)  # graphene_rect_t: x, y, width, height
         var inner = self.widgets[i]
-        if external_call["gtk_widget_compute_bounds", c_int](self.widgets[b.children[k]], inner, Int(rect.unsafe_ptr())) == 0:
-            return False
-        var cx = Float64(rect[0])
-        var cy = Float64(rect[1])
-        var cw = Float64(rect[2])
-        var ch = Float64(rect[3])
+        ref card = self.rt.shown.nodes[b.children[k]]
+        var cx = Float64(card.x)  # (on the page: where the app put it, not where GTK has got to moving it: a card the tiling just
+        var cy = Float64(card.y)  # moved would be scrolled to its old place)
+        var cw = Float64(card.w)
+        var ch = Float64(card.h)
+        if self.board_list:
+            if external_call["gtk_widget_compute_bounds", c_int](self.widgets[b.children[k]], inner, Int(rect.unsafe_ptr())) == 0:
+                return False
+            cx = Float64(rect[0])
+            cy = Float64(rect[1])
+            cw = Float64(rect[2])
+            ch = Float64(rect[3])
         if cw <= 0 or ch <= 0:  # (an object just put on the Board isn't laid out yet: next frame)
             return False
         _ = len(rect)

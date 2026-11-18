@@ -140,9 +140,13 @@ def _gtk_six(g, full):
     if not (x == 0 and cw == w and y >= max(v[1] + v[3] for k, v in rects.items() if k != newest) + GAP - 1):
         probs.append(f"{newest} at {x},{y} {cw}x{ch} isn't a row under the others in a {w}-wide Board")
     scrolls = _scroll(out)  # (one per card added, after it)
-    value, upper, page = scrolls[first - 3]
-    if not (value <= y < value + page):
-        probs.append(f"{newest} (top {y}) not in view: page scrolled {value}, shows {page}")
+    for n in range(3, 8):  # every card added is in view (the page scrolled to it when it went below the fold)
+        added = [k for k in by[f"n{n}"][1] if k not in by[f"n{n - 1}"][1]][0]
+        top = by[f"n{n}"][1][added][1]
+        value, upper, page = scrolls[n - 3]
+        if not (value <= top < value + page):
+            probs.append(f"n{n}: {added} (top {top}) not in view: page scrolled {value}, shows {page}")
+    value = scrolls[first - 3][0]
     (sw, sh), srects = by["smaller"]
     if sw > by["n7"][0][0] - 100:
         probs.append(f"the window went 1440x900 -> 1280x800 but the Board is {sw} wide (was {by['n7'][0][0]})")
@@ -236,6 +240,12 @@ def _web(g, full):
     for label in ("before", "grown", "shrunk") + tuple(f"n{n}" for n in range(4, 8)):
         probs += tiled(label)
         probs += [f"{label}: {k} {v[2]}x{v[3]} under {MIN_W}x{MIN_H}" for k, v in seen[label]["cards"].items() if v[2] < MIN_W or v[3] < MIN_H]
+    for n in range(4, 8):  # every card added is in view
+        before = seen["shrunk" if n == 4 else f"n{n - 1}"]["cards"]
+        added = [k for k in seen[f"n{n}"]["cards"] if k not in before][0]
+        top, (value, _, page, _) = seen[f"n{n}"]["cards"][added][1], seen[f"n{n}"]["scroll"]
+        if not (value <= top < value + page):
+            probs.append(f"n{n}: {added} (top {top}) not in view: page scrolled {value}, shows {page}")
     n7 = seen["n7"]
     if len(n7["cards"]) != 7 or n7["board"][1] <= seen["before"]["board"][1]:
         probs.append(f"seven cards: {len(n7['cards'])} cards, Board {n7['board']}")
