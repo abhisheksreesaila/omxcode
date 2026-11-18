@@ -89,6 +89,8 @@ def main():
     key_file = work / "pair-key"
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=GPU, OMX_LLM_GPU="0", OMX_MODELS=MODELS, MOJOUI_PAIR_KEY_FILE=str(key_file),
                MOJOUI_EXTRA_HOSTS=machine)
+    if os.environ.get("G72_LAYOUT") == "split":  # the brain on card 0, the voice on card 1 (docs/goals/72-check.py's SPLIT)
+        env.update(CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=os.environ.get("G72_VOICE_GPU", "1") + "," + os.environ.get("G72_BRAIN_GPU", "0"), OMX_LLM_GPU="1")
     log = open(OUT / "omx-tablet-host.log", "w")
     host = subprocess.Popen(["pixi", "run", "-e", "voice", "python", str(ROOT / "mojoui/hosts/web.py"), str(MODULE), str(port)], cwd=ROOT,
                             env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
