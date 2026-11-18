@@ -16,6 +16,7 @@
 # file, and only those close to the best (the floor), so an unrelated question finds nothing rather than the least bad note.
 
 from std.os.path import realpath, isdir
+from mojoui.utf8 import head, boundary
 from mojoui.watch import walk_files, file_stamp
 from mojoui.textembed import Embedder
 from mojoui.json import Json, json_string
@@ -88,7 +89,7 @@ def split_passages(text: String) -> List[String]:
         out.append(cur)
     for i in range(len(out)):
         if out[i].byte_length() > 2000:
-            var cut = String(out[i][byte = :2000])
+            var cut = head(out[i], 2000)
             out[i] = cut^
     return out^
 

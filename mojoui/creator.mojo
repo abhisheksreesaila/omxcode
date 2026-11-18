@@ -23,6 +23,7 @@
 from std.memory import ArcPointer
 from std.os import makedirs, getenv
 from std.os.path import exists
+from mojoui.utf8 import head, boundary
 from mojoui.http import Request
 from mojoui.app import Event
 from mojoui.json import Json, json_string
@@ -559,7 +560,7 @@ def _title_of(subject: String) -> String:
     var b = subject.as_bytes()
     while n > 20 and b[n] != 32:
         n -= 1
-    return String(subject[byte = :n]) + "…"
+    return head(subject, n) + "…"
 
 
 def _snippet(text: String, most: Int) -> String:

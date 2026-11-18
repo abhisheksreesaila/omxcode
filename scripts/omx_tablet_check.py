@@ -88,7 +88,7 @@ def main():
     https = int(os.environ.get("MOJOUI_TABLET_PORT", "8444"))
     key_file = work / "pair-key"
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=GPU, OMX_LLM_GPU="0", OMX_MODELS=MODELS, MOJOUI_PAIR_KEY_FILE=str(key_file),
-               MOJOUI_EXTRA_HOSTS=machine)
+               MOJOUI_EXTRA_HOSTS=machine, OMX_TRACE="1")
     if os.environ.get("G72_LAYOUT") == "split":  # the brain on card 0, the voice on card 1 (docs/goals/72-check.py's SPLIT)
         env.update(CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=os.environ.get("G72_VOICE_GPU", "1") + "," + os.environ.get("G72_BRAIN_GPU", "0"), OMX_LLM_GPU="1")
     log = open(OUT / "omx-tablet-host.log", "w")

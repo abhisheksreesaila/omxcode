@@ -28,7 +28,7 @@ from mojoui.app import App, Event
 from mojoui.view import View, Overlay
 from mojoui.agui import Agent, EV_TEXT, EV_RUN_FINISHED, EV_RUN_ERROR
 from mojoui.assistant import Assistant, ASSISTANT_SYSTEM
-from mojoui.cloudlane import route, Route, LANE_CLOUD, LANE_BACKGROUND, ASK_DONE, ASK_FAILED
+from mojoui.cloudlane import route, LANE_CLOUD, LANE_BACKGROUND, STEP_ANSWERED, STEP_FAILED, STEP_FRAME_OFF
 from mojoui.http import Http, Request
 from mojoui.agentui import Screens
 from mojoui.canvas import Surface
@@ -82,10 +82,8 @@ struct Main(App):
     var muted: Bool
     var typing: Bool
     var draft: String
-    var cloud: Bool  # the lane the answers come from: this machine, or a cloud model (the frame is orange)
     var heard: String
     var reply: String
-    var said_before: String  # what the merged turn had said before the last continuation
     var queued: Bool  # a run waits for the one in flight to be cancelled
     var silent_run: Bool  # the run in flight was cancelled: its late words are not spoken
     var turns: Int
@@ -96,9 +94,6 @@ struct Main(App):
     var shelf_version: Int
     var primed: Bool  # the model has been asked for its prompt cache (LlmAgent.prime)
     var by_agent: Bool  # a button is being pressed by the model's tool call
-    var cloud_turn: Bool  # the question went to the cloud model and its answer is awaited
-    var cloud_done: Bool  # ... and has come back: the frame stays until it has been said
-    var cloud_text: String
     var thought_through: Bool  # the turn's words asked to be thought through in the background (a job should follow)
     var jobs_before: Int
     var lane_switch: Bool  # the test button that flips the lane is shown (OMX_LANE_SWITCH)
@@ -107,9 +102,6 @@ struct Main(App):
         self.http = Http()
         self.assist = Assistant(TODO, NEWS)
         self.by_agent = False
-        self.cloud_turn = False
-        self.cloud_done = False
-        self.cloud_text = ""
         self.thought_through = False
         self.jobs_before = 0
         self.lane_switch = environment("OMX_LANE_SWITCH") != ""
@@ -139,10 +131,8 @@ struct Main(App):
         self.muted = False
         self.typing = False
         self.draft = ""
-        self.cloud = False
         self.heard = ""
         self.reply = ""
-        self.said_before = ""
         self.queued = False
         self.silent_run = False
         self.turns = 0
@@ -151,6 +141,12 @@ struct Main(App):
         self.trace = environment("OMX_TRACE") != ""
         self.last_state = -1
         self.shelf_version = 0
+
+    def out(self, line: String):
+        """A line for the checker (what was heard, said and called, with its numbers). What the person said, what was answered and
+        what a tool was given stays off stdout unless OMX_TRACE=1: an app's output is read by whoever runs it (D-7305)."""
+        if self.trace:
+            print(line, flush=True)
 
     def title(self) -> String:
         return "omx"
@@ -190,8 +186,8 @@ struct Main(App):
                 self.cancel_run()
             self.cancel_cloud()
         elif m == LANE:
-            self.cloud = not self.cloud
-            self.orb.lane(self.cloud)
+            self.assist.cloud.flip()
+            self.orb.lane(self.assist.cloud.framed)
         elif m >= CHIP and m < CHIP + len(self.suggestions):
             var asked = self.suggestions[m - CHIP]
             self.send(asked)
@@ -213,6 +209,7 @@ struct Main(App):
         return all^
 
     def closing(mut self):
+        self.assist.cloud.close()  # (a running cloud request ends with the app)
         self.creator.closing()
 
     def tools(self) -> List[AppTool]:
@@ -246,17 +243,17 @@ struct Main(App):
             elif e.kind == BARGED:
                 self.cancel_run()
                 self.cancel_cloud()
-                print("OMX BARGE: ms=" + String(Int(e.ms + 0.5)), flush=True)
+                self.out("OMX BARGE: ms=" + String(Int(e.ms + 0.5)))
             elif e.kind == HEARD:
                 self.heard_turn(e.copy())
         self.creator.tick()
         for line in self.creator.take_log():
-            print("OMX " + line, flush=True)
+            self.out("OMX " + line)
         self.pump_run()
         self.drive_assistant()
         if self.loop.first_ns != self.told_first and self.loop.first_ns > 0:
             self.told_first = self.loop.first_ns
-            print("OMX FIRST_AUDIO: turn=" + String(self.turns) + " ms=" + String(Int(self.loop.first_audio_ms() + 0.5)), flush=True)
+            self.out("OMX FIRST_AUDIO: turn=" + String(self.turns) + " ms=" + String(Int(self.loop.first_audio_ms() + 0.5)))
         var s = self.loop.state()
         if self.trace and s != self.last_state:
             self.last_state = s
@@ -279,82 +276,61 @@ struct Main(App):
         self.work = True
         self.turns += 1
         self.creator.turn_began()
-        var fresh = String(e.text[byte = self.said_before.byte_length() + 1 :]) if e.merged and e.text.byte_length() > self.said_before.byte_length() else e.text
+        var fresh = self.assist.cloud.fresh(e.text, e.merged)  # (a merged turn continues the one before: only what is new)
         self.heard = e.text
-        self.said_before = e.text
         self.reply = ""
-        print("OMX HEARD: turn=" + String(self.turns) + " ms=" + String(Int(e.ms + 0.5)) + " text=" + e.text, flush=True)
+        self.out("OMX HEARD: turn=" + String(self.turns) + " ms=" + String(Int(e.ms + 0.5)) + " text=" + e.text)
         self.cancel_cloud()
         var lane = route(fresh)
-        if lane.lane == LANE_CLOUD and self.ask_cloud(fresh, lane):
+        if lane.lane == LANE_CLOUD and self.ask_cloud(fresh, lane.model):
             return
         self.thought_through = lane.lane == LANE_BACKGROUND
         self.jobs_before = self.assist.jobs_started
         self.client.say(fresh + (" (Use think_it_through for this: they want it thought through in the background.)" if self.thought_through else ""))
         self.start_run()
 
-    # --- the cloud lane: only when the person names it (mojoui.cloudlane) ------------------------------------------
+    # --- the cloud lane: only when the person names it (mojoui.cloudlane.CloudTurn keeps the turn; the app says and shows) -----
 
-    def ask_cloud(mut self, text: String, lane: Route) -> Bool:
+    def ask_cloud(mut self, text: String, model: String) -> Bool:
         """The turn goes to the cloud model: True when it was asked (the frame is orange, "Asking Claude." is said); False when it
         wasn't (the cap, a secret in the words: the reason is said and the local model answers)."""
-        var why = self.assist.cloud.begin(text, lane.model)
+        var why = self.assist.cloud.ask(text, model)
         if why != "":
             self.loop.say("Sorry, " + why + ". I'll answer here. ")
             return False
-        self.cloud_turn = True
-        self.cloud_done = False
-        self.cloud_text = text
-        self.cloud = True
         self.orb.lane(True)
         self.loop.say("Asking Claude. ")
-        print("OMX LANE: cloud turn=" + String(self.turns) + " model=" + lane.model, flush=True)
+        self.out("OMX LANE: cloud turn=" + String(self.turns) + " model=" + model)
         return True
 
     def cancel_cloud(mut self):
-        if self.cloud_turn:
-            self.assist.cloud.cancel()
-        self.assist.cloud.idle()
-        if self.cloud:
-            print("OMX LANE: local turn=" + String(self.turns) + " (cloud turn dropped)", flush=True)
-        self.cloud_turn = False
-        self.cloud_done = False
-        self.cloud = False
+        if self.assist.cloud.cancel():
+            self.out("OMX LANE: local turn=" + String(self.turns) + " (cloud turn dropped)")
         self.orb.lane(False)
 
     def cloud_step(mut self):
         """The cloud's answer arrives (or fails); the frame goes when what it said has been said."""
-        if self.cloud_turn:
-            var state = self.assist.cloud.poll()
-            if state == ASK_DONE:
-                var answer = self.assist.cloud.answer
-                self.reply = answer
-                self.loop.say(answer)
-                self.loop.end_reply()
-                if self.llm:
-                    self.llm.value().remember("user", self.cloud_text)
-                    self.llm.value().remember("assistant", answer)
-                print("OMX CLOUD: turn=" + String(self.turns) + " seconds=" + String(Int(self.assist.cloud.seconds() + 0.5)) + " bytes_out=" + String(self.assist.cloud.bytes_out)
-                      + " used=" + String(self.assist.cloud.used) + " text=" + answer, flush=True)
-                self.assist.cloud.idle()
-                self.cloud_turn = False
-                self.cloud_done = True
-            elif state == ASK_FAILED:
-                print("OMX CLOUD: failed turn=" + String(self.turns) + " why=" + self.assist.cloud.error, flush=True)
-                self.assist.cloud.idle()
-                self.cloud_turn = False
-                self.cloud = False
-                self.orb.lane(False)
-                print("OMX LANE: local turn=" + String(self.turns), flush=True)
-                self.loop.say("Claude didn't answer, so I'll answer here. ")
-                self.jobs_before = self.assist.jobs_started
-                self.client.say(self.cloud_text)
-                self.start_run()
-        elif self.cloud_done and not self.loop.active:
-            self.cloud_done = False
-            self.cloud = False
+        var step = self.assist.cloud.step(self.loop.active)
+        if step.kind == STEP_ANSWERED:
+            self.reply = step.text
+            self.loop.say(step.text)
+            self.loop.end_reply()
+            if self.llm:
+                self.llm.value().remember("user", step.question)
+                self.llm.value().remember("assistant", step.text)
+            self.out("OMX CLOUD: turn=" + String(self.turns) + " seconds=" + String(Int(step.seconds + 0.5)) + " bytes_out=" + String(step.bytes_out)
+                     + " used=" + String(step.used) + " text=" + step.text)
+        elif step.kind == STEP_FAILED:
+            self.out("OMX CLOUD: failed turn=" + String(self.turns) + " why=" + step.text)
             self.orb.lane(False)
-            print("OMX LANE: local turn=" + String(self.turns), flush=True)
+            self.out("OMX LANE: local turn=" + String(self.turns))
+            self.loop.say("Claude didn't answer, so I'll answer here. ")
+            self.jobs_before = self.assist.jobs_started
+            self.client.say(step.question)
+            self.start_run()
+        elif step.kind == STEP_FRAME_OFF:
+            self.orb.lane(False)
+            self.out("OMX LANE: local turn=" + String(self.turns))
 
     def drive_assistant(mut self):
         """The to-do file, the job's clock, the cloud's answer, and the one sentence when a job has finished."""
@@ -362,12 +338,12 @@ struct Main(App):
             return
         _ = self.assist.tick(self.llm.value())
         self.cloud_step()
-        var quiet = self.loop.idle() and not self.llm.value().running() and not self.cloud_turn
+        var quiet = self.loop.idle() and not self.llm.value().running() and not self.assist.cloud.asking
         var line = self.assist.notice(quiet)
         if line != "":
             _ = self.loop.announce(line)
         for l in self.assist.take_log():
-            print("OMX " + l, flush=True)
+            self.out("OMX " + l)
 
     def start_run(mut self):
         if not self.llm:
@@ -405,7 +381,7 @@ struct Main(App):
                 self.take(ev)
             var calls = self.llm.value().take_calls()
             for c in calls:  # (the assistant's slow tools, the creator's (answered when done), then the app's own buttons, as the agent pressed them)
-                print("OMX TOOL: " + c.name + " " + c.arguments, flush=True)
+                self.out("OMX TOOL: " + c.name + " " + c.arguments)
                 if self.assist.is_tool(c.name):
                     self.assist.run_tool(c, self.llm.value(), self.http)
                     continue
@@ -440,7 +416,7 @@ struct Main(App):
             if not self.silent_run:
                 self.loop.end_reply()
                 var first = self.llm.value().first_text_ms if self.llm else Float64(-1)
-                print("OMX REPLY: turn=" + String(self.turns) + " first_words_ms=" + String(Int(first + 0.5)) + " text=" + self.reply, flush=True)
+                self.out("OMX REPLY: turn=" + String(self.turns) + " first_words_ms=" + String(Int(first + 0.5)) + " text=" + self.reply)
                 if kind == EV_RUN_ERROR:
                     self.note = "the run failed: " + self.client.ended
                     print("OMX ERROR: " + self.client.ended, flush=True)
@@ -449,8 +425,8 @@ struct Main(App):
                     self.assist.start_job("", self.heard, "", self.llm.value())
         if self.screens.adopt(self.client) > 0:
             self.shelf_version += 1
-            print("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
-                  + String(len(self.screens.uis)) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary(), flush=True)
+            self.out("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
+                     + String(len(self.screens.uis)) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary())
 
     # --- the screen -----------------------------------------------------------------------------------------------
 
@@ -459,7 +435,7 @@ struct Main(App):
             return self.note
         if self.muted:
             return "Muted"
-        if self.cloud_turn:
+        if self.assist.cloud.asking:
             return "Asking Claude…"
         var s = self.loop.state()
         if s == LOOP_LOADING:
@@ -475,8 +451,8 @@ struct Main(App):
     def page(self, cards: Bool) -> View:
         """The screen without the cards' own buttons when `cards` is False: those are the agent's to show, not to press, so
         the tools it is offered (the app's buttons) don't change when a card appears (the model's prompt cache keeps)."""
-        var lane = VoiceLane("Local · Qwen 27B", "Claude · cloud", self.cloud, LANE, self.lane_switch)
-        var busy = self.loop.state() == LOOP_THINKING or self.loop.state() == LOOP_SPEAKING or self.cloud_turn or (self.llm and self.llm.value().running())
+        var lane = VoiceLane("Local · Qwen 27B", "Claude · cloud", self.assist.cloud.framed, LANE, self.lane_switch)
+        var busy = self.loop.state() == LOOP_THINKING or self.loop.state() == LOOP_SPEAKING or self.assist.cloud.asking or (self.llm and self.llm.value().running())
         var dock = VoiceDock(self.muted, self.typing, self.draft, MUTE, TYPE, STOP, DRAFT, SEND, busy)
         if not cards:
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), "", "", "", lane, List[View](), dock)
@@ -490,7 +466,7 @@ struct Main(App):
         return VoiceHome(OrbView(ORB_CANVAS, self.orb.version(), True), "Hi, I'm omx.", self.status(), lane, VoiceChips(self.suggestions, CHIP), dock)
 
     def view(self) -> View:
-        if self.cloud:
+        if self.assist.cloud.framed:
             return Overlay(self.page(True), RimView(RIM_CANVAS, 1)).grow().fill()
         return self.page(True)
 
@@ -498,7 +474,7 @@ struct Main(App):
         if canvas == ORB_CANVAS:
             self.orb.draw(surface, self.look.palette)
         elif canvas == RIM_CANVAS:
-            draw_rim(surface, self.look.palette, self.cloud)
+            draw_rim(surface, self.look.palette, self.assist.cloud.framed)
         elif self.creator.owns_canvas(canvas):
             self.creator.draw(canvas, surface, self.look.palette)
         else:

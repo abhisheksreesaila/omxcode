@@ -13,6 +13,8 @@
 # events: it is counted (the card says how long, not what), kept only to write the answer from if the thinking used up the
 # whole budget, and dropped. A stray <think> block in the answer is cut.
 
+from mojoui.utf8 import tail as utf8_tail
+from mojoui.utf8 import head, boundary
 from mojoui.clock import now_ns
 from mojoui.json import json_string
 from mojoui.llm import Llm, LlmEvent, TEXT, REASONING, TOOL_CALLS, DONE, ERROR
@@ -126,8 +128,7 @@ struct ThinkJob(Movable):
                 if not self.second:
                     self.notes = self.notes + e.text
                     if self.notes.byte_length() > KEEP_NOTES * 2:
-                        var tail = String(self.notes[byte = self.notes.byte_length() - KEEP_NOTES :])
-                        self.notes = tail^
+                        self.notes = utf8_tail(self.notes, KEEP_NOTES)
             elif e.kind == ERROR:
                 self.fail(e.text)
                 return True
@@ -143,7 +144,7 @@ struct ThinkJob(Movable):
         if text.byte_length() < 80 and self.notes != "" and not self.second:
             self.second = True
             self.answer = String("")
-            var tail = self.notes if self.notes.byte_length() <= KEEP_NOTES else String(self.notes[byte = self.notes.byte_length() - KEEP_NOTES :])
+            var tail = utf8_tail(self.notes, KEEP_NOTES)
             var msgs = (
                 '[{"role":"system","content":' + json_string(JOB_SYSTEM) + '},{"role":"user","content":'
                 + json_string(self.task + "\n\nYour working notes so far (private, do not quote them):\n" + tail + "\n\nNow write the final answer.") + "}]"
@@ -154,7 +155,7 @@ struct ThinkJob(Movable):
             except e:
                 self.fail(String(e))
                 return
-        var cut = text if text.byte_length() <= MAX_ANSWER else String(text[byte = :MAX_ANSWER])
+        var cut = head(text, MAX_ANSWER)
         self.answer = cut if cut != "" else String("I couldn't reach an answer.")
         self.state = JOB_DONE
         self.ended_ns = now_ns()
@@ -197,5 +198,5 @@ def job_memory(job: ThinkJob) -> String:
     """What the conversation learns when the job lands (at the start of the next turn, never in the middle of one)."""
     if job.state != JOB_DONE:
         return String("")
-    var a = job.answer if job.answer.byte_length() <= MEMORY_ANSWER else String(job.answer[byte = :MEMORY_ANSWER])
+    var a = head(job.answer, MEMORY_ANSWER)
     return "(I finished thinking about " + job.title + " in the background and showed it on screen. What I worked out:) " + a

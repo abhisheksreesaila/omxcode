@@ -10,17 +10,18 @@
 #              var say = assist.notice(person_is_idle)                          # "I've finished thinking about X…" once, when nobody talks
 #   start of a run: assist.flush(agent)                                         # what the job found joins the conversation, never mid-turn
 #   view():    assist.cards()                                                   # the to-do card, the job's card, the news cards (newest first)
-#   assist.cloud                                                                # the cloud lane (mojoui.cloudlane), driven by the app's turns
+#   assist.cloud                                                                # the cloud lane as a turn (mojoui.cloudlane.CloudTurn): ask, cancel, step
 #   assist.take_log()                                                           # lines the app prints for its checker ("TODO: …", "NEWS: …", "JOB: …")
 #
 # The numbers it owns: the tick boxes (tick_base + the thing's index, up to 200) and, after them, the finished job's Dismiss.
 # Slow work is never done here: the news is a request (mojoui.http: the reply comes back as an Event), the job is the model's
 # second sequence, the cloud lane a child process; the to-do tools read and write a file in microseconds.
 
+from mojoui.utf8 import head, boundary
 from mojoui.agui import ToolCall
 from mojoui.app import Event
 from mojoui.clock import now_ns
-from mojoui.cloudlane import CloudLane
+from mojoui.cloudlane import CloudTurn
 from mojoui.http import Http, Request
 from mojoui.json import Json, json_string
 from mojoui.llmagent import LlmAgent
@@ -80,7 +81,7 @@ struct Assistant(Movable):
     var jobs_started: Int
     var turn_ns: Int  # when the turn that is being answered began (the app sets it: cards say how long they took)
     var memories: List[String]
-    var cloud: CloudLane
+    var cloud: CloudTurn
     var log: List[String]
 
     def __init__(out self, tick_base: Int, news_msg: Int, cloud_cap: Int = 3):
@@ -100,7 +101,7 @@ struct Assistant(Movable):
         var asked = environment("OMX_CLOUD_CAP")
         if asked != "" and asked.as_bytes()[0] >= 48 and asked.as_bytes()[0] <= 57:
             cap = Int(asked.as_bytes()[0]) - 48  # (a single digit: the cap is small on purpose)
-        self.cloud = CloudLane(cap=cap)
+        self.cloud = CloudTurn(cap=cap)
         self.log = List[String]()
 
     def register(mut self, mut agent: LlmAgent):
@@ -209,7 +210,7 @@ struct Assistant(Movable):
             return
         var name = String(title.strip())
         if name == "":
-            name = String(task[byte = : min(task.byte_length(), 60)])
+            name = head(task, 60)
         var job = ThinkJob(name, String(task))
         job.start(agent.llm)
         if job.state != JOB_RUNNING:
@@ -241,7 +242,7 @@ struct Assistant(Movable):
                 if job.state == JOB_DONE:
                     var said = job.answer.replace("\n", " ")
                     self.log.append("JOB: done seconds=" + String(job.seconds()) + " thought_chars=" + String(job.thought_chars) + " answer_chars=" + String(job.answer.byte_length()) + " title=" + job.title
-                                    + " answer=" + String(said[byte = : min(said.byte_length(), 300)]))
+                                    + " answer=" + head(said, 300))
                 else:
                     self.log.append("JOB: failed " + job.error)
         return changed

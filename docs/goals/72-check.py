@@ -163,7 +163,7 @@ def run_app(source, steps, window=None, record=None, timeout=300, env=None):
         extra_env = dict(SPLIT)
     env = {"CUDA_VISIBLE_DEVICES": GPU, "OMX_LLM_GPU": "0", "OMX_MODELS": str(MODELS), "MOJOUI_AUDIO_SINK": SINK,
            "MOJOUI_AUDIO_SOURCE": source.replace("W/", str(WAV) + "/"), "MOJOUI_TEST": steps,
-           "OMX_SD": "0"}  # (the painter off: M4's layout has the brain and the voice on one card; M6's creator layout turns it on)
+           "OMX_SD": "0", "OMX_TRACE": "1"}  # (the painter off: M4's layout has the brain and the voice on one card; M6's creator layout turns it on)
     if window:
         env["MOJOUI_WINDOW"] = window
     env.update(extra_env or {})

@@ -13,6 +13,7 @@
 
 from std.os import makedirs
 from std.os.path import exists
+from mojoui.utf8 import head
 from mojoui import libc
 from mojoui.json import Json, json_string, J_ARRAY, J_STRING, J_NUMBER
 from mojoui.llmagent import ToolFn
@@ -144,7 +145,7 @@ struct TodoList(Movable):
                 s = shorter^
             if s == "" or len(self.items) >= MAX_ITEMS:
                 continue
-            self.items.append(TodoItem(String(s[byte = : min(s.byte_length(), MAX_TEXT)])))
+            self.items.append(TodoItem(head(s, MAX_TEXT)))
             n += 1
         if n > 0:
             self.save()
