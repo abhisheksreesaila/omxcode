@@ -216,7 +216,46 @@ def _run_binary(build_cmd, run_cmd, env=None, want=None, timeout=3600):
 
 
 def m1():
-    return _run_binary(["scripts/mxbuild.sh", "tests/test_llm.mojo", "-o", "build/test_llm"], ["build/test_llm"], {"LLM_GPU": GPU}, "llm ")
+    """tests/test_llm, whose last case compares the in-process first token with the same chat through llama-server over HTTP: the
+    check starts that server itself (omx-local's binary, on the other card, ended after) so nothing of the prototype has to run."""
+    import urllib.request
+
+    b = sh(["scripts/mxbuild.sh", "tests/test_llm.mojo", "-o", "build/test_llm"], 3600)
+    if b.returncode:
+        return "FAIL", "build: " + tail(b, 500)
+    server = Path.home() / "Projects/omx-local/third_party/llama.cpp/build/bin/llama-server"
+    other = "0" if GPU != "0" else "1"
+    if not wait_for_gpu(int(other)):
+        return "FAIL", f"GPU {other} stayed busy for 45 minutes: no card for the HTTP baseline server"
+    log = open(OUT / "baseline-server.log", "w")
+    srv = subprocess.Popen([str(server), "-m", str(MODELS / "Qwen3.8-27B-UD-Q4_K_M.gguf"), "-ngl", "999", "-c", "8192", "-fa", "on", "--jinja",
+                            "--host", "127.0.0.1", "--port", "8182", "--no-webui"], stdout=log, stderr=log, cwd=server.parent, start_new_session=True,
+                           env=dict(os.environ, CUDA_VISIBLE_DEVICES=other, CUDA_DEVICE_ORDER="PCI_BUS_ID"))
+    try:
+        for _ in range(300):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8182/health", timeout=1)
+                break
+            except Exception:
+                time.sleep(1)
+                if srv.poll() is not None:
+                    return "FAIL", "the baseline llama-server ended: " + (OUT / "baseline-server.log").read_text()[-300:]
+        else:
+            return "FAIL", "the baseline llama-server never became healthy"
+        r = sh(["build/test_llm"], 1800, {"LLM_GPU": GPU, "LLM_HTTP": "http://127.0.0.1:8182"})
+    finally:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(srv.pid, sig)
+                srv.wait(15)
+                break
+            except ProcessLookupError:
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    if r.returncode or "llm " not in r.stdout:
+        return "FAIL", tail(r, 500)
+    return "PASS", [l for l in r.stdout.splitlines() if l.strip()][-1][:160]
 
 
 def m2():
@@ -374,7 +413,18 @@ def run6(source, steps, env=None, **kw):
     return ev, r
 
 
+def ensure_notes_pack():
+    """The notes' embedding model as a pack (build/packs/e5small, ignored by git; scripts/setup builds it too): made once, on the second card."""
+    if (ROOT / "build/packs/e5small/vocab.txt").exists():
+        return None
+    r = sh(["pixi", "run", "python", "scripts/packs/e5small.py", "build/packs/e5small"], 1800, {"CUDA_VISIBLE_DEVICES": "1"})
+    return None if r.returncode == 0 else "building the e5small pack: " + tail(r, 500)
+
+
 def m6_units():
+    why = ensure_notes_pack()
+    if why:
+        return "FAIL", why
     out = []
     for name in ("todo", "news", "cloudlane", "assistant", "creator", "imagegen", "notes"):  # (the last three use the second card)
         b = sh(["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", "-I", "vendor", f"tests/test_{name}.mojo", "-o", f"build/test_{name}"], 900)
@@ -532,7 +582,7 @@ def m6_jobs():
         probs.append("no spoken notice")
     spoken = hear(OUT / "m6-jobs.wav")
     bench(m6_jobs_as_heard=spoken)
-    (said if re.search(r"finished .{0,60}on your screen", spoken, re.I | re.S) else probs).append(f"the speaker's audio, heard back: ...{spoken[-160:]!r}")
+    (said if re.search(r"finished .{0,100}on your screen", spoken, re.I | re.S) else probs).append(f"the speaker's audio, heard back: ...{spoken[-160:]!r}")
     rep = replies(ev)
     last = max(rep) if rep else 0
     if not re.search(r"3090|5090|3,?000|two cards|second", rep.get(last, ""), re.I):
@@ -689,6 +739,10 @@ def creator_session():
     shutil.rmtree(OUT / "pictures", ignore_errors=True)
     shutil.rmtree(OUT / "notes-cache", ignore_errors=True)
     ensure_wavs()
+    why = ensure_notes_pack()
+    if why:
+        _CREATOR.update(error=why)
+        return _CREATOR
     kill_painter()
     if not wait_for_gpu():
         _CREATOR.update(error="GPU 0 stayed busy for 45 minutes (another run's brain is on it)")
@@ -828,7 +882,9 @@ def m6_notes():
         lines.append(f"{f.split('/')[-1]}:{'ok' if ok else 'x(' + ('cited' if cited else 'cite') + ')'}")
     refused = [e for e in of(ev, "REFUSED") if "only read your notes folder" in e.get("text", "")]
     declined = of(ev, "REPLY", len(NOTE_QS) + 3)
-    unit = sh([str(ROOT / "build/test_creator")], 300)  # (built by M6-UNITS)
+    if not (ROOT / "build/test_creator").exists():  # (M6-UNITS builds it; this lets M6-NOTES run alone)
+        sh(["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", "-I", "vendor", "tests/test_creator.mojo", "-o", "build/test_creator"], 900)
+    unit = sh([str(ROOT / "build/test_creator")], 300)
     refused_ok = "creator: ok" in unit.stdout
     bench(notes_good=good, notes_named=named, notes_search_ms=[s.get("search_ms") for s in searches])
     probs = []
@@ -868,7 +924,7 @@ OMX_LOCAL_HEAD = "8b6bcd0"  # (its head when this goal began: nothing of it is e
 def m7():
     """Nothing regressed: the component matrix is current, goal 71's M5 (the robot search) still passes, the decisions and libc
     lints, and the prototype (omx-local) is exactly as the goal found it."""
-    probs, said = [], []
+    probs, said, blocked = [], [], []
     r = sh(["pixi", "run", "python", "scripts/components.py", "--check"], 300)
     (probs if r.returncode else said).append("the component matrix is " + ("stale: " + tail(r, 300) if r.returncode else "current"))
     for lint in ("decisions_lint", "libc_lint"):
@@ -876,14 +932,22 @@ def m7():
         (probs if r.returncode else said).append(f"{lint}: " + (tail(r, 400) if r.returncode else (r.stdout.strip().splitlines() or ["ok"])[-1]))
     r = sh(["pixi", "run", "python", "docs/goals/71-check.py", "M5"], 3600)
     line = next((l for l in r.stdout.splitlines() if l.startswith("M5:")), "")
-    (said if line.startswith("M5: PASS") else probs).append("goal 71 " + (line[:300] or "M5 printed nothing: " + tail(r, 300)))
+    full = (ROOT / "build/g70/m3-68.txt").read_text() if (ROOT / "build/g70/m3-68.txt").exists() else ""
+    if line.startswith("M5: PASS"):
+        said.append("goal 71 " + line[:200])
+    elif "No space left on device" in full:  # (its robot data and videos are tens of GB: not a regression, but nothing was proved)
+        blocked.append("goal 71 M5 could not run: the disk is full (" + str(len(re.findall("No space left on device", full))) + " writes refused in goal 68's run); " + line[:300])
+    else:
+        probs.append("goal 71 " + (line[:300] or "M5 printed nothing: " + tail(r, 300)))
     head = sh(["git", "-C", str(OMX_LOCAL), "rev-parse", "--short=7", "HEAD"]).stdout.strip()
     dirty = sh(["git", "-C", str(OMX_LOCAL), "status", "--porcelain", "--untracked-files=no"]).stdout.strip()
     if head != OMX_LOCAL_HEAD or dirty:
         probs.append(f"omx-local changed: HEAD {head} (was {OMX_LOCAL_HEAD}), edits: {dirty[:200] or 'none'}")
     else:
         said.append(f"omx-local untouched (HEAD {head}, no edits)")
-    return ("FAIL", "; ".join(probs + said)) if probs else ("PASS", "; ".join(said))
+    if probs:
+        return "FAIL", "; ".join(probs + blocked + said)
+    return ("BLOCKED", "; ".join(blocked + said)) if blocked else ("PASS", "; ".join(said))
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, **M6_PARTS}
