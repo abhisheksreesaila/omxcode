@@ -1635,3 +1635,14 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7409 · list, task and bullet markers are drawn as shapes (circle, box, tick) not glyphs · the baked Inter atlas has 106 glyphs and no •, ☐ or ✓ · yes
 - D-7410 · on the caret's paragraph a list item shows its raw marks and no drawn marker (the marks are what you edit); elsewhere the marker shows and the marks hide · the goal's rule (marks hidden except on the caret's line), as Obsidian does · yes
 - D-7411 · code-block fences are found by a scan of paragraph starts after each edit (MdEdit.sync), bumping the styler's version only when they change · a fence opens or closes blocks far away; the scan is microseconds at 16k paragraphs · yes
+- D-7412 · M0's refreshed audit landed inside M2's commit (6a6d52f8: the delegate was mid-edit when it was taken); its final text equals that commit · harmless; later commits name their paths · yes
+- D-7413 · objectlayer's undo steps hold before/after copies of only the objects an operation touched, not the whole list · a drag on a 645-object note copies one object · yes
+- D-7414 · objectlayer drags are explicit begin_gesture/end_gesture steps, not the history's time window · a slow drag with pauses is still one undo · yes
+- D-7415 · objectlayer keeps each box's text as a String with a cached TextEdit per box · TextEdit moves but can't be copied, and undo needs copies · yes
+- D-7416 · turned text and pictures draw upright inside their turned box (outlines, hit areas and handles turn) · the Painter has no rotate yet; noted as debt · yes
+- D-7417 · objectlayer culls to the view snapped out to 512-pt tiles and versions its layer by change counter + tile; a uniform 256-pt grid for hits · a small pan reuses the host's cached layer; hit p95 0.005 ms · yes
+- D-7418 · mindmap stores each first-level topic's side (balanced when added) instead of recomputing by weight · collapsing never flips a branch; expanding restores exact places · yes
+- D-7419 · mindmap: a new topic plus its typed words is one undo step; an Escaped empty topic leaves none · "add Milk" undoes in one press · yes
+- D-7420 · mindmap labels wrap with the TextEdit's own rule · a pill keeps its size when editing starts · yes
+- D-7421 · mindmap deletes leave tombstones (ids never change) · stable ids for notes, hits and undo · yes
+- D-7422 · mindmap's stored outline: 2 spaces a level, flags (- c o x L #colour), \n and \\ escaped · readable and round-trips; it's a stored format · yes, before real notes are saved
