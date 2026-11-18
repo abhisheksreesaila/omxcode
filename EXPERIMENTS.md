@@ -4,6 +4,14 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 74: Personal Note's editors, native in Mojo (2026-11-17/18)
+- **Setup:** worktree ../mojo-ui-g74, branch `goal-74-personal-note` off main cc33c9d7. Owner: "can we even build Personal Note?", natively, no JS. M0 and M4/M5 built by delegates in parallel, the rest in the main session.
+- **Worked:** mojoui.history, textedit (a native multi-line editor: 1M characters open in ms), mdedit (Markdown in place, marks hidden off the caret's line), objectlayer (objects, connectors, ink; Personal Note's 645-object note pans in 0.3 ms of app paint), mindmap; examples/pnote composes them with SQLite + FTS5 and a palette; M0–M7 pass, reviewer round 2 PASS.
+- **Broke and fixed:** the GTK test key step sent "Return" as "R" (now takes GDK names, D-7424); framebench in a hidden window timed nothing (it shows the window now, D-7425); round 1 found tabs lost on save, a hollow test fallback, no clipboard.
+- **Race:** 1M-character page opens in 35 ms vs Personal Note's 2.9 s; typing level (~2–3 ms a key); panning the dense canvas slower on software rendering (12–19 ms a frame vs no dropped frames in Chromium). docs/goals/74/race.md.
+- **Means:** Personal Note's editing heart can be native Mojo; the gaps left are platform (system paste, IME, rotate, GPU canvas path). M8 is red only from a load-sensitive omxplorer frame check (D-7432). Report: docs/goals/74-report.md.
+---
+
 ## Fix: the Linux download opens the file it is given (2026-11-16)
 - **Setup:** a fresh download of the linux-app release (sha256 db2a7475…), installed with its install.sh, run on a headless display before recording the launch video.
 - **Broke:** `./omxplorer path/to/file.csv` (the README) and the launcher entry's `%f` showed the Start screen: only scripts/omxplorer.sh opened a file, through OMX_OPEN.

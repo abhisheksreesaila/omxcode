@@ -592,9 +592,10 @@ struct TextEdit(Movable):
                     self.clip_version += 1
                 return True
             if name == "v" or name == "V":
-                if self.clip != "":
-                    var pasted = self.clip
-                    self.replace(self.sel_start(), self.sel_end(), pasted, EDIT_OTHER, now_ms)
+                if self.clip == "":
+                    return False  # (nothing of ours to paste: the key goes on, so a host's system paste can take it, D-7427)
+                var pasted = self.clip
+                self.replace(self.sel_start(), self.sel_end(), pasted, EDIT_OTHER, now_ms)
                 return True
             if name == "a" or name == "A":
                 self.select_all()
