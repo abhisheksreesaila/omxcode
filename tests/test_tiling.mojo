@@ -162,6 +162,45 @@ def main() raises:
     assert_true(bad, "broken text is refused")
     print("text: ok")
 
+    # stretch (goal 73): a card's row gets taller, the other cards keep their pixels; a part shrinks back as far as it can
+    var g2 = Tiling(300, 200)
+    g2.insert("table", "", W, H)
+    g2.insert("a", "table", W, H)  # table | a
+    g2.insert("b", "a", W, H)  # table | (a / b)
+    assert_false(g2.has_below("table") or g2.has_below("b"))
+    assert_true(g2.has_below("a"))
+    assert_equal(g2.stretch("table", 300, W, H), 300)  # (the whole row: the card beside it, b, takes it too; a keeps its pixels)
+    assert_equal(String(at(g2, "table", W, H + 300)), "0,0 496x900")
+    assert_equal(String(at(g2, "a", W, H + 300)), "504,0 496x296")
+    assert_equal(String(at(g2, "b", W, H + 300)), "504,304 496x596")
+    assert_equal(g2.stretch("a", 100, W, H + 300), 100)  # (a's own part: b below keeps its pixels, the table beside grows)
+    assert_equal(String(at(g2, "a", W, H + 400)), "504,0 496x396")
+    assert_equal(String(at(g2, "b", W, H + 400)), "504,404 496x596")
+    assert_equal(String(at(g2, "table", W, H + 400)), "0,0 496x1000")
+    assert_equal(g2.stretch("table", -250, W, H + 400), -250)  # (shorter: the card's own side first, the rest from where there's room)
+    assert_equal(String(at(g2, "table", W, H + 150)), "0,0 496x750")
+    assert_equal(String(at(g2, "b", W, H + 150)), "504,404 496x346")  # (b gave it: the table's side had no room to spare in a)
+    assert_equal(g2.stretch("table", -5000, W, H + 150), -342)  # (every card at its minimum height, and no further)
+    assert_equal(String(at(g2, "table", W, H - 192)), "0,0 496x408")
+    assert_equal(String(at(g2, "a", W, H - 192)), "504,0 496x200")
+    assert_equal(String(at(g2, "b", W, H - 192)), "504,208 496x200")
+    var gs = Lcg(73)  # (random trees stretched and shrunk: still no overlap and no gap but GAP)
+    for round in range(200):
+        var tt = Tiling(300, 200)
+        var ids2 = List[String]()
+        var hh = 600
+        for k in range(2 + gs.next(5)):
+            var nm = "k" + String(k)
+            tt.insert(nm, ids2[gs.next(len(ids2))] if len(ids2) > 0 else String(""), 1600, hh)
+            ids2.append(nm)
+        for _ in range(4):
+            var pick = ids2[gs.next(len(ids2))]
+            var got = tt.stretch(pick, gs.next(801) - 400, 1600, hh)
+            hh += got
+            var p2 = problems(tt, 1600, hh)
+            assert_equal(p2, "", "round " + String(round) + " " + tt.to_text() + ": " + p2)
+    print("stretch: ok")
+
     # random: 2,000 operations at random sizes
     var g = Lcg(54)
     var rt = Tiling()

@@ -80,3 +80,71 @@ def main() raises:
     assert_equal(r5[3].x, r5[1].x)  # (video0's space was halved: the chart sits under or beside it, in its column)
     assert_true(r5[3].y >= r5[1].y)
     print("focus: ok")
+
+    # grow (goal 73): a corner dragged past what the Board can give makes the Board taller; only the dragged card's row
+    # grows (the table's neighbours beside it are in its row), every other card keeps its pixels
+    var g = BoardTiles()
+    var gt: List[String] = ["table", "a", "b"]
+    var gr: List[Rect] = [Rect(0, 0, 0, 0), Rect(0, 0, 0, 0), Rect(0, 0, 0, 0)]
+    gr = g.sync(gt, gr, W, H)
+    assert_equal(g.height(H), 600)
+    assert_equal(s(gr[0]), "0,0 496x600")
+    assert_equal(s(gr[1]), "504,0 496x296")
+    gr = g.resize(0, 0, 300, gt, gr)  # (the table's corner 300 down: nothing below it to give, so the Board grows)
+    assert_equal(g.height(H), 900)
+    assert_equal(s(gr[0]), "0,0 496x900")
+    assert_equal(s(gr[1]), "504,0 496x296")  # (a keeps its pixels; b, in the table's row, takes the rest)
+    assert_equal(s(gr[2]), "504,304 496x596")
+    gr = g.sync(gt, gr, W, H)  # (the next event: the Board's height is remembered, and nothing moves)
+    assert_equal(g.height(H), 900)
+    assert_equal(s(gr[0]), "0,0 496x900")
+    assert_equal(g.height(1200), 1200)  # (never less than the window's room)
+    # a drag the card below can give is today's: it moves the shared edge and the Board stays as tall as the window
+    var small = BoardTiles()
+    var st: List[String] = ["table", "a", "b"]
+    var sr: List[Rect] = [Rect(0, 0, 0, 0), Rect(0, 0, 0, 0), Rect(0, 0, 0, 0)]
+    sr = small.sync(st, sr, W, H)
+    sr = small.resize(1, 0, 60, st, sr)
+    assert_equal(small.height(H), 600)
+    assert_equal(s(sr[1]), "504,0 496x356")
+    assert_equal(s(sr[2]), "504,364 496x236")
+    # past what b can give (it stops at its minimum, 200), the rest makes the Board taller: a ends 400 taller in all
+    sr = small.resize(1, 0, 400, st, sr)
+    assert_equal(sr[1].h, 356 + 400)
+    assert_equal(sr[2].h, 200)
+    assert_equal(small.height(H), 600 + 364)
+    assert_equal(sr[0].h, 964)
+    print("grow: ok")
+
+    # shrink: the bottom card's corner dragged up gives the height back, down to the window's room and no further
+    var down = small.resize(2, 0, -2000, st, sr)  # (b is a bottom card now; the Board is 964, the window's room 600)
+    assert_equal(small.height(H), 600)
+    assert_equal(down[0].h, 600)
+    assert_true(down[1].h >= 200 and down[2].h >= 200, s(down[1]) + " " + s(down[2]))
+    print("shrink: ok")
+
+    # bottom: a card that would squeeze another under its minimum goes below everything (a new row), the others unmoved
+    var bt2 = BoardTiles()
+    var bt_tags = List[String]()
+    var bt_rects = List[Rect]()
+    var grew_at = -1
+    for k in range(9):
+        var prev = List[Rect]()  # (where each card was before this one came)
+        for r in bt_rects:
+            prev.append(r)
+        bt_tags.append("c" + String(k))
+        bt_rects.append(Rect(0, 0, 1, 1))
+        var tall0 = bt2.height(H)
+        bt_rects = bt2.sync(bt_tags, bt_rects, W, H)
+        for r in bt_rects:
+            assert_true(r.w >= 300 and r.h >= 200, "card " + String(k) + " under its minimum: " + s(r))
+        if bt2.height(H) > tall0 and grew_at < 0:
+            grew_at = k
+            assert_equal(bt_rects[k].x, 0)  # (the new row: the whole width, under everything)
+            assert_equal(bt_rects[k].w, W)
+            assert_equal(bt_rects[k].y, tall0 + 8)
+            assert_true(bt_rects[k].h >= 200)
+            for j in range(k):  # (every card that was there keeps its place and size exactly)
+                assert_equal(s(bt_rects[j]), s(prev[j]))
+    assert_true(grew_at > 0 and grew_at <= 8, "the Board never grew: " + String(grew_at))
+    print("bottom: ok")
