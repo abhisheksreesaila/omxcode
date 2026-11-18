@@ -7,7 +7,8 @@
 #   audio_init()               once per server process: the hub's memory (0: it was there already). Without it
 #                              (the GTK host, a test) Microphone and Speaker open the sound server as before.
 #   audio_client(+1 / -1)      a page's socket attached / went away; the first one drops audio nobody heard
-#   audio_wants()              1 while an app has started its Microphone: the page opens (or closes) its microphone
+#   audio_wants()              bit 0: an app has started its Microphone (the page opens, or closes, its microphone);
+#                              bit 1: audio is queued for the speaker
 #   audio_push(addr, bytes)    the page's microphone: 16-bit little-endian mono samples at 16 kHz, as they arrive
 #   audio_fail(code)           the page couldn't open the microphone (101 refused, 102 none found, 103 not allowed here)
 #   audio_pull(addr, max)      the app's Speaker: up to `max` bytes of 16-bit mono samples at 24 kHz for the page to play
@@ -68,8 +69,14 @@ def audio_client(delta: Int):
 
 
 def audio_wants() -> Int:
+    """Bit 0: an app has started its Microphone (the page opens its microphone). Bit 1: an app has audio queued for the
+    speaker (a page that hasn't been tapped yet shows its "Tap to turn on sound" button)."""
     var h = _hub()
-    return Int(_A.load(_word(h + 8 * HUB_CTL, H_MIC_WANT))) if h != 0 else 0
+    if h == 0:
+        return 0
+    var spk = h + 8 * HUB_SPEAKER
+    var queued = _A.load(_word(spk, S_WRITE)) > max(_A.load(_word(spk, S_READ)), _A.load(_word(spk, S_DROP)))
+    return Int(_A.load(_word(h + 8 * HUB_CTL, H_MIC_WANT))) + (2 if queued else 0)
 
 
 def audio_fail(code: Int):
@@ -83,7 +90,7 @@ def audio_fail(code: Int):
 def audio_push(addr: Int, nbytes: Int):
     """The page's microphone: samples as they arrive (16-bit little-endian, mono, 16 kHz). Ignored while no app wants them."""
     var h = _hub()
-    if h == 0 or nbytes < 2 or audio_wants() == 0:
+    if h == 0 or nbytes < 2 or audio_wants() % 2 == 0:
         return
     var src = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
     var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(h, W_RING))))

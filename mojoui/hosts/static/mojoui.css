@@ -190,3 +190,8 @@ button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 .mojoui-busy-page a.button { align-self: flex-start; text-decoration: none; }
 .mojoui-busy-page a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 8px; font-weight: 600;
   background: var(--accent, #2f7d6d); color: light-dark(#fff, #0b0d10); }
+/* the page's audio (docs/web-audio.md): shown only while an app wants sound and nobody has tapped the page yet */
+.mojoui-audio-pill { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 50;
+  padding: 12px 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 600; cursor: pointer; color: #fff;
+  background: var(--o-accent, var(--accent)); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
+.mojoui-audio-pill[hidden] { display: none; }

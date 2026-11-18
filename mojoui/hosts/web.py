@@ -37,6 +37,9 @@ from fasthtml.common import (
 )
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # (the host's own modules, also when a test loads this file by path)
+import pairing
+
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
@@ -60,6 +63,8 @@ AGENT_SOCKET = "" if PUBLIC else os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an
 # to be set on a deployed host (docs/js.md).
 DEV = os.environ.get("MOJOUI_DEV") == "1" and not PUBLIC
 DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
+AUDIO_CHUNK = 1920  # bytes of speaker samples (16-bit, 24 kHz: 40 ms) the host hands the page at a time
+AUDIO = not PUBLIC # the page's microphone and speaker for the app's Microphone and Speaker (goal 72 M5); never in the public copy
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds with nothing to say (0: as long as the tab lives)
 PUSH = os.environ.get("MOJOUI_PUSH", "1" if PUBLIC else "0") == "1"  # (local apps keep pulling at the display's rate)
@@ -1221,7 +1226,8 @@ def content_name(name, data):
 def host_files():
     """The host's own files, by content hash: {name: (hashed name, bytes, media type)}. mojoui.js is every adapter
     (canvas, board, menus, effects, the page's listeners, widgets) in one script."""
-    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-widgets.js").read_text()]).encode()
+    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-audio.js").read_text(),
+                    (STATIC / "mojoui-widgets.js").read_text()]).encode()
     out = {}
     for name, data, media in (("htmx.min.js", (STATIC / "htmx.min.js").read_bytes(), "text/javascript"),
                               ("mojoui.js", js, "text/javascript"), ("mojoui.css", CSS.encode(), "text/css")):
@@ -2104,6 +2110,9 @@ def make_app(module_dir):
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:
         print(f"SHARED: {loads} load, 0 sessions", flush=True)
+    audio = AUDIO and hasattr(mod, "audio_init")
+    if audio:
+        mod.audio_init()  # the hub an app's Microphone and Speaker talk to, before any session
     files = host_files()
     by_name = {hashed: (data, media) for hashed, data, media in files.values()}
     fonts = {}
@@ -2127,6 +2136,8 @@ def make_app(module_dir):
         Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
         Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
     app.add_middleware(SecurityHeaders)
+    if not PUBLIC:  # (another device only with the pairing key, and only under an allowed host name: mojoui/hosts/pairing.py)
+        app.add_middleware(pairing.Pairing)
     if PUBLIC:
         roots = [Path(module_dir).resolve(), Path(__file__).resolve().parents[2], Path.home(), uploads_base().parent]
         for name in ("OMX_STARTER", "OMX_DOCUMENTS", "OMX_CONFIG"):
@@ -2443,6 +2454,7 @@ def make_app(module_dir):
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
         page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+                    data_audio="1" if AUDIO else None,  # (the page opens its audio socket: docs/web-audio.md)
                     data_push="1" if PUSH else None,  # (playing canvases' pictures pushed: the public copy, or MOJOUI_PUSH=1)
                     data_agent="1" if AGENT_SOCKET else None, data_dev="1" if DEV else None)  # (widgets tell the host what they show only while an agent may read it)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
@@ -2479,6 +2491,98 @@ def make_app(module_dir):
             return Response(status_code=404)
         data, media = by_name[name]
         return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+    worklet = (STATIC / "mojoui-mic-worklet.js").read_bytes()
+
+    @app.get("/audio/worklet.js")
+    def audio_worklet():
+        """The page's microphone worklet (AudioWorklet modules load from a URL, and the page's policy allows only its own)."""
+        if not audio:
+            return Response(status_code=404)
+        return Response(worklet, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+    hub = {"active": None}  # the audio socket holding the microphone and speaker: the last page that was tapped
+
+    async def audio_socket(ws):
+        """A page's audio (docs/web-audio.md): its microphone in, the app's Speaker out, one socket. Tag byte 1 = microphone
+        up, 2 = speaker down (3 is kept for the camera); JSON text for the rest. Only the claimed page (its first tap) is
+        heard; a page opened later and tapped takes over, and the one before is told so."""
+        import asyncio
+        from starlette.websockets import WebSocketDisconnect
+        await ws.accept()
+        me = object()
+        pcm = (ctypes.c_char * (1 + AUDIO_CHUNK))()
+        addr = ctypes.addressof(pcm) + 1
+        state = {"mic": None, "told": False, "held": False, "flushes": mod.audio_flushes()}
+
+        async def pump():  # the app's side: wants and flushes now, speaker samples as the app queues them
+            try:
+                while True:
+                    if hub["active"] is me:
+                        state["held"] = True
+                        mic = bool(mod.audio_wants() & 1)
+                        if mic != state["mic"]:
+                            state["mic"] = mic
+                            await ws.send_text('{"t":"mic","on":%s}' % ("true" if mic else "false"))
+                        flushes = mod.audio_flushes()
+                        if flushes != state["flushes"]:
+                            state["flushes"] = flushes
+                            mod.audio_settle()
+                            await ws.send_text('{"t":"flush"}')
+                        n = mod.audio_pull(addr, AUDIO_CHUNK)
+                        if n:
+                            pcm[0] = b"\x02"
+                            await ws.send_bytes(memoryview(pcm)[:1 + n].tobytes())
+                            continue
+                    elif state["held"]:  # (another page was tapped: this one is told, and stays quiet)
+                        state["held"] = False
+                        await ws.send_text('{"t":"bumped"}')
+                    else:
+                        wanted = mod.audio_wants() != 0 and hub["active"] is None
+                        if wanted and not state["told"]:  # (an app wants audio and nobody has tapped: the page says so)
+                            await ws.send_text('{"t":"tap"}')
+                        state["told"] = wanted
+                    await asyncio.sleep(0.005)
+            except Exception:  # (the socket closed under a send: the receive loop below ends too)
+                return
+
+        task = asyncio.create_task(pump())
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                data = msg.get("bytes")
+                if data is not None:
+                    if hub["active"] is me and data[:1] == b"\x01" and len(data) > 1:
+                        mod.audio_push(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p).value + 1, len(data) - 1)
+                    continue
+                try:
+                    note = json.loads(msg.get("text") or "{}")
+                except ValueError:
+                    continue
+                kind = note.get("t") if isinstance(note, dict) else None
+                if kind == "claim" and hub["active"] is not me:
+                    first = hub["active"] is None
+                    hub["active"] = me
+                    state["mic"] = None
+                    mod.audio_client(1 if first else 0)  # (the first page to be tapped drops what nobody heard)
+                    state["flushes"] = mod.audio_flushes()
+                elif kind == "mic_fail" and hub["active"] is me and isinstance(note.get("code"), int):
+                    mod.audio_fail(note["code"] if note["code"] in (101, 102, 103) else 102)
+                elif kind == "latency" and isinstance(note.get("us"), int):
+                    mod.audio_latency(max(0, min(note["us"], 5_000_000)))
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            task.cancel()
+            if hub["active"] is me:
+                hub["active"] = None
+                mod.audio_client(-1)
+
+    if audio:
+        from starlette.routing import WebSocketRoute
+        app.router.routes.insert(0, WebSocketRoute("/audio", audio_socket))  # (plain Starlette: FastHTML's own websocket wrapper accepts for you)
 
     @app.get("/assets/{name}")
     def asset(name: str):
@@ -3456,6 +3560,9 @@ def deadline_protocol():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--pair-key"]:  # (scripts/tablet.sh: the key a tablet's first visit carries, ?k=)
+        print(pairing.pair_key())
+        raise SystemExit(0)
     module_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MOJOUI_MODULE", "build/hello/web")
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "5001"))  # (a platform's port: $PORT)
     host = os.environ.get("HOST", "127.0.0.1")  # (a container listens on 0.0.0.0: HOST)
