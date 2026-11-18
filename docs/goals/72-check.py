@@ -71,6 +71,10 @@ class NullSink:
     def __enter__(self):
         sh("pactl list short modules | grep sink_name=%s | cut -f1 | xargs -r -n1 pactl unload-module" % SINK, shell=True)
         self.module = sh(["pactl", "load-module", "module-null-sink", f"sink_name={SINK}", f"sink_properties=device.description={SINK}"]).stdout.strip()
+        # A sink nobody plays to for a few seconds suspends, and what is said when it wakes can be lost to the recording (a reply
+        # long after the last one went missing from the monitor while the app's own stamps said the device had it): silence keeps it awake.
+        self.keep = subprocess.Popen(["pacat", "--playback", f"--device={SINK}", "--rate=16000", "--channels=1", "--format=s16le"],
+                                     stdin=open("/dev/zero", "rb"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return self
 
     def record(self, path):
@@ -93,6 +97,8 @@ class NullSink:
 
     def __exit__(self, *a):
         self.stop_recording()
+        if getattr(self, "keep", None):
+            self.keep.terminate()
         if self.module:
             sh(["pactl", "unload-module", self.module])
 

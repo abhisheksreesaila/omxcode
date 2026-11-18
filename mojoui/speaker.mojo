@@ -118,7 +118,12 @@ def _play(words: Int) raises:
             _A.store(_word(words, S_LAT), Int64(dl_call[UInt64](lib, "pa_simple_get_latency", s, Int(err))))
         if _A.load(_word(words, S_FLUSH)) == Int64(seen):  # (a stop() during the write already took this back)
             _A.store(_word(words, S_READ), Int64(read + n))
-            _A.store(_word(words, S_TAIL), Int64(t) + Int64(_A.load(_word(words, S_LAT))) * 1000)
+            # Where the sound ends: the sink may take more than a buffer's worth at once (after an idle stretch it took a whole reply
+            # in one go: the first version, tail = now + the first write's latency, ended the turn while a second of it still
+            # sounded), so what was written is added to where the earlier writes end, after the device's own delay.
+            var lead = min(max(Int(_A.load(_word(words, S_LAT))), 0), 2_000_000) * 1000
+            var start = max(Int(_A.load(_word(words, S_TAIL))), Int(t) + lead)
+            _A.store(_word(words, S_TAIL), Int64(start + n * 1_000_000_000 // OUT_RATE))
     if not lost:
         _ = dl_call[c_int](lib, "pa_simple_flush", s, Int(err))
     dl_call[NoneType](lib, "pa_simple_free", s)

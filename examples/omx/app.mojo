@@ -83,6 +83,8 @@ struct Main(App):
     var turns: Int
     var run_ns: Int
     var told_first: Int
+    var trace: Bool  # OMX_TRACE=1: a line each time the voice loop changes state (what a checker reads when a turn ends early)
+    var last_state: Int
     var shelf_version: Int
     var primed: Bool  # the model has been asked for its prompt cache (LlmAgent.prime)
     var cloud_turn: Bool  # the question went to the cloud model and its answer is awaited
@@ -132,6 +134,8 @@ struct Main(App):
         self.turns = 0
         self.run_ns = 0
         self.told_first = 0
+        self.trace = environment("OMX_TRACE") != ""
+        self.last_state = -1
         self.shelf_version = 0
 
     def title(self) -> String:
@@ -220,6 +224,10 @@ struct Main(App):
             self.told_first = self.loop.first_ns
             print("OMX FIRST_AUDIO: turn=" + String(self.turns) + " ms=" + String(Int(self.loop.first_audio_ms() + 0.5)), flush=True)
         var s = self.loop.state()
+        if self.trace and s != self.last_state:
+            self.last_state = s
+            print("OMX STATE: " + String(s) + " active=" + String(self.loop.active) + " said=" + String(self.loop.said) + " finished=" + String(self.loop.finished)
+                  + " playing=" + String(self.loop.speaker.playing()) + " queued_ms=" + String(Int(self.loop.speaker.queued_ms())) + " latency_ms=" + String(Int(self.loop.speaker.latency_ms())) + " handed=" + String(self.loop.handed) + " spoken=" + String(self.loop.spoken) + " closed=" + String(self.loop.closed), flush=True)
         if s == LOOP_HEARING:
             self.orb.mode(ORB_LISTEN)
         elif s == LOOP_THINKING:
