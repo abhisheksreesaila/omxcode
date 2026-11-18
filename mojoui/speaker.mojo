@@ -10,8 +10,10 @@
 #
 # Linux: libpulse-simple (PipeWire serves it through pipewire-pulse), opened with dlopen like Microphone. The device is
 # kept at 40 ms of buffer, so stop() is heard within about that. The queue holds one minute: play() drops what doesn't
-# fit. Mac / iPhone / web: not built yet (play() marks the speaker failed with a reason: AVAudioEngine and the browser's
-# AudioContext are the planned paths; the web host's speaker is a later milestone, M5); it compiles there.
+# fit. Web host (M5): the same calls; the samples go to the browser's AudioContext over the host's audio socket
+# (mojoui.webaudio pulls them from this queue, at most 600 ms ahead of the page's playing; stop() makes the host tell the
+# page to drop what it holds). Mac / iPhone: not built yet (play() marks the speaker failed with a reason: AVAudioEngine is
+# the planned path); it compiles there.
 
 from std.atomic import Atomic
 from std.ffi import c_int, OwnedDLHandle
@@ -19,7 +21,8 @@ from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
 from mojoui import libc
-from mojoui.audio import dl_call, resample, _word, _cstr, _free_bytes, _A, _P
+from mojoui.audio import dl_call, resample, _word, _cstr, _free_bytes, _A, _P, SLOT_WEB_AUDIO, HUB_SPEAKER
+from mojoui.shared import get_shared
 from mojoui.clock import now_ns
 
 comptime OUT_RATE = 24000  # samples per second, mono (Kokoro's own rate)
@@ -143,13 +146,20 @@ struct Speaker(Movable):
     var words: Int
     var sink: String
     var reason: String
+    var web: Bool  # the browser's speaker (the web host's hub): `words` are the hub's, nothing to free
 
     def __init__(out self, sink: String = ""):
         self.sink = sink if sink.byte_length() > 0 else getenv("MOJOUI_AUDIO_SINK", "")
         self.words = 0
         self.reason = ""
+        self.web = False
 
     def _open(mut self):
+        var hub = get_shared(SLOT_WEB_AUDIO)
+        if hub != 0:
+            self.web = True
+            self.words = hub + 8 * HUB_SPEAKER
+            return
         comptime if not CompilationTarget.is_linux():
             self.reason = "no speaker on this host yet (Mac: AVAudioEngine; web: the browser's AudioContext, M5)"
         else:
@@ -238,6 +248,6 @@ struct Speaker(Movable):
         return Float64(_A.load(_word(self.words, S_LAT))) / 1000.0 if self.words != 0 else 0.0
 
     def __deinit__(deinit self):
-        if self.words != 0:
+        if self.words != 0 and not self.web:
             _A.store(_word(self.words, S_STOP), 1)
             _release(self.words)
