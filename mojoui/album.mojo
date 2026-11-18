@@ -12,12 +12,17 @@ from mojoui.json import json_string
 from mojoui.canvas import Surface
 
 
+comptime MAX_HELD = 24  # pictures made at run time that an agent may still name; the oldest let go beyond this (D-7313)
+
+
 struct Album(Copyable, Movable, Defaultable):
     var names: List[String]
     var abouts: List[String]  # what each shows, for the agent
     var pictures: List[ArcPointer[Picture]]  # (copies of the album share the pixels: every screen holds one)
+    var held: List[String]  # the names hold() made, oldest first (add()'s pictures are the app's own and stay)
 
     def __init__(out self):
+        self.held = List[String]()
         self.names = List[String]()
         self.abouts = List[String]()
         self.pictures = List[ArcPointer[Picture]]()
@@ -64,6 +69,14 @@ struct Album(Copyable, Movable, Defaultable):
         self.names.append(final)
         self.abouts.append(about)
         self.pictures.append(picture)
+        self.held.append(final)
+        while len(self.held) > MAX_HELD:  # (a long session of comics: the oldest pictures stop being nameable, their cards keep drawing them)
+            var gone = self.find(self.held[0])
+            _ = self.held.pop(0)
+            if gone >= 0:
+                _ = self.names.pop(gone)
+                _ = self.abouts.pop(gone)
+                _ = self.pictures.pop(gone)
         return final
 
     def find(self, name: String) -> Int:

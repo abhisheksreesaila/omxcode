@@ -53,6 +53,18 @@ def main() raises:
     assert_equal(album.hold("../../etc/passwd", shared, "x"), "etc-passwd")
     assert_equal(album.hold("", shared, "x"), "picture")
     assert_equal(album.count(), 4)
+    # a long session: what hold() made is capped (the oldest let go), what add() was given stays
+    var own = Album()
+    own.add("keeper", "tests/fixtures/media/alpha.png", "the app's own picture")
+    var last = String("")
+    for i in range(30):
+        last = own.hold("panel " + String(i), shared, "made")
+    assert_equal(own.count(), 25)  # the app's own and the 24 newest
+    assert_equal(own.find("keeper"), 0)
+    assert_equal(own.find("panel-0"), -1)
+    assert_equal(own.find("panel-5"), -1)
+    assert_true(own.find("panel-6") >= 0 and own.find("panel-29") >= 0)
+    assert_equal(last, "panel-29")
     # the tools, with no painter and with the fixture notes
     var server = ImageServer.zimage("/nonexistent/sd-server", "/nonexistent", "1", 8190)
     var c = Creator(9000, 5000, server^, "build/g72/pictures-test")
