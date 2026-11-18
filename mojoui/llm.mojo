@@ -186,6 +186,11 @@ struct Llm(Movable):
                 if line.byte_length() > 0:
                     out.append(_event(String(line)))
 
+    def test_fault(self, what: Int) -> Int:
+        """A test hook: 1, 2 or 3 makes the next request fail inside the engine (its token feed, its admission, its end), 0
+        clears it. The engine must end that request with an error and go on. Returns how many requests it still knows."""
+        return _fn[_ERR](_dlsym(self.lib, "llm_test_fault"))(self.handle, what)
+
     def cancel(self, id: Int):
         """Stops request `id` at the next decode step; its DONE (reason "cancel") follows from poll()."""
         _fn[_CANCEL](_dlsym(self.lib, "llm_cancel"))(self.handle, id)

@@ -90,6 +90,7 @@ struct Req {
     // events not yet polled (guarded by Engine::mu)
     std::string out;
     bool finished = false;
+    clk::time_point t_done = clk::now();   // when it finished (a request nobody polls to the end is dropped after a while)
 };
 
 struct Seq {
@@ -113,6 +114,7 @@ struct Engine {
     std::vector<Seq> seqs;
     int64_t next_id = 1;
     bool quit = false;
+    std::atomic<int> fault{0};          // a test hook (llm_test_fault): 1 = the next request's token feed throws after 3 tokens, 2 = its admission throws, 3 = its end throws
     std::thread th;
 };
 
@@ -168,6 +170,7 @@ void emit_error(Engine * e, Req & r, const std::string & why) {
     emit(e, r, "{\"t\":\"error\",\"s\":" + jstr(why) + "}");
     std::lock_guard<std::mutex> l(e->mu);
     r.finished = true;
+    r.t_done = clk::now();
 }
 
 // length of the complete-UTF-8 prefix of s
@@ -194,7 +197,7 @@ void seq_reset(Engine * e, int s) {
     e->seqs[s].ckpts.clear();
 }
 
-void take_checkpoint(Engine * e, int s, int32_t n) {
+void take_checkpoint_inner(Engine * e, int s, int32_t n) {
     Seq & sq = e->seqs[s];
     llama_synchronize(e->ctx);
     size_t sz = llama_state_seq_get_size_ext(e->ctx, s, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
@@ -210,9 +213,18 @@ void take_checkpoint(Engine * e, int s, int32_t n) {
     while (sq.ckpts.size() > MAX_CKPTS) sq.ckpts.pop_front();
 }
 
+void take_checkpoint(Engine * e, int s, int32_t n) {
+    try {
+        take_checkpoint_inner(e, s, n);
+    } catch (...) {
+        e->seqs[s].ckpts.clear();
+    }
+}
+
 // Turn a queued request into a prefilling one: template, tokens, cache reuse. false: an error event was emitted.
-bool admit(Engine * e, int s, Req & r) {
+bool admit_inner(Engine * e, int s, Req & r) {
     r.t_admit = clk::now();
+    if (e->fault.load() == 2) { e->fault = 0; throw std::runtime_error("test fault in admit"); }
     try {
         common_chat_templates_inputs in;
         in.messages = common_chat_msgs_parse_oaicompat(common_json::parse(r.messages));
@@ -293,9 +305,34 @@ bool admit(Engine * e, int s, Req & r) {
     return true;
 }
 
-void finish(Engine * e, int s, Req & r, const char * reason) {
+// One request failed in a way nobody planned for: it ends with an error event, its sequence starts empty (its KV is in an
+// unknown state), and the engine and every other sequence go on.
+void fail_request(Engine * e, int s, Req & r, const std::string & why) {
+    emit_error(e, r, why);
+    if (r.smpl) { common_sampler_free(r.smpl); r.smpl = nullptr; }
+    seq_reset(e, s);
+    {
+        std::lock_guard<std::mutex> l(e->mu);
+        if (e->seqs[s].active.get() == &r) e->seqs[s].active.reset();
+    }
+    wake(e);
+}
+
+bool admit(Engine * e, int s, Req & r) {
+    try {
+        return admit_inner(e, s, r);
+    } catch (const std::exception & ex) {
+        fail_request(e, s, r, std::string("could not start the request: ") + ex.what());
+    } catch (...) {
+        fail_request(e, s, r, "could not start the request");
+    }
+    return false;
+}
+
+void finish_inner(Engine * e, int s, Req & r, const char * reason) {
     const bool cancelled = std::string(reason) == "cancel";
     if (r.session) {
+        if (e->fault.load() == 3) { e->fault = 0; throw std::runtime_error("test fault at the end"); }
         common_chat_input rest;
         if (!r.pending.empty()) rest = common_chat_input(std::string(r.pending));
         r.pending.clear();
@@ -326,16 +363,28 @@ void finish(Engine * e, int s, Req & r, const char * reason) {
     {
         std::lock_guard<std::mutex> l(e->mu);
         r.finished = true;
+        r.t_done = clk::now();
         e->seqs[s].active.reset();
     }
     wake(e);
 }
 
-void handle_token(Engine * e, int s, Req & r, llama_token tok) {
+void finish(Engine * e, int s, Req & r, const char * reason) {
+    try {
+        finish_inner(e, s, r, reason);
+    } catch (const std::exception & ex) {
+        fail_request(e, s, r, std::string("the reply could not be finished: ") + ex.what());
+    } catch (...) {
+        fail_request(e, s, r, "the reply could not be finished");
+    }
+}
+
+void handle_token_inner(Engine * e, int s, Req & r, llama_token tok) {
     auto now = clk::now();
     if (!r.got_first) { r.got_first = true; r.t_first = now; }
     r.t_last = now;
     r.n_gen++;
+    if (e->fault.load() == 1 && r.n_gen == 3) { e->fault = 0; throw std::runtime_error("test fault in the token feed"); }
     common_sampler_accept(r.smpl, tok, true);
     r.last = tok;
     if (llama_vocab_is_eog(e->vocab, tok)) { finish(e, s, r, "stop"); return; }
@@ -359,6 +408,112 @@ void handle_token(Engine * e, int s, Req & r, llama_token tok) {
     if (r.n_gen >= r.max_tokens || (int) e->seqs[s].cached.size() + 1 >= e->n_ctx) finish(e, s, r, "length");
 }
 
+void handle_token(Engine * e, int s, Req & r, llama_token tok) {
+    try {
+        handle_token_inner(e, s, r, tok);
+    } catch (const std::exception & ex) {
+        fail_request(e, s, r, std::string("the reply could not be read: ") + ex.what());
+    } catch (...) {
+        fail_request(e, s, r, "the reply could not be read");
+    }
+}
+
+void fail_all(Engine * e, const std::string & why) {
+    for (int s = 0; s < (int) e->seqs.size(); s++) {
+        std::shared_ptr<Req> a;
+        { std::lock_guard<std::mutex> l(e->mu); a = e->seqs[s].active; }
+        if (a) fail_request(e, s, *a, why);
+    }
+}
+
+// One pass of the engine: admit, batch, decode, sample. Anything it throws ends the requests that were in it, not the engine.
+void engine_pass(Engine * e, common_batch & batch) {
+    // admit what is waiting, end what was cancelled
+    std::vector<std::pair<int, std::shared_ptr<Req>>> active;
+    for (int s = 0; s < (int) e->seqs.size(); s++) {
+        Seq & sq = e->seqs[s];
+        while (true) {
+            std::shared_ptr<Req> q;
+            {
+                std::lock_guard<std::mutex> l(e->mu);
+                if (sq.active || sq.queue.empty()) break;
+                q = sq.queue.front();
+                sq.queue.pop_front();
+                sq.active = q;
+            }
+            if (q->cancel) { finish(e, s, *q, "cancel"); continue; }
+            if (!admit(e, s, *q)) {
+                std::lock_guard<std::mutex> l(e->mu);
+                sq.active.reset();
+                continue;
+            }
+            break;
+        }
+        std::shared_ptr<Req> a;
+        { std::lock_guard<std::mutex> l(e->mu); a = sq.active; }
+        if (a && a->cancel) { finish(e, s, *a, "cancel"); a.reset(); }
+        if (a) active.emplace_back(s, a);
+    }
+    if (active.empty()) return;
+
+    // one batch for every active sequence: a token each for the ones generating, a chunk for the ones reading
+    batch.clear();
+    for (auto & [s, rp] : active) {
+        Req & r = *rp;
+        Seq & sq = e->seqs[s];
+        r.i_logits = -1;
+        if (r.generating) {
+            sq.cached.push_back(r.last);
+            r.i_logits = batch.add(r.last, (llama_pos) (sq.cached.size() - 1), s, true);
+        } else {
+            int32_t n = (int32_t) r.prompt.size();
+            int32_t take = std::min<int32_t>(n - r.n_done, e->n_ubatch);
+            if (r.ck_at > r.n_done) take = std::min<int32_t>(take, r.ck_at - r.n_done);
+            take = std::min<int32_t>(take, e->n_batch - batch.size());
+            for (int32_t i = 0; i < take; i++) {
+                bool out = (r.n_done + i == n - 1);
+                int idx = batch.add(r.prompt[r.n_done + i], r.n_done + i, s, out);
+                if (out) r.i_logits = idx;
+                sq.cached.push_back(r.prompt[r.n_done + i]);
+            }
+            r.n_done += take;
+        }
+    }
+    if (batch.size() == 0) return;
+    auto t_dec = clk::now();
+    int ret = llama_process(e->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get());
+    if (ret == 0) llama_synchronize(e->ctx);
+    double dec_ms = std::chrono::duration<double, std::milli>(clk::now() - t_dec).count();
+    if (ret != 0) {
+        for (auto & [s, rp] : active) {
+            emit_error(e, *rp, ret == 1 ? "the context is full" : "decode failed (" + std::to_string(ret) + ")");
+            if (rp->smpl) { common_sampler_free(rp->smpl); rp->smpl = nullptr; }
+            seq_reset(e, s);
+            std::lock_guard<std::mutex> l(e->mu);
+            e->seqs[s].active.reset();
+        }
+        wake(e);
+        return;
+    }
+
+    for (auto & [s, rp] : active) {
+        Req & r = *rp;
+        if (!r.generating && r.ck_at > 0 && r.n_done == r.ck_at) {
+            take_checkpoint(e, s, r.ck_at);
+            r.ck_at = -1;
+        }
+        if (r.i_logits < 0) continue;
+        if (!r.generating) { r.generating = true; r.t_prefilled = clk::now(); }
+        auto t_smp = clk::now();
+        llama_token tok = common_sampler_sample(r.smpl, e->ctx, r.i_logits);
+        auto t_prs = clk::now();
+        r.ms_decode += dec_ms;
+        r.ms_sample += std::chrono::duration<double, std::milli>(t_prs - t_smp).count();
+        handle_token(e, s, r, tok);
+        r.ms_parse += std::chrono::duration<double, std::milli>(clk::now() - t_prs).count();
+    }
+}
+
 void engine_main(Engine * e) {
     common_batch batch(e->ctx);
     while (true) {
@@ -371,89 +526,12 @@ void engine_main(Engine * e) {
             });
             if (e->quit) break;
         }
-        // admit what is waiting, end what was cancelled
-        std::vector<std::pair<int, std::shared_ptr<Req>>> active;
-        for (int s = 0; s < (int) e->seqs.size(); s++) {
-            Seq & sq = e->seqs[s];
-            while (true) {
-                std::shared_ptr<Req> q;
-                {
-                    std::lock_guard<std::mutex> l(e->mu);
-                    if (sq.active || sq.queue.empty()) break;
-                    q = sq.queue.front();
-                    sq.queue.pop_front();
-                    sq.active = q;
-                }
-                if (q->cancel) { finish(e, s, *q, "cancel"); continue; }
-                if (!admit(e, s, *q)) {
-                    std::lock_guard<std::mutex> l(e->mu);
-                    sq.active.reset();
-                    continue;
-                }
-                break;
-            }
-            std::shared_ptr<Req> a;
-            { std::lock_guard<std::mutex> l(e->mu); a = sq.active; }
-            if (a && a->cancel) { finish(e, s, *a, "cancel"); a.reset(); }
-            if (a) active.emplace_back(s, a);
-        }
-        if (active.empty()) continue;
-
-        // one batch for every active sequence: a token each for the ones generating, a chunk for the ones reading
-        batch.clear();
-        for (auto & [s, rp] : active) {
-            Req & r = *rp;
-            Seq & sq = e->seqs[s];
-            r.i_logits = -1;
-            if (r.generating) {
-                sq.cached.push_back(r.last);
-                r.i_logits = batch.add(r.last, (llama_pos) (sq.cached.size() - 1), s, true);
-            } else {
-                int32_t n = (int32_t) r.prompt.size();
-                int32_t take = std::min<int32_t>(n - r.n_done, e->n_ubatch);
-                if (r.ck_at > r.n_done) take = std::min<int32_t>(take, r.ck_at - r.n_done);
-                take = std::min<int32_t>(take, e->n_batch - batch.size());
-                for (int32_t i = 0; i < take; i++) {
-                    bool out = (r.n_done + i == n - 1);
-                    int idx = batch.add(r.prompt[r.n_done + i], r.n_done + i, s, out);
-                    if (out) r.i_logits = idx;
-                    sq.cached.push_back(r.prompt[r.n_done + i]);
-                }
-                r.n_done += take;
-            }
-        }
-        if (batch.size() == 0) continue;
-        auto t_dec = clk::now();
-        int ret = llama_process(e->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get());
-        if (ret == 0) llama_synchronize(e->ctx);
-        double dec_ms = std::chrono::duration<double, std::milli>(clk::now() - t_dec).count();
-        if (ret != 0) {
-            for (auto & [s, rp] : active) {
-                emit_error(e, *rp, ret == 1 ? "the context is full" : "decode failed (" + std::to_string(ret) + ")");
-                if (rp->smpl) { common_sampler_free(rp->smpl); rp->smpl = nullptr; }
-                seq_reset(e, s);
-                std::lock_guard<std::mutex> l(e->mu);
-                e->seqs[s].active.reset();
-            }
-            wake(e);
-            continue;
-        }
-
-        for (auto & [s, rp] : active) {
-            Req & r = *rp;
-            if (!r.generating && r.ck_at > 0 && r.n_done == r.ck_at) {
-                take_checkpoint(e, s, r.ck_at);
-                r.ck_at = -1;
-            }
-            if (r.i_logits < 0) continue;
-            if (!r.generating) { r.generating = true; r.t_prefilled = clk::now(); }
-            auto t_smp = clk::now();
-            llama_token tok = common_sampler_sample(r.smpl, e->ctx, r.i_logits);
-            auto t_prs = clk::now();
-            r.ms_decode += dec_ms;
-            r.ms_sample += std::chrono::duration<double, std::milli>(t_prs - t_smp).count();
-            handle_token(e, s, r, tok);
-            r.ms_parse += std::chrono::duration<double, std::milli>(clk::now() - t_prs).count();
+        try {
+            engine_pass(e, batch);
+        } catch (const std::exception & ex) {
+            fail_all(e, std::string("the engine hit an error: ") + ex.what());
+        } catch (...) {
+            fail_all(e, "the engine hit an error");
         }
     }
     for (int s = 0; s < (int) e->seqs.size(); s++) {
@@ -555,6 +633,10 @@ int64_t llm_chat(int64_t h, int64_t seq, const char * msgs, int64_t msgs_len, co
     int64_t id;
     {
         std::lock_guard<std::mutex> l(e->mu);
+        auto now = clk::now();  // (a finished request nobody polled to its end, a minute old, is forgotten)
+        for (auto it = e->reqs.begin(); it != e->reqs.end();) {
+            if (it->second->finished && now - it->second->t_done > std::chrono::seconds(60)) it = e->reqs.erase(it); else ++it;
+        }
         id = r->id = e->next_id++;
         e->reqs[id] = r;
         e->seqs[seq].queue.push_back(r);
@@ -588,6 +670,16 @@ int64_t llm_poll(int64_t h, int64_t req, char * buf, int64_t cap) {
     return (int64_t) take;
 }
 
+// A test hook: what = 1, 2 or 3 makes the next request fail inside the engine (its token feed, its admission, its end) so a
+// test can see that the engine and the other sequences survive; 0 clears it. Returns the number of requests still known.
+int64_t llm_test_fault(int64_t h, int64_t what) {
+    Engine * e = (Engine *) (intptr_t) h;
+    if (!e) return -1;
+    e->fault = (int) what;
+    std::lock_guard<std::mutex> l(e->mu);
+    return (int64_t) e->reqs.size();
+}
+
 void llm_cancel(int64_t h, int64_t req) {
     Engine * e = (Engine *) (intptr_t) h;
     if (!e) return;
@@ -595,6 +687,7 @@ void llm_cancel(int64_t h, int64_t req) {
         std::lock_guard<std::mutex> l(e->mu);
         auto it = e->reqs.find(req);
         if (it == e->reqs.end()) return;
+        if (it->second->finished) { e->reqs.erase(it); return; }  // (done and never read: cancelling it is forgetting it)
         it->second->cancel = true;
     }
     e->cv.notify_all();

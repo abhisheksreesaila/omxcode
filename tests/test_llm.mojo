@@ -147,6 +147,36 @@ def main() raises:
     assert_true(r2.done.n_cached >= r1.done.n_prompt - 8, "the second turn reuses the first's prompt: " + String(r2.done.n_cached))
     assert_true(r2.done.ttft_ms <= 0.5 * r1.done.ttft_ms, "turn 2 ttft " + String(r2.done.ttft_ms) + " <= half of " + String(r1.done.ttft_ms))
 
+    # 5b. D-7302: whatever goes wrong inside the engine for one request ends that request with an error and nothing else. Each
+    # fault (the token feed, the admission, the end of the reply) hits the next request; the one after it, and a request on the
+    # other sequence in the same moment, answer as if nothing had happened.
+    for what in range(1, 4):
+        _ = llm.test_fault(what)
+        var other = llm.chat("[" + msg("user", "What is the capital of Italy? One word.") + "]", seq=1, max_tokens=24)  # (sequence 1 is queued behind nothing: the fault is for whichever the engine takes first)
+        var failing = llm.chat("[" + msg("user", "Count from one to ten in words.") + "]", seq=0, max_tokens=40)
+        var bad = String("")
+        var ids = List[Int]()
+        ids.append(other)
+        ids.append(failing)
+        var errors = 0
+        var finished = 0
+        for id in ids:
+            try:
+                var rep = llm.wait(id)
+                finished += 1
+                _ = rep^
+            except err:
+                errors += 1
+                bad = String(err)
+        assert_equal(errors, 1)  # exactly one of the two requests met the fault
+        assert_equal(finished, 1)  # ... and the other one finished
+        assert_true(bad.find("test fault") >= 0, "the error says what failed: " + bad)
+        var after = llm.complete("[" + msg("user", "What is the capital of France? One word.") + "]", max_tokens=24)
+        assert_true(after.text.find("Paris") >= 0, "the engine answers after fault " + String(what) + ": " + after.text)
+        var after1 = llm.complete("[" + msg("user", "What is the capital of Spain? One word.") + "]", seq=1, max_tokens=24)
+        assert_true(after1.text.find("Madrid") >= 0, "the other sequence answers after fault " + String(what) + ": " + after1.text)
+        print("llm fault", what, ": ok |", bad)
+
     # 6. a background request beside the conversation: both finish, both right
     var bg = llm.chat("[" + msg("user", "Write the numbers from 1 to 60, one per line, and nothing else.") + "]", seq=1, max_tokens=400)
     sleep_ms(300)  # (the background one is generating)
@@ -187,7 +217,9 @@ def main() raises:
         if i > 0:  # (the first one warms the cache)
             in_proc.append(r.done.ttft_ms)
     var http_ms = List[Float64]()
-    if http_url != "":
+    # (D-7311: the baseline is part of the proof, never skipped: no LLM_HTTP means a failed test, not a quiet pass)
+    assert_true(http_url != "", "no HTTP baseline: set LLM_HTTP to a running llama-server with the same model (the checker starts one)")
+    if True:
         makedirs("build/g72", exist_ok=True)
         var spec = open("build/g72/ttft-messages.json", "w")
         spec.write('{"messages":' + m7 + ',"tools":' + TOOLS + "}")
