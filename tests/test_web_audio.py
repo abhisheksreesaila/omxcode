@@ -168,6 +168,19 @@ def main():
                  "--autoplay-policy=no-user-gesture-required", "--no-sandbox"]
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=CHROMIUM, headless=True, args=flags)
+            # D-7310: one live page per process: a second tab takes over, and the first says so (it doesn't keep a second copy
+            # of the app and its model alive)
+            ctx = browser.new_context(permissions=["microphone"])
+            first = ctx.new_page()
+            first.goto(f"http://127.0.0.1:{port}/")
+            first.wait_for_selector("text=Press Listen.")
+            second = ctx.new_page()
+            second.goto(f"http://127.0.0.1:{port}/")
+            second.wait_for_selector("text=Press Listen.")
+            wait_for(lambda: "belong to one page at a time" in first.inner_text("body"), 15, "the first tab's notice")
+            assert "Press Listen." in second.inner_text("body")
+            report["second_tab_notice"] = True
+            ctx.close()
             ctx = browser.new_context(viewport={"width": 820, "height": 1180}, permissions=["microphone"])
             page = ctx.new_page()
             drive(page, report, "local", f"http://127.0.0.1:{port}/", 3.0)

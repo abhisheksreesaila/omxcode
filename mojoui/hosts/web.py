@@ -2504,6 +2504,7 @@ def make_app(module_dir):
             return Response(status_code=404)
         return Response(worklet, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
+    audio_logged = []  # (the audio pump says why it stopped once, not for every page)
     hub = {"active": None}  # the audio socket holding the microphone and speaker: the last page that was tapped
 
     async def audio_socket(ws):
@@ -2546,7 +2547,10 @@ def make_app(module_dir):
                             await ws.send_text('{"t":"tap"}')
                         state["told"] = wanted
                     await asyncio.sleep(0.005)
-            except Exception:  # (the socket closed under a send: the receive loop below ends too)
+            except Exception as e:  # (the socket closed under a send: the receive loop below ends too; anything else is said once)
+                if not isinstance(e, (WebSocketDisconnect, RuntimeError)) and not audio_logged:
+                    audio_logged.append(1)
+                    print(f"AUDIO: the pump for a page stopped: {type(e).__name__}: {e}", flush=True)
                 return
 
         task = asyncio.create_task(pump())
@@ -2650,9 +2654,12 @@ def make_app(module_dir):
             made()
             sessions[sid] = s
             if not PUBLIC:
-                gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
+                keep = 1 if audio else MAX_SESSIONS  # (D-7310: an app with sound has one microphone, one speaker and one model per process)
+                gone += list(sessions.items())[:max(0, len(sessions) - keep)]  # (local: the oldest tab gives way)
         for old_sid, old in gone:
-            end_session(old_sid, old, "This page was closed to make room. Reload it to start again.")
+            end_session(old_sid, old, "Another page opened this app, so this one stopped: the microphone, the speaker and the model "
+                        "belong to one page at a time. Reload this page to take them back." if audio and not PUBLIC
+                        else "This page was closed to make room. Reload it to start again.")
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
