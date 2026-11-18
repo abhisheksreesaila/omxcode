@@ -111,6 +111,22 @@ def main() raises:
     assert_equal(len(links), 1, "Return on the same link again adds nothing")
     assert_equal(links.problem != "", True, "an already-made link says so")
     links.problem = ""
+    # a video card's half-typed column (its columns come from know_card, not a table's schema): Return completes, never links "fr"
+    links.draft = "fleet.episode = clip.mp4.fr"
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(links.draft, "fleet.episode = clip.mp4.frame", "Return on a video card's half-typed column completes it")
+    assert_equal(len(links), 1, "and links nothing")
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(links.list()[1], "fleet.episode = clip.mp4.frame", "Return on the whole column links it")
+    _ = links.remove(1)
+    links.draft = "orders.order_id = clip.mp4.code"  # (a video's analysis column, none of file/t/frame: links as typed)
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(links.list()[1], "orders.order_id = clip.mp4.code", "a column nothing completes links as typed")
+    _ = links.remove(1)
+    links.draft = ""  # (Return on an empty field offers the first card: nothing links)
+    _ = links.update(Event(7600 + LINKS_ADD, "", 0))
+    assert_equal(links.draft, "fleet.", "Return on an empty field fills the first card's name")
+    assert_equal(len(links), 1, "and links nothing")
     links.draft = "nonsense"
     _ = links.update(Event(7600 + LINKS_ADD, "", 0))
     assert_equal(links.problem != "", True, "nothing to complete: the error shows")

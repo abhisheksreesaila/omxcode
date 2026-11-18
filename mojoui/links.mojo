@@ -851,6 +851,14 @@ struct Links(Movable, Sized):
             self.draft = event.text
         elif m == LINKS_ADD:
             var text = event.text if event.text != "" else self.draft
+            var next = self.complete(text)
+            var whole = len(next) == 0
+            for c in next:
+                whole = whole or c.text == text
+            if not whole:  # (the word being typed only begins what could come: "clip.mp4.fr", whose card's columns the
+                self.draft = next[0].text  # check below can't know, links nothing; Return completes it, as on any partial draft)
+                self.problem = String("")
+                return True
             try:
                 _ = self.add(parse_link(text, BY_PERSON))  # (a host can't tell a person's typing from an agent's)
                 self.draft = String("")

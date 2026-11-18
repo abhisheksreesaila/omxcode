@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "build/g73/m1"
-DATA = Path(os.environ.get("G73_DATA", "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g71/build/g47/full"))
+DATA = Path(os.environ.get("G73_DATA", ROOT / "build/g47/full"))  # (goal 47's DROID folder: scripts/robot_data.py makes it)
 APP = ROOT / "build/omxplorer/linux/omxplorer"
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -65,15 +65,13 @@ def gtk():
         f"pick:Choose a file={DATA / 'fleet.csv'}", "waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000",
         f"pick:Table={DATA / 'telemetry.parquet'}", "pause:2500", "tap:Links", "pause:400",
         f"shot:{OUT}/gtk-1-empty.png",
-        f"type:{L}=fl", "pause:300", f"shot:{OUT}/gtk-2-fl.png",
-        f"type:{L}=fleet.ep", "pause:300", f"shot:{OUT}/gtk-3-fleet-ep.png",
-        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-4-operators.png",
-        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-5-second-end.png",
-        f"type:{L}=fleet.episode = tel", "pause:300",
-        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-6-telemetry-columns.png",
-        f"type:{L}=fleet.episode = telemetry.ep", "pause:300",
-        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-7-whole-link.png",
-        f"submit:{L}", "pause:600", f"shot:{OUT}/gtk-8-linked.png",
+        f"type:{L}=fl", "pause:300", f"shot:{OUT}/gtk-2-fl.png",  # (the only typing: two letters)
+        f"submit:{L}", "pause:300", f"shot:{OUT}/gtk-3-return-completes.png",  # Return on a partial draft: it becomes fleet.
+        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-4-operators.png",  # fleet.episode (its first column)
+        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-5-second-end.png",  # =
+        "tap:link-pick-1", "pause:300", f"shot:{OUT}/gtk-6-telemetry-columns.png",  # telemetry.
+        "tap:link-pick-0", "pause:300", f"shot:{OUT}/gtk-7-whole-link.png",  # telemetry.episode
+        f"submit:{L}", "pause:600", f"shot:{OUT}/gtk-8-linked.png",  # Return: the link
     ])
     env = {"OMX_DOCUMENTS": str(home / "docs"), "OMX_CONFIG": str(home / "config"), "MOJOUI_TEST": steps,
            "MOJOUI_WINDOW": "1440x900", "MOJOUI_SHOT": str(OUT / "gtk-final.png"), "MOJOUI_TRACE": "1", "MOJOUI_BUDGET_MS": "50"}
@@ -84,12 +82,13 @@ def gtk():
     if r.returncode != 0 or bad:
         return f"GTK run failed (exit {r.returncode}): " + " / ".join(bad)[:500]
     got = offers(out)
-    for miss in (need(got, "fl", ["fleet."]), need(got, "fleet.ep", ["episode"]), need(got, "fleet.episode ", ["=", "~"]),
-                 need(got, "fleet.episode = ", first="fleet."), need(got, "fleet.episode = tel", ["telemetry."]),
-                 need(got, "fleet.episode = telemetry.", first="episode"),
-                 need(got, "fleet.episode = telemetry.episode", ["episode"])):
+    for miss in (need(got, "fl", ["fleet."]), need(got, "fleet.", first="episode"), need(got, "fleet.episode ", ["=", "~"]),
+                 need(got, "fleet.episode = ", ["fleet.", "telemetry."]), need(got, "fleet.episode = telemetry.", first="episode")):
         if miss:
             return "GTK: " + miss
+    links = [l for l in out.splitlines() if l.startswith("LINK: ")]
+    if links[:1] != ["LINK: fleet.episode = telemetry.episode (typed)"]:  # (Return on "fl" filled the draft and linked nothing)
+        return f"GTK: the first link made wasn't fleet.episode = telemetry.episode from the chips' draft: {links[:3]}"
     if "LINK: fleet.episode = telemetry.episode (typed)" not in out:
         return "GTK: Return on the chips' draft didn't link fleet.episode = telemetry.episode"
     if got[-1][0] != "":  # (after Return the field is empty: no stale change brings the old text back)
@@ -168,7 +167,7 @@ def web():
             return "web: after telemetry. no chip offers its episode column"
         call(name)
         time.sleep(0.2)
-        call("link", text="fleet.episode = telemetry.episode", submit=True)
+        call("link", submit=True)  # (Return on the draft the chips built: no text typed)
         time.sleep(0.6)
         shown = call("links")
         got = offers("\n".join(log))

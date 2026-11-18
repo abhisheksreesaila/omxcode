@@ -9,13 +9,14 @@
 Layouts are read from the host's `BOARD:` lines / the page's DOM, never the app's own word for it; screenshots in build/g73/m2/.
 """
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "build/g73/m2"
-DATA = [ROOT / "build/g47/full", Path("/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g71/build/g47/full")]
+DATA = [Path(os.environ.get("G73_DATA", ROOT / "build/g47/full"))]  # (goal 47's DROID folder: scripts/robot_data.py)
 GAP = 8
 MIN_W, MIN_H = 300, 200  # omxplorer's TILE_MIN_W / TILE_MIN_H
 sys.path.insert(0, str(ROOT / "scripts"))

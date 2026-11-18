@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "build/g73/m3"
-FLEET = "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g71/build/g47/full/fleet.csv"
+FLEET = os.environ.get("G73_DATA", str(ROOT / "build/g47/full")) + "/fleet.csv"  # (goal 47's DROID folder: scripts/robot_data.py)
 sys.path.insert(0, str(ROOT / "scripts"))
 
 # the page: import dialog -> Create table, then two charts (the Chart tool), as a person would
