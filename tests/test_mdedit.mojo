@@ -69,9 +69,13 @@ def main() raises:
     assert_true(has_note(sc, "marker number 5"))
     assert_true(has_note(sc, "run quote text quoted words"))
     assert_true(has_note(sc, "run code code let x = 1"))
-    assert_true(has_note(sc, "run p strike gone") or has_note(sc, "run p text gone"))
+    assert_true(has_note(sc, "run p strike gone"))
     var gone = text_op(sc, "gone")
     assert_true(gone >= 0)
+    var struck = False  # (the strike line: a thin rect right after the word's text op, across its middle)
+    if gone + 1 < sc.ops():
+        struck = sc.text_at(gone + 1) == "" and sc.num(gone + 1, 3) < 2
+    assert_true(struck)
     print("mdedit styles: ok")
 
     # Marks: hidden off the caret's paragraph, drawn on it.

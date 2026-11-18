@@ -608,17 +608,22 @@ def test_600(font: Font) raises:
     var ol: ObjectLayer
     var source: String
     var t0 = perf_counter_ns()
-    try:
+    var text = String()
+    var have_file = True
+    try:  # (only a missing file falls back: review round 1 found the counts inside this try, so a bad import hid)
         var f = open("build/g74/bench-note.json", "r")
-        var text = f.read()
+        text = f.read()
         f.close()
+    except:
+        have_file = False
+    if have_file:
         ol = import_fabric(text, font)
         source = "build/g74/bench-note.json"
         assert_equal(ol.count_kind(TEXT), 300)
         assert_equal(ol.count_kind(INK), 240)
         assert_equal(ol.count_kind(RECT), 60)
         assert_equal(ol.count_kind(CONNECTOR), 45)
-    except:
+    else:
         ol = seeded_note()
         source = "a seeded 645-object note (no build/g74/bench-note.json)"
     var load_ms = Float64(perf_counter_ns() - t0) / 1e6
@@ -698,7 +703,7 @@ def test_save(font: Font) raises:
     """Added by the parent (D-7423): save_text → load_text keeps every object, its kind, box, text, ink and connector
     ends; saving the loaded layer again gives the same text (ids are reissued, so the first save is compared by counts)."""
     var ol = ObjectLayer()
-    var a = ol.add_text(10, 20, 200, 60, "Ship\nthe \\ export", 18)
+    var a = ol.add_text(10, 20, 200, 60, "Ship\nthe \\ export\tnow", 18)
     var b = ol.add_sticky(400, 50, 160, "Idea")
     _ = ol.add_ellipse(50, 300, 120, 80, 0xFF88CC88)
     var st = Stroke(3, 0xFF222222)
@@ -717,7 +722,19 @@ def test_save(font: Font) raises:
     var l3 = ObjectLayer()
     l3.load_text(s2)
     assert_equal(l3.save_text(), s2)
-    assert_true(s2.find("Ship\\nthe \\\\ export") >= 0)
+    assert_true(s2.find("Ship\\nthe \\\\ export\\tnow") >= 0)
+    var kept = False
+    for i in range(l2.count()):
+        if l2.objs[i].kind == TEXT:
+            kept = l2.objs[i].text == "Ship\nthe \\ export\tnow"
+    assert_true(kept)
+    var bad = ObjectLayer()
+    var refused = False
+    try:
+        bad.load_text("objectlayer 1\n1\t2\t3\n")
+    except:
+        refused = True
+    assert_true(refused)
     var found = False
     for i in range(l2.count()):
         if l2.objs[i].kind == CONNECTOR:

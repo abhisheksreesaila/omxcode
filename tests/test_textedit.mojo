@@ -5,7 +5,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from std.time import perf_counter_ns
 
-from mojoui.textedit import TextEdit, PlainStyler, Pos, SHIFT, CTRL
+from mojoui.textedit import TextEdit, PlainStyler, Pos, SHIFT, CTRL, ALT
 from mojoui.text import Font
 from mojoui.scene import Scene
 
@@ -164,6 +164,37 @@ def main() raises:
     assert_equal(ed.text(), "one two!")
     print("textedit undo: ok")
 
+    # Clipboard (review round 1): Ctrl+C copies the selection (its version bumps, for the host's Clipboard view), Ctrl+V
+    # pastes it over the selection or at the caret (one undo step), Ctrl+X cuts; Option (Alt) moves and deletes by words.
+    ed.set_text("alpha beta\ngamma")
+    ed.anchor = Pos(0, 6)
+    ed.caret = Pos(0, 10)
+    _ = ed.key("c", CTRL, t, font, st)
+    assert_equal(ed.clip, "beta")
+    assert_equal(ed.clip_version, 1)
+    _ = ed.key("End", CTRL, t, font, st)
+    _ = ed.key("v", CTRL, t, font, st)
+    assert_equal(ed.text(), "alpha beta\ngammabeta")
+    _ = ed.key("z", CTRL, t, font, st)
+    assert_equal(ed.text(), "alpha beta\ngamma")
+    ed.anchor = Pos(0, 0)
+    ed.caret = Pos(0, 6)
+    _ = ed.key("x", CTRL, t, font, st)
+    assert_equal(ed.clip, "alpha ")
+    assert_equal(ed.clip_version, 2)
+    assert_equal(ed.text(), "beta\ngamma")
+    ed.anchor = Pos(0, 2)
+    ed.caret = Pos(1, 3)
+    _ = ed.key("v", CTRL, t, font, st)
+    assert_equal(ed.text(), "bealpha ma")
+    ed.set_text("one two three")
+    _ = ed.key("End", 0, t, font, st)
+    _ = ed.key("ArrowLeft", ALT, t, font, st)
+    assert_true(ed.caret == Pos(0, 8))
+    _ = ed.key("Backspace", ALT, t, font, st)
+    assert_equal(ed.text(), "one three")
+    print("textedit clipboard: ok")
+
     # 1M: open, then 200 keystrokes in the middle, each edit + re-layout + paint of the view into a Scene.
     var big = String()
     var s = UInt32(7)
@@ -196,7 +227,31 @@ def main() raises:
         doc.paint(frame, font, 0, 0, st)
         times.append(Float64(perf_counter_ns() - a) / 1e6)
     var worst = p95(times^)
-    print("textedit 1M numbers: chars=" + String(doc.chars()) + " paragraphs=" + String(len(doc.paras)) + " open_ms=" + String(open_ms) + " key_p95_ms=" + String(worst))
+    # (review round 1) Enter and Backspace joins in the middle: paragraphs come and go, the ones after shift.
+    var joins = List[Float64]()
+    for k in range(100):
+        var a = perf_counter_ns()
+        _ = doc.key("Enter" if k % 2 == 0 else "Backspace", 0, 2_000_000 + k * 40, font, st)
+        var frame = Scene(900, 800, 1.0)
+        doc.paint(frame, font, 0, 0, st)
+        joins.append(Float64(perf_counter_ns() - a) / 1e6)
+    var join_worst = p95(joins^)
+    print("textedit 1M numbers (short paragraphs): chars=" + String(doc.chars()) + " paragraphs=" + String(len(doc.paras)) + " open_ms=" + String(open_ms) + " key_p95_ms=" + String(worst) + " enter_join_p95_ms=" + String(join_worst))
     assert_true(open_ms <= 300)
     assert_true(worst <= 4)
+    assert_true(join_worst <= 4)
+    # One 1M-character paragraph (no newlines): measured and reported, not part of the 1M claim (each key re-wraps the
+    # paragraph it's in: O(its length), D-7428).
+    var one = TextEdit("word " * 200_000)
+    one.resize(900, 800)
+    one.caret = Pos(0, 500_000)
+    one.anchor = one.caret
+    var lt = List[Float64]()
+    for k in range(20):
+        var a = perf_counter_ns()
+        _ = one.key("x", 0, 3_000_000 + k * 40, font, st)
+        var frame = Scene(900, 800, 1.0)
+        one.paint(frame, font, 0, 0, st)
+        lt.append(Float64(perf_counter_ns() - a) / 1e6)
+    print("textedit one 1M-character paragraph: key_p95_ms=" + String(p95(lt^)) + " (not bounded by this test)")
     print("textedit 1M: ok")

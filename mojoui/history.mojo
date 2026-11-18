@@ -65,11 +65,8 @@ struct History[T: Undoable](Movable):
         self.done.append(step^)
         self.at_ms = now_ms
         self.sealed = not coalesce
-        if len(self.done) > self.cap:
-            var keep = List[Self.T](capacity=self.cap)
-            for i in range(len(self.done) - self.cap, len(self.done)):
-                keep.append(self.done[i].copy())
-            self.done = keep^
+        while len(self.done) > self.cap:  # (the oldest goes: the rest shift down, moved, not copied)
+            _ = self.done.pop(0)
 
     def seal(mut self):
         self.sealed = True

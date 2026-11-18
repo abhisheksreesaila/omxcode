@@ -309,6 +309,9 @@ struct TextEdit(Movable):
     var select_color: UInt32
     var read_only: Bool
     var est_char_w: Float64  # a paragraph not laid out yet is guessed from its length
+    var clip: String  # the editor's clipboard: Ctrl+C / Ctrl+X put the selection here, Ctrl+V inserts it
+    var clip_version: Int  # bumped on every copy: an app shows it with mojoui.overlays.Clipboard(clip, clip_version),
+    # which puts it on the system clipboard (pasting from the system clipboard needs a host read: debt, D-7427)
 
     def __init__(out self, text: String = ""):
         self.paras = List[String]()
@@ -332,6 +335,8 @@ struct TextEdit(Movable):
         self.select_color = 0x40EB6325
         self.read_only = False
         self.est_char_w = 7.5
+        self.clip = ""
+        self.clip_version = 0
         self.set_text(text)
 
     # ------------------------------------------------ text
@@ -405,20 +410,19 @@ struct TextEdit(Movable):
             for k in range(len(pieces)):
                 self.paras[a.para + k] = pieces[k]
                 self.laid[a.para + k].valid = False
-        else:
-            var new_paras = List[String](capacity=len(self.paras) - removed + len(pieces))
-            var new_laid = List[Laid](capacity=len(self.paras) - removed + len(pieces))
-            for i in range(a.para):
-                new_paras.append(self.paras[i])
-                new_laid.append(self.laid[i].copy())
-            for k in range(len(pieces)):
-                new_paras.append(pieces[k])
-                new_laid.append(Laid())
-            for i in range(b.para + 1, len(self.paras)):
-                new_paras.append(self.paras[i])
-                new_laid.append(self.laid[i].copy())
-            self.paras = new_paras^
-            self.laid = new_laid^
+        else:  # (paragraphs come or go: the ones after shift in place, moved, not copied)
+            var keep = min(removed, len(pieces))
+            for k in range(keep):
+                self.paras[a.para + k] = pieces[k]
+                self.laid[a.para + k] = Laid()
+            if len(pieces) > removed:
+                for k in range(removed, len(pieces)):
+                    self.paras.insert(a.para + k, pieces[k])
+                    self.laid.insert(a.para + k, Laid())
+            else:
+                for _ in range(removed - len(pieces)):
+                    _ = self.paras.pop(a.para + keep)
+                    _ = self.laid.pop(a.para + keep)
             if self.top_para >= len(self.paras):
                 self.top_para = len(self.paras) - 1
                 self.top_off = 0
@@ -563,7 +567,35 @@ struct TextEdit(Movable):
         """A key press: a typed character, or a web key name. True when the editor used it."""
         var shift = (mods & SHIFT) != 0
         var ctrl = (mods & CTRL) != 0
+        var alt = (mods & ALT) != 0
+        if alt and not ctrl:  # (Option on a Mac: by words)
+            if name == "ArrowLeft":
+                self.move_to(self.prev_word(self.caret), shift)
+                return True
+            if name == "ArrowRight":
+                self.move_to(self.next_word(self.caret), shift)
+                return True
+            if name == "Backspace":
+                if not self.has_selection():
+                    self.anchor = self.prev_word(self.caret)
+                self.replace(self.sel_start(), self.sel_end(), "", EDIT_OTHER, now_ms)
+                return True
         if ctrl:
+            if name == "c" or name == "C":
+                if self.has_selection():
+                    self.clip = self.selected_text()
+                    self.clip_version += 1
+                return True
+            if name == "x" or name == "X":
+                if self.has_selection():
+                    self.clip = self.cut(now_ms)
+                    self.clip_version += 1
+                return True
+            if name == "v" or name == "V":
+                if self.clip != "":
+                    var pasted = self.clip
+                    self.replace(self.sel_start(), self.sel_end(), pasted, EDIT_OTHER, now_ms)
+                return True
             if name == "a" or name == "A":
                 self.select_all()
                 return True

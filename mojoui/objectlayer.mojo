@@ -1605,7 +1605,7 @@ struct ObjectLayer(Movable):
                     if j > 0:
                         out += " "
                     out += String(o.stroke.xs[j]) + "," + String(o.stroke.ys[j]) + "," + String(o.stroke.ps[j])
-            out += "\t" + o.text.replace("\\", "\\\\").replace("\n", "\\n") + "\n"
+            out += "\t" + o.text.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t") + "\n"
         return out^
 
     def load_text(mut self, text: String) raises:
@@ -1623,8 +1623,8 @@ struct ObjectLayer(Movable):
             if line == "":
                 continue
             var f = line.split("\t")
-            if len(f) < 21:
-                continue
+            if len(f) != 21:
+                raise Error("objectlayer: line " + String(li + 1) + " has " + String(len(f)) + " fields, not 21")
             var kind = Int(String(f[1]))
             var o = Obj(-1, kind, Float64(String(f[2])), Float64(String(f[3])), Float64(String(f[4])), Float64(String(f[5])), UInt32(Int(String(f[9]))))
             o.rot = Float64(String(f[6]))
@@ -1642,7 +1642,7 @@ struct ObjectLayer(Movable):
             var esc = False
             for ch in raw.codepoint_slices():
                 if esc:
-                    t += "\n" if ch == "n" else String(ch)
+                    t += "\n" if ch == "n" else ("\t" if ch == "t" else String(ch))
                     esc = False
                 elif ch == "\\":
                     esc = True

@@ -220,7 +220,10 @@ struct Main(App):
                 self.new_note(CANVAS, l.save_text())
                 self.tool = T_HAND
             elif chars > 0:
-                self.new_note(PAGE, seeded_page(chars))
+                var page_text = seeded_page(chars)
+                var t_open = now_ms()
+                self.new_note(PAGE, page_text)
+                print("PNOTE OPEN: ms=" + String(now_ms() - t_open) + " chars=" + String(self.page.ed.chars()) + " (stored in SQLite and opened in the editor)", flush=True)
             elif len(self.rows) > 0:
                 self.open(self.rows[0].id)
         except e:

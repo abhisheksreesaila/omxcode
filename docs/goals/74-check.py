@@ -2,7 +2,8 @@
 
     pixi run python docs/goals/74-check.py [M0 M1 ...]          (default: every milestone)
 
-Written before the work (2026-11-17), from the goal's words; never edited to make a milestone pass (add, don't weaken).
+Written before the work (2026-11-17), from the goal's words; never edited to make a milestone pass (add, don't weaken),
+except M7's item count (D-7426, a correction to its own contract) and, after review round 1, race.md's caveats (D-7429).
 GTK runs are headless (scripts/headless.py). Personal Note (~/Projects/personalnotev2) is only read and run; its outputs
 go to build/g74/.
 
@@ -335,8 +336,24 @@ def m7():
           "### Personal Note (Chromium, its own scripts/benchmark-leafer.mjs --dpr=1)", "", "```",
           *((pn or why_pn).strip().splitlines()[-40:]), "```", "",
           "## Page: typing in a 1,000,000-character note", "",
-          "### pnote (GTK)", "", "```", *ours_page, "```", "",
+          "### pnote (GTK)", "", "```", *[l for l in out.splitlines() if l.startswith("PNOTE OPEN:")], *ours_page, "```", "",
           "### Personal Note (Chromium, scripts/pn_typing.mjs)", "", "```", *((pn_page or why_page).strip().splitlines()[-30:]), "```", ""]
+    md += ["## Caveats (what each number is)", "",
+           "- **Not the same yardstick.** pnote's FRAMEBENCH numbers are each frame's *work* on GTK: the event, the app's update and "
+           "paint, GTK's paint, a display round trip and a full software raster of the canvas (GskCairoRenderer on a headless Xvfb "
+           "display, no GPU): an upper bound. Personal Note's canvas table is its own benchmark's *frame intervals* in headless "
+           "Chromium, locked to 60 Hz: 16.7 ms means no frame was dropped, not that a frame cost 16.7 ms. So the canvas result is "
+           "\"both hold 60 fps panning; pnote's zoom p95 work passes one frame\", not \"faster\".",
+           "- **Page typing.** Personal Note's \"main-thread work per key\" (scripts/pn_typing.mjs) is the key's handlers plus a "
+           "forced style and layout read in the next frame; it leaves out paint, raster and compositing (Chromium does those off "
+           "the main thread). pnote's number includes its whole frame, raster too. Its keydown → painted frame (~33 ms) is two "
+           "vsync waits, what a person sees on a 60 Hz screen in either app.",
+           "- **Opening.** Personal Note's open time is the page load through its Vite dev server (module transforms included), "
+           "not a production build. pnote's PNOTE OPEN line is the note stored in SQLite and opened in the editor; the window "
+           "itself isn't timed here. tests/test_textedit times the editor alone opening 1M characters (a few ms).",
+           "- **Scope of 1M.** 1M characters in ordinary paragraphs (~65 characters each). One 1M-character paragraph re-wraps on "
+           "every key in pnote (~27 ms a key, tests/test_textedit prints it): debt, D-7428.",
+           "- Both sides ran on the same machine, same seeded content (the same generator, word list and seed), 1440×900 at 1×.", ""]
     race = ROOT / "docs" / "goals" / "74" / "race.md"
     race.parent.mkdir(parents=True, exist_ok=True)
     race.write_text("\n".join(md))
