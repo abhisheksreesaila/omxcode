@@ -6,6 +6,9 @@
 #          OrbView(ORB_CANVAS, self.orb.version(), big=True)                  view(): big fills the room it is given, small sits beside words
 #          draw(): self.orb.draw(surface, palette)                              springs step by the time since the last draw
 #   Rim:   RimView(RIM_CANVAS, version) over the page (Overlay)  ·  draw_rim(surface, palette, on)
+#   Eyes:  self.orb.look(x, y, amount)                                          update(): which way to look (a unit vector) and how much
+#          (Pointer.look("orb-small") gives them): while she points at a card's part the orb grows two eyes that turn toward it,
+#          and lets them go when she is done (goal 77 M1)
 #
 # The motion is Liquid's: the loudness, the size and the colour are springs (mojoui.spring), so the orb swells with a
 # voice and settles without a bounce; three overlapping blobs drift on a slow phase so it reads as one liquid body. When
@@ -26,6 +29,7 @@ comptime ORB_LISTEN = 1  # swelling with the voice it hears
 comptime ORB_THINK = 2  # contracted, three points circling it
 comptime ORB_SPEAK = 3  # swelling with its own voice
 comptime ORB_WHITE: UInt32 = 0xFFFFFFFF
+comptime ORB_PUPIL: UInt32 = 0xFF1B1F27  # (the eyes are white with a dark pupil in either scheme)
 comptime ORB_MAX_RADIUS = 190.0  # pixels: what one frame of drawing can afford on the CPU path
 comptime SMALL_SIDE = 84  # points: the orb beside words
 
@@ -64,6 +68,9 @@ struct Orb(Movable):
     var calm: Spring  # 1 while thinking: contracts the body and brings the circling points in
     var radius: Spring  # pixels; follows the canvas's size, so a layout change morphs
     var cloud: Spring  # 1 while a cloud model speaks: the colour moves to the warning tone
+    var eyes: Spring  # 1 while it looks at something (two eyes fade in)
+    var gaze_x: Spring  # where it looks: a unit vector's parts, springs so the eyes turn rather than jump
+    var gaze_y: Spring
     var phase: Float64
     var last_ns: Int
     var stamp: Int
@@ -75,6 +82,9 @@ struct Orb(Movable):
         self.calm = Spring(0.0, 90.0, 19.0)
         self.radius = Spring(0.0, 140.0, 22.0)
         self.cloud = Spring(0.0, 90.0, 19.0)
+        self.eyes = Spring(0.0, 150.0, 22.0)
+        self.gaze_x = Spring(0.0, 200.0, 24.0)
+        self.gaze_y = Spring(0.0, 200.0, 24.0)
         self.phase = 0.0
         self.last_ns = 0
         self.stamp = 0
@@ -93,6 +103,16 @@ struct Orb(Movable):
         """How loud the voice is now (0…1: Microphone.level() × a few, or the speaker's own level)."""
         self.loud.to(min(max(level, 0.0), 1.0) if self._mode == ORB_LISTEN or self._mode == ORB_SPEAK else 0.0)
 
+    def look(mut self, x: Float64, y: Float64, amount: Float64):
+        """Look toward the unit vector (x, y) with `amount` 0…1 (0: no eyes). Keeps the version moving while the eyes change."""
+        if amount > 0.02:
+            self.gaze_x.to(x)
+            self.gaze_y.to(y)
+        self.eyes.to(min(max(amount, 0.0), 1.0) if amount > 0.02 else 0.0)
+
+    def looking(self) -> Bool:
+        return self.eyes.value > 0.02 or self.eyes.target > 0.0
+
     def lane(mut self, cloud: Bool):
         self.cloud.to(1.0 if cloud else 0.0)
 
@@ -108,6 +128,9 @@ struct Orb(Movable):
         _ = self.loud.step(Int(dt * 1e6))
         _ = self.calm.step(Int(dt * 1e6))
         _ = self.cloud.step(Int(dt * 1e6))
+        _ = self.eyes.step(Int(dt * 1e6))
+        _ = self.gaze_x.step(Int(dt * 1e6))
+        _ = self.gaze_y.step(Int(dt * 1e6))
         self.phase += dt * (0.7 + 1.6 * self.calm.value)
         var fit = min(Float64(s.width), Float64(s.height)) * 0.30
         var base = min(fit, ORB_MAX_RADIUS)
@@ -130,6 +153,15 @@ struct Orb(Movable):
         soft_disc(s, cx + wob * sin(self.phase + 2.1), cy + wob * cos(self.phase * 1.1 + 2.1), r * 0.96, _tone(cool, 0.55), 1.5)
         soft_disc(s, cx + wob * sin(self.phase + 4.2), cy + wob * cos(self.phase * 0.8 + 4.2), r * 0.92, _tone(light, 0.40), 1.5)
         soft_disc(s, cx - 0.30 * r, cy - 0.36 * r, 0.45 * r, _tone(ORB_WHITE, 0.30), 0.45 * r)
+        if self.eyes.value > 0.02:  # looking at something: two eyes on the front, their pupils toward it
+            var e = self.eyes.value
+            var gx = self.gaze_x.value
+            var gy = self.gaze_y.value
+            for side in range(2):
+                var ex = cx + (-0.30 if side == 0 else 0.30) * r + gx * 0.10 * r
+                var ey = cy - 0.06 * r + gy * 0.08 * r
+                soft_disc(s, ex, ey, 0.19 * r, _tone(ORB_WHITE, 0.96 * e), 1.5)
+                soft_disc(s, ex + gx * 0.085 * r, ey + gy * 0.085 * r, 0.095 * r, _tone(ORB_PUPIL, e), 1.5)
         if self.calm.value > 0.02:  # thinking: three points circle it
             for k in range(3):
                 var a = self.phase * 1.6 + Float64(k) * 2.0944

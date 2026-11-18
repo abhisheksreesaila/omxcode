@@ -52,6 +52,34 @@ def main() raises:
     frames(orb, s, p, 80)
     var back = covered(buf)
     assert_true(back < loud * 9 // 10, "silence settles it: " + String(loud) + " -> " + String(back))
+    # eyes (goal 77 M1): looking at something right of it grows two white eyes on the front whose pupils turn that way; letting go clears them
+    var eyed = Orb()
+    frames(eyed, s, p, 10)
+    var cy = h // 2 - Int(0.06 * 0.30 * Float64(h))  # (the eyes sit a little above the middle)
+    def whites(buf: List[UInt32], w: Int, y: Int) -> Int:
+        var n = 0
+        for x in range(w):
+            var v = buf[y * w + x]
+            if (v >> 24) > 200 and Int(v & 255) > 235 and Int((v >> 8) & 255) > 235 and Int((v >> 16) & 255) > 235:
+                n += 1
+        return n
+    assert_equal(whites(buf, w, cy), 0)
+    eyed.look(1.0, 0.0, 1.0)
+    frames(eyed, s, p, 60)
+    assert_true(whites(buf, w, cy) > 8, "two white eyes show once it looks at something: " + String(whites(buf, w, cy)))
+    var dark_right = 0
+    var dark_left = 0
+    for x in range(w):
+        var v = buf[cy * w + x]
+        if Int(v & 255) < 60 and Int((v >> 8) & 255) < 60 and Int((v >> 16) & 255) < 70 and (v >> 24) > 200:
+            if x > w // 2:
+                dark_right += 1
+            else:
+                dark_left += 1
+    assert_true(dark_right > 0 and dark_left > 0, "a dark pupil in each eye")
+    eyed.look(0.0, 0.0, 0.0)
+    frames(eyed, s, p, 90)
+    assert_equal(whites(buf, w, cy), 0)
     var v0 = orb.version()
     orb.mode(ORB_THINK)
     assert_true(orb.version() != v0, "a new mode is a new canvas version")

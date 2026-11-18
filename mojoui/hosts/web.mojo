@@ -19,6 +19,10 @@ from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
 from mojoui.uijobs import wake_pipe
 from mojoui.pygil import python_hosted, gil_release, gil_restore
+from mojoui.geometry import register_rects, SLOT_RECT_HOST
+from mojoui.json import Json, J_ARRAY
+from mojoui.shared import put_shared
+from std.ffi import c_int
 
 
 def json_str(s: String) -> String:
@@ -89,8 +93,12 @@ struct WebSession[A: App](Movable):
 
     var rt: Runtime[Self.A]
     var pixels: List[UInt32]
+    var rect_tags: List[String]  # where the page says its tagged views are (web_rects), 4 numbers each in rect_vals
+    var rect_vals: List[Float64]
 
     def __init__(out self):
+        self.rect_tags = List[String]()
+        self.rect_vals = List[Float64]()
         self.rt = Runtime(Self.A())
         self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines in the server's log)
         self.pixels = List[UInt32]()
@@ -115,7 +123,46 @@ def web_new[A: App]() -> Int:
     _ = python_hosted()
     var tab = alloc(Layout[WebSession[A]].single()).unsafe_leak()
     tab.unsafe_write(WebSession[A]())
+    var rect_fn = web_rect_of[A]  # (mojoui.geometry.rect_of: a drawn pointer asks where a tagged view is; the page's last report answers)
+    register_rects(Pointer(to=rect_fn).unsafe_bitcast[Int]()[], Int(tab))
     return Int(tab)
+
+
+def web_rects[A: App](handle: Int, data: String):
+    """The page's report of where its tagged views are: {"card2.meaning": [x, y, w, h], …} in viewport pixels (mojoui/hosts/web.py
+    PAGE_JS). Replaces the last report; at most 400 views are kept."""
+    var tab = tab_at[A](handle)
+    var tags = List[String]()
+    var vals = List[Float64]()
+    try:
+        var j = Json.parse(data)
+        for k in range(min(len(j.keys[0]), 400)):
+            var a = j.kids[0][k]
+            if j.kind(a) == J_ARRAY and j.size(a) == 4:
+                tags.append(j.keys[0][k])
+                for q in range(4):
+                    vals.append(j.real(j.at(a, q)))
+    except:
+        return
+    tab[].rect_tags = tags^
+    tab[].rect_vals = vals^
+
+
+def web_rect_of[A: App](host_addr: Int, tag_addr: Int, tag_len: Int, out_addr: Int) abi("C") -> Int:
+    """mojoui.geometry.rect_of for the tab being drawn (web_draw says which): [x, y, w, h] from the page's last report."""
+    var tab = tab_at[A](host_addr)
+    var bytes = List[UInt8](capacity=tag_len)
+    var tp = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=tag_addr)
+    for k in range(tag_len):
+        bytes.append(tp[k])
+    var tag = String(unsafe_from_utf8=bytes)
+    for i in range(len(tab[].rect_tags)):
+        if tab[].rect_tags[i] == tag:
+            var out = Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=out_addr)
+            for k in range(4):
+                out[k] = tab[].rect_vals[4 * i + k]
+            return 1
+    return 0
 
 
 def web_title[A: App](handle: Int) -> String:
@@ -151,6 +198,7 @@ def web_draw[A: App](handle: Int, node: Int, width: Int, height: Int, scale: Flo
     {"address", "width", "height", "diff"}: where the RGBA pixels are (valid until the next
     call for this tab) and what else changed on screen."""
     var tab = tab_at[A](handle)
+    put_shared(SLOT_RECT_HOST, handle)  # (rect_of answers for the tab being drawn: the pointer ring and the orb ask while they draw)
     var w = min(max(width, 1), 4096)
     var h = min(max(height, 1), 4096)
     if len(tab[].pixels) != w * h:

@@ -17,6 +17,11 @@
 # Echo: a desktop microphone hears the speaker too, so use headphones or the browser's echo cancellation (the web host's
 # page asks for it); `barge` False turns the interruption off for a room without either.
 #
+# Pointing (goal 77 M1, mojoui.pointer): `loop.parts = [Part(...)]` (the parts of the cards on screen, as the app lists them), and every
+# clause handed to the speaker is matched against them; a clause that names a part gives a POINT event when the audio that names it
+# plays, not before: its time is the speaker's play clock for the clause (Speaker.next_start_ns) plus how far into the clause the name
+# is (at × the clause's length), and a clause that starts a burst is corrected once the device reports its first sample.
+#
 # Stamps (now_ns(), CLOCK_MONOTONIC, the clock of the capture times): heard_ns = the last voiced sample of the person's
 # words as captured; first_audio_ns = when the first sample of the reply reached the sound device; first_audio_ms() the
 # distance, which holds the endpointer's 384 ms of quiet, the recogniser, the model's first sentence and Kokoro; barge_ms
@@ -27,6 +32,7 @@ from std.math import sqrt
 from std.os import setenv
 from mojoui.audio import Microphone
 from mojoui.clock import now_ns
+from mojoui.pointer import Part, match_clause, point_event
 from mojoui.speaker import Speaker
 from mojoui.speech import SpeechModel, SpeechStream, FINAL
 from mojoui.voice import Voice, Endpointer, START as EP_START, BARGE as EP_BARGE, END as EP_END
@@ -42,6 +48,8 @@ comptime STARTED = 1  # the person began to speak (a run still thinking may be c
 comptime BARGED = 2  # they spoke over the reply: the speaker has stopped (ms: how long it took from their first sound)
 comptime READY = 3  # the models are loaded and the microphone is on
 comptime FAILED = 4  # something couldn't load: text says what
+comptime POINT = 5  # a spoken clause named a part of a card (goal 77 M1): text = the AG-UI CUSTOM `point` event, ns = when its audio
+#   plays (the speaker's play clock: the device's delay is in it), ms = how far into the clause the name is said
 
 comptime ENV_WINDOW = 480  # samples (20 ms at 24 kHz) per loudness reading of the reply
 
@@ -94,6 +102,23 @@ def take_sentences(mut pending: String, final: Bool = False) -> List[String]:
     return out^
 
 
+@fieldwise_init
+struct Scheduled(Copyable, Movable):
+    """A point waiting for its audio: the event, when it is due on the play clock, the burst it belongs to."""
+    var card: String
+    var part: String
+    var at_ms: Int
+    var due_ns: Int
+    var group: Int  # the burst (a run of clauses the device plays without a gap) whose first sample is still to be measured; -1: settled
+
+
+@fieldwise_init
+struct Burst(Copyable, Movable):
+    var ref_ns: Int  # the play() that began it
+    var est_ns: Int  # when its first sample was expected to sound
+    var fixed: Bool
+
+
 struct VoiceLoop(Movable):
     var mic: Microphone
     var speaker: Speaker
@@ -132,6 +157,10 @@ struct VoiceLoop(Movable):
     var heard_text_ms: Float64  # the endpointer's END -> the words, as the recogniser took them
     var bargings: Int
     var barge_ms_: Float64
+    var parts: List[Part]  # the parts of the cards on screen that a clause may name (the app sets them)
+    var due: List[Scheduled]  # points waiting for the audio that names them
+    var bursts: List[Burst]
+    var last_point: String  # the part last pointed at (the same one is not sent twice running)
 
     def __init__(out self, sink: String = "", parakeet_dir: String = ""):
         """sink: the speaker's output ($MOJOUI_AUDIO_SINK if empty); parakeet_dir: the recogniser's files, unless
@@ -181,6 +210,10 @@ struct VoiceLoop(Movable):
         self.heard_text_ms = 0.0
         self.bargings = 0
         self.barge_ms_ = 0.0
+        self.parts = List[Part]()
+        self.due = List[Scheduled]()
+        self.bursts = List[Burst]()
+        self.last_point = String("")
 
     def state(self) -> Int:
         return self._state
@@ -225,6 +258,7 @@ struct VoiceLoop(Movable):
             self.mouth()
         except e:
             out.append(LoopEvent(FAILED, String(e), now_ns(), 0.0, False))
+        self.points(out)
         self.settle()
         return out^
 
@@ -327,6 +361,9 @@ struct VoiceLoop(Movable):
         self.closed = False
         self.pending = String("")
         self.first_ns = 0
+        self.due = List[Scheduled]()
+        self.bursts = List[Burst]()
+        self.last_point = String("")
         self.dispatch_ns = now_ns()
         self._state = LOOP_THINKING
         return LoopEvent(HEARD, words, heard_ns, Float64(self.dispatch_ns - heard_ns) / 1e6, merged)
@@ -393,7 +430,9 @@ struct VoiceLoop(Movable):
             if c.done:
                 self.finished += 1
                 continue
-            if not self.speaker.playing():  # (a new burst: its loudness readings start here)
+            var fresh = not self.speaker.playing()
+            var start_ns = self.speaker.next_start_ns()
+            if fresh:  # (a new burst: its loudness readings start here)
                 self.env = List[Float32]()
                 self.burst_ns = now_ns()
             var k = 0
@@ -405,11 +444,53 @@ struct VoiceLoop(Movable):
                     sq += v * v
                 self.env.append(Float32(sqrt(sq / Float64(m))))
                 k += ENV_WINDOW
+            self.schedule(c.text, Float64(len(c.samples)) * 1000.0 / Float64(max(c.rate, 1)), start_ns, fresh)
             self.speaker.play(c.samples, c.rate)
             self.handed = True
         if self.active and not self.spoken and self.speaker.first_ns() > self.dispatch_ns and self.said > 0:
             self.spoken = True
             self.first_ns = self.speaker.first_ns()
+
+    def schedule(mut self, clause: String, length_ms: Float64, start_ns: Int, fresh: Bool):
+        """Matches the clause against the parts on screen; each part it names is due when that name is said."""
+        if len(self.parts) == 0:
+            return
+        var group = -1  # (a clause joining a burst the device is already playing is timed from its tail: nothing to correct)
+        if fresh:  # (every burst is measured, named or not: a later clause may join it before the device reports its first sample)
+            self.bursts.append(Burst(now_ns(), start_ns, False))
+            group = len(self.bursts) - 1
+        elif len(self.bursts) > 0 and not self.bursts[len(self.bursts) - 1].fixed:
+            group = len(self.bursts) - 1  # (the burst's first sample isn't measured yet: its points move with it)
+        var hits = match_clause(clause, self.parts)
+        for h in hits:
+            var at_ms = Int(h.at * length_ms)
+            self.due.append(Scheduled(h.card, h.part, at_ms, start_ns + at_ms * 1_000_000, group))
+
+    def points(mut self, mut out: List[LoopEvent]):
+        """POINT events for the parts whose audio is playing now (the play clock has reached them)."""
+        if len(self.due) == 0:
+            return
+        var now = now_ns()
+        for g in range(len(self.bursts)):  # (a burst's first sample is measured: its estimate is corrected once)
+            if not self.bursts[g].fixed and self.speaker.first_ns() >= self.bursts[g].ref_ns:
+                var real = self.speaker.first_ns() + Int(self.speaker.latency_ms() * 1e6)
+                var delta = real - self.bursts[g].est_ns
+                self.bursts[g].fixed = True
+                for k in range(len(self.due)):
+                    if self.due[k].group == g:
+                        self.due[k].due_ns += delta
+                        self.due[k].group = -1
+        var keep = List[Scheduled]()
+        for k in range(len(self.due)):
+            ref d = self.due[k]
+            if d.group < 0 and d.due_ns <= now:
+                var tag = d.card + "." + d.part
+                if tag != self.last_point:
+                    self.last_point = tag
+                    out.append(LoopEvent(POINT, point_event(d.card, d.part, d.at_ms), d.due_ns, Float64(d.at_ms), False))
+            else:
+                keep.append(d.copy())
+        self.due = keep^
 
     def settle(mut self):
         if not self.loaded:
@@ -434,6 +515,8 @@ struct VoiceLoop(Movable):
             pass
         self.floor = self.last_job
         self.handed = False
+        self.due = List[Scheduled]()
+        self.bursts = List[Burst]()
         self.stopped_ns = now_ns()
         self.pending = String("")
         self.finished = self.said

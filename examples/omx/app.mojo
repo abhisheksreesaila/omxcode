@@ -36,13 +36,15 @@ from mojoui.clock import now_ns
 from mojoui.effects import Every
 from mojoui.json import Json
 from mojoui.llm import Llm
-from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool, DEFAULT_SYSTEM
+from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool
+from mojoui.pointer import Pointer, PointerView, Part, parse_point
+from mojoui.visual import Visual, VISUAL_SYSTEM, card_kind
 from mojoui.creator import Creator
 from mojoui.http import Request
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme
-from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
+from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, POINT, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
 from mojoui.voiceui import VoiceHome, VoiceWork, VoiceDock, VoiceChips, VoiceLane
 from themes.liquid import liquid
 
@@ -58,10 +60,19 @@ comptime TODO = 1000  # the to-do card's tick boxes: TODO + the thing's index (m
 comptime NEWS = 8  # the news feed's reply (mojoui.http)
 comptime ORB_CANVAS = 1
 comptime RIM_CANVAS = 2
+comptime POINTER_CANVAS = 3  # the ring she points with (mojoui.pointer), over the whole page
 comptime CARDS = 20_000  # the cards' controls (mojoui.agentui.Screens) and their canvases
 comptime CARD_CANVASES = 2000
 comptime CREATOR_MSG = 900  # the image server's replies (mojoui.creator)
 comptime CREATOR_CANVAS = 12_000  # the creator's cards' canvases
+
+
+@fieldwise_init
+struct PointMark(Copyable, Movable):
+    var tag: String
+    var due_ns: Int  # when its audio plays (the speaker's play clock)
+    var sent_ns: Int  # when the app handed it to the ring
+    var stamp: Int  # the ring's version when it was handed over
 
 
 struct Main(App):
@@ -75,6 +86,10 @@ struct Main(App):
     var screens: Screens[]
     var creator: Creator  # comics, pictures and notes (mojoui.creator)
     var orb: Orb
+    var pointer: Pointer  # the ring that moves to the part of a card she is naming
+    var turn_card: Int  # the first card of this turn on the shelf: only this turn's cards are pointed at
+    var parts_seen: Int  # how many cards the loop's parts were last made from
+    var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var look: Theme
     var suggestions: List[String]
     var note: String  # why something isn't working ("" when all is well)
@@ -113,8 +128,9 @@ struct Main(App):
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
             var ctx = Int(environment("OMX_LLM_CTX", "65536"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(DEFAULT_SYSTEM) + String(ASSISTANT_SYSTEM))
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu, n_ctx=ctx), "Your name is omx. " + String(VISUAL_SYSTEM) + String(ASSISTANT_SYSTEM))
             self.assist.register(self.llm.value())
+            Visual.register(self.llm.value())  # (the map and the diagram: stubs until they are built, mojoui.visual)
             self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
             self.llm.value().trust.allow("type")
         except e:
@@ -125,6 +141,10 @@ struct Main(App):
         var sd = environment("HOME") + "/Projects/omx-local"
         self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
         self.orb = Orb()
+        self.pointer = Pointer()
+        self.turn_card = 0
+        self.parts_seen = 0
+        self.marks = List[PointMark]()
         self.look = liquid(False)
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
         self.work = False
@@ -246,6 +266,9 @@ struct Main(App):
                 self.out("OMX BARGE: ms=" + String(Int(e.ms + 0.5)))
             elif e.kind == HEARD:
                 self.heard_turn(e.copy())
+            elif e.kind == POINT:
+                self.point(e)
+        self.tell_points()
         self.creator.tick()
         for line in self.creator.take_log():
             self.out("OMX " + line)
@@ -279,6 +302,9 @@ struct Main(App):
     def heard_turn(mut self, e: LoopEvent):
         """The person's words are in (said or typed): the Work screen, and a run of the agent on them."""
         self.work = True
+        self.turn_card = len(self.screens.uis)  # (this turn's cards are the ones she points at)
+        self.parts_seen = -1
+        self.loop.parts = List[Part]()
         self.turns += 1
         self.creator.turn_began()
         var fresh = self.assist.cloud.fresh(e.text, e.merged)  # (a merged turn continues the one before: only what is new)
@@ -293,6 +319,28 @@ struct Main(App):
         self.jobs_before = self.assist.jobs_started
         self.client.say(fresh + (" (Use think_it_through for this: they want it thought through in the background.)" if self.thought_through else ""))
         self.start_run()
+
+    # --- pointing (mojoui.pointer): the voice loop says when a clause names a part of a card, the ring moves there ----------------
+
+    def point(mut self, e: LoopEvent):
+        """A spoken clause named a part (its audio is playing now): the ring goes to it."""
+        var hit = parse_point(e.text)
+        if not hit:
+            return
+        var tag = hit.value().tag()
+        self.pointer.go(tag)
+        self.marks.append(PointMark(tag, e.ns, now_ns(), self.pointer.version()))
+        self.out("OMX POINT_SENT: turn=" + String(self.turns) + " tag=" + tag + " at_ms=" + String(Int(e.ms)) + " late_ms=" + String(Int(Float64(now_ns() - e.ns) / 1e6)))
+
+    def tell_points(mut self):
+        """The ring has been drawn on a point: its lag from the audio that names the part is printed (what the checker reads)."""
+        if self.parts_seen != len(self.screens.uis):  # (a card arrived: the parts she may point at are this turn's cards')
+            self.parts_seen = len(self.screens.uis)
+            self.loop.parts = self.screens.parts(self.turn_card)
+        if len(self.marks) > 0 and self.pointer.shown_stamp >= self.marks[0].stamp and self.pointer.shown_ns > 0:
+            var m = self.marks.pop(0)
+            self.out("OMX POINT: turn=" + String(self.turns) + " tag=" + m.tag + " lag_ms=" + String(Int(Float64(self.pointer.shown_ns - m.due_ns) / 1e6))
+                     + " sent_ms=" + String(Int(Float64(m.sent_ns - m.due_ns) / 1e6)) + " seen=" + String(self.pointer.seen))
 
     # --- the cloud lane: only when the person names it (mojoui.cloudlane.CloudTurn keeps the turn; the app says and shows) -----
 
@@ -431,7 +479,7 @@ struct Main(App):
         if self.screens.adopt(self.client) > 0:
             self.shelf_version += 1
             self.out("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
-                     + String(len(self.screens.uis)) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary())
+                     + String(len(self.screens.uis)) + " cardkind=" + card_kind("", self.screens.uis[len(self.screens.uis) - 1].summary()) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary())
 
     # --- the screen -----------------------------------------------------------------------------------------------
 
@@ -471,13 +519,18 @@ struct Main(App):
         return VoiceHome(OrbView(ORB_CANVAS, self.orb.version(), True), "Hi, I'm omx.", self.status(), lane, VoiceChips(self.suggestions, CHIP), dock)
 
     def view(self) -> View:
+        var ring = PointerView(POINTER_CANVAS, self.pointer.version())
         if self.assist.cloud.framed:
-            return Overlay(self.page(True), RimView(RIM_CANVAS, 1)).grow().fill()
-        return self.page(True)
+            return Overlay(self.page(True), ring^, RimView(RIM_CANVAS, 1)).grow().fill()
+        return Overlay(self.page(True), ring^).grow().fill()
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         if canvas == ORB_CANVAS:
+            var gaze = self.pointer.look("orb-small" if self.work else "orb")
+            self.orb.look(gaze[0], gaze[1], gaze[2])
             self.orb.draw(surface, self.look.palette)
+        elif canvas == POINTER_CANVAS:
+            self.pointer.draw(surface, self.look.palette)
         elif canvas == RIM_CANVAS:
             draw_rim(surface, self.look.palette, self.assist.cloud.framed)
         elif self.creator.owns_canvas(canvas):

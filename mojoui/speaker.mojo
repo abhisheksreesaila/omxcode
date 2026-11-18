@@ -250,6 +250,15 @@ struct Speaker(Movable):
         """now_ns() of the play() call that started the latest burst."""
         return Int(_A.load(_word(self.words, S_PLAYAT))) if self.words != 0 else 0
 
+    def next_start_ns(self) -> Int:
+        """now_ns() when the next sample queued will sound (the play clock, for what is about to be play()ed): after what the device
+        already holds and what waits in the queue; a speaker that is idle sounds it after the device's own delay (the last
+        burst's, else the device buffer's: the first write measures the real one, see first_ns() and latency_ms())."""
+        var t = now_ns()
+        var lead = Int(self.latency_ms() * 1e6) if self.latency_ms() > 0.0 else BUFFER_MS * 1_000_000
+        var tail = Int(_A.load(_word(self.words, S_TAIL))) if self.words != 0 else 0
+        return max(tail, t + lead) + Int(self.queued_ms() * 1e6)
+
     def latency_ms(self) -> Float64:
         """The device's own delay (buffer + sink) measured when the latest burst began."""
         return Float64(_A.load(_word(self.words, S_LAT))) / 1000.0 if self.words != 0 else 0.0

@@ -46,11 +46,14 @@ from mojoui.numformat import grouped
 from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
 from mojoui.disclosure import Disclosure
+from mojoui.pointer import Part
+from mojoui.wordcard import WordCard, word_parts, draw_word
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
 from mojoui.app import Event
 from mojoui.partialjson import complete
+from mojoui.clock import now_ns
 
 comptime MAX_DEPTH = 8
 comptime MAX_NODES = 200
@@ -215,6 +218,9 @@ def catalog() -> List[Spec]:
                                 Field("label", P_TEXT, False, 100, 0, List[String]()),
                                 Field("kind", P_ENUM, False, 0, 0, ["place", "finding"])]),
         number("height", 160, 600, False, "points")]))
+    out.append(Spec("WordCard", "a word explained as a card: the word printed big, how it sounds, its part of speech, its meaning and one example with the word in it, and where it comes from. The voice can point at its parts by name: word, sounds, meaning, example, origin. Use it whenever someone asks what a word means.", [
+        text("word", 60, True), text("sounds", 60, False, "how it is said, e.g. /ɪˈfɛm.ər.əl/"), text("part_of_speech", 30, False, "noun, verb, adjective…"),
+        text("meaning", 300, True, "one plain sentence"), text("example", 240, False, "a sentence that uses the word"), text("origin", 200, False, "where it comes from, one short line")]))
     out.append(Spec("Breadcrumbs", "where you are, as a trail", [texts("items", 1, 8, True), action(False)]))
     out.append(Spec("Picture", "a picture the app holds, by name (see the run's context; never pixels or a link), fitted, with an optional caption", [
         Prop("name", P_WORD, True, 0, 0, List[String](), "a picture the app holds, by name", List[Field]()),
@@ -288,6 +294,8 @@ def sample(name: String) -> String:
         n = '{"component":"Timeline","steps":[{"label":"Plan","status":"done"},{"label":"Build","status":"running","detail":"2 of 5"}]}'
     elif name == "MapView":
         n = '{"component":"MapView","route":[[38.70,-9.14],[38.69,-9.20]],"places":[{"lat":38.70,"lon":-9.14,"label":"Baixa"}]}'
+    elif name == "WordCard":
+        n = '{"component":"WordCard","word":"ephemeral","sounds":"/ɪˈfɛm.ər.əl/","part_of_speech":"adjective","meaning":"Lasting only a very short time.","example":"The ephemeral beauty of cherry blossoms.","origin":"From the Greek ephemeros, lasting a day."}'
     elif name == "Breadcrumbs":
         n = '{"component":"Breadcrumbs","items":["Home","Trips","Lisbon"],"action":"crumb"}'
     elif name == "Icon":
@@ -730,6 +738,7 @@ comptime CV_KPI = 2
 comptime CV_MAP = 3
 comptime CV_GRID = 4
 comptime CV_PICTURE = 5
+comptime CV_WORD = 6  # a WordCard's big word, typed in letter by letter
 
 
 @fieldwise_init
@@ -763,6 +772,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_GRID
     if comp == "Picture":
         return CV_PICTURE
+    if comp == "WordCard":
+        return CV_WORD
     return -1
 
 
@@ -798,6 +809,8 @@ struct GenUi[H: Hub = NoData](Movable):
     var notes: List[String]  # per canvas: what a dataset's chart cost ("1,000,000 rows · 2.1 ms on the GPU")
     var album: Album  # the app's pictures (a Picture names one: mojoui.album)
     var shown: List[Int]  # per canvas: the album's picture it draws (-1: not a Picture)
+    var born: List[Int]  # per canvas: now_ns() of its first draw (a WordCard's typing starts then)
+    var card: String  # what the screen is called in a `point` event ("card2": Screens names it); its parts' tags start with it
 
     def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H(), album: Album = Album()):
         self.problem = validate(args)
@@ -822,6 +835,8 @@ struct GenUi[H: Hub = NoData](Movable):
         self.notes = List[String]()
         self.album = album.copy()
         self.shown = List[Int]()
+        self.born = List[Int]()
+        self.card = "card"
         if self.problem != "":
             self.json = Json()
             return
@@ -907,6 +922,7 @@ struct GenUi[H: Hub = NoData](Movable):
             if kind == CV_PICTURE and picture < 0:
                 self.problem = "unknown picture " + json_string(self.str(n, "name")) + " (the app holds: " + self.album.names_text() + ")"
             self.shown.append(picture)
+            self.born.append(0)
             self.sources.append(source)
             self.notes.append("")
             if kind == CV_CHART and source >= 0:
@@ -1153,6 +1169,12 @@ struct GenUi[H: Hub = NoData](Movable):
                 var status = STAGE_DONE if st == "done" else (STAGE_RUNNING if st == "running" else (STAGE_FAILED if st == "failed" else (STAGE_CANCELLED if st == "cancelled" else STAGE_PENDING)))
                 stages.append(Stage(self.str(s, "label"), status, -1, self.str(s, "detail")))
             return Timeline(stages)
+        if comp == "WordCard":
+            var body = WordCard(self.card, self.canvas(n), v + self.stamp(n), self.str(n, "word"), self.str(n, "sounds"), self.str(n, "part_of_speech"),
+                                self.str(n, "meaning"), self.str(n, "example"), self.str(n, "origin"))
+            if in_card:
+                return body^
+            return Card(body^, spacing=SPACE_S).fill()
         if comp == "Breadcrumbs":
             return Breadcrumbs(self.texts_of(n, "items"), self.msg(n))
         if comp == "Picture":
@@ -1272,6 +1294,18 @@ struct GenUi[H: Hub = NoData](Movable):
             return UiAction(ACT_ACTION, path, act, value)
         return UiAction(ACT_STATE, path, "", value)
 
+    def parts(self) -> List[Part]:
+        """What speech may point at on this screen (mojoui.pointer): the named parts of its pointable components."""
+        var out = List[Part]()
+        if self.problem != "":
+            return out^
+        for k in range(len(self.canvases)):
+            var n = self.canvases[k]
+            if self.kinds[k] == CV_WORD:
+                for pt in word_parts(self.card, self.str(n, "word"), self.str(n, "sounds"), self.str(n, "origin")):
+                    out.append(pt.copy())
+        return out^
+
     def draws(self, canvas: Int) -> Bool:
         return canvas >= self.canvas_base and canvas < self.canvas_base + len(self.canvases)
 
@@ -1296,6 +1330,10 @@ struct GenUi[H: Hub = NoData](Movable):
         elif kind == CV_MAP:
             surface.fill(p.card)
             self.map_of(n).draw(surface, font, p)
+        elif kind == CV_WORD:
+            if self.born[k] == 0:
+                self.born[k] = now_ns()
+            draw_word(surface, p, font, self.str(n, "word"), self.born[k])
         elif kind == CV_PICTURE:
             surface.fill(p.card)
             if self.shown[k] >= 0:

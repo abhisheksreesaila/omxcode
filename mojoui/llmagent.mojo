@@ -274,7 +274,7 @@ def compact_catalog() -> String:
         for ref p in spec.props:
             line += ("" if first else ", ") + _prop_text(p)
             first = False
-        out += line + ")\n"
+        out += line + ")" + ((" -- " + spec.about) if spec.about.find("can point at") >= 0 else String("")) + "\n"  # (a card the voice points at says which parts, and when to use it)
     return out^
 
 

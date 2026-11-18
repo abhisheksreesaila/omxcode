@@ -17,6 +17,7 @@ from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui,
 from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
 from mojoui.jsonpatch import JDoc
+from mojoui.pointer import Part
 from mojoui.json import json_string
 from mojoui.view import View, Text, Card, CAPTION, SPACE_XS, CARD_WARN
 from mojoui.canvas import Surface
@@ -117,13 +118,17 @@ struct Screens[H: Hub = NoData](Movable):
                     if len(self.uis) >= self.max:
                         continue
                     k = len(self.uis)
-                    self.uis.append(self.preview_of(c.arguments, k))
+                    var shown = self.preview_of(c.arguments, k)
+                    shown.card = "card" + String(k + 1)
+                    self.uis.append(shown^)
                     self.calls.append(c.id)
                     self.messages.append(m.id)
                     self.live.append(True)
                     self.sizes.append(c.arguments.byte_length())
                 else:
-                    self.uis[k] = self.preview_of(c.arguments, k)
+                    var shown = self.preview_of(c.arguments, k)
+                    shown.card = "card" + String(k + 1)
+                    self.uis[k] = shown^
                     self.sizes[k] = c.arguments.byte_length()
                 changed = True
         return changed
@@ -172,6 +177,7 @@ struct Screens[H: Hub = NoData](Movable):
                 refused = True
             else:
                 self.streak = 0
+            ui.card = "card" + String(k + 1)
             if was >= 0:  # the preview becomes the screen
                 self.uis[k] = ui^
                 self.live[k] = False
@@ -213,6 +219,7 @@ struct Screens[H: Hub = NoData](Movable):
                 if ui.problem != "":
                     self.refused.append(c.id)
                     continue
+                ui.card = "card" + String(k + 1)
                 self.uis.append(ui^)
                 self.calls.append(c.id)
                 self.messages.append(m.id)
@@ -245,6 +252,16 @@ struct Screens[H: Hub = NoData](Movable):
         else:
             agent.say("(used the screen) " + act.report())
         return True
+
+    def parts(self, from_screen: Int = 0) -> List[Part]:
+        """What speech may point at on the screens from `from_screen` on (the cards of this turn): each screen's named parts
+        (mojoui.pointer.Part)."""
+        var out = List[Part]()
+        for k in range(max(from_screen, 0), len(self.uis)):
+            if not self.live[k]:
+                for pt in self.uis[k].parts():
+                    out.append(pt.copy())
+        return out^
 
     def of_message(self, message_id: String) -> List[Int]:
         var out = List[Int]()

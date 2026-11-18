@@ -322,6 +322,33 @@ MENU_JS = r"""
   addEventListener('load', tellScheme);
   scheme.addEventListener('change', tellScheme);
   addEventListener('resize', () => { clearTimeout(sizeTimer); sizeTimer = setTimeout(tellSize, 120); });
+  // Where the tagged views are (mojoui.geometry.rect_of, which the app's pointer ring asks for, goal 77 M1): the page reports the
+  // rects, in viewport pixels, of the views whose tag has a dot (a card's parts: "card2.meaning"), of the pointer's own layer
+  // ("pointer") and of the orb ("orb…"), whenever the screen settles, scrolls or resizes, and only when they changed.
+  let rectsTimer = 0, rectsSent = '';
+  const tellRects = () => {
+    rectsTimer = 0;
+    const root = document.getElementById('mojoui-root');
+    if (!root || !root.dataset.sid) return;
+    const out = {};
+    document.querySelectorAll('[data-tag]').forEach(el => {
+      const t = el.dataset.tag;
+      if (!(t.includes('.') || t === 'pointer' || t.startsWith('orb'))) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out[t] = [Math.round(r.left * 10) / 10, Math.round(r.top * 10) / 10, Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10];
+    });
+    const text = JSON.stringify(out);
+    if (text === rectsSent) return;
+    rectsSent = text;
+    htmx.ajax('POST', `/rects/${root.dataset.sid}`, { values: { data: text }, swap: 'none', source: lane('rects') });
+  };
+  const rectsSoon = () => { if (!rectsTimer) rectsTimer = setTimeout(tellRects, 60); };
+  document.addEventListener('htmx:afterSettle', rectsSoon);
+  afterSwaps(rectsSoon);
+  addEventListener('load', rectsSoon);
+  addEventListener('resize', rectsSoon);
+  document.addEventListener('scroll', rectsSoon, true);
+  document.addEventListener('DOMContentLoaded', () => new MutationObserver(rectsSoon).observe(document.body, { childList: true, subtree: true, characterData: true }));
 })();
 """
 
@@ -1115,7 +1142,7 @@ class SessionRequests:
 
     EXEMPT = ("static", "assets", "health", "wait", "push", "bye", "download", "img", "favicon.ico", "")  # (no session work, or a few a tab holds)
     # (the routes that name a session, but the exempt ones; any other path, /dev/… on a public copy, gets its own answer)
-    ROUTES = ("e", "w", "frame", "pending", "resize", "save", "reply", "appearance", "describe", "dropfile", "jslog", "rows", "spot", "upload")
+    ROUTES = ("e", "w", "frame", "pending", "resize", "save", "reply", "appearance", "describe", "dropfile", "jslog", "rows", "spot", "upload", "rects")
 
     def __init__(self, app, alive):
         self.app, self.alive, self.open, self.lock = app, alive, {}, threading.Lock()
@@ -2978,6 +3005,18 @@ def make_app(module_dir):
             if s.closed or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != CANVAS:
                 return "-1,-1"
             return mod.spot(s.handle, n, name)
+
+    @app.post("/rects/{sid}")
+    def tag_rects(sid: str, data: str = ""):
+        """Where the tagged views are in the page (mojoui.geometry.rect_of): {tag: [x, y, w, h]} in viewport pixels, sent by the page
+        when they change (PAGE_JS). Kept for the app's drawing (the pointer ring); never an input, so an idle tab stays idle."""
+        s = sessions.get(sid)
+        if s is None or len(data) > 65536 or not hasattr(mod, "rects"):
+            return ""
+        with s.lock:
+            if not s.closed:
+                mod.rects(s.handle, data)
+        return ""
 
     @app.post("/describe/{sid}")
     def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):

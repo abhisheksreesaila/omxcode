@@ -88,6 +88,9 @@
      "$ref": "#/$defs/components/MapView"
     },
     {
+     "$ref": "#/$defs/components/WordCard"
+    },
+    {
      "$ref": "#/$defs/components/Breadcrumbs"
     },
     {
@@ -943,6 +946,50 @@
     },
     "required": [
      "component"
+    ],
+    "additionalProperties": false
+   },
+   "WordCard": {
+    "type": "object",
+    "description": "a word explained as a card: the word printed big, how it sounds, its part of speech, its meaning and one example with the word in it, and where it comes from. The voice can point at its parts by name: word, sounds, meaning, example, origin. Use it whenever someone asks what a word means.",
+    "properties": {
+     "component": {
+      "const": "WordCard"
+     },
+     "word": {
+      "type": "string",
+      "maxLength": 60
+     },
+     "sounds": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "how it is said, e.g. /\u026a\u02c8f\u025bm.\u0259r.\u0259l/"
+     },
+     "part_of_speech": {
+      "type": "string",
+      "maxLength": 30,
+      "description": "noun, verb, adjective\u2026"
+     },
+     "meaning": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "one plain sentence"
+     },
+     "example": {
+      "type": "string",
+      "maxLength": 240,
+      "description": "a sentence that uses the word"
+     },
+     "origin": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "where it comes from, one short line"
+     }
+    },
+    "required": [
+     "component",
+     "word",
+     "meaning"
     ],
     "additionalProperties": false
    },
