@@ -35,6 +35,7 @@ from mojoui.canvas import Surface
 from mojoui.clock import now_ns
 from mojoui.effects import Every
 from mojoui.json import Json
+from mojoui.genui import dump
 from mojoui.llm import Llm
 from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool
 from mojoui.pointer import Pointer, PointerView, Part, parse_point
@@ -320,6 +321,11 @@ struct Main(App):
         self.client.say(fresh + (" (Use think_it_through for this: they want it thought through in the background.)" if self.thought_through else ""))
         self.start_run()
 
+    def card_json(self) -> String:
+        """The newest card as the agent built it (JSON; what a checker compares with what was asked)."""
+        ref ui = self.screens.uis[len(self.screens.uis) - 1]
+        return dump(ui.json, ui.json.get(0, "ui"))
+
     # --- pointing (mojoui.pointer): the voice loop says when a clause names a part of a card, the ring moves there ----------------
 
     def point(mut self, e: LoopEvent):
@@ -454,6 +460,12 @@ struct Main(App):
     def take(mut self, ev: String):
         """One AG-UI event of the run: kept in the conversation, spoken, shown."""
         var kind = self.client.on_json(ev)
+        if self.trace and ev.find('"TOOL_CALL_START"') >= 0:  # (every tool the model calls, whoever answers it: what a checker reads to see which card it went for)
+            try:
+                var call = Json.parse(ev)
+                self.out("OMX CALL: turn=" + String(self.turns) + " name=" + call.text(call.get(0, "toolCallName")))
+            except:
+                pass
         if kind == EV_TEXT:
             try:
                 var j = Json.parse(ev)
@@ -479,7 +491,7 @@ struct Main(App):
         if self.screens.adopt(self.client) > 0:
             self.shelf_version += 1
             self.out("OMX CARD: turn=" + String(self.turns) + " ms=" + String(Int(Float64(now_ns() - self.run_ns) / 1e6 + 0.5)) + " cards="
-                     + String(len(self.screens.uis)) + " cardkind=" + card_kind("", self.screens.uis[len(self.screens.uis) - 1].summary()) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary())
+                     + String(len(self.screens.uis)) + " cardkind=" + card_kind("", self.screens.uis[len(self.screens.uis) - 1].summary()) + " shape=" + self.screens.uis[len(self.screens.uis) - 1].summary() + " text=" + self.card_json())
 
     # --- the screen -----------------------------------------------------------------------------------------------
 

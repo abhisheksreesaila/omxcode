@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 77 M1, M2, M5: she points, the word card, visual first (2026-11-18)
+- **Setup:** ../mojo-ui-g77-point (branch g77-point, from goal-77-show-and-point); the brain and the voice on GPU 0 (context 32 768), `pixi run python docs/goals/77-check.py M1 M2 M5`, GTK on Xvfb and headless Chromium; decisions D-7701 to D-7714.
+- **Built:** `mojoui/pointer.mojo` (parts, the matcher ported from omx-local, the AG-UI `point` event, the ring: a clear canvas over the page, springs, the target's rect asked every frame), `mojoui/wordcard.mojo` (the catalog's WordCard: the word typed in letter by letter, sounds, meaning, example with the word in bold, origin), `mojoui/visual.mojo` (the visual-first system prompt, `show_map` and `explain` stubs, `card_kind`), `VoiceLoop.parts` / `POINT` events timed on the speaker's play clock (`Speaker.next_start_ns`), the orb's eyes, the web host's `rect_of` (the page reports tagged rects, `POST /rects`), `docs/goals/77-check.py`, `scripts/omx_point_web.py`.
+- **Worked:** a card with parts, walked through aloud by the real app: 4 points, each shown 9 to 27 ms from the audio that names it (limit 250); the ring sits on its part and the orb's eyes turn to it (docs/goals/77/point_ring_on_target.png); the same on the web host in headless Chromium.
+- **Broke and how it was fixed:** (1) no point ever came when the first clause named nothing: a burst was only recorded for a clause with a hit, so a later clause joined a burst whose first sample was never measured and waited for ever; every fresh burst is recorded now; (2) the web ring layer swallowed every click (Playwright: "intercepts pointer events"): `.overlay > .island.cover` is `pointer-events: none`; (3) the checker's screenshots missed the ring because the status line says the microphone note, not "Speaking": it waits for the card's own caption now; (4) `kind=` on the CARD line replaced the event's own kind in the checker's parser: it is `cardkind=`.
+- **Means:** a card is pointable with a tag and a list of words; the voice, the ring and the eyes need nothing else from an app. Map and diagram cards only have to list their parts (`names_for` builds a stop's names) and register `show_map` / `explain`.
+- **Next:** goals 77 M3 (map) and M4 (isometric) register their tools over the stubs; M6's boxes can be pointed at the same way.
+
+---
+
 ## Goal 72 review round: fixing what the reviewer found, then proving it again (2026-11-18)
 - **Setup:** ../mojo-ui-g72, branch goal-72-omx-voice; the brain on GPU 0, the voice, embeddings and pictures on GPU 1; ~1.6 GB of disk free the whole time (nothing big was made; the tests' folders and probes were removed). Decisions D-7251 to D-7293.
 - **Built:** `mojoui/trust.mojo` (untrusted text fenced, the turn tainted, guarded tools refused until the person says yes), `mojoui/utf8.mojo`, `CloudTurn` in `cloudlane.mojo` (the app's cloud state machine, now a component), compaction in `llmagent.mojo` (`maintain`, `start_over`), the engine thread's exception handling and room checks in `bridge/llm_shim.cpp`, an incremental notes index, the to-do file's save and backup rules, the watcher's link rule, the web host's pairing and one-page rules.

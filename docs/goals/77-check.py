@@ -191,13 +191,11 @@ def bench(**kv):
 def card_args(ev, turn):
     """The arguments of the turn's render_ui calls, as dicts (what the model put on the card)."""
     out = []
-    for e in of(ev, "TOOL", turn):
-        raw = e.get("raw", "")
-        if raw.startswith("render_ui "):
-            try:
-                out.append(json.loads(raw[len("render_ui "):]).get("ui", {}))
-            except ValueError:
-                pass
+    for e in of(ev, "CARD", turn):  # (the CARD line carries the card as the agent built it)
+        try:
+            out.append(json.loads(e.get("text", "")))
+        except ValueError:
+            pass
     return out
 
 
@@ -284,15 +282,8 @@ def card_kind_of(ev, turn):
 
 def turn_kind(ev, turn):
     """The kind of card the turn went for: its first card tool (show_map, explain, to-do, news), or render_ui and what it built."""
-    inside = False
-    render = False
-    for e in ev:
-        if e["kind"] == "HEARD":
-            inside = e.get("turn") == turn
-            continue
-        if not inside or e["kind"] != "TOOL":
-            continue
-        name = e.get("raw", "").split(" ")[0]
+    for e in of(ev, "CALL", turn):
+        name = str(e.get("name", ""))
         if name == "show_map":
             return "map"
         if name == "explain":
@@ -301,8 +292,9 @@ def turn_kind(ev, turn):
             return "todo"
         if name == "news":
             return "news"
-        render = render or name == "render_ui"
-    return card_kind_of(ev, turn) if render else ""
+        if name == "render_ui":
+            return card_kind_of(ev, turn)
+    return ""
 
 
 def m5():

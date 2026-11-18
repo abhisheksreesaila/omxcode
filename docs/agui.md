@@ -22,6 +22,8 @@ it with generic pieces any app can use; `examples/agentchat` (60 lines) only com
 ```mojo
 var chat = AgentChat[SheetHub](url, base=20_000, canvas_base=2000, layout=CHAT_PANEL, title="Assistant")
 chat.suggest("Chart a million orders")                        # chips on the welcome screen (the agent's CUSTOM "suggestions" replace them)
+
+**Points** (goal 77): a voice app that shows a card and talks about it sends the CUSTOM event `point` while the audio that names a part plays: `{"type":"CUSTOM","name":"point","value":{"card":"card2","part":"meaning","at_ms":420}}` (`mojoui.pointer.point_event`; `at_ms` = how far into the clause's audio the name is said). A client that plays the audio itself shows the ring at that moment; omx's hosts draw it as a ring on the part tagged `card2.meaning`.
 chat.offer(Tool("refund_order", "Refund an order", schema), confirm=True)   # asks the person first
 var hub = SheetHub(); hub.add("orders", sheet^); chat.set_hub(hub^)          # datasets: rows stay here
 # App: requests() → chat.requests(); update(e) → chat.update(e); view() → chat.view() (or chat.over(content): a popup)
