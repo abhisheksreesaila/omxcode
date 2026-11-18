@@ -1667,3 +1667,10 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7507 · the Mac's framebench is synchronous: the gesture, draw_canvas, displayIfNeeded and a CATransaction flush, with the 60 Hz timer stopped; renderer= names the path that drew each frame (gpu_frames/cpu_frames) · deterministic, split by part, and proves frames really went to the GPU in M3; the window server's compositing isn't counted · yes
 - D-7508 · MAC_ENV goes to the Mac as a file (data/env.txt), not an ssh argument · empty arguments vanish and spaces split over ssh · yes
 - D-7509 · the Mac baseline is at the screen's real 1.0× backing scale (the owner's display in this setup); a Retina screen is 4× the pixels, so it's a floor for the CPU path · measures what the owner sees · yes
+- D-7510 · gpu2d draws circles as zero-length capsules, not rounded boxes · exactly draw.circle's formula; a rounded box is wrong under radius 0.5 · yes
+- D-7511 · gpu2d draws fills and images with blending off (REPLACE runs) · what Surface.fill and blit do, so the reference matches · yes
+- D-7512 · gpu2d puts a clip rect in every instance, intersected in pixels while building and mapped back to each layer's units · no clip pass; a clip opened in a moved layer still cuts the next one · yes
+- D-7513 · gpu2d picks the face and measures alignment at the size on screen (size·k), as SurfacePainter does · a layer reused at a new zoom keeps its build-time face · yes
+- D-7514 · gpu2d stacks the five faces in one 1026×312 R8 atlas with zero borders · bilinear sampling with clamp reads zeros past a face's edge exactly as Face.coverage · yes
+- D-7515 · gpu2d skips glyphs with no pixels (a space) · a space only moves the pen · yes
+- D-7516 · Canvas(…).gpu() marks a canvas for the GPU path through the node's hint ("gpu"), not a bit in spacing or size (those carry scroll_pans, keys, passthrough and hosts compare them exactly) · nothing existing changes meaning · yes

@@ -411,6 +411,13 @@ struct View(Copyable, Movable):
         self.nodes[0].value = 3
         return self^
 
+    def gpu(var self) -> View:
+        """On a Canvas whose app paints a Scene (draw_scene): the host draws that Scene with mojoui.gpu2d on the GPU (GL on
+        Linux, Metal on the Mac) when it can, and falls back to its usual path when it can't (goal 75). The node's hint
+        says so ("gpu"), which hosts read."""
+        self.nodes[0].hint = "gpu"
+        return self^
+
     def passthrough(var self) -> View:
         """On a Canvas: it only shows (lines over a page, a highlight): presses go to whatever is under it, and the parts
         it leaves unpainted show what's beneath (hosts keep its alpha)."""
