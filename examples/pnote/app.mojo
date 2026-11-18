@@ -29,6 +29,7 @@ from mojoui.textedit import now_ms
 from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, INK, CONNECTOR, H_ROTATE
 from mojoui.mindmap import MindMap, MapView
 from mojoui.ink import Stroke
+from mojoui.maths import cos, sin
 from themes.liquid import liquid
 
 comptime NEW_PAGE = 1
@@ -113,6 +114,53 @@ def seeded_page(n: Int) -> String:
     return out^
 
 
+def whiteboard_layer(n: Int) -> ObjectLayer:
+    """The judged whiteboard (goal 75): n pressure strokes of 101 points each, wandering lines seeded like goal 40's Sketch
+    bench, across about two screens of page."""
+    var l = ObjectLayer()
+    var s = UInt32(40)
+    var colours: List[UInt32] = [rgba(28, 30, 38), rgba(37, 99, 235), rgba(220, 38, 38)]
+    for k in range(n):
+        var r = List[Float64]()
+        for _ in range(4):
+            s ^= s << 13
+            s ^= s >> 17
+            s ^= s << 5
+            r.append(Float64(s >> 8) / 16777216.0)
+        var st = Stroke(3.5, colours[k % 3])
+        var x = 40.0 + r[0] * 2400.0
+        var y = 40.0 + r[1] * 1500.0
+        var a = r[2] * 6.283
+        for i in range(101):
+            st.add(x, y, 0.25 + 0.7 * Float64(i if i < 50 else 100 - i) / 50.0)
+            a += (r[3] - 0.5) * 0.04 + 0.05 * sin(Float64(i) * 0.15)
+            x += 1.6 * cos(a)
+            y += 1.6 * sin(a)
+        st.seal()
+        _ = l.add_ink(st)
+    l.history.clear()
+    return l^
+
+
+def scene_map(n: Int) -> MindMap:
+    """The judged mind map (goal 75): n topics, eight main branches, seeded words."""
+    var words: List[String] = ["Plan", "Ideas", "Budget", "Garden", "Trip", "Reading", "Health", "Work", "milk", "eggs",
+                               "flights", "hotel", "notes", "draft", "review", "launch", "seeds", "soil", "run", "sleep"]
+    var m = MindMap("Life plan")
+    var ids = List[Int]()
+    ids.append(0)
+    var s = UInt32(9)
+    for k in range(n - 1):
+        s ^= s << 13
+        s ^= s >> 17
+        s ^= s << 5
+        var parent = 0 if k < 8 else ids[1 + Int(s % UInt32(len(ids) - 1))]
+        var text = words[Int((s >> 5) % UInt32(len(words)))] + (" " + words[Int((s >> 11) % UInt32(len(words)))] if s % 3 == 0 else "")
+        ids.append(m.add_child(parent, text, 0))
+    m.clear_history()
+    return m^
+
+
 def layer_stats(l: ObjectLayer) -> String:
     var ink = l.count_kind(INK)
     var conn = l.count_kind(CONNECTOR)
@@ -156,6 +204,9 @@ struct Main(App):
     var my1: Float64
     var map_dx: Float64  # the map's pan (points from the canvas's centre)
     var map_dy: Float64
+    var map_k: Float64  # the map's zoom
+    var box_w_canvas: Float64  # the note canvas's size (points), as last painted
+    var box_h_canvas: Float64
     var scale: Float64  # the canvas's pixels per point (the last paint's)
     var font: Font
     var version: Int
@@ -190,6 +241,9 @@ struct Main(App):
         self.my1 = 0
         self.map_dx = 0
         self.map_dy = 0
+        self.map_k = 1
+        self.box_w_canvas = 800
+        self.box_h_canvas = 600
         self.scale = 1
         self.font = Font()
         self.version = 0
@@ -213,7 +267,22 @@ struct Main(App):
             except:
                 chars = 0
             var imp = environment("PNOTE_IMPORT", "")
-            if imp != "":
+            var scene = environment("PNOTE_SCENE", "")
+            print("PNOTE GPU: " + ("cpu (PNOTE_GPU=0)" if environment("PNOTE_GPU", "1") == "0" else "cpu (no GPU backend in this host yet)"), flush=True)
+            if scene == "whiteboard":
+                var l = whiteboard_layer(1000)
+                self.new_note(CANVAS, l.save_text())
+                self.tool = T_PEN
+            elif scene == "mindmap":
+                self.new_note(MAP, scene_map(300).to_text())
+            elif scene == "canvas" and imp != "":
+                var f = open(imp, "r")
+                var json = f.read()
+                f.close()
+                var l = import_fabric(json, self.font)
+                self.new_note(CANVAS, l.save_text())
+                self.tool = T_HAND
+            elif imp != "":
                 var f = open(imp, "r")
                 var json = f.read()
                 f.close()
@@ -408,6 +477,7 @@ struct Main(App):
                 self.map.from_text(body)
             self.map_dx = 0
             self.map_dy = 0
+            self.map_k = 1
         self.version += 1
 
     def closing(mut self):
@@ -456,6 +526,15 @@ struct Main(App):
             elif kind == WHEEL or (kind == PAN):
                 self.map_dx += e.dx if kind == PAN else -e.dx
                 self.map_dy += e.dy if kind == PAN else -e.dy
+            elif kind == ZOOM:  # (around the pointer: the point under it stays put)
+                var z = min(max(self.map_k * e.zoom, 0.2), 4.0)
+                var cx = self.box_w_canvas / 2 + self.map_dx
+                var cy = self.box_h_canvas / 2 + self.map_dy
+                cx = e.x - (e.x - cx) * (z / self.map_k)
+                cy = e.y - (e.y - cy) * (z / self.map_k)
+                self.map_dx = cx - self.box_w_canvas / 2
+                self.map_dy = cy - self.box_h_canvas / 2
+                self.map_k = z
             self.version += 1
             return
         if self.open_kind == PAGE:
@@ -756,7 +835,9 @@ struct Main(App):
                 p.rect(x0, y0, abs(self.mx1 - self.mx0), abs(self.my1 - self.my0), rgba(37, 99, 235, 30), 2)
         else:
             self.scale = k
-            self.map.paint(p, self.font, MapView((w / 2 + self.map_dx) * k, (h / 2 + self.map_dy) * k, k))
+            self.box_w_canvas = w
+            self.box_h_canvas = h
+            self.map.paint(p, self.font, MapView((w / 2 + self.map_dx) * k, (h / 2 + self.map_dy) * k, k * self.map_k))
 
     def draw_scene(mut self, canvas: Int, mut scene: Scene) -> Bool:
         var k = scene.scale()

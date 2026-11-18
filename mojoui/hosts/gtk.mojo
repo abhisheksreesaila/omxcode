@@ -4177,7 +4177,7 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
 
 
 def frame_bench[A: App](host_addr: Int, rest: String):
-    """framebench:K=pan|zoom|draw|finish|erase|deepzoom|type,N (goal 40; type: goal 74): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
+    """framebench:K=pan|zoom|draw|finish|erase|deepzoom|type|grow,N (goal 40; type: goal 74; grow: goal 75): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
     fro every 20; ZOOM by 1.01× around the middle, in then out; one pen stroke of N moves; finish: short strokes, press,
     three moves, release, every frame timed, the releases and the frame after each also on their own; erase: one drag
     of N moves to and fro, where moves that hit nothing don't redraw and count as unchanged; deepzoom: zoom's steps
@@ -4234,6 +4234,15 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     host[].layer_textures = 0
     var x = w * 0.3
     var y = h * 0.3
+    var grow_keys = List[String]()
+    if what == "grow":
+        for t in range(count):
+            grow_keys.append("Tab" if t == 0 else "Enter")
+            grow_keys.append("t")
+            grow_keys.append("Enter")
+        grow_keys.append(" ")
+        grow_keys.append(" ")
+        count = len(grow_keys)
     if what == "deepzoom":  # (untimed: in to 8× around the middle, past a page-sized texture's 4096 px cap)
         host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 8.0, host_addr)
         bench_wait[A](host_addr, ci, 3_000_000_000)
@@ -4277,9 +4286,12 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 kind = RELEASE
                 host[].canvases[ci].pressure = 0.5
                 host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
-        elif what == "type":  # (goal 74, D-7405: keystrokes into the canvas's key controller, as a typist's reach it)
+        elif what == "type" or what == "grow":  # (goal 74, D-7405: keystrokes into the canvas's key controller, as a typist's reach
+            # it; grow (goal 75): a mind map grows by keys: Tab (the first) or Enter, "t", Enter per topic, then Space twice)
             var typed = String("native mojo is fast ")
             var ch = String(typed[byte = i % 20 : i % 20 + 1])
+            if what == "grow":
+                ch = grow_keys[i]
             var handled = List[c_int](length=1, fill=0)
             var sig = String("key-pressed")
             if host[].canvases[ci].keys != 0:

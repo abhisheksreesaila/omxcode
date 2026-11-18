@@ -1427,3 +1427,11 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Measured (bench-note.json, 645 objects, 27,903 ink points): import 178 ms, pan paint p95 0.20 ms (max 0.37; ≤281 objects drawn per view snapped to 512-pt tiles), hit test p95 0.005 ms.
 - Gotchas: `Optional and Optional` won't compile (not ImplicitlyCopyable) → `Bool(a) and Bool(b)`; passing `self.selected` to a `mut self` method is an aliasing error → `.copy()`; Dict.pop raises → try/except. atan2 written by hand (Mac stub lacks libm's).
 - Test fixes, not code: connector side ties (equal distances) picked a different but valid pair; marquee boxes include the outline's half width.
+
+## 2026-11-18 goal 75 M0 (Linux desktop baseline, today's GTK Vulkan replay)
+- RTX 3090, GskVulkanRenderer, 1440x900, PNOTE_GPU=0 (today's path: the Scene replayed into GSK nodes). p50/p95/max ms:
+  whiteboard pan 0.9/75.7/102.1, zoom 1.2/59.2/180.1, draw 2.3/5.2/7.0, finish 1.4/4.0/5.8; canvas pan 0.7/122.8/225.1,
+  zoom 0.7/49.6/229.5; mindmap pan 1.0/1.2/1.8, zoom 1.1/1.3/1.3, grow 32.3/43.5/69.1.
+- Reading: typical frames are already cheap; the spikes are layer rebuilds, where GSK fills our polygons (ink, branch
+  ribbons) as paths on the CPU (draw_p95 ≈ the spike). The mind map pans silky today (its layer only moves); growing
+  relays and refills every branch.
