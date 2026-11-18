@@ -207,8 +207,9 @@ def edge_pixels(png, chrome_check):
 
 
 def backdrop_of(appearance):
-    # Liquid's backdrop: light #e1e7ef (gradient #e6ebf2 → #dbe2eb), dark #12151b (a shade either side)
-    return [(225, 231, 239), (230, 235, 242), (219, 226, 235)] if appearance == "light" else [(18, 21, 27), (22, 25, 32), (15, 18, 23)]
+    # Liquid's canvas (goal 73 M3, D-7320/D-7321: the owner's "more contrast and depth", a darker canvas under the cards):
+    # light #d7dee9 (gradient #dde4ee → #cfd8e4), dark #0b0d12 (a shade either side: #121419, #0a0c11)
+    return [(215, 222, 233), (221, 228, 238), (207, 216, 228)] if appearance == "light" else [(11, 13, 18), (18, 20, 25), (10, 12, 17)]
 
 
 def near(a, b, tol=5):
