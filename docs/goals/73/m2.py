@@ -61,6 +61,7 @@ def _units(g):
 def _gtk_grow(g, full):
     fleet, tele = full / "fleet.csv", full / "telemetry.parquet"
     start = [f"pick:Choose a file={fleet}", "waitfor:Create table=60000", "tap:Create table", "wait:800",
+             "shortcut:Ctrl+Shift+I", "wait:300",  # (the inspector open, as it opened by default when this proof was written; goal 76 starts it closed)
              f"pick:Table={tele}", "waitfor:close-telemetry=120000", "wait:500", "tap:Chart", "wait:800"]
     steps = ";".join(start + [
         "boards:before", f"shot:{OUT / 'gtk-1-before.png'}",

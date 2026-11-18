@@ -247,7 +247,11 @@ def step(page, s):
             by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
         if not by_title.count():  # (an Image(on_tap) tagged so: a tappable picture, goal 71)
             by_title = page.locator(f"img.tappable[data-tag={title!r}]")
-        by_title.nth(int(nth or 0)).click()
+        target = by_title.nth(int(nth or 0))
+        if target.is_visible():
+            target.click()
+        else:  # (a hidden view's button, a ribbon's other tab: its click as GTK's tap: emits it, D-7601; a person picks the tab first)
+            target.dispatch_event("click")
     elif verb in ("type", "submit", "enter"):
         hint, _, text = rest.partition("=")
         field = page.locator(f"input[data-kind=field][placeholder={hint!r}]").first

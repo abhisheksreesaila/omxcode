@@ -1443,3 +1443,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - drive.py's wait: waited for a *visible* Links (hidden on Home): now "attached", as GTK's waitfor reads the tree.
 - The "nothing lost" diff found INSERT_TABLE (Insert ▸ Table…, a dialog holding a picker) missing: the ribbon's Table is the picker itself; listed as an equivalence with the colour swatches (D-7613).
 - The web's file-picker tools sat 3 px higher than button tools (label.picker.tool had no tool box): the base sheet gives a picker tool the same box.
+
+## 2026-11-18 (goal 76 M3, part 1)
+- 73-check on the ribbon: M1 failed (its panel-edge probe hit a chip, the panel hadn't moved), M2 failed (panels closed → a 1416-wide board tiles three cards in one row; the proof's L-shape needs the inspector open, its old default), M3 failed (it clicked the Chart tool by coordinates, now Underline; probes at y=162 hit the formula bar). Steps updated (D-7618); then M2's seven-cards part exposed a real bug: the launch Board 21 pt taller than its room (D-7619). Rebuilt: 73 M1, M2, M3 PASS.

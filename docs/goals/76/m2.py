@@ -150,7 +150,7 @@ def gtk(d):
     home = config("gtk-home")
     L = "link"
     steps = ";".join([
-        "waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", f"regions:{OUT}/gtk-0.json", f"shot:{OUT}/gtk-1-launch.png",
+        "waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", "boards:launch", f"regions:{OUT}/gtk-0.json", f"shot:{OUT}/gtk-1-launch.png",
         "tap:ribbon-tab-insert", "pause:300", f"shot:{OUT}/gtk-tab-insert.png",
         f"pick:Table={d / 'telemetry.parquet'}", "pause:3000", f"regions:{OUT}/gtk-2.json", f"shot:{OUT}/gtk-2-telemetry.png",
         "tap:Links", "pause:500", f"regions:{OUT}/gtk-3.json", f"shot:{OUT}/gtk-3-links-docked.png",
@@ -177,6 +177,9 @@ def gtk(d):
     bad = [l for l in out.splitlines() if "TEST:" in l]
     if r.returncode != 0 or bad:
         return f"GTK run failed (exit {r.returncode}): " + " / ".join(bad)[:500]
+    m = re.search(r"^BOARDS: launch (\d+)x(\d+) in (\d+)x(\d+)$", out, re.M)
+    if not m or int(m.group(2)) > int(m.group(4)):  # (the Board fits the room the ribbon leaves: nothing scrolls at launch)
+        return f"GTK launch: the Board overflows its room ({m.group(0) if m else 'no BOARDS line'})"
     for k, panel, where in ((0, False, "launch"), (2, False, "after Insert > Table"), (3, True, "Links docked"), (5, False, "after the x"),
                             (6, True, "Ctrl+Shift+I"), (7, False, "Esc on the sheet"), (8, False, "Ctrl+Shift+C (a chart: no panel)")):
         why = geometry(OUT / f"gtk-{k}.json", panel, "GTK " + where)

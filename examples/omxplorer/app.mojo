@@ -358,7 +358,7 @@ comptime OMX_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 10
 comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxapp's are adopted, D-285)
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
-comptime SHELL_CHROME_H = 126  # the formula bar, the board's padding, the bottom tabs and the status bar (goal 54: measured; the ribbon's own height is ribbon_h())
+comptime SHELL_CHROME_H = 147  # the formula bar, the board's padding, the bottom tabs and the status bar, with their gaps (goal 76: measured, the Board's scroller 632 high at 1440x900 under a 121-pt ribbon; the ribbon's own height is ribbon_h())
 comptime RIBBON_PAD_H = 5  # what a theme adds to a ribbon band (Liquid: 2 + 2 padding and its edge line; goal 76: measured)
 comptime BOARD_PAD = 12  # the board's padding inside the docked chrome (shell A, goal 54)
 comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
