@@ -376,11 +376,11 @@ def run6(source, steps, env=None, **kw):
 
 def m6_units():
     out = []
-    for name in ("todo", "news", "cloudlane", "assistant"):
+    for name in ("todo", "news", "cloudlane", "assistant", "creator", "imagegen", "notes"):  # (the last three use the second card)
         b = sh(["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", "-I", "vendor", f"tests/test_{name}.mojo", "-o", f"build/test_{name}"], 900)
         if b.returncode:
             return "FAIL", f"build test_{name}: " + tail(b, 600)
-        r = sh([f"build/test_{name}"], 300)
+        r = sh([f"build/test_{name}"], 600, {"CUDA_VISIBLE_DEVICES": "1"} if name in ("imagegen", "notes") else None)
         if r.returncode or f"{name}: ok" not in r.stdout:
             return "FAIL", f"test_{name}: " + tail(r, 600)
         out.append(r.stdout.strip().splitlines()[-1])
@@ -828,7 +828,7 @@ def m6_notes():
         lines.append(f"{f.split('/')[-1]}:{'ok' if ok else 'x(' + ('cited' if cited else 'cite') + ')'}")
     refused = [e for e in of(ev, "REFUSED") if "only read your notes folder" in e.get("text", "")]
     declined = of(ev, "REPLY", len(NOTE_QS) + 3)
-    unit = sh([str(ROOT / "build/test_creator")], 300, {"CUDA_VISIBLE_DEVICES": "1"})
+    unit = sh([str(ROOT / "build/test_creator")], 300)  # (built by M6-UNITS)
     refused_ok = "creator: ok" in unit.stdout
     bench(notes_good=good, notes_named=named, notes_search_ms=[s.get("search_ms") for s in searches])
     probs = []
