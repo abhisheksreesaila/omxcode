@@ -1646,3 +1646,5 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-7420 · mindmap labels wrap with the TextEdit's own rule · a pill keeps its size when editing starts · yes
 - D-7421 · mindmap deletes leave tombstones (ids never change) · stable ids for notes, hits and undo · yes
 - D-7422 · mindmap's stored outline: 2 spaces a level, flags (- c o x L #colour), \n and \\ escaped · readable and round-trips; it's a stored format · yes, before real notes are saved
+- D-7423 · objectlayer.save_text/load_text (tab-separated lines in z order, ink points inline) added by the parent for pnote's storage; pictures keep their box but not their pixels (debt) · every app storing a canvas needs it; tested by objectlayer save · yes
+- D-7424 · the GTK host's test key step now takes GDK key names ("Return") as well as web names; before, a multi-letter name that wasn't a web name was sent as its first letter · the checker's map steps used Return and typed an R; fixing the host, not the checker · yes

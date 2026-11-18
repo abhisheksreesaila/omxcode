@@ -4773,6 +4773,14 @@ def gdk_keyval(name: String) -> Int:
     if name.startswith("F") and name.byte_length() <= 3 and name != "F":
         var f = name
         return Int(external_call["gdk_keyval_from_name", c_uint](f.as_c_string_span()))
+    var count = 0
+    for _ in name.codepoint_slices():
+        count += 1
+    if count > 1:  # (a GDK name, "Return", "BackSpace": goal 74 found "Return" sent as "R", D-7424)
+        var n = name
+        var kv = Int(external_call["gdk_keyval_from_name", c_uint](n.as_c_string_span()))
+        if kv != 0 and kv != 0xFFFFFF:
+            return kv
     for ch in name.codepoint_slices():
         return Int(external_call["gdk_unicode_to_keyval", c_uint](c_uint(Int(ord(String(ch))))))
     return 0

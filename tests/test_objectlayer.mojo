@@ -691,3 +691,36 @@ def main() raises:
     test_undo(font)
     test_random(font)
     test_600(font)
+    test_save(font)
+
+
+def test_save(font: Font) raises:
+    """Added by the parent (D-7423): save_text → load_text keeps every object, its kind, box, text, ink and connector
+    ends; saving the loaded layer again gives the same text (ids are reissued, so the first save is compared by counts)."""
+    var ol = ObjectLayer()
+    var a = ol.add_text(10, 20, 200, 60, "Ship\nthe \\ export", 18)
+    var b = ol.add_sticky(400, 50, 160, "Idea")
+    _ = ol.add_ellipse(50, 300, 120, 80, 0xFF88CC88)
+    var st = Stroke(3, 0xFF222222)
+    for k in range(20):
+        st.add(100 + Float64(k) * 5, 400 + Float64(k % 3), 0.5)
+    st.seal()
+    _ = ol.add_ink(st)
+    _ = ol.add_connector(a, b)
+    var s1 = ol.save_text()
+    var l2 = ObjectLayer()
+    l2.load_text(s1)
+    assert_equal(l2.count(), ol.count())
+    for k in [TEXT, STICKY, ELLIPSE, INK, CONNECTOR]:
+        assert_equal(l2.count_kind(k), ol.count_kind(k))
+    var s2 = l2.save_text()
+    var l3 = ObjectLayer()
+    l3.load_text(s2)
+    assert_equal(l3.save_text(), s2)
+    assert_true(s2.find("Ship\\nthe \\\\ export") >= 0)
+    var found = False
+    for i in range(l2.count()):
+        if l2.objs[i].kind == CONNECTOR:
+            found = l2.has(l2.objs[i].from_id) and l2.has(l2.objs[i].to_id)
+    assert_true(found)
+    print("objectlayer save: ok")

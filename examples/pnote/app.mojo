@@ -25,6 +25,9 @@ from mojoui.geometry import rect_of
 from mojoui.theme import Theme
 from mojoui.mdedit import MdEdit
 from mojoui.textedit import now_ms
+from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, INK, CONNECTOR, H_ROTATE
+from mojoui.mindmap import MindMap, MapView
+from mojoui.ink import Stroke
 from themes.liquid import liquid
 
 comptime NEW_PAGE = 1
@@ -43,6 +46,26 @@ comptime CANVAS = 1
 comptime MAP = 2
 
 comptime PAPER: UInt32 = 0xFFFCFAF8
+
+# canvas tools
+comptime T_SELECT = 0
+comptime T_TEXT = 1
+comptime T_STICKY = 2
+comptime T_RECT = 3
+comptime T_PEN = 4
+comptime T_HAND = 5
+# what a drag on the canvas does
+comptime D_NONE = 0
+comptime D_MOVE = 1
+comptime D_HANDLE = 2
+comptime D_MARQUEE = 3
+comptime D_PAN = 4
+comptime D_INK = 5
+
+
+def tool_name(t: Int) -> String:
+    var names: List[String] = ["select", "text", "sticky", "rect", "pen", "hand"]
+    return names[t]
 
 
 def kind_name(k: Int) -> String:
@@ -89,6 +112,13 @@ def seeded_page(n: Int) -> String:
     return out^
 
 
+def layer_stats(l: ObjectLayer) -> String:
+    var ink = l.count_kind(INK)
+    var conn = l.count_kind(CONNECTOR)
+    return ("chars=0 objects=" + String(l.count() - ink - conn) + " connectors=" + String(conn) + " strokes=" + String(ink)
+            + " nodes=0")
+
+
 struct Row(Copyable, Movable):
     var id: Int
     var kind: Int
@@ -109,6 +139,23 @@ struct Main(App):
     var open_id: Int  # 0: none
     var open_kind: Int
     var page: MdEdit
+    var layer: ObjectLayer
+    var map: MindMap
+    var tool: Int
+    var drag: Int
+    var handle: Int
+    var made_on_press: Bool
+    var wet: Stroke
+    var cam_x: Float64  # the canvas's view: the page point at the top-left, and the zoom
+    var cam_y: Float64
+    var zoom: Float64
+    var mx0: Float64  # a marquee's corners (page points)
+    var my0: Float64
+    var mx1: Float64
+    var my1: Float64
+    var map_dx: Float64  # the map's pan (points from the canvas's centre)
+    var map_dy: Float64
+    var scale: Float64  # the canvas's pixels per point (the last paint's)
     var font: Font
     var version: Int
     var palette: Bool
@@ -126,6 +173,23 @@ struct Main(App):
         self.open_id = 0
         self.open_kind = PAGE
         self.page = MdEdit("", 16)
+        self.layer = ObjectLayer()
+        self.map = MindMap("Central topic")
+        self.tool = T_SELECT
+        self.drag = D_NONE
+        self.handle = -1
+        self.made_on_press = False
+        self.wet = Stroke(3, 0xFF262222)
+        self.cam_x = 0
+        self.cam_y = 0
+        self.zoom = 1
+        self.mx0 = 0
+        self.my0 = 0
+        self.mx1 = 0
+        self.my1 = 0
+        self.map_dx = 0
+        self.map_dy = 0
+        self.scale = 1
         self.font = Font()
         self.version = 0
         self.palette = False
@@ -147,7 +211,15 @@ struct Main(App):
                 chars = Int(environment("PNOTE_PAGE_CHARS", "0"))
             except:
                 chars = 0
-            if chars > 0:
+            var imp = environment("PNOTE_IMPORT", "")
+            if imp != "":
+                var f = open(imp, "r")
+                var json = f.read()
+                f.close()
+                var l = import_fabric(json, self.font)
+                self.new_note(CANVAS, l.save_text())
+                self.tool = T_HAND
+            elif chars > 0:
                 self.new_note(PAGE, seeded_page(chars))
             elif len(self.rows) > 0:
                 self.open(self.rows[0].id)
@@ -210,18 +282,33 @@ struct Main(App):
     def stats(self, kind: Int, body: String) -> String:
         if kind == PAGE:
             return "chars=" + String(body.byte_length()) + " objects=0 connectors=0 strokes=0 nodes=0"
-        return "chars=0 objects=0 connectors=0 strokes=0 nodes=0"
+        if kind == CANVAS:
+            var l = ObjectLayer()
+            try:
+                if body != "":
+                    l.load_text(body)
+            except:
+                pass
+            return layer_stats(l)
+        var m = MindMap("Central topic")
+        if body != "":
+            m.from_text(body)
+        return "chars=0 objects=0 connectors=0 strokes=0 nodes=" + String(m.nodes())
 
     def live_stats(self) -> String:
         """The open note's counts, read from its component (no serialising: a 1M-character page costs nothing here)."""
         if self.open_kind == PAGE:
             return "chars=" + String(self.page.ed.chars()) + " objects=0 connectors=0 strokes=0 nodes=0"
-        return "chars=0 objects=0 connectors=0 strokes=0 nodes=0"
+        if self.open_kind == CANVAS:
+            return layer_stats(self.layer)
+        return "chars=0 objects=0 connectors=0 strokes=0 nodes=" + String(self.map.nodes())
 
     def current_body(self) -> String:
         if self.open_kind == PAGE:
             return self.page.ed.text()
-        return ""
+        if self.open_kind == CANVAS:
+            return self.layer.save_text()
+        return self.map.to_text()
 
     def current_title(self) -> String:
         if self.open_kind == PAGE:
@@ -232,7 +319,14 @@ struct Main(App):
             var trimmed = String(first.strip())
             first = trimmed
             return first if first != "" else "Untitled page"
-        return "Untitled"
+        if self.open_kind == CANVAS:
+            for i in range(self.layer.count()):
+                ref o = self.layer.objs[i]
+                if (o.kind == TEXT or o.kind == STICKY) and String(o.text.strip()) != "":
+                    var nl = o.text.find("\n")
+                    return String(o.text[byte=:nl]) if nl > 0 else o.text
+            return "Untitled canvas"
+        return self.map.text_of(0) if self.map.nodes() > 0 else "Untitled map"
 
     def save(mut self):
         if self.open_id == 0 or not self.db:
@@ -293,6 +387,23 @@ struct Main(App):
                 self.page.ed.caret.para = last
                 self.page.ed.caret.byte = self.page.ed.paras[last].byte_length()
             self.page.ed.anchor = self.page.ed.caret
+        elif kind == CANVAS:
+            self.layer = ObjectLayer()
+            try:
+                if body != "":
+                    self.layer.load_text(body)
+            except e:
+                print("PNOTE ERROR: canvas: " + String(e), flush=True)
+            self.cam_x = 0
+            self.cam_y = 0
+            self.zoom = 1
+            self.tool = T_SELECT
+        else:
+            self.map = MindMap("Central topic")
+            if body != "":
+                self.map.from_text(body)
+            self.map_dx = 0
+            self.map_dy = 0
         self.version += 1
 
     def closing(mut self):
@@ -325,6 +436,22 @@ struct Main(App):
                 return
             if self.open_kind == PAGE:
                 _ = self.page.key(e.text, mods, t, self.font)
+            elif self.open_kind == CANVAS:
+                self.canvas_key(e.text, mods, t)
+            else:
+                _ = self.map.key(e.text, mods, t, self.font)
+            self.version += 1
+            return
+        if self.open_kind == CANVAS:
+            self.canvas_gesture(e, t)
+            self.version += 1
+            return
+        if self.open_kind == MAP:
+            if kind == TAP:
+                _ = self.map.tap(e.x * self.scale, e.y * self.scale, t, self.font)
+            elif kind == WHEEL or (kind == PAN):
+                self.map_dx += e.dx if kind == PAN else -e.dx
+                self.map_dy += e.dy if kind == PAN else -e.dy
             self.version += 1
             return
         if self.open_kind == PAGE:
@@ -340,6 +467,176 @@ struct Main(App):
                 self.page.ed.focused = False  # (a scroll moves the view, not the caret)
                 self.page.ed.scroll_by(e.dy * -1.0, self.font, self.page.st)
             self.version += 1
+
+    def page_xy(self, x: Float64, y: Float64) -> Tuple[Float64, Float64]:
+        return (self.cam_x + x / self.zoom, self.cam_y + y / self.zoom)
+
+    def make_at(mut self, x: Float64, y: Float64):
+        """The text, sticky or rectangle tool's object, centred at (x, y) on screen; a text or sticky starts editing."""
+        var p = self.page_xy(x, y)
+        var id = -1
+        if self.tool == T_TEXT:
+            id = self.layer.add_text(p[0] - 110, p[1] - 22, 220, 44, "", 18)
+        elif self.tool == T_STICKY:
+            id = self.layer.add_sticky(p[0] - 80, p[1] - 80, 160, "")
+        elif self.tool == T_RECT:
+            id = self.layer.add_rect(p[0] - 90, p[1] - 55, 180, 110, rgba(37, 99, 235, 38), rgba(37, 99, 235), 2, 8)
+        if id >= 0:
+            self.layer.select(id)
+            if self.tool != T_RECT:
+                _ = self.layer.begin_text_edit(id)
+        self.tool = T_SELECT
+
+    def canvas_key(mut self, name: String, mods: Int, t: Int):
+        if self.layer.editing >= 0:
+            if name == "Escape":
+                self.layer.end_text_edit()
+            else:
+                _ = self.layer.text_key(name, mods, t, self.font)
+            return
+        var ctrl = (mods & CTRL) != 0
+        var shift = (mods & SHIFT) != 0
+        if ctrl:
+            if name == "z" or name == "Z":
+                if shift or name == "Z":
+                    _ = self.layer.redo()
+                else:
+                    _ = self.layer.undo()
+            elif name == "a" or name == "A":
+                self.layer.select_all()
+            elif name == "d":
+                self.layer.duplicate_selection()
+            return
+        if name == "v":
+            self.tool = T_SELECT
+        elif name == "t":
+            self.tool = T_TEXT
+        elif name == "s":
+            self.tool = T_STICKY
+        elif name == "r":
+            self.tool = T_RECT
+        elif name == "p":
+            self.tool = T_PEN
+        elif name == "h":
+            self.tool = T_HAND
+        elif name == "c":  # (connect the two picked objects that aren't ink or arrows, in the order they were picked)
+            var ends = List[Int]()
+            for id in self.layer.selected:
+                var k = self.layer.get(id).kind
+                if k != INK and k != CONNECTOR:
+                    ends.append(id)
+            if len(ends) == 2:
+                _ = self.layer.add_connector(ends[0], ends[1])
+        elif name == "Delete" or name == "Backspace":
+            self.layer.delete_selection()
+        elif name == "Escape":
+            self.layer.clear_selection()
+        elif name == "ArrowLeft":
+            self.layer.nudge(-1, 0, shift)
+        elif name == "ArrowRight":
+            self.layer.nudge(1, 0, shift)
+        elif name == "ArrowUp":
+            self.layer.nudge(0, -1, shift)
+        elif name == "ArrowDown":
+            self.layer.nudge(0, 1, shift)
+        elif name == "]":
+            self.layer.bring_to_front()
+        elif name == "[":
+            self.layer.send_to_back()
+        elif name == "Enter" and len(self.layer.selected) == 1:
+            _ = self.layer.begin_text_edit(self.layer.selected[0])
+
+    def canvas_gesture(mut self, e: Event, t: Int):
+        var kind = e.number
+        if kind == ZOOM:
+            var z = min(max(self.zoom * e.zoom, 0.1), 8.0)
+            var before = self.page_xy(e.x, e.y)
+            self.zoom = z
+            self.cam_x = before[0] - e.x / z
+            self.cam_y = before[1] - e.y / z
+            return
+        if kind == WHEEL:
+            self.cam_x -= e.dx / self.zoom
+            self.cam_y -= e.dy / self.zoom
+            return
+        var p = self.page_xy(e.x, e.y)
+        if kind == PRESS:
+            self.made_on_press = False
+            if self.layer.editing >= 0:
+                self.layer.end_text_edit()
+            if self.tool == T_TEXT or self.tool == T_STICKY or self.tool == T_RECT:
+                self.make_at(e.x, e.y)
+                self.made_on_press = True
+                self.drag = D_NONE
+            elif self.tool == T_PEN:
+                self.wet = Stroke(3, rgba(38, 34, 34))
+                self.wet.add(p[0], p[1], e.pressure)
+                self.drag = D_INK
+            elif self.tool == T_HAND:
+                self.drag = D_PAN
+            else:
+                var h = self.layer.handle_at(p[0], p[1], self.zoom)
+                if h >= 0:
+                    self.handle = h
+                    self.layer.begin_gesture()
+                    self.drag = D_HANDLE
+                else:
+                    var id = self.layer.hit_test(p[0], p[1], 4 / self.zoom)
+                    if id >= 0:
+                        if not self.layer.is_selected(id):
+                            self.layer.select(id, False)
+                        self.layer.begin_gesture()
+                        self.drag = D_MOVE
+                    else:
+                        self.layer.clear_selection()
+                        self.mx0 = p[0]
+                        self.my0 = p[1]
+                        self.mx1 = p[0]
+                        self.my1 = p[1]
+                        self.drag = D_MARQUEE
+            return
+        if kind == PAN:
+            if self.drag == D_PAN:
+                self.cam_x -= e.dx / self.zoom
+                self.cam_y -= e.dy / self.zoom
+            elif self.drag == D_INK:
+                self.wet.add(p[0], p[1], e.pressure)
+            elif self.drag == D_MOVE:
+                self.layer.move_by(e.dx / self.zoom, e.dy / self.zoom)
+            elif self.drag == D_HANDLE:
+                if self.handle == H_ROTATE:
+                    self.layer.rotate_towards(p[0], p[1])
+                else:
+                    self.layer.resize_handle(self.handle, p[0], p[1])
+            elif self.drag == D_MARQUEE:
+                self.mx1 = p[0]
+                self.my1 = p[1]
+            return
+        if kind == RELEASE:
+            if self.drag == D_INK and self.wet.points() > 0:
+                self.wet.seal()
+                _ = self.layer.add_ink(self.wet)
+            elif self.drag == D_MOVE or self.drag == D_HANDLE:
+                self.layer.end_gesture()
+            elif self.drag == D_MARQUEE:
+                self.layer.marquee(min(self.mx0, self.mx1), min(self.my0, self.my1), max(self.mx0, self.mx1), max(self.my0, self.my1))
+            self.drag = D_NONE
+            return
+        if kind == TAP:
+            if self.made_on_press:
+                self.made_on_press = False
+                return
+            if self.tool == T_TEXT or self.tool == T_STICKY or self.tool == T_RECT:
+                self.make_at(e.x, e.y)
+            elif self.tool == T_SELECT:
+                if self.layer.editing >= 0:
+                    self.layer.end_text_edit()
+                _ = self.layer.click(p[0], p[1], False)
+            return
+        if kind == DOUBLE:
+            var id = self.layer.hit_test(p[0], p[1], 4 / self.zoom)
+            if id >= 0:
+                _ = self.layer.begin_text_edit(id)
 
     def palette_hits(self) -> List[Int]:
         """Rows whose title holds the palette's text (case-insensitive), in list order."""
@@ -402,6 +699,8 @@ struct Main(App):
         var bar = List[View]()
         bar.append(Text(self.current_title() if self.open_id != 0 else "No note", HEADLINE))
         bar.append(Spacer())
+        if self.open_kind == CANVAS:
+            bar.append(Text(tool_name(self.tool) + " · " + String(Int(self.zoom * 100 + 0.5)) + "%", CAPTION))
         bar.append(Text(kind_name(self.open_kind), CAPTION))
         var main = VStack(
             HStack(bar^, spacing=8).fill().align(CENTER).padding(8, 16).tag("notebar"),
@@ -440,6 +739,20 @@ struct Main(App):
             self.box_w = col
             self.box_h = h
             self.page.paint(p, self.font, (w - col) / 2, 0)
+        elif self.open_kind == CANVAS:
+            self.scale = k
+            self.layer.paint(p, self.font, self.cam_x, self.cam_y, w / self.zoom, h / self.zoom, self.zoom * k)
+            p.begin_layer("wet")
+            p.layer_transform(-self.cam_x * self.zoom * k, -self.cam_y * self.zoom * k, self.zoom * k)
+            if self.drag == D_INK and self.wet.points() > 0:
+                p.polygon(self.wet.outline(), self.wet.color)
+            if self.drag == D_MARQUEE:
+                var x0 = min(self.mx0, self.mx1)
+                var y0 = min(self.my0, self.my1)
+                p.rect(x0, y0, abs(self.mx1 - self.mx0), abs(self.my1 - self.my0), rgba(37, 99, 235, 30), 2)
+        else:
+            self.scale = k
+            self.map.paint(p, self.font, MapView((w / 2 + self.map_dx) * k, (h / 2 + self.map_dy) * k, k))
 
     def draw_scene(mut self, canvas: Int, mut scene: Scene) -> Bool:
         var k = scene.scale()

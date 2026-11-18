@@ -1580,6 +1580,110 @@ struct ObjectLayer(Movable):
 
     # ------------------------------------------------ building without undo (importers)
 
+    def save_text(self) -> String:
+        """The objects as text, one per line in z order (pictures keep their box, not their pixels: debt, D-7423).
+        Fields are tab-separated; a text's newlines and backslashes are escaped; an INK line ends with its points."""
+        var order = List[Int]()
+        for i in range(len(self.objs)):
+            order.append(i)
+        for a in range(1, len(order)):  # (insertion sort by z: objects are mostly in order already)
+            var k = order[a]
+            var b = a - 1
+            while b >= 0 and self.objs[order[b]].z > self.objs[k].z:
+                order[b + 1] = order[b]
+                b -= 1
+            order[b + 1] = k
+        var out = String("objectlayer 1\n")
+        for i in order:
+            ref o = self.objs[i]
+            out += String(o.id) + "\t" + String(o.kind) + "\t" + String(o.x) + "\t" + String(o.y) + "\t" + String(o.w) + "\t" + String(o.h)
+            out += "\t" + String(o.rot) + "\t" + String(o.z) + "\t" + ("1" if o.locked else "0") + "\t" + String(Int(o.color)) + "\t" + String(Int(o.line))
+            out += "\t" + String(o.line_width) + "\t" + String(o.radius) + "\t" + String(o.size) + "\t" + String(o.from_id) + "\t" + String(o.to_id)
+            out += "\t" + String(o.fx) + "\t" + String(o.fy) + "\t" + String(o.stroke.width) + "\t"
+            if o.kind == INK:
+                for j in range(o.stroke.points()):
+                    if j > 0:
+                        out += " "
+                    out += String(o.stroke.xs[j]) + "," + String(o.stroke.ys[j]) + "," + String(o.stroke.ps[j])
+            out += "\t" + o.text.replace("\\", "\\\\").replace("\n", "\\n") + "\n"
+        return out^
+
+    def load_text(mut self, text: String) raises:
+        """Replaces the objects with save_text's (ids are new; connectors keep their ends); no undo step."""
+        self.objs = List[Obj]()
+        self.pos_of = Dict[Int, Int]()
+        self.selected = List[Int]()
+        self.history.clear()
+        var new_of = Dict[Int, Int]()
+        var conns = List[Obj]()
+        var zs = Dict[Int, Int]()  # new id → saved z
+        var lines = text.split("\n")
+        for li in range(1, len(lines)):
+            var line = String(lines[li])
+            if line == "":
+                continue
+            var f = line.split("\t")
+            if len(f) < 21:
+                continue
+            var kind = Int(String(f[1]))
+            var o = Obj(-1, kind, Float64(String(f[2])), Float64(String(f[3])), Float64(String(f[4])), Float64(String(f[5])), UInt32(Int(String(f[9]))))
+            o.rot = Float64(String(f[6]))
+            o.locked = String(f[8]) == "1"
+            o.line = UInt32(Int(String(f[10])))
+            o.line_width = Float64(String(f[11]))
+            o.radius = Float64(String(f[12]))
+            o.size = Float64(String(f[13]))
+            o.from_id = Int(String(f[14]))
+            o.to_id = Int(String(f[15]))
+            o.fx = Float64(String(f[16]))
+            o.fy = Float64(String(f[17]))
+            var raw = String(f[20])
+            var t = String()
+            var esc = False
+            for ch in raw.codepoint_slices():
+                if esc:
+                    t += "\n" if ch == "n" else String(ch)
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                else:
+                    t += String(ch)
+            o.text = t
+            if kind == INK:
+                var st = Stroke(Float64(String(f[18])), o.color)
+                for pt in String(f[19]).split(" "):
+                    var v = String(pt).split(",")
+                    if len(v) == 3:
+                        st.add(Float64(String(v[0])), Float64(String(v[1])), Float64(String(v[2])))
+                st.seal()
+                o.stroke = st^
+            var old = Int(String(f[0]))
+            var z = Int(String(f[7]))
+            if kind == CONNECTOR:
+                o.z = z
+                conns.append(o^)
+            else:
+                var nid = self.adopt(o^)
+                new_of[old] = nid
+                zs[nid] = z
+        for ref c in conns:
+            var o = c.copy()
+            o.from_id = new_of.get(o.from_id, -1) if o.from_id >= 0 else -1
+            o.to_id = new_of.get(o.to_id, -1) if o.to_id >= 0 else -1
+            var z = o.z
+            var nid = self.adopt(o^)
+            zs[nid] = z
+        var lo = 0
+        var hi = 0
+        for i in range(len(self.objs)):
+            var z = zs.get(self.objs[i].id, self.objs[i].z)
+            self.objs[i].z = z
+            lo = min(lo, z) if i > 0 else z
+            hi = max(hi, z) if i > 0 else z
+        self.z_top = hi
+        self.z_bottom = lo
+        self._changed()
+
     def adopt(mut self, var o: Obj) -> Int:
         """An object as it is (an importer's): a new id and the top z, no undo step."""
         o.id = self.next_id
