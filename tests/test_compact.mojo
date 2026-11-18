@@ -76,7 +76,7 @@ def says(events: List[String], what: String) -> Bool:
 def main() raises:
     var gguf = getenv("LLM_GGUF", getenv("HOME", "") + "/Projects/omx-local/models/Qwen3.8-27B-UD-Q4_K_M.gguf")
     var gpu = Int(getenv("LLM_GPU", "0"))
-    var agent = LlmAgent(Llm(gguf, gpu=gpu, n_ctx=8192, n_seq=2), SYSTEM, max_tokens=80)
+    var agent = LlmAgent(Llm(gguf, gpu=gpu, n_ctx=8192, n_seq=2), SYSTEM, max_tokens=80, temperature=Float64(getenv("COMPACT_TEMP", "0.0") == "0.3") * 0.3)  # (greedy: the same words every run; COMPACT_TEMP=0.3 looks into sampling)
     assert_equal(agent.budget(), 3276)
     var turns = Int(getenv("COMPACT_TURNS", String(TURNS)))
     var early = List[Float64]()

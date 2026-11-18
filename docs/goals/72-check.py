@@ -276,7 +276,16 @@ def m3():
     if state != "PASS":
         return state, why
     r = sh(["pixi", "run", "python", "scripts/agui_llm_check.py"], 1800, {"LLM_GPU": GPU})
-    return ("PASS", why + " | official AG-UI client: " + r.stdout.strip().splitlines()[-1][:120]) if r.returncode == 0 else ("FAIL", "agui_llm_check: " + tail(r, 400))
+    if r.returncode:
+        return "FAIL", "agui_llm_check: " + tail(r, 400)
+    # D-7314: the conversation that never fills (84 turns on an 8192-token context, condensed between turns)
+    state, why2 = _run_binary(["scripts/mojo_flare.sh", "build", "tests/test_compact.mojo", "-o", "build/test_compact"], ["build/test_compact"], {"LLM_GPU": GPU}, "compact: ok")
+    if state != "PASS":
+        return state, "test_compact: " + why2
+    bench = json.loads((OUT / "compact-bench.json").read_text())
+    return "PASS", (why + " | official AG-UI client: " + r.stdout.strip().splitlines()[-1][:120]
+                    + f" | never full: {bench['turns']} turns on {bench['n_ctx']} tokens condensed {bench['compactions']} times, no failed run, the first turn's facts recalled, "
+                    f"first words late/early {bench['ratio']:.2f}")
 
 
 def app_lint():
@@ -434,7 +443,7 @@ def m6_units():
     if why:
         return "FAIL", why
     out = []
-    for name in ("todo", "news", "cloudlane", "assistant", "creator", "imagegen", "notes"):  # (the last three use the second card)
+    for name in ("todo", "news", "cloudlane", "assistant", "creator", "imagegen", "notes", "trust", "utf8"):  # (imagegen and notes use the second card)
         b = sh(["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", "-I", "vendor", f"tests/test_{name}.mojo", "-o", f"build/test_{name}"], 900)
         if b.returncode:
             return "FAIL", f"build test_{name}: " + tail(b, 600)
@@ -442,7 +451,14 @@ def m6_units():
         if r.returncode or f"{name}: ok" not in r.stdout:
             return "FAIL", f"test_{name}: " + tail(r, 600)
         out.append(r.stdout.strip().splitlines()[-1])
-    return "PASS", " | ".join(out) + " (fixtures: 19 routing utterances land right: local, cloud, background)"
+    edges = sh(["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_watch_edges.mojo"], 600)  # (D-7307: a link is never followed out of a watched folder)
+    if edges.returncode or "edges: all ok" not in edges.stdout:
+        return "FAIL", "test_watch_edges: " + tail(edges, 600)
+    pair = sh(["pixi", "run", "python", "tests/test_pairing.py"], 300)  # (D-7300)
+    if pair.returncode or "pairing: ok" not in pair.stdout:
+        return "FAIL", "test_pairing: " + tail(pair, 600)
+    out.append("watch edges: ok | pairing: ok")
+    return "PASS", " | ".join(out) + " (fixtures: routing utterances land right, the names that stay local do too)"
 
 
 def m6_todo():
@@ -650,10 +666,13 @@ def m6_cloud():
     if not cloud or "failed" in cloud[0]["raw"] or len(cloud[0].get("text", "")) <= 10:
         probs.append("no cloud answer: " + str([c["raw"][:80] for c in cloud]))
     rows = [json.loads(l) for l in ledger.read_text().splitlines()] if ledger.exists() else []
-    if len(rows) != 1 or rows[0].get("outcome") != "ok" or rows[0].get("bytes_out", 0) <= 0 or rows[0].get("bytes_in", 0) <= 0:
-        probs.append(f"the ledger: {rows}")
+    # D-7303: the record comes first: a "sent" row written before the request left, then the outcome (two rows, both 0600)
+    if (len(rows) != 2 or rows[0].get("outcome") != "sent" or rows[1].get("outcome") != "ok" or rows[0].get("bytes_out", 0) <= 0
+            or rows[1].get("bytes_in", 0) <= 0 or rows[0].get("at", 0) > rows[1].get("at", 0) or (ledger.stat().st_mode & 0o777) != 0o600):
+        probs.append(f"the ledger: {rows} mode {oct(ledger.stat().st_mode & 0o777) if ledger.exists() else None}")
     else:
-        said.append(f"cloud via {rows[0]['provider']} {rows[0]['model']}: {rows[0]['bytes_out']} bytes out, {rows[0]['bytes_in']} in, {rows[0]['seconds']} s, one ledger row; "
+        rows = rows[1:]
+        said.append(f"cloud via {rows[0]['provider']} {rows[0]['model']}: {rows[0]['bytes_out']} bytes out, {rows[0]['bytes_in']} in, {rows[0]['seconds']} s, a sent row then its outcome (0600); "
                     f"answer {cloud[0]['text'][:90]!r}")
         bench(cloud_bytes_out=rows[0]["bytes_out"], cloud_seconds=rows[0]["seconds"])
     spoken = hear(OUT / "m6-cloud.wav")

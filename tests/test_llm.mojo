@@ -177,6 +177,16 @@ def main() raises:
         assert_true(after1.text.find("Madrid") >= 0, "the other sequence answers after fault " + String(what) + ": " + after1.text)
         print("llm fault", what, ": ok |", bad)
 
+    # 5c. D-7302: a request nobody polls to its end is forgotten when it is cancelled (the engine kept it for ever before)
+    _ = llm.test_fault(0)
+    var abandoned = llm.chat("[" + msg("user", "Say hi.") + "]", seq=0, max_tokens=4)
+    sleep_ms(2500)  # (it has finished by now, and nobody read it)
+    var known = llm.test_fault(0)
+    assert_equal(known, 1)
+    llm.cancel(abandoned)
+    assert_equal(llm.test_fault(0), 0)
+    print("llm abandoned request: ok, forgotten on cancel")
+
     # 6. a background request beside the conversation: both finish, both right
     var bg = llm.chat("[" + msg("user", "Write the numbers from 1 to 60, one per line, and nothing else.") + "]", seq=1, max_tokens=400)
     sleep_ms(300)  # (the background one is generating)
