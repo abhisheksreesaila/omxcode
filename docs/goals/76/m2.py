@@ -161,7 +161,8 @@ def gtk(d):
         "key:grid=Escape", "pause:400", f"regions:{OUT}/gtk-7.json",
         "shortcut:Ctrl+Shift+C", "pause:1500", f"regions:{OUT}/gtk-8.json", f"shot:{OUT}/gtk-8-chart.png",
         "tap:ribbon-tab-insert", "pause:300", "tap:Links", "pause:500", f"regions:{OUT}/gtk-10.json",  # (review round 1: Esc from where the
-        "escape", "pause:500", f"regions:{OUT}/gtk-11.json",  # ribbon's button leaves the keyboard, not sent to the grid)
+        "escape", "pause:500", f"regions:{OUT}/gtk-11.json",  # ribbon's button leaves the keyboard: the window's Escape item fires)
+        "tap:Links", "pause:500", f"regions:{OUT}/gtk-12.json", "tapat:table-telemetry=500,600", "pause:500", "key:table-telemetry=Escape", "pause:500", f"regions:{OUT}/gtk-13.json",  # (round 2: a card's canvas has it)
         "shortcut:Ctrl+S", "pause:1500",
         "tap:ribbon-tab-home", "pause:300", f"shot:{OUT}/gtk-tab-home.png",
         "tap:ribbon-tab-data", "pause:300", f"shot:{OUT}/gtk-tab-data.png",
@@ -184,7 +185,8 @@ def gtk(d):
         return f"GTK launch: the Board overflows its room ({m.group(0) if m else 'no BOARDS line'})"
     for k, panel, where in ((0, False, "launch"), (2, False, "after Insert > Table"), (3, True, "Links docked"), (5, False, "after the x"),
                             (6, True, "Ctrl+Shift+I"), (7, False, "Esc on the sheet"), (8, False, "Ctrl+Shift+C (a chart: no panel)"),
-                            (10, True, "Insert > Links again"), (11, False, "Esc reaching the window")):
+                            (10, True, "Insert > Links again"), (11, False, "Esc reaching the window"),
+                            (12, True, "Links once more"), (13, False, "Esc in the telemetry card")):
         why = geometry(OUT / f"gtk-{k}.json", panel, "GTK " + where)
         if why:
             return why
@@ -224,6 +226,8 @@ def web(d):
         "shortcut:Ctrl+Shift+I", "pause:600", f"regions:{OUT}/web-6.json", "shortcut:Ctrl+Shift+I", "pause:600",
         "tap:Insert", "pause:300", "tap:Links", "pause:600", f"regions:{OUT}/web-7.json",  # (review round 1: a real Esc, the keyboard
         "press:Escape", "pause:600", f"regions:{OUT}/web-8.json",  # where the ribbon's button left it)
+        "tap:Links", "pause:600", f"regions:{OUT}/web-9.json", "tapat:table-telemetry=500,600", "pause:400", "key:table-telemetry=Escape", "pause:600",
+        f"regions:{OUT}/web-10.json",  # (round 2: a real click into the telemetry card, then a real Esc: the card's canvas has the keyboard)
         "tap:Format", "pause:300", f"shot:{OUT}/web-tab-format.png",
     ])
     r, out = drive.web_run(WEB, steps, viewport=(W, H), env=env)
@@ -231,7 +235,8 @@ def web(d):
     if r.returncode != 0:
         return "web run failed: " + out[-600:]
     for k, panel, where in ((0, False, "launch"), (2, False, "after Insert > Table"), (3, True, "Links docked"), (5, False, "after the x"), (6, True, "Ctrl+Shift+I"),
-                            (7, True, "Insert > Links again"), (8, False, "a real Esc")):
+                            (7, True, "Insert > Links again"), (8, False, "a real Esc"),
+                            (9, True, "Links once more"), (10, False, "a real Esc in the telemetry card")):
         why = geometry(OUT / f"web-{k}.json", panel, "web " + where)
         if why:
             return why

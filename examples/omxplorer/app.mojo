@@ -3829,6 +3829,12 @@ struct Main(App):
             self.ribbon_at = m - RIBBON_TAB
             self.version += 1
             return
+        if event.number == KEY and event.text == "Escape" and self.inspector_open and self.grid.editor_place(self.frame)[2] == 0:
+            # (an Escape a canvas took (a table card's grid, a document, a video, the sheet's own grid) with no cell being
+            # edited: the docked panel closes, as the window's Escape item does where no canvas has the keyboard; the canvas
+            # still gets the key below, review round 2, D-7623)
+            self.close_panels()
+            self.version += 1
         if self.tracks.update(event, self.font, self.pal):  # (a log's chart tapped or set: its video seeks; a column picked; close)
             if self.tracks.seek_card >= 0:
                 var video = self.tracks.cards[self.tracks.seek_card].video
