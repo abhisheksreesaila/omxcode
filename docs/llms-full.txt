@@ -1085,6 +1085,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Voice loop (turn-taking) | `mojoui.voiceloop: VoiceLoop().tick() -> HEARD / STARTED / BARGED events, say(delta) / end_reply(); microphone -> VAD -> Parakeet, the reply's sentences -> Kokoro -> Speaker; barge-in, merge while thinking, first-audio and barge stamps; Microphone also plays a recorded voice (`file:a.wav@2.5`)` | ✅ | ✅ | ❌ | ❌ | ❌ | — |
 | Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
+| To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| News headlines | `mojoui.news: news_url, parse_headlines (Google News RSS: title, source, link, age; entities decoded, newest first), NewsCard (each headline a link), news_for_model` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
+| Think-it-through job | `mojoui.llmjob: ThinkJob(title, task).start(llm) on the model's second sequence with thinking on, poll(), ThinkCard (a clock, then the answer; the thinking is never shown), job_notice / job_memory; LlmAgent.remember` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
+| Cloud lane | `mojoui.cloudlane: route(text) (the cloud only when named: 'ask Claude', 'use Opus for…'; 'stay local' wins; 'think it through' is a background job), looks_secret, CloudLane (claude -p as a child process, capped, never waits), the ledger of bytes sent` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
+| Assistant features (glue) | `mojoui.assistant.Assistant: registers todo_*, news and think_it_through as the agent's tools (LlmAgent.add_deferred: tools the app answers later), owns the to-do card's messages, the job, the news cards, the cloud lane; an app calls register / tick / flush / notice / cards` | ✅ | 🔨 | ❌ | ❌ | ❌ | — |
 
 - Microphone (Web): tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too.
 - Microphone (Android): not built.
@@ -1134,6 +1139,31 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - Voice screens (Android): plain views; never run with this app.
 - Voice screens (Mac (AppKit)): builds; never run.
 - Voice screens (iPhone (UIKit)): builds; never run.
+- To-do list (Linux (GTK)): tests/test_todo; 72-check M6-TODO on examples/omx: five things in one spoken-style turn, 'I called mum' ticks it, a tap on a tick box, 'what's left', still there after a restart.
+- To-do list (Web): the same file and tools; never run in the browser.
+- To-do list (Android): plain views; never run.
+- To-do list (Mac (AppKit)): builds; never run.
+- To-do list (iPhone (UIKit)): builds; never run.
+- News headlines (Linux (GTK)): tests/test_news; 72-check M6-NEWS: two topics, 6 headlines with sources, the card 1.3-2.3 s after the question (limit 12), a two-sentence gist; https through Flare (examples/omx/needs: flare).
+- News headlines (Web): the request is mojoui.http, but the web build has no TLS (plain http only): the tool answers that it can't reach the news.
+- News headlines (Android): Flare isn't built for Android.
+- News headlines (Mac (AppKit)): Flare runs on the Mac; never run with this.
+- News headlines (iPhone (UIKit)): Flare isn't built for iOS.
+- Think-it-through job (Linux (GTK)): tests/test_llmjob (the conversation answered in 372 ms while the job ran); 72-check M6-JOBS: a spoken question during the job, first audio within 1.5 s, the notice heard back, the next turn knows the answer.
+- Think-it-through job (Web): same code; never run in the browser.
+- Think-it-through job (Android): libllama isn't built there.
+- Think-it-through job (Mac (AppKit)): libllama shim not built.
+- Think-it-through job (iPhone (UIKit)): libllama shim not built.
+- Cloud lane (Linux (GTK)): tests/test_cloudlane (19 routing utterances, a script standing in for claude, the cap, the ledger); 72-check M6-CLOUD: one real request, 'Asking Claude.' said first, the chip and the orange frame while it spoke, gone after.
+- Cloud lane (Web): mojoui.process runs there; never run with the cloud lane.
+- Cloud lane (Android): no child processes there.
+- Cloud lane (Mac (AppKit)): mojoui.process runs on the Mac; never run with this.
+- Cloud lane (iPhone (UIKit)): no child processes on the phone.
+- Assistant features (glue) (Linux (GTK)): examples/omx (72-check M6).
+- Assistant features (glue) (Web): same code; never run in the browser.
+- Assistant features (glue) (Android): needs the llama shim.
+- Assistant features (glue) (Mac (AppKit)): needs the llama shim.
+- Assistant features (glue) (iPhone (UIKit)): needs the llama shim.
 
 ## Composite components (Mojo, built from the ones above)
 

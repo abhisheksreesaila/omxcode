@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "build/g72"
 SHOTS = ROOT / "docs/goals/72"
 WAV = OUT / "wav"
-SINK = "g72omx"
+SINK = os.environ.get("G72_SINK") or f"m6a{os.getpid()}"  # (one per run, and not a prefix of another run's name: the grep that clears leftovers would unload a neighbour's)
 GPU = os.environ.get("G72_GPU", "1")
 MODELS = Path(os.environ.get("OMX_MODELS") or Path.home() / "Projects/omx-local/models")
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -355,12 +355,14 @@ def wait_gpu(index, need_mib, timeout=1200):
 
 def run6(source, steps, env=None, **kw):
     wait_gpu(BRAIN_GPU, 20000)
-    return run_app(source, steps, env=env, **kw)
+    ev, r = run_app(source, steps, env=env, **kw)
+    (OUT / "last-run6.log").write_text(r.stdout)  # (what the app printed, for reading when a scenario fails)
+    return ev, r
 
 
 def m6_units():
     out = []
-    for name in ("todo", "news", "cloudlane"):
+    for name in ("todo", "news", "cloudlane", "assistant"):
         b = sh(["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", "-I", "vendor", f"tests/test_{name}.mojo", "-o", f"build/test_{name}"], 900)
         if b.returncode:
             return "FAIL", f"build test_{name}: " + tail(b, 600)
@@ -474,6 +476,7 @@ def m6_jobs():
     follow = "What did you conclude about the graphics card question?"
     steps = (TYPED_OPEN + turn(task, 90000) + f"shot:{OUT}/job_running.png;wait:300;"
              + "waitfor:Dismiss=420000;wait:9000;" + f"shot:{OUT}/job_done.png;wait:300;" + turn(follow, 90000))
+    wait_gpu(BRAIN_GPU, 20000)  # (before the recording starts: it would hold the minutes of waiting)
     with NullSink() as sink:
         sink.record(OUT / "m6-jobs.wav")
         ev, r = run6("file:W/q1.wav@25", steps, env={**SPLIT}, timeout=900)
@@ -560,6 +563,7 @@ def m6_cloud():
     steps = (TYPED_OPEN + turn("What is two plus two?", 90000) + f"shot:{OUT}/frame_local.png;wait:300;"
              + "enter:Type to omx=Ask Claude: in one sentence, what is a monad?;wait:800;waitfor:Claude · cloud=30000;wait:1200;"
              + f"shot:{OUT}/frame_cloud.png;wait:300;waitfor:Local · Qwen 27B=120000;wait:1500;shot:{OUT}/frame_after.png;wait:300")
+    wait_gpu(BRAIN_GPU, 20000)  # (before the recording starts: it would hold the minutes of waiting)
     with NullSink() as sink:
         sink.record(OUT / "m6-cloud.wav")
         ev, r = run6(SILENT, steps, env=env, timeout=600)
