@@ -41,9 +41,12 @@ goal-73-links-canvas.
 - Goal 71's M5 chain (70 → 68 → 47) run on the merged branch. Goal 68 M0 failed only on a fresh worktree's missing
   moments.csv (made by a later milestone); rerun PASS.
 - Goal 47's M8 (the robots recording on GTK) first failed on "the screen is being rebuilt: ask again" (a link made just as a
-  row's video card opened); the agent host now asks again (D-7330). It then reports SLOW frames (52–141 ms over the 50 ms
-  budget): the base commit run back to back under the same load (load average 58: the owner's running app and another
-  session's ffmpeg) is as slow or slower (51–299 ms), so these are the machine's load, not this goal.
+  row's video card opened); the agent host now asks again (D-7330). After that it passed once outright (0 SLOW) and failed
+  on single SLOW stalls in other runs; the base, run in turns with it, shows the same stalls under load and the same
+  distributions (median frame paint 11.8 vs 11.7 ms, canvas draw 1.04 vs 1.04 ms): docs/goals/73/m8-compare.md with every
+  run, raw logs under build/g73/m4/. So 73-check M4 is not green on its last run; every part of it has passed on this
+  branch (goal 68 M0–M5, M6's components / messages / seek lint, goal 70's lints, goal 47 M0–M7, and M8 in run 1), and
+  scenario robots exits 0 (docs/goals/73/m4.py).
 - Already failing before this goal (checked on cc33c9d7): tests/test_theme's graphite accent assertion; goal 54's M1 width
   check (board 1066 → 927 for a 160-point narrower window, the check wants ≥ 150).
 
