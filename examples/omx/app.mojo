@@ -272,7 +272,6 @@ struct Main(App):
         self.cloud_text = text
         self.cloud = True
         self.orb.lane(True)
-        self.reply = "Asking Claude…"
         self.loop.say("Asking Claude. ")
         print("OMX LANE: cloud turn=" + String(self.turns) + " model=" + lane.model, flush=True)
         return True
@@ -447,7 +446,7 @@ struct Main(App):
 
     def view(self) -> View:
         if self.cloud:
-            return Overlay(self.page(True), RimView(RIM_CANVAS, 1))
+            return Overlay(self.page(True), RimView(RIM_CANVAS, 1)).grow().fill()
         return self.page(True)
 
     def draw(mut self, canvas: Int, mut surface: Surface):

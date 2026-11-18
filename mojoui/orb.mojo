@@ -171,4 +171,4 @@ def draw_rim(mut s: Surface, p: Palette, on: Bool):
 
 def RimView(canvas: Int, version: Int) -> View:
     """The cloud frame's Canvas, over the whole page (put it last in an Overlay): presses go through to the page."""
-    return Canvas(canvas, version).passthrough().fill().tag("rim")
+    return Canvas(canvas, version).passthrough().fill().grow().tag("rim")

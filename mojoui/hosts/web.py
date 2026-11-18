@@ -1813,7 +1813,8 @@ def render_node(s, i, sid):
                 ch = s.nodes[c]
                 h = {START: "start", END: "end"}.get(ch["x"], "center")
                 v = "end" if ch["y"] == END else "start"
-                kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}"))
+                cover = " cover" if ch["fills"] and ch["grows"] else ""  # (a layer over the whole overlay: mojoui.orb.RimView)
+                kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}{cover}"))
         return Div(*kids, cls="overlay", id=nid, data_kind="overlay")
     if kind == CANVAS:
         # Its own size only when the app's layout doesn't size it (as on the other hosts).

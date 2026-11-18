@@ -2029,6 +2029,10 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_widget_set_hexpand", NoneType](child, c_int(1))
                     external_call["gtk_widget_set_vexpand", NoneType](child, c_int(1))
                     external_call["gtk_overlay_set_child", NoneType](w, child)
+                elif self.rt.shown.nodes[c].fills and self.rt.shown.nodes[c].grows:  # a layer that covers the whole overlay (.fill().grow(): mojoui.orb.RimView, the cloud frame)
+                    external_call["gtk_widget_set_halign", NoneType](child, c_int(0))
+                    external_call["gtk_widget_set_valign", NoneType](child, c_int(0))
+                    external_call["gtk_overlay_add_overlay", NoneType](w, child)
                 else:  # an island: pinned to an edge, 12 pt in, its natural size
                     ref pin = self.rt.shown.nodes[c]
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(1 if pin.x == START else (2 if pin.x == END else ALIGN_CENTER)))

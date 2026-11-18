@@ -140,6 +140,8 @@ def run_app(source, steps, window=None, record=None, timeout=300, env=None):
 
     headless.ensure()
     extra_env = env
+    if os.environ.get("G72_LAYOUT") == "split" and not env:  # (the brain on card 0, the voice on card 1: how M6 runs; set it to run M4 and M5 as the owner's machine is laid out)
+        extra_env = dict(SPLIT)
     env = {"CUDA_VISIBLE_DEVICES": GPU, "OMX_LLM_GPU": "0", "OMX_MODELS": str(MODELS), "MOJOUI_AUDIO_SINK": SINK,
            "MOJOUI_AUDIO_SOURCE": source.replace("W/", str(WAV) + "/"), "MOJOUI_TEST": steps}
     env.update(extra_env or {})
@@ -524,7 +526,7 @@ def m6_jobs():
         probs.append("no spoken notice")
     spoken = hear(OUT / "m6-jobs.wav")
     bench(m6_jobs_as_heard=spoken)
-    (said if re.search(r"finished thinking", spoken, re.I) else probs).append(f"the speaker's audio, heard back: ...{spoken[-160:]!r}")
+    (said if re.search(r"finished .{0,60}on your screen", spoken, re.I | re.S) else probs).append(f"the speaker's audio, heard back: ...{spoken[-160:]!r}")
     rep = replies(ev)
     last = max(rep) if rep else 0
     if not re.search(r"3090|5090|3,?000|two cards|second", rep.get(last, ""), re.I):
