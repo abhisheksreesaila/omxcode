@@ -9,6 +9,7 @@ A dated record of what was tried, what happened, and what it means. Newest first
 - **Worked:** Links autocomplete as chips under the field (`fl` → `fleet.`, `fleet.ep` → `episode`, `=`/`~`, the second end), Return completes a partial draft; a Board that grows downwards and scrolls (a +600 pt drag makes the table 600 pt taller; a 6th card goes in a new row instead of squeezing); Liquid cards on a darker canvas with one soft shadow (+10 L* step, every text pair ≥ 4.5:1). Proven on GTK (headless, real input) and the web host.
 - **Broke and fixed:** GTK put a field's stale held text back after the app cleared it; chips three to a row widened the inspector over the next card (now packed by width); the agent host didn't retry the GTK host's "ask again" (goal 47's robots run).
 - **Means:** making a link is typing with help, not copy-paste; a card can be made as big as the data needs. The ribbon is next, after the launch posts. Report: docs/goals/73-report.md.
+- **Shipped (2026-11-18):** reviewer round 2 PASS; main d51a7218 pushed; the linux-app download rebuilt from it (sha256 98f50c91…), re-downloaded from GitHub and driven headless: `./omxplorer fleet.csv`, `fl`, Return and chips linked fleet.episode = telemetry.episode.
 ---
 
 ## Fix: the Linux download opens the file it is given (2026-11-16)
