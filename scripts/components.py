@@ -417,6 +417,27 @@ SERVICES = [
      {"Linux (GTK)": ("✅", "tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); no app yet"), "Web": ("❌", "needs libllama in the app's process"),
       "Android": ("❌", "not built"), "Mac (AppKit)": ("❌", "not built (llama.cpp has Metal; the shim is untried there)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
+    # Goal 72 M2 (the voice components, run by tests/test_voice.mojo in the `voice` pixi environment, GPU 1 + a null sink)
+    ("Speaker", "mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread", "",
+     {"Linux (GTK)": ("✅", "tests/test_voice: heard on a PulseAudio null sink's monitor, silent 25 ms after stop()"),
+      "Web": ("❌", "the browser's AudioContext is goal 72 M5"), "Android": ("❌", "not built"),
+      "Mac (AppKit)": ("🔨", "builds; play() reports \"no speaker on this host yet\" (AVAudioEngine planned)"),
+      "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
+    ("Voice (text to speech)", "mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause", "",
+     {"Linux (GTK)": ("✅", "tests/test_voice: first audio under 70 ms on a free 3090"),
+      "Web": ("❌", "the model needs CPython + torch in the app's process"), "Android": ("❌", "not built"),
+      "Mac (AppKit)": ("🔨", "builds; needs CPython with torch beside the app, never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+    ("Speech model: Parakeet", "mojoui.speech: SpeechModel(\"parakeet\") (Parakeet TDT 0.6B v3 int8, onnx_asr, GPU), same transcribe()/SpeechStream", "",
+     {"Linux (GTK)": ("✅", "tests/test_voice: WER 0.0 on the TTS'd sentence, about 0.14 s an utterance on a free 3090"),
+      "Web": ("❌", "the model needs CPython + onnxruntime in the app's process"), "Android": ("❌", "not built"),
+      "Mac (AppKit)": ("🔨", "builds; never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+    ("Endpointer (turn-taking)", "mojoui.voice: Endpointer().feed(samples, captured_ns, playing), poll() -> START / BARGE / END (Silero VAD)", "",
+     {"Linux (GTK)": ("✅", "tests/test_voice: one START and one END per utterance, BARGE over a playing speaker"),
+      "Web": ("❌", "needs CPython + torch in the app's process"), "Android": ("❌", "not built"),
+      "Mac (AppKit)": ("🔨", "builds; never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
 ]
 
 

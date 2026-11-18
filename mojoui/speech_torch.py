@@ -67,10 +67,13 @@ class Model:
     def _load_now(self, name, device, half):
         global torch
         import torch
-        from transformers import AutoProcessor, WhisperForConditionalGeneration
 
         t0 = self._t0
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        if name.startswith("parakeet"):
+            return self._load_parakeet(t0)
+        from transformers import AutoProcessor, WhisperForConditionalGeneration
+
         self.dtype = torch.float16 if (half and self.device.type == "cuda") else torch.float32
         self.processor = AutoProcessor.from_pretrained(name)
         self.model = WhisperForConditionalGeneration.from_pretrained(
@@ -81,9 +84,31 @@ class Model:
         self.transcribe(np.zeros(RATE, dtype=np.float32))
         self.load_ms = (time.perf_counter() - t0) * 1000
 
+    def _load_parakeet(self, t0):
+        """NVIDIA Parakeet TDT 0.6B v3, int8 ONNX through onnx_asr, on the GPU when there is one (torch is imported first:
+        it brings the cuDNN that onnxruntime's CUDA provider needs). Files: $MOJOUI_PARAKEET_DIR (a folder with the
+        encoder/decoder .int8.onnx files), else onnx_asr's Hugging Face cache."""
+        import os
+        import onnx_asr
+
+        folder = os.environ.get("MOJOUI_PARAKEET_DIR") or None
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.device.type == "cuda" else ["CPUExecutionProvider"]
+        self.asr = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", folder, quantization="int8", providers=providers)
+        self.gpu = torch.cuda.get_device_name(self.device) if self.device.type == "cuda" else "CPU"
+        self.lock = threading.Lock()
+        warm = np.random.default_rng(1).normal(0, 0.05, RATE * 2).astype(np.float32)
+        self.transcribe(warm)
+        self.transcribe(warm)
+        self.load_ms = (time.perf_counter() - t0) * 1000
+
     def transcribe(self, audio):
-        """Text for float32 samples at 16 kHz (up to 30 s: Whisper's window)."""
+        """Text for float32 samples at 16 kHz (Whisper: up to 30 s, its window)."""
         t0 = time.perf_counter()
+        if hasattr(self, "asr"):
+            with self.lock:
+                text = str(self.asr.recognize(audio, sample_rate=RATE)).strip() if len(audio) >= RATE // 10 else ""
+            self.last_ms = (time.perf_counter() - t0) * 1000
+            return text
         with self.lock, torch.inference_mode():
             feats = self.processor.feature_extractor(
                 audio[: 30 * RATE], sampling_rate=RATE, return_tensors="pt",
