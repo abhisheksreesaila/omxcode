@@ -9,6 +9,9 @@
 #   the screens        mojoui.voiceui                  Home (big orb, greeting, chips) morphing to Work (small orb, shelf)
 #   the look           themes.liquid                   Liquid light, and Liquid dark when the system is
 #
+#   pictures, notes    mojoui.creator.Creator          make_comic / draw_picture (an image model on its own GPU, panel by panel on a card)
+#                                                      and find_in_notes (e5 embeddings by MAX, a card citing the files)
+#
 # Environment (nothing is hard-wired to a machine): OMX_MODELS = the folder with Qwen3.8-27B-UD-Q4_K_M.gguf and
 # parakeet-tdt-0.6b-v3 (default ~/Projects/omx-local/models); OMX_LLM_GPU = the GPU the model loads on (default 0: set
 # CUDA_VISIBLE_DEVICES to pick the card); MOJOUI_AUDIO_SOURCE / MOJOUI_AUDIO_SINK = the microphone and the speaker
@@ -24,7 +27,9 @@ from mojoui.clock import now_ns
 from mojoui.effects import Every
 from mojoui.json import Json
 from mojoui.llm import Llm
-from mojoui.llmagent import LlmAgent, press, view_tools, render_ui_tool, DEFAULT_SYSTEM
+from mojoui.llmagent import LlmAgent, AppTool, press, view_tools, render_ui_tool, DEFAULT_SYSTEM
+from mojoui.creator import Creator
+from mojoui.http import Request
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme
@@ -44,13 +49,18 @@ comptime ORB_CANVAS = 1
 comptime RIM_CANVAS = 2
 comptime CARDS = 20_000  # the cards' controls (mojoui.agentui.Screens) and their canvases
 comptime CARD_CANVASES = 2000
+comptime CREATOR_MSG = 900  # the image server's replies (mojoui.creator)
+comptime CREATOR_CANVAS = 12_000  # the creator's cards' canvases
 
 
 struct Main(App):
+    comptime HTTP = True  # the creator sends the image server its requests
+
     var loop: VoiceLoop
     var llm: Optional[LlmAgent]
     var client: Agent  # the conversation as the screen keeps it (AG-UI messages, the cards' calls)
     var screens: Screens[]
+    var creator: Creator  # comics, pictures and notes (mojoui.creator)
     var orb: Orb
     var look: Theme
     var suggestions: List[String]
@@ -79,12 +89,14 @@ struct Main(App):
         self.loop = VoiceLoop(parakeet_dir=models + "/parakeet-tdt-0.6b-v3")
         try:
             var gpu = Int(environment("OMX_LLM_GPU", "0"))
-            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu), "Your name is omx. " + String(DEFAULT_SYSTEM))
+            self.llm = LlmAgent(Llm(models + "/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=gpu), "Your name is omx. " + String(DEFAULT_SYSTEM), max_tokens=1000)
         except e:
             self.note = "the language model didn't load: " + String(e)
         self.client = Agent("", 0, 0, "omx")
         self.client.offer(render_ui_tool())
         self.screens = Screens(CARDS, CARD_CANVASES)
+        var sd = environment("HOME") + "/Projects/omx-local"
+        self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
         self.orb = Orb()
         self.look = liquid(False)
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
@@ -144,9 +156,25 @@ struct Main(App):
         elif m >= CHIP and m < CHIP + len(self.suggestions):
             var asked = self.suggestions[m - CHIP]
             self.send(asked)
+        elif self.creator.owns(m):
+            self.creator.reply(e)
         elif self.screens.owns(m):
             if self.screens.handle(e, self.client):  # (a card's button: the agent hears it)
                 self.start_run()
+
+    def requests(mut self) -> List[Request]:
+        return self.creator.take_requests()
+
+    def closing(mut self):
+        self.creator.closing()
+
+    def tools(self) -> List[AppTool]:
+        """What the agent may call: the app's buttons (not the cards' own: those don't change the tool list when a card appears,
+        so the model's prompt cache keeps) and the creator's tools."""
+        var all = view_tools(self.page(False))
+        for t in self.creator.tools():
+            all.append(t.copy())
+        return all^
 
     def send(mut self, text: String):
         """Words typed or tapped: the same turn as words said."""
@@ -157,7 +185,7 @@ struct Main(App):
     def tick(mut self):
         if not self.primed and self.llm:
             self.primed = True
-            self.llm.value().set_tools(view_tools(self.page(False)))
+            self.llm.value().set_tools(self.tools())
             self.llm.value().prime(self.client.input_json())
         self.loop.hold = self.llm.value().warm() == False if self.llm else False  # (the first question meets a warm prompt cache)
         for ref e in self.loop.tick():
@@ -173,6 +201,9 @@ struct Main(App):
                 print("OMX BARGE: ms=" + String(Int(e.ms + 0.5)), flush=True)
             elif e.kind == HEARD:
                 self.heard_turn(e.copy())
+        self.creator.tick()
+        for line in self.creator.take_log():
+            print("OMX " + line, flush=True)
         self.pump_run()
         if self.loop.first_ns != self.told_first and self.loop.first_ns > 0:
             self.told_first = self.loop.first_ns
@@ -194,6 +225,7 @@ struct Main(App):
         """The person's words are in (said or typed): the Work screen, and a run of the agent on them."""
         self.work = True
         self.turns += 1
+        self.creator.turn_began()
         var fresh = String(e.text[byte = self.said_before.byte_length() + 1 :]) if e.merged and e.text.byte_length() > self.said_before.byte_length() else e.text
         self.heard = e.text
         self.said_before = e.text
@@ -214,7 +246,7 @@ struct Main(App):
         self.silent_run = False
         self.run_ns = now_ns()
         var input = self.client.local_input()
-        self.llm.value().set_tools(view_tools(self.page(False)))
+        self.llm.value().set_tools(self.tools())
         for ev in self.llm.value().begin(input):
             self.take(ev)
 
@@ -235,10 +267,15 @@ struct Main(App):
             for ev in self.llm.value().poll():
                 self.take(ev)
             var calls = self.llm.value().take_calls()
-            for c in calls:  # (the app's own buttons, as the agent pressed them)
+            for c in calls:  # (the app's own buttons, as the agent pressed them; the creator's tools answer now or when done)
+                if self.creator.handles(c.name):
+                    self.creator.call(c.id, c.name, c.arguments)
+                    continue
                 var result = press(self, c.name, c.arguments)
                 self.llm.value().answer(c.id, result)
-                self.llm.value().set_tools(view_tools(self.page(False)))
+                self.llm.value().set_tools(self.tools())
+            for a in self.creator.take_answers():
+                self.llm.value().answer(a.id, a.content)
         elif self.queued:
             self.start_run()
 
@@ -294,7 +331,7 @@ struct Main(App):
         if not cards:
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), "", "", "", lane, List[View](), dock)
         if self.work:
-            var shelf = List[View]()
+            var shelf = self.creator.views()  # (its newest on top, then the agent's own cards)
             for k in range(len(self.screens.uis) - 1, -1, -1):  # (newest on top)
                 shelf.append(self.screens.view(k, self.client.state, self.shelf_version))
             return VoiceWork(OrbView(ORB_CANVAS, self.orb.version(), False), self.status(), self.heard, self.reply, lane, shelf^, dock)
@@ -310,5 +347,7 @@ struct Main(App):
             self.orb.draw(surface, self.look.palette)
         elif canvas == RIM_CANVAS:
             draw_rim(surface, self.look.palette, self.cloud)
+        elif self.creator.owns_canvas(canvas):
+            self.creator.draw(canvas, surface, self.look.palette)
         else:
             self.screens.draw(canvas, surface, self.look.palette, self.client.state)

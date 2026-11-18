@@ -24,7 +24,7 @@ from std.memory import ArcPointer
 from std.os import makedirs, getenv
 from std.os.path import exists
 from mojoui.http import Request
-from mojoui.event import Event
+from mojoui.app import Event
 from mojoui.json import Json, json_string
 from mojoui.clock import now_ns
 from mojoui.picture import Picture, draw_fitted
@@ -140,6 +140,7 @@ struct Creator(Movable):
     var serial: Int
     var tainted: Bool  # this turn read the person's notes (untrusted text)
     var asked: Int  # drawing requests sent
+    var warmed: Bool  # a first small picture has loaded the model's weights (the first real one doesn't pay for it)
 
     def __init__(out self, msg: Int, canvas_base: Int, var server: ImageServer, pictures: String):
         self.server = server^
@@ -162,6 +163,7 @@ struct Creator(Movable):
         self.serial = 0
         self.tainted = False
         self.asked = 0
+        self.warmed = False
 
     @staticmethod
     def from_environment(prefix: String, msg: Int, canvas_base: Int, sd_bin: String, sd_models: String) -> Creator:
@@ -170,8 +172,12 @@ struct Creator(Movable):
         NOTES_DIR (~/Documents/notes), NOTES_PACK (build/packs/e5small), NOTES_CACHE (~/.cache/omxcode/notes). The image
         model starts at once when it is installed; the notes index is read when the folder exists."""
         var home = getenv("HOME", "")
-        var server = ImageServer.zimage(getenv(prefix + "_SD_BIN", sd_bin), getenv(prefix + "_SD_MODELS", sd_models),
-                                        getenv(prefix + "_SD_GPU", "1"), Int(getenv(prefix + "_SD_PORT", "8190")))
+        var port = 8190
+        try:
+            port = Int(getenv(prefix + "_SD_PORT", "8190"))
+        except:
+            pass
+        var server = ImageServer.zimage(getenv(prefix + "_SD_BIN", sd_bin), getenv(prefix + "_SD_MODELS", sd_models), getenv(prefix + "_SD_GPU", "1"), port)
         var c = Creator(msg, canvas_base, server^, getenv(prefix + "_PICTURES", home + "/Pictures/omx"))
         if getenv(prefix + "_SD", "1") != "0":
             c.server.start()
@@ -249,6 +255,7 @@ struct Creator(Movable):
         return out^
 
     def refuse(mut self, id: String, why: String):
+        self.log.append("REFUSED: " + why)
         self.answers.append(Answer(id, '{"error":' + json_string(why) + "}"))
 
     def cant_draw(self) -> String:
@@ -336,8 +343,14 @@ struct Creator(Movable):
             self.version += 1
 
     def pump(mut self):
-        """The next panel goes out when the last one is back and the model is up."""
-        if self.flying[0] >= 0 or len(self.queue) == 0:
+        """The next panel goes out when the last one is back and the model is up. The model loads its weights on its first
+        picture (5 s here): a small one is drawn as soon as it is healthy, so the first real one is not that late."""
+        if self.server.ready() and not self.warmed and self.flying[0] == -1:
+            self.warmed = True
+            self.flying = (-2, -2)
+            self.outbox.append(self.server.draw_request(self.msg, 0, "a dot", 1, 256))
+            return
+        if self.flying[0] != -1 or len(self.queue) == 0:
             return
         if self.server.state == IMG_FAILED:
             while len(self.queue) > 0:  # (the model died: every waiting panel says so)
@@ -362,6 +375,8 @@ struct Creator(Movable):
         var q = self.flying
         self.flying = (-1, -1)
         if q[0] < 0 or q[0] >= len(self.cards):
+            if q[0] == -2:
+                self.log.append("PAINTER: warm ms=" + String((now_ns() - self.server.started_ns) // 1_000_000))
             return
         ref card = self.cards[q[0]]
         ref slot = card.slots[q[1]]
