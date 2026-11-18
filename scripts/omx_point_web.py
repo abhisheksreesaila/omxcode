@@ -95,13 +95,20 @@ def main():
             browser = p.chromium.launch(executable_path=CHROMIUM, headless=True, args=flags)
             ctx = browser.new_context(viewport={"width": 820, "height": 1180}, permissions=["microphone"])
             page = ctx.new_page()
+            page.on("framenavigated", lambda f: print("navigated", f.url, flush=True))
+            page.on("pageerror", lambda e: print("pageerror", str(e)[:300], flush=True))
+            page.on("console", lambda m: print("console", m.type, m.text[:160], flush=True))
             page.goto(f"http://127.0.0.1:{port}/", timeout=240000)
             page.mouse.click(10, 10)  # (the tap that turns sound on)
             wait_for(lambda: "OMX READY" in log_path.read_text(), 240, "the voice and the model", 0.5)
             page.get_by_role("button", name="Type").click()
             box = page.get_by_placeholder("Type to omx")
+            box.wait_for()
+            page.wait_for_timeout(1500)  # (htmx wires the new box after the swap: Enter before that submits the page's own form)
             box.fill(ASK)
             box.press("Enter")
+            page.wait_for_timeout(2500)
+            page.screenshot(path=str(OUT / "web_after_enter.png"))  # (what the page showed just after the question was sent: for when no turn starts)
             shots, best = [], None
             end = time.time() + 90
             while time.time() < end:

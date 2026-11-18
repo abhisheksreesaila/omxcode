@@ -26,7 +26,7 @@ _spec = importlib.util.spec_from_file_location("g72check", ROOT / "docs/goals/72
 g72 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(g72)
 
-CTX = {"OMX_LLM_CTX": "32768"}  # (the context stays under 32768: one 3090 holds the brain and the voice)
+CTX = {"OMX_LLM_CTX": "32768", "MOJOUI_TODO": str(OUT / "todo.json")}  # (the context stays under 32768: one 3090 holds the brain and the voice; the to-do list is the checker's own file, emptied before each run)
 LAG_LIMIT_MS = 250  # a point is shown within this of the audio that names it
 TAG = re.compile(r"^card\d+\.(word|sounds|meaning|example|origin)$")
 WORDS = {  # M2: the word, a reference meaning the card's is judged against
@@ -63,8 +63,14 @@ def sentences(text):
     return len([s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()])
 
 
+def fresh_todo():
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "todo.json").write_text('{"items":[]}')
+
+
 def typed_turns(turns, shots=None, extra_wait=0):
     """One app run with typed turns; shots: [(ms after the last turn is sent, file)]. Returns (events, run)."""
+    fresh_todo()
     steps = g72.TYPED_OPEN + "".join(f"enter:Type to omx={t};wait:800;waitfor:Listening=170000;wait:400;" for t in turns)
     return g72.run_app(g72.SILENT, steps, env=CTX, timeout=60 * 12 * max(1, len(turns)))
 
@@ -118,6 +124,7 @@ def m1():
     SHOTS.mkdir(parents=True, exist_ok=True)
     for old_shot in OUT.glob("m1_*.png"):
         old_shot.unlink()
+    fresh_todo()
     steps = g72.TYPED_OPEN + f"enter:Type to omx={ask};waitfor:meaning=120000;" + "".join(f"shot:{OUT}/m1_{k:02d}.png;wait:100;" for k in range(10)) + "waitfor:Listening=170000;wait:400;"
     with g72.NullSink():
         ev, r = g72.run_app(g72.SILENT, steps, env=CTX, timeout=900)
@@ -171,7 +178,7 @@ def ring_shot():
     for f in sorted(OUT.glob("m1_*.png")):
         im = Image.open(f).convert("RGB")
         px = im.load()
-        n = sum(1 for y in range(140, min(420, im.height)) for x in range(im.width) if px[x, y][0] < 90 and 120 < px[x, y][1] < 190 and 130 < px[x, y][2] < 200)
+        n = sum(1 for y in range(100, min(700, im.height)) for x in range(im.width) if px[x, y][0] < 90 and 120 < px[x, y][1] < 190 and 130 < px[x, y][2] < 200)
         if best is None or n > best[1]:
             best = (f, n)
     return best if best and best[1] > 1200 else None
@@ -212,6 +219,7 @@ def m2():
     words = list(WORDS)
     SHOTS.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
+    fresh_todo()
     steps = g72.TYPED_OPEN
     for w in words:
         steps += f"enter:Type to omx=What does the word {w} mean?;wait:3000;shot:{OUT}/m2_{w}_mid.png;wait:2500;shot:{OUT}/m2_{w}_mid2.png;waitfor:Listening=170000;wait:600;shot:{OUT}/m2_{w}.png;"

@@ -28,7 +28,7 @@ comptime VISUAL_SYSTEM = (
     "labels printed on it (\"the meaning says...\", \"the example is...\"). Never read a card out. Which card: what a word means or how it "
     "is said, use render_ui with a WordCard, then say the word, what its meaning says and what its example shows, in two sentences at "
     "most (\"Ephemeral. The meaning says it lasts a very short time, and the example is a sunset.\"); a trip, a route, a walk or places to go, call show_map; how something works or is made, call "
-    "explain; facts or numbers to compare, a schedule or a list of things with details, use render_ui with a Table; things to remember or "
+    "explain; two or more things to compare, numbers, a schedule or a list of things with details, even a short one, use render_ui with a Card holding a Table (cards always sit in a Card with a title); things to remember or "
     "do, the to-do tools; the news, the news tool. Plain talk needs no card: a greeting, a yes or no, a quick fact, an opinion, a joke, "
     "a sum: answer in one or two short sentences. If a card tool says it is not available, build the closest card with render_ui. Your "
     "words are spoken aloud: natural sentences, no markdown, no bullet lists, no emoji, numbers written the way they are said. If a tool "
