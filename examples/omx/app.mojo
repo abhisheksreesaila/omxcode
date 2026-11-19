@@ -182,6 +182,7 @@ struct Main(App):
     var recent: List[String]  # the cards shown, newest first (keys: cardN, todo, job, newsK, lookN, makeK)
     var recent_titles: List[String]
     var speaking: Bool  # she was speaking at the last tick (the TV's quiet counts from when she stops)
+    var stopped_at: Int  # when she last stopped speaking (tv_now): her subtitles stay as long as the TV's quiet
     var todo_sig: String
     var job_sig: String
     var news_seen: Int
@@ -264,6 +265,7 @@ struct Main(App):
         self.recent = List[String]()
         self.recent_titles = List[String]()
         self.speaking = False
+        self.stopped_at = -1
         self.todo_sig = ""
         self.job_sig = ""
         self.news_seen = 0
@@ -473,6 +475,8 @@ struct Main(App):
         if talking != self.speaking:  # (the TV's quiet counts from her last word, never while she talks)
             self.speaking = talking
             self.tv.speaking(tv_now(), talking)
+            if not talking:
+                self.stopped_at = tv_now()
         if s == LOOP_HEARING:
             self.orb.mode(ORB_LISTEN)
         elif s == LOOP_THINKING:
@@ -500,6 +504,7 @@ struct Main(App):
         var fresh = self.assist.cloud.fresh(e.text, e.merged)  # (a merged turn continues the one before: only what is new)
         self.heard = e.text
         self.reply = ""
+        self.stopped_at = -1
         self.msgs.append(StageMsg(TV_YOU, e.text, clock_text(local_time())))
         self.reply_msg = -1
         self.tv.touch(tv_now())
@@ -974,9 +979,11 @@ struct Main(App):
         return "Listening"
 
     def subtitle(self) -> String:
-        """The chat bar's words when its box is closed: what she is saying (its last words), what she heard while she thinks."""
+        """The chat bar's words when its box is closed: what she is saying (its last words; they stay as long as the TV's quiet
+        after she stops), what she heard while she thinks."""
         var s = self.loop.state()
-        if (s == LOOP_SPEAKING or s == LOOP_THINKING) and self.reply != "":
+        var lingers = self.stopped_at >= 0 and (tv_now() - self.stopped_at) // 1000 < self.tv.quiet_ms  # (read after she stops, as long as the TV's quiet)
+        if (s == LOOP_SPEAKING or s == LOOP_THINKING or lingers) and self.reply != "":
             var r = self.reply
             if r.byte_length() > 90:
                 var cut = r.byte_length() - 90

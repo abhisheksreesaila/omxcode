@@ -2180,7 +2180,11 @@ def make_app(module_dir):
         # inherited their list's hx-target and silently sent nothing). Note: hx-vals is still
         # merged from ancestors even so, so elements set every key they rely on themselves.
         # No eval and no scripts from answers (the CSP forbids both anyway); no inline style for htmx's indicators.
-        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'),
+        # No settle delay (goal 77 M7f, D-7840): for its 20 ms default htmx lends a swapped-in element whose id an old one had
+        # the old element's attributes (classes, styles) so CSS transitions can run; mojoui's ids are node numbers, which a
+        # rebuilt screen gives to different views, so a frame could paint the new screen in the old one's sizes (the Stage's
+        # TV body caught squashed, its orb on black). mojoui animates with its own springs, never with htmx's settle classes.
+        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "defaultSettleDelay": 0}'),
         Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
         Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
     app.add_middleware(SecurityHeaders)
