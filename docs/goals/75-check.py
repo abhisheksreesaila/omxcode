@@ -120,19 +120,41 @@ def mac(scene, gpu=True):
     return out, ""
 
 
-def silky(res, scene):
+def step_bad(what, b, where="linux"):
+    """'' when a framebench step is silky, else why not. (Added 11-18, D-7554, nothing lowered: on the Mac the
+    main thread waits for each frame's GPU (D-7532), so the time from commit to the GPU starting and from it ending to
+    the thread waking is a real stall; D-7541's frame work (CPU + GPU-busy) must pass AND the wall clock too
+    (wall_p95 ≤ P95, wall_max ≤ MAX), and a GPU run has no frame drawn by the CPU executor (cpu_frames=0).)"""
+    if not b or int(b.get("n", "0")) == 0:
+        return f"{what}: no frames"
+    p95, mx, missed = float(b["p95"]), float(b["max"]), int(b.get("missed", "0"))
+    bad = []
+    if p95 > P95 or mx > MAX or missed > 0:
+        bad.append(f"p95 {p95} max {mx} missed {missed}")
+    if where == "mac":
+        if "wall_p95" not in b or "wall_max" not in b:
+            bad.append("no wall_p95/wall_max")
+        elif float(b["wall_p95"]) > P95 or float(b["wall_max"]) > MAX:
+            bad.append(f"wall_p95 {b['wall_p95']} wall_max {b['wall_max']}")
+        if b.get("renderer", "").startswith("gpu2d") and int(b.get("cpu_frames", "1")) != 0:
+            bad.append(f"cpu_frames {b.get('cpu_frames')} (frames drawn off the GPU)")
+    return f"{what} " + ", ".join(bad) if bad else ""
+
+
+def silky(res, scene, where="linux"):
     """'' when every step of the scene is silky, else what isn't."""
     bad = []
     for step in [x for x in STEPS[scene] if x.startswith("framebench:")]:
         what = step.split("=")[1].split(",")[0]
-        b = res.get(what)
-        if not b or int(b.get("n", "0")) == 0:
-            bad.append(f"{what}: no frames")
-            continue
-        p95, mx, missed = float(b["p95"]), float(b["max"]), int(b.get("missed", "0"))
-        if p95 > P95 or mx > MAX or missed > 0:
-            bad.append(f"{what} p95 {p95} max {mx} missed {missed}")
+        why = step_bad(what, res.get(what), where)
+        if why:
+            bad.append(why)
     return "; ".join(bad)
+
+
+def wall(res):
+    """The Mac's wall-clock p95/max per step, for the PASS line."""
+    return " wall " + " ".join(f"{w}:{b.get('wall_p95')}/{b.get('wall_max')}" for w, b in res.items())
 
 
 def summary(res):
@@ -190,7 +212,7 @@ def gpu_milestone(where, readback_test, ok_line):
         if g.startswith("cpu") or g.startswith("(no"):
             return "FAIL", f"{scene}: not on the GPU ({g})"
         res = benches(out)
-        bad = silky(res, scene)
+        bad = silky(res, scene, where)
         if bad:
             return "FAIL", f"{scene} ({g}): {bad}"
         check = ""
@@ -203,7 +225,7 @@ def gpu_milestone(where, readback_test, ok_line):
             if nums[0] > 1.5 or nums[1] > 0.5 or nums[2] > 1.5 or nums[3] > 0.5:
                 return "FAIL", f"{scene}: readback outside M1's bounds: {m.group(1)}"
             check = f" readback mean {nums[0]} far {nums[1]}%"
-        said.append(f"{scene} {summary(res)}{check}")
+        said.append(f"{scene} {summary(res)}{wall(res) if where == 'mac' else ''}{check}")
     return "PASS", f"silky ({where}): " + "; ".join(said)
 
 
@@ -231,9 +253,10 @@ def m4():
             return "BLOCKED", why
         res = benches(out)
         b = res.get("grow")
-        if not b or int(b.get("n", "0")) == 0 or float(b["p95"]) > P95 or float(b["max"]) > MAX or int(b.get("missed", "0")):
-            return "FAIL", f"{where} grow: {b}"
-        said.append(f"{where} grow {b['p50']}/{b['p95']}/{b['max']}")
+        why = step_bad("grow", b, where)
+        if why:
+            return "FAIL", f"{where} {why}: {b}"
+        said.append(f"{where} grow {b['p50']}/{b['p95']}/{b['max']}" + (f" wall {b['wall_p95']}/{b['wall_max']}" if where == "mac" else ""))
     return "PASS", "motion test; " + "; ".join(said) + "; compare.png"
 
 
@@ -246,9 +269,10 @@ def m5():
         res = benches(out)
         for what in ("draw", "finish"):
             b = res.get(what)
-            if not b or int(b.get("n", "0")) == 0 or float(b["p95"]) > P95 or float(b["max"]) > MAX or int(b.get("missed", "0")):
-                return "FAIL", f"{where} {what}: {b}"
-            said.append(f"{where} {what} {b['p50']}/{b['p95']}/{b['max']}")
+            why = step_bad(what, b, where)
+            if why:
+                return "FAIL", f"{where} {why}: {b}"
+            said.append(f"{where} {what} {b['p50']}/{b['p95']}/{b['max']}" + (f" wall {b['wall_p95']}/{b['wall_max']}" if where == "mac" else ""))
     return "PASS", "; ".join(said)
 
 

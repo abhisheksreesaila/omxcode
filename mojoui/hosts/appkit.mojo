@@ -50,7 +50,7 @@ from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
-    new_class, add_method, add_protocol, register_class, pool_push,
+    new_class, add_method, add_protocol, register_class, pool_push, fn_address,
 )
 
 comptime NODE_BITS = 16
@@ -288,6 +288,22 @@ struct AppKitHost[A: App](Movable):
     var g2d_why: String  # "": Metal is here (probed at start); else why those canvases stay on the CPU path
     var g2d_force: Bool  # MOJOUI_GPU2D=1: every canvas whose app draws a Scene takes the GPU path, .gpu() or not (testing)
     var g2d_frames: Int  # pictures Metal drew so far (framebench's renderer=)
+    var g2d_defer: Bool  # (set by tick and framebench around their draws) a GPU frame is committed, not waited for: see finish_gpu2d
+    var g2d_defer_on: Bool  # MOJOUI_GPU2D_DEFER=0: every GPU frame is waited for at once, as before D-7555 (to compare)
+    var g2d_keep: Int  # GPU frames left in flight at the end of a frame (MOJOUI_GPU2D_INFLIGHT − 1)
+    # committed GPU frames not yet shown, oldest first: canvas, ring slot, IOSurface, and what the CPU fallback needs
+    var g2d_pk: List[Int]
+    var g2d_pat: List[Int]
+    var g2d_ps: List[Int]
+    var g2d_pw: List[Int]
+    var g2d_ph: List[Int]
+    var g2d_pscale: List[Float64]
+    var g2d_pb: List[CGRect]
+    var g2d_pt: List[Int]  # (and when each was committed, ns)
+    var g2d_shown_ms: List[Float64]  # commit → handed to Core Animation, per frame shown that way (framebench reads and clears it)
+    var g2d_done: List[Float64]  # the GPU time of each completed frame, in commit order (framebench reads and clears it)
+    var g2d_notify: Bool  # the renderer calls on_gpu2d_done when a committed frame completes
+    var g2d_failed: Int  # committed GPU frames the GPU didn't complete (counted as GPU frames when committed: framebench moves them to cpu_frames)
     var g2d_parts: List[Float64]  # the last GPU frame's parts (ms): the app's Scene, the batches, Metal (encode + GPU), the GPU alone;
     # then layers rebuilt, kept, grown, polygon groups planned and drawn (on the canvas)
 
@@ -353,6 +369,22 @@ struct AppKitHost[A: App](Movable):
         self.g2d_why = g2d_why
         self.g2d_force = env("MOJOUI_GPU2D") == "1"
         self.g2d_frames = 0
+        self.g2d_defer = False
+        self.g2d_defer_on = env("MOJOUI_GPU2D_DEFER") != "0"
+        var inflight = env("MOJOUI_GPU2D_INFLIGHT")
+        self.g2d_keep = 1 if inflight == "" else max(to_int(inflight) - 1, 0)
+        self.g2d_pk = List[Int]()
+        self.g2d_pat = List[Int]()
+        self.g2d_ps = List[Int]()
+        self.g2d_pw = List[Int]()
+        self.g2d_ph = List[Int]()
+        self.g2d_pscale = List[Float64]()
+        self.g2d_pb = List[CGRect]()
+        self.g2d_pt = List[Int]()
+        self.g2d_shown_ms = List[Float64]()
+        self.g2d_done = List[Float64]()
+        self.g2d_notify = False
+        self.g2d_failed = 0
         self.g2d_parts = List[Float64](length=13, fill=0)
         self.size_w = List[Int]()
         self.size_h = List[Int]()
@@ -2027,6 +2059,7 @@ struct AppKitHost[A: App](Movable):
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.sized = List[Tuple[Int, Int, Int, Int]](length=len(self.rt.shown.nodes), fill=(0, 0, 0, 0))
+        self.finish_gpu2d(0)  # (frames still on the GPU complete before their IOSurfaces go)
         for ref c in self.canvases:
             c.drop_surfaces()
         self.canvases = List[AppleCanvas]()
@@ -2872,18 +2905,35 @@ struct AppKitHost[A: App](Movable):
         var micro = Int((seconds - self.last_frame) * 1e6) if self.last_frame > 0 and seconds - self.last_frame < 0.25 else 16667
         self.last_frame = seconds
         var k = 0
+        self.g2d_defer = True  # (GPU frames are committed, not waited for: shown when they complete, D-7555)
         while k < len(self.canvases):
             var node = self.canvases[k].node
             if self.rt.shown.nodes[node].msg2 != 0:
                 var d = self.rt.frame(node, micro)
                 self.apply(d, self_addr)
                 if d.rebuild:
+                    self.g2d_defer = False
+                    self.finish_frame()
                     return
             self.draw_canvas(k, self_addr)
             k += 1
+        self.g2d_defer = False
+        self.finish_frame()
         if self.link != 0 and self.idle():  # nothing to animate or redraw: stop waking up
+            self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
             _ = msg(self.link, "invalidate")
             self.link = 0
+
+    def finish_frame(mut self):
+        """After a frame's draws: the window draws and commits its own views, then GPU frames are shown oldest first,
+        leaving g2d_keep of them in flight (the next frame shows them; tick shows the last when it stops) (D-7555)."""
+        self.finish_ready()
+        if len(self.g2d_pk) <= self.g2d_keep:
+            return
+        if self.window != 0:
+            _ = msg(self.window, "displayIfNeeded")
+            _ = msg(cls("CATransaction"), "flush")  # (layer-backed views draw into their layers when it commits: now)
+        self.finish_gpu2d(self.g2d_keep)
 
     def idle(self) -> Bool:
         for ref c in self.canvases:
@@ -3006,7 +3056,11 @@ struct AppKitHost[A: App](Movable):
         var n = len(c.surfaces)
         for j in range(n):
             var at = (c.next + j) % n
-            if cfunc[UInt8]("IOSurfaceIsInUse", c.surfaces[at]) == 0:
+            var flying = False  # (committed, not yet shown: Core Animation doesn't hold it yet, the GPU does)
+            for x in self.g2d_ps:
+                if x == c.surfaces[at]:
+                    flying = True
+            if not flying and cfunc[UInt8]("IOSurfaceIsInUse", c.surfaces[at]) == 0:
                 return at
         if n > 0 and n < 6:
             var s = io_surface(wpx, hpx)
@@ -3033,14 +3087,21 @@ struct AppKitHost[A: App](Movable):
 
     def draw_gpu2d(mut self, k: Int, wpx: Int, hpx: Int, scale: Float64, bounds: CGRect, version: Int, self_addr: Int) -> Bool:
         """Canvas k on the GPU (goal 75 M3): the app's Scene (draw_scene) → gpu2d's batches, layer by layer (unchanged
-        layers keep theirs, D-7533) → Metal into a free IOSurface of the canvas's ring, waited for (a frame's work
-        includes the GPU's, and the picture is whole) and handed to Core Animation as a layer's contents (no copy).
-        When Metal can't take the frame (no free IOSurface, a failed command buffer) the same batches are drawn by
-        gpu2d's CPU executor and shown as before. False: the app draws no Scene (the host's usual path draws it)."""
+        layers keep theirs, D-7533) → Metal into a free IOSurface of the canvas's ring (one no frame in flight holds)
+        and handed to Core Animation as a layer's contents (no copy) once the GPU completed it: at once, or, inside tick
+        and framebench (g2d_defer), when the frame's completed handler says so or a later frame needs the slot, never
+        blocking on the frame just committed (D-7555). When Metal can't take the frame (no free IOSurface, a failed
+        command buffer) the same batches are drawn by gpu2d's CPU executor and shown as before. False: the app draws no
+        Scene (the host's usual path draws it)."""
         var addr = self.gpu2d()
         if addr == 0:
             return False
+        if len(self.g2d_pk) > 0 and not self.g2d_defer:  # (a waited-for draw: whatever is in flight is shown first)
+            self.finish_gpu2d(0)
         var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=addr)
+        if not self.g2d_notify:  # (frames committed without waiting are shown from the main queue when they complete)
+            g[].metal.notify(self_addr, fn_address(on_gpu2d_done[Self.A]))
+            self.g2d_notify = True
         var node = self.canvases[k].node
         var t0 = Int(now_ns())
         g[].scene.reset(wpx, hpx, scale)
@@ -3048,11 +3109,15 @@ struct AppKitHost[A: App](Movable):
         if not r[0]:
             return False
         var t1 = Int(now_ns())
+        if len(self.g2d_pk) > self.g2d_keep:  # (no more than g2d_keep + 1 frames in flight)
+            self.finish_gpu2d(self.g2d_keep)
         var at = self.ring_pick(k, wpx, hpx, addr)
         var on_gpu = False
+        var pending = False
         if at >= 0:
             var s = self.canvases[k].surfaces[at]
-            on_gpu = g[].render_scene(node, s, wpx, hpx)
+            var defer = self.g2d_defer and self.g2d_defer_on
+            on_gpu = g[].render_scene(node, s, wpx, hpx, 0, not defer)
             self.g2d_parts[0] = Float64(t1 - t0) / 1e6
             self.g2d_parts[1] = g[].build_ms
             self.g2d_parts[2] = Float64(Int(now_ns()) - t1) / 1e6 - g[].build_ms
@@ -3063,34 +3128,109 @@ struct AppKitHost[A: App](Movable):
             self.g2d_parts[8] = Float64(g[].metal.drawn_groups)
             self.g2d_parts[11] = g[].metal.idle_ms
             self.g2d_parts[12] = Float64(g[].metal.woken)
-            if on_gpu:
-                if self.canvases[k].gpu_frames == 0:
-                    self.report.note("canvas node " + String(node) + ": drawn by gpu2d on Metal into an IOSurface, shown without a copy")
-                self.layer_show(k, s, bounds)
+            if on_gpu and defer:  # (committed: shown when it completes, finish_ready / show_oldest)
+                pending = True
+                self.g2d_pk.append(k)
+                self.g2d_pat.append(at)
+                self.g2d_ps.append(s)
+                self.g2d_pw.append(wpx)
+                self.g2d_ph.append(hpx)
+                self.g2d_pscale.append(scale)
+                self.g2d_pb.append(bounds.copy())
+                self.g2d_pt.append(Int(now_ns()))
                 self.canvases[k].next = (at + 1) % len(self.canvases[k].surfaces)
                 self.canvases[k].gpu_frames += 1
                 self.g2d_frames += 1
+            elif on_gpu:
+                self.g2d_done.append(g[].metal.gpu_ms)
+                self.gpu2d_shown(k, at, bounds, True)
         if not on_gpu:
-            if len(self.canvases[k].pixels) != wpx * hpx:
-                self.canvases[k].pixels = List[UInt32](length=wpx * hpx, fill=0)
-            else:
-                for i in range(wpx * hpx):
-                    self.canvases[k].pixels[i] = 0
-            var surface = Surface(Int(self.canvases[k].pixels.unsafe_ptr()), wpx, hpx, scale)
-            fill_batches(g[].frame, g[].scene, g[].atlas, g[].font)
-            execute_cpu(g[].frame, g[].atlas, surface)
-            if self.canvases[k].layer != 0:
-                _ = msg(self.canvases[k].layer, "setHidden:", 1)
-            _ = self.show_pixels(k, wpx, hpx, bounds)
+            self.gpu2d_cpu(k, wpx, hpx, scale, bounds, False)
         if wpx != self.canvases[k].wpx or hpx != self.canvases[k].hpx:
             self.report.note("canvas node " + String(node) + " (id " + String(self.rt.shown.nodes[node].style) + ") drew " + String(wpx) + "x" + String(hpx)
-                             + " px on the " + ("GPU (gpu2d, Metal)" if on_gpu else "CPU (gpu2d's executor)"))
+                             + " px on the " + ("GPU (gpu2d, Metal)" if on_gpu else "CPU (gpu2d's executor)") + (" (committed, shown when it completes)" if pending else ""))
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
         self.canvases[k].drawn = version if not g[].scene.again else -1  # (mid-animation: drawn again next frame, as GTK)
         g[].end_frame()
         self.apply(r[1], self_addr)
         return True
+
+    def gpu2d_shown(mut self, k: Int, at: Int, bounds: CGRect, count: Bool):
+        """Canvas k's GPU frame is complete in ring slot `at`: Core Animation shows it (`count`: it's counted now, not
+        when it was committed)."""
+        ref c = self.canvases[k]
+        if c.gpu_frames == 0 or (not count and c.gpu_frames == 1):
+            self.report.note("canvas node " + String(c.node) + ": drawn by gpu2d on Metal into an IOSurface, shown without a copy")
+        self.layer_show(k, c.surfaces[at], bounds)
+        if count:
+            self.canvases[k].next = (at + 1) % len(self.canvases[k].surfaces)
+            self.canvases[k].gpu_frames += 1
+            self.g2d_frames += 1
+
+    def gpu2d_cpu(mut self, k: Int, wpx: Int, hpx: Int, scale: Float64, bounds: CGRect, drawn: Bool):
+        """Canvas k's frame by gpu2d's CPU executor (Metal couldn't take it or didn't complete it), shown as pixels; the
+        frame's Scene is the renderer's `scene`, or `prev` once end_frame ran (`drawn`)."""
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
+        if len(self.canvases[k].pixels) != wpx * hpx:
+            self.canvases[k].pixels = List[UInt32](length=wpx * hpx, fill=0)
+        else:
+            for i in range(wpx * hpx):
+                self.canvases[k].pixels[i] = 0
+        var surface = Surface(Int(self.canvases[k].pixels.unsafe_ptr()), wpx, hpx, scale)
+        if drawn:
+            fill_batches(g[].frame, g[].prev, g[].atlas, g[].font)
+        else:
+            fill_batches(g[].frame, g[].scene, g[].atlas, g[].font)
+        execute_cpu(g[].frame, g[].atlas, surface)
+        if self.canvases[k].layer != 0:
+            _ = msg(self.canvases[k].layer, "setHidden:", 1)
+        _ = self.show_pixels(k, wpx, hpx, bounds)
+
+    def finish_ready(mut self):
+        """Shows the committed GPU frames the GPU has completed, oldest first, without waiting (the renderer's completed
+        handler calls this on the main queue; a frame's end calls it too)."""
+        if self.g2d == 0:
+            return
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
+        while len(self.g2d_pk) > 0 and g[].metal.oldest_done():
+            self.show_oldest()
+
+    def finish_gpu2d(mut self, keep: Int):
+        """GPU frames draw_gpu2d committed (g2d_defer) are waited for, oldest first, and handed to Core Animation until
+        `keep` are left in flight (the picture is whole when CA gets it, D-7532; the main thread never waits for a frame
+        it just committed, D-7555)."""
+        if self.g2d == 0:
+            return
+        while len(self.g2d_pk) > keep:
+            self.show_oldest()
+
+    def show_oldest(mut self):
+        """The oldest committed GPU frame, waited for if it's still on the GPU, into Core Animation. A frame the GPU
+        didn't complete is drawn by the CPU executor instead when it's the newest."""
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
+        var k = self.g2d_pk.pop(0)
+        var at = self.g2d_pat.pop(0)
+        var s = self.g2d_ps.pop(0)
+        var w = self.g2d_pw.pop(0)
+        var h = self.g2d_ph.pop(0)
+        var scale = self.g2d_pscale.pop(0)
+        var bounds = self.g2d_pb.pop(0)
+        var t_commit = self.g2d_pt.pop(0)
+        var ok = g[].metal.complete_oldest()
+        if ok:
+            self.g2d_done.append(g[].metal.gpu_ms)
+        else:
+            self.g2d_failed += 1
+            self.g2d_done.append(0.0)  # (its place in commit order kept)
+        var same = k < len(self.canvases) and at < len(self.canvases[k].surfaces) and self.canvases[k].surfaces[at] == s
+        if not same:  # (the screen was rebuilt in between: that canvas is drawn again from scratch)
+            return
+        if ok:
+            self.gpu2d_shown(k, at, bounds, False)
+            self.g2d_shown_ms.append(Float64(Int(now_ns()) - t_commit) / 1e6)
+        elif len(self.g2d_pk) == 0:
+            self.gpu2d_cpu(k, w, h, scale, bounds, True)
 
     def offer_iosurface(mut self, k: Int, wpx: Int, hpx: Int, mut surface: Surface):
         """The Mac with its GPU (D-5311): offers this draw an IOSurface to draw into (surface.shared_*), the first of the
@@ -3434,6 +3574,11 @@ def host_at[A: App](addr: Int) -> Pointer[AppKitHost[A], MutUntrackedOrigin]:
 def in_view(view: Int, p: CGPoint) -> CGPoint:
     """AppKit's y runs upwards; canvases count from the top-left."""
     return CGPoint(p.x, msg[CGRect](view, "bounds").height - p.y)
+
+
+def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
+    """On the main queue: a GPU frame committed without waiting has completed; it's shown now (D-7555)."""
+    host_at[A](host_addr)[].finish_ready()
 
 
 def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
@@ -3846,6 +3991,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var g_metal = List[Float64]()
     var g_gpu = List[Float64]()
     var g_layers = List[String]()
+    var diag = List[String]()  # (per frame: event, paint, layout, slept, wall: FRAMES)
+    var g2d_at = List[Int]()  # (per frame: which gpu2d frame of this step it is, -1: none)
     var walls = List[Float64]()  # (each frame's wall time, the GPU waits included)  # (per GPU frame: layers rebuilt/kept/grown, polygon groups)
     if what == "draw" or what == "pan":  # (a drag: press, the moves, release; the app's tool decides what it does)
         host[].canvases[k].moved = False
@@ -3853,6 +4000,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         host[].canvases[k].moved = True
         host[].draw_canvas(k, host_addr)
     var window = host[].window
+    host[].finish_gpu2d(0)
+    host[].g2d_done.clear()
+    host[].g2d_shown_ms.clear()
+    var failed0 = host[].g2d_failed
     for i in range(count):
         node = canvas_node_at(host[], tag)  # (a rebuild may have renumbered the screen)
         k = host[].canvas_at(node) if node >= 0 else -1
@@ -3899,63 +4050,78 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             host[].apply(d, host_addr)
             node = canvas_node_at(host[], tag)
             k = host[].canvas_at(node) if node >= 0 else -1
+        var s0 = slept_ms(host[].g2d)
         var t1 = Int(now_ns())
         var drew = False
         if k >= 0:
             if host[].canvases[k].drawn != drawn0:  # (a rebuild made a new canvas: its picture is drawn from scratch)
                 drawn0 = -1
+            host[].g2d_defer = True  # (as tick: a GPU frame is committed, not waited for, D-7555)
             host[].draw_canvas(k, host_addr)
-            # (a GPU frame counts even when the version reads the same: mid-animation it stays -1, drawn every frame)
-            drew = host[].canvases[k].drawn != drawn0 or host[].g2d_frames != g2d0
+            host[].g2d_defer = False
+        var s1 = slept_ms(host[].g2d)
         var t2 = Int(now_ns())
+        _ = msg(window, "layoutIfNeeded")  # (displayIfNeeded's first part, timed apart: FRAMES' L)
+        var t2l = Int(now_ns())
         _ = msg(window, "displayIfNeeded")
+        host[].finish_frame()  # (as tick: completed frames shown, at most g2d_keep left in flight)
         _ = msg(cls("CATransaction"), "flush")
         var t3 = Int(now_ns())
+        var s2 = slept_ms(host[].g2d)
+        node = canvas_node_at(host[], tag)
+        k = host[].canvas_at(node) if node >= 0 else -1
+        if k >= 0:  # (a GPU frame counts even when the version reads the same: mid-animation it stays -1, drawn every frame)
+            drew = host[].canvases[k].drawn != drawn0 or host[].g2d_frames != g2d0
         # (a gpu2d frame's work: its CPU time and the GPU's time on it, not the time the thread slept while the GPU
-        # queued it or woke up: GTK's rule, D-7528, D-7541; the wall time is printed too)
-        var gms = 0.0
-        var slept = 0.0
-        if drew and host[].g2d_frames != g2d0:
-            var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=host[].g2d)
-            gms = g[].metal.gpu_ms
-            slept = g[].metal.blocked_ms
-            host[].g2d_parts[9] = g[].metal.wait_before_ms
-            host[].g2d_parts[10] = g[].metal.wait_after_ms
+        # queued it or woke up: GTK's rule, D-7528, D-7541; the GPU's time is added below, once the frame completed. The
+        # wall time is printed too, and on the Mac it must pass as well, D-7554; GPU times as frames complete, D-7556)
         if not drew:
             missed += 1
         else:
-            if host[].g2d_frames != g2d0:
+            var is_g2d = host[].g2d_frames != g2d0
+            if is_g2d:
                 on_g2d += 1
                 g_scene.append(host[].g2d_parts[0])
                 g_batch.append(host[].g2d_parts[1])
                 g_metal.append(host[].g2d_parts[2])
-                g_gpu.append(gms)
                 g_layers.append(String(Int(host[].g2d_parts[4])) + "/" + String(Int(host[].g2d_parts[5])) + "/" + String(Int(host[].g2d_parts[6])) + "/" + String(Int(host[].g2d_parts[8])) + ":" + String(Int(host[].g2d_parts[7]))
-                                + " w" + one_decimal(host[].g2d_parts[9]) + "+" + one_decimal(host[].g2d_parts[10]) + " i" + one_decimal(host[].g2d_parts[11])
-                                + " k" + String(Int(host[].g2d_parts[12])))
+                                + " i" + one_decimal(host[].g2d_parts[11]) + " k" + String(Int(host[].g2d_parts[12])))
             if host[].canvases[k].gpu_frames != gpu0:
                 on_gpu += 1
             else:
                 on_cpu += 1
             var ev = Float64(t1 - t0) / 1e6
-            var dm = Float64(t2 - t1) / 1e6 - slept + gms
-            var pm = Float64(t3 - t2) / 1e6
+            var dm = Float64(t2 - t1) / 1e6 - (s1 - s0)  # (CPU only: the GPU's time is added when it's known)
+            var pm = Float64(t3 - t2) / 1e6 - (s2 - s1)
             events.append(ev)
             draws.append(dm)
             paints.append(pm)
             works.append(ev + dm + pm)
             walls.append(Float64(t3 - t0) / 1e6)
+            g2d_at.append(on_g2d - 1 if is_g2d else -1)
+            diag.append(" e" + one_decimal(ev) + " p" + one_decimal(pm) + " L" + one_decimal(Float64(t2l - t2) / 1e6) + " s" + one_decimal(s2 - s0) + " W" + one_decimal(Float64(t3 - t0) / 1e6))
         pump_run_loop(0)  # (the window server's events, untimed)
     node = canvas_node_at(host[], tag)
     if node >= 0 and (what == "pan" or what == "draw"):
         host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
+    host[].finish_gpu2d(0)  # (the step's last frames: shown, their GPU times known)
+    var failed = host[].g2d_failed - failed0  # (committed, but the GPU didn't complete them: the CPU executor drew what was shown)
+    on_gpu -= failed
+    on_cpu += failed
+    for i in range(len(works)):  # (each gpu2d frame's GPU time, in commit order, into its draw and its work)
+        var j = g2d_at[i]
+        var gms = host[].g2d_done[j] if j >= 0 and j < len(host[].g2d_done) else 0.0
+        draws[i] += gms
+        works[i] += gms
+        if j >= 0:
+            g_gpu.append(gms)
     host[].wake()
     if env("MOJOUI_FRAMEBENCH_FRAMES") == "1":  # (every frame's work and its GPU parts, in order: where the slow ones fall)
         var line = String("FRAMES: ") + what
         for i in range(len(works)):
             line += " " + one_decimal(works[i])
             if i < len(g_scene):
-                line += "(" + one_decimal(g_scene[i]) + "/" + one_decimal(g_batch[i]) + "/" + one_decimal(g_metal[i]) + "/" + one_decimal(g_gpu[i]) + " " + g_layers[i] + ")"
+                line += "(" + one_decimal(g_scene[i]) + "/" + one_decimal(g_batch[i]) + "/" + one_decimal(g_metal[i]) + "/" + one_decimal(g_gpu[i]) + " " + g_layers[i] + diag[i] + ")"
         print(line, flush=True)
     var renderer = String("AppKit-IOSurface") if on_cpu == 0 and on_gpu > 0 else (String("AppKit-CPU") if on_gpu == 0 else String("AppKit-mixed"))
     if on_g2d > 0:  # (goal 75 M3: our renderer on Metal drew them; each frame's GPU work is in its draw time)
@@ -3969,7 +4135,16 @@ def frame_bench[A: App](host_addr: Int, rest: String):
           + " canvas=" + String(Int(w)) + "x" + String(Int(h)) + "pt@" + one_decimal(scale) + "x"
           + ((" scene_p95=" + one_decimal(pct(g_scene, 0.95)) + " batch_p95=" + one_decimal(pct(g_batch, 0.95)) + " metal_p95=" + one_decimal(pct(g_metal, 0.95))
               + " gpu_p50=" + one_decimal(pct(g_gpu, 0.5)) + " gpu_p95=" + one_decimal(pct(g_gpu, 0.95)) + " scene_max=" + one_decimal(pct(g_scene, 1.0))
-              + " metal_max=" + one_decimal(pct(g_metal, 1.0)) + " gpu_max=" + one_decimal(pct(g_gpu, 1.0))) if on_g2d > 0 else String("")), flush=True)
+              + " metal_max=" + one_decimal(pct(g_metal, 1.0)) + " gpu_max=" + one_decimal(pct(g_gpu, 1.0))
+              + " shown=" + String(len(host[].g2d_shown_ms)) + " shown_p50=" + one_decimal(pct(host[].g2d_shown_ms, 0.5)) + " shown_p95=" + one_decimal(pct(host[].g2d_shown_ms, 0.95))
+              + " shown_max=" + one_decimal(pct(host[].g2d_shown_ms, 1.0))) if on_g2d > 0 else String("")), flush=True)
+
+
+def slept_ms(g2d: Int) -> Float64:
+    """How long the main thread has slept waiting for gpu2d's GPU frames so far (0 without the Metal renderer)."""
+    if g2d == 0:
+        return 0.0
+    return Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=g2d)[].metal.slept_ms
 
 
 def gpu2d_probe() -> String:

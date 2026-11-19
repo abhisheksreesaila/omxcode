@@ -17,15 +17,17 @@
 #                              row into the accumulator (signed, so the fan sums to the winding), then the cover blends
 #                              the colour by min(|sum|, 1) and zeroes the accumulator (programmable blending, D-7534)
 # Everything is analytic at the pixel, so there's no multisampling: the picture matches execute_cpu to a fraction of a
-# level. Blending is gpu2d's BLEND_OVER: src·a + dst·(1 − a) on RGB, the destination's alpha kept. Each render waits for
-# its command buffer (D-7532): the picture is complete when the host hands the IOSurface over, nothing is in flight
-# between frames, and a thread blocked on the GPU keeps macOS running the GPU fast (returning at "scheduled" instead let
-# the GPU's clock drop: whiteboard zoom 0.8 → 2.5 ms of GPU work a frame). blocked_ms says how long the wait
-# took; gpu_ms how much of it the GPU worked.
+# level. Blending is gpu2d's BLEND_OVER: src·a + dst·(1 − a) on RGB, the destination's alpha kept. A render either waits
+# for its command buffer, or (wait=False, how hosts draw frames) returns once it's committed: the host shows it when it
+# completes (the completed handler posts to the main queue, notify) and at most two frames are in flight; the picture is
+# whole when the host hands the IOSurface over (D-7532), and nothing that writes a buffer, the accumulator or a surface
+# runs while a frame may read it (drain). Not waiting costs GPU clock (the GPU stays slower: its time counts in a frame's
+# work) but no longer stalls the main thread (D-7555). gpu_ms is a completed frame's GPU time; blocked_ms how long the
+# thread slept for it; slept_ms all the sleeping so far.
 
 from std.ffi import external_call
 from std.memory import Pointer
-from mojoui.hosts.objc import cls, sel, msg, ns_string, from_ns, pool_push
+from mojoui.hosts.objc import cls, sel, msg, ns_string, from_ns, pool_push, data_block, block_data
 from mojoui.hosts.apple_canvas import cfunc
 from mojoui.text import Font
 from mojoui.clock import now_ns
@@ -365,6 +367,16 @@ def _copy(memcpy_addr: Int, dst: Int, src: Int, n: Int):
     _ = fp(dst, src, n)
 
 
+def _done_invoke(block: Int, cb: Int) abi("C"):
+    """A committed frame's completed handler (on Metal's thread): posts the host's callback to the main queue, where it
+    shows the frame (D-7555). The block's data: the callback's argument, the callback, the main queue."""
+    var d = block_data(block)
+    var ctx = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=d)[]
+    var callback = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=d + 8)[]
+    var q = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=d + 16)[]
+    cfunc[NoneType]("dispatch_async_f", q, ctx, callback)
+
+
 def _sym(handle: Int, name: String) -> Int:
     var n = name
     return external_call["dlsym", Int](handle, n.as_c_string_span())
@@ -414,6 +426,10 @@ struct Metal2D(Movable):
     var wait_before_ms: Float64  # the last frame: commit → the GPU starting it (ms)
     var wait_after_ms: Float64  # the GPU done → this thread running again (ms)
     var blocked_ms: Float64  # the last frame: how long this thread waited for its command buffer (ms)
+    var pending: List[Int]  # command buffers committed and not yet completed here (render_layers(wait=False)), oldest
+    var pending_at: List[Float64]  # first, retained; and their commit times (on the GPU's clock)
+    var slept_ms: Float64  # how long this thread has slept waiting for the GPU (drain, complete_oldest) so far
+    var done_block: Int  # the completed handler each frame committed without waiting gets (notify), 0: none
     var drawn_groups: Int  # polygon groups drawn (on the canvas) since the last pass began
     # classes and selectors of the per-frame calls
     var c_rpd: Int
@@ -479,6 +495,10 @@ struct Metal2D(Movable):
         self.wait_before_ms = 0
         self.wait_after_ms = 0
         self.blocked_ms = 0
+        self.pending = List[Int]()
+        self.pending_at = List[Float64]()
+        self.slept_ms = 0
+        self.done_block = 0
         self.c_rpd = 0
         self.s_rpd = sel("renderPassDescriptor")
         self.s_color_attachments = sel("colorAttachments")
@@ -611,9 +631,10 @@ struct Metal2D(Movable):
         _ = msg(ff, "release")
         return p
 
-    def upload(self, frame: Frame2D, plan: PolyPlan, mut gb: GpuBuffers, tail: Bool = False):
+    def upload(mut self, frame: Frame2D, plan: PolyPlan, mut gb: GpuBuffers, tail: Bool = False):
         """A frame's batches into a set of GPU buffers: the four instance lists, the polygon fans, the images' pixels and
         where each starts, the polygon groups' lists. tail: only what was added since the last upload (a layer that grew)."""
+        self.drain()  # (a frame in flight may read these buffers)
         upload_frame(self.device, self.f, self.s_contents, self.memcpy, frame, gb, tail)
         upload_plan(self.device, self.f, self.s_contents, self.memcpy, plan, gb, tail)
 
@@ -621,6 +642,7 @@ struct Metal2D(Movable):
         """The polygon accumulator, w × h R32Float in tile memory only (memoryless; private memory if refused)."""
         if self.acc != 0 and self.acc_w == w and self.acc_h == h:
             return True
+        self.drain()
         if self.acc != 0:
             _ = msg(self.acc, "release")
             self.acc = 0
@@ -657,6 +679,7 @@ struct Metal2D(Movable):
 
     def forget(mut self, io: Int):
         """The host is releasing IOSurface `io`: its wrap goes first."""
+        self.drain()
         for i in range(len(self.targets)):
             if self.targets[i] == io:
                 _ = msg(self.target_tex[i], "release")
@@ -669,6 +692,7 @@ struct Metal2D(Movable):
         the GPU is done — and waits for the GPU to finish. False: not drawn."""
         if not self.ok:
             return False
+        self.drain()
         var tex = _send(self.f, drawable, self.s_texture) if drawable != 0 else self.target_for(io, w, h)
         if tex == 0 or not self._acc_target(w, h):
             return False
@@ -690,10 +714,12 @@ struct Metal2D(Movable):
         swap(plan, self.whole_plan)
         return self._finish(pool, cb, enc, drawable)
 
-    def render_layers(mut self, layers: List[GpuLayer], n: Int, io: Int, w: Int, h: Int, drawable: Int = 0) -> Bool:
+    def render_layers(mut self, layers: List[GpuLayer], n: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
         """Draws layers[0 : n] (each one Scene layer's batches in its own buffers, uploaded when it changed; its
         transform this frame in layers[i].dx/dy/k) into IOSurface `io` — or, with `drawable`, into that CAMetalLayer
-        drawable's texture, presented when the GPU is done — and waits for the GPU. False: not drawn."""
+        drawable's texture, presented when the GPU is done — and waits for the GPU. wait=False: returns once committed;
+        complete_oldest() later waits for it (D-7555). Frames in flight only read their layers' buffers: whoever
+        uploads into one, resizes the accumulator or lets an IOSurface go calls drain() first. False: not drawn."""
         if not self.ok:
             return False
         var tex = _send(self.f, drawable, self.s_texture) if drawable != 0 else self.target_for(io, w, h)
@@ -712,7 +738,7 @@ struct Metal2D(Movable):
             self._bind(enc, L.gpu.bufs)
             for li in range(len(L.frame.layers)):
                 self._draw_layer(enc, L.frame, L.plan, li, L.dx, L.dy, L.k)
-        return self._finish(pool, cb, enc, drawable)
+        return self._finish(pool, cb, enc, drawable, wait)
 
     def _begin_pass(mut self, tex: Int, w: Int, h: Int, mut cb: Int) -> Int:
         """One render pass: the picture (`tex`) cleared and stored, the accumulator cleared (and never stored); its encoder."""
@@ -820,27 +846,74 @@ struct Metal2D(Movable):
         var fp = Pointer(to=raw).unsafe_bitcast[def() thin abi("C") -> Float64]()[]
         return fp()
 
-    def _finish(mut self, pool: Int, cb: Int, enc: Int, drawable: Int = 0) -> Bool:
-        """Ends the pass, commits and waits for the GPU (the picture is complete when this returns); a drawable is
-        presented as soon as the GPU is done with it."""
+    def _finish(mut self, pool: Int, cb: Int, enc: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
+        """Ends the pass and commits; then waits for the GPU (the picture is complete when this returns), or with
+        wait=False leaves it in `pending` for complete_oldest(). A drawable is presented as soon as the GPU is done."""
         var f = self.f
         _send[NoneType](f, enc, self.s_end)
         if drawable != 0:
             _send[NoneType](f, cb, self.s_present, drawable)
+        if not wait and self.done_block != 0:
+            _ = msg[NoneType](cb, "addCompletedHandler:", self.done_block)
         _send[NoneType](f, cb, self.s_commit)
-        var t_commit = self._now()  # (the clock GPUStartTime and GPUEndTime are on)
+        self.pending_at.append(self._now())  # (the clock GPUStartTime and GPUEndTime are on)
         self.idle_ms = Float64(Int(now_ns()) - self.last_commit_ns) / 1e6
         self.last_commit_ns = Int(now_ns())
+        _ = msg(cb, "retain")  # (commandBuffer's is autoreleased: kept past the pool)
+        self.pending.append(cb)
+        cfunc[NoneType]("objc_autoreleasePoolPop", pool)
+        if wait:  # (this frame alone: frames still in flight stay pending, in order)
+            return self._complete(len(self.pending) - 1)
+        return True
+
+    def notify(mut self, ctx: Int, callback: Int):
+        """From now on each frame committed without waiting calls fn(ctx) on the main queue once the GPU completed it
+        (callback: a C function's address, called as callback(ctx)); the host shows it there, without blocking on the GPU (D-7555)."""
+        var words = cfunc[Int]("calloc", 3, 8)  # (lives as long as the process, as the block does)
+        if words == 0:
+            return
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=words)[] = ctx
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=words + 8)[] = callback
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=words + 16)[] = _sym(RTLD_DEFAULT, "_dispatch_main_q")
+        self.done_block = data_block(_done_invoke, "v16@?0@8", words)
+
+    def oldest_done(self) -> Bool:
+        """The oldest pending command buffer has completed (or failed): complete_oldest won't sleep."""
+        return len(self.pending) > 0 and _send(self.f, self.pending[0], self.s_status) >= 4
+
+    def drain(mut self):
+        """Waits until every pending command buffer completed (they stay pending: complete_oldest reads them)."""
+        if len(self.pending) == 0:
+            return
+        var t0 = Int(now_ns())
+        for cb in self.pending:
+            _send[NoneType](self.f, cb, self.s_wait)
+        self.slept_ms += Float64(Int(now_ns()) - t0) / 1e6
+
+    def complete_oldest(mut self) -> Bool:
+        """Waits for the oldest pending command buffer (if any), reads its times: gpu_ms (GPU busy), wait_before_ms
+        (commit → GPU start), wait_after_ms (GPU end → this thread back; 0 when it was done before the call),
+        blocked_ms (how long this call slept); and lets it go. False: it didn't complete (the picture isn't whole)."""
+        return self._complete(0)
+
+    def _complete(mut self, i: Int) -> Bool:
+        if i < 0 or i >= len(self.pending):
+            return True
+        var cb = self.pending.pop(i)
+        var t_commit = self.pending_at.pop(i)
+        var f = self.f
+        var t_in = self._now()
         _send[NoneType](f, cb, self.s_wait)
         var t_back = self._now()
         var status = _send(f, cb, self.s_status)
         var g0 = _send[Float64](f, cb, self.s_gpu_start)
         var g1 = _send[Float64](f, cb, self.s_gpu_end)
+        _ = msg[NoneType](cb, "release")
         self.gpu_ms = (g1 - g0) * 1000.0
         self.wait_before_ms = (g0 - t_commit) * 1000.0 if t_commit > 0 else 0.0
-        self.wait_after_ms = (t_back - g1) * 1000.0 if t_back > 0 else 0.0
-        self.blocked_ms = (t_back - t_commit) * 1000.0 if t_commit > 0 else 0.0
-        cfunc[NoneType]("objc_autoreleasePoolPop", pool)
+        self.wait_after_ms = max(t_back - max(g1, t_in), 0.0) * 1000.0 if t_back > 0 else 0.0
+        self.blocked_ms = (t_back - t_in) * 1000.0 if t_in > 0 else 0.0
+        self.slept_ms += self.blocked_ms
         if status != 4:  # MTLCommandBufferStatusCompleted
             if self.frames == 0:
                 print("mojoui: gpu2d Metal: the first frame's command buffer ended with status " + String(status), flush=True)
@@ -1189,7 +1262,7 @@ struct MetalCanvas2D(Movable):
         self.groups = 0
         self.build_ms = 0
 
-    def render_scene(mut self, owner: Int, io: Int, w: Int, h: Int, drawable: Int = 0) -> Bool:
+    def render_scene(mut self, owner: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
         """This frame's Scene (painted by the app into self.scene) into IOSurface `io` on the GPU: layers that changed
         are built (or grown) and uploaded, the others kept (the rules above); then one pass draws them all in order.
         Call end_frame afterwards (whatever this returned)."""
@@ -1257,7 +1330,7 @@ struct MetalCanvas2D(Movable):
             self.layers[i].valid = False
         self.owner = owner
         self.build_ms = Float64(Int(now_ns()) - t0) / 1e6
-        return self.metal.render_layers(self.layers, n, io, w, h, drawable)
+        return self.metal.render_layers(self.layers, n, io, w, h, drawable, wait)
 
     def end_frame(mut self):
         """This frame's Scene becomes last frame's (its memory: next frame's to paint into)."""
