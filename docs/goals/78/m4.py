@@ -60,6 +60,38 @@ def saved():
     return True, f"a free .omx reopens with every card where it was ({len(after['asked'])} cards, zoom {after['zoom']}); an older .omx opens tiled ({t}, {ch})"
 
 
+def setting():
+    """Settings ▸ "Tile the cards" ticked by hand (not OMX_CANVAS): settings.txt then says canvas=tiled and the cards tile at once
+    (the chart splits the table's row); a second run starting tiled unticks it: canvas=free, and the cards stay where the tiles left them."""
+    d = c.DATA
+    label = "Tile the cards (instead of the free canvas)"
+    start = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", "shortcut:Ctrl+Shift+C", "pause:1500", "boards:before"]
+    flip = ["shortcut:Ctrl+,", "pause:500", f"toggle:{label}", "pause:600", "tap:Done", "pause:800", "boards:after"]
+    out = c.gtk(start + flip + [f"shot:{c.OUT}/m4-5-setting-tiled.png"], "m4-setting", open_path=d / "fleet.csv")
+    cfg = (c.OUT / "m4-setting/config/settings.txt").read_text()
+    b = c.boards(out)
+    out2 = c.gtk(start + flip, "m4-setting-back", settings="appearance=light\ncanvas=tiled\n", open_path=d / "fleet.csv")
+    cfg2 = (c.OUT / "m4-setting-back/config/settings.txt").read_text()
+    b2 = c.boards(out2)
+    probs = []
+    f, t = b["before"]["cards"], b["after"]["cards"]
+    W = b["after"]["room"][0]
+    tt, tc = t.get("table"), t.get("chart0")
+    if f.get("chart0", (0, 0))[1] < f["table"][1] + f["table"][3]:
+        probs.append(f"before ticking: the chart {f.get('chart0')} isn't below the table {f['table']} (the free canvas)")
+    if "canvas=tiled" not in cfg:
+        probs.append(f"ticked: settings.txt says {cfg.strip()!r}")
+    if not tt or not tc or not (tt[1] == tc[1] == 0 and tt[2] + c.GAP + tc[2] == W):
+        probs.append(f"ticked: not tiled: table {tt}, chart {tc}, room {W}")
+    if "canvas=free" not in cfg2:
+        probs.append(f"unticked: settings.txt says {cfg2.strip()!r}")
+    if b2["after"]["cards"] != b2["before"]["cards"]:
+        probs.append(f"unticked: the cards moved {b2['before']['cards']} -> {b2['after']['cards']} (free keeps them where the tiles left them)")
+    if probs:
+        return False, "setting: " + "; ".join(probs)
+    return True, f"Settings ▸ Tile the cards ticked: canvas=tiled, the chart splits the table's row ({tt}, {tc}); unticked: canvas=free, the cards stay"
+
+
 def story():
     demo = c.DEMO
     if not (demo / "fleet.csv").exists() or not (demo / "telemetry.parquet").exists():
@@ -121,7 +153,7 @@ def check():
     c.build(("omxplorer", "linux"))
     parts = []
     blocked = []
-    for fn in (saved, story, g76):
+    for fn in (saved, setting, story, g76):
         ok, why = fn()
         if ok is False:
             return False, why

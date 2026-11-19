@@ -226,7 +226,7 @@ comptime TIMINGS = 75  # Settings: show GPU timings in the status bar
 comptime KEEP_INSPECTOR = 76  # Settings: the inspector opens with a sheet
 comptime ABOUT_CLOSE = 77
 comptime FX_HELP = 78  # the formula bar's ƒx: what formulas can do
-comptime CANVAS_MODE = 77  # Settings: tile the cards instead of the free canvas (saved as canvas=tiled, goal 78)
+comptime CANVAS_MODE = 94  # Settings: tile the cards instead of the free canvas (saved as canvas=tiled, goal 78)
 comptime HELP_CLOSE = 79
 comptime STYLE_BOLD = 80  # the format toggles: the selected cell, or the whole column when a column is selected
 comptime STYLE_ITALIC = 81
@@ -4045,13 +4045,13 @@ struct Main(App):
         elif m == KEEP_INSPECTOR:  # (only the saved choice: the panel open now stays as it is, review round 1)
             self.keep_panels = event.number == 1
             write_setting(APP, "panels", "open" if self.keep_panels else "closed")
+            self.version += 1
         elif m == CANVAS_MODE:  # (tiled ↔ free: free keeps every card where the tiles left it; tiled lays them out afresh)
             self.free = event.number != 1
             write_setting(APP, "canvas", "free" if self.free else "tiled")
             self.fb.seen = self.card_tags()
             self.fb.zoom = 100
             self.board_tiles = BoardTiles(TILE_MIN_W, TILE_MIN_H)
-            self.version += 1
             self.version += 1
         elif m == TOAST_CLOSE:
             self.toast = ""
