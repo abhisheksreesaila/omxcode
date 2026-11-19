@@ -158,7 +158,7 @@ MENU_JS = r"""
     if (t && document.querySelector('.menubar > .menu.open') && !t.parentElement.classList.contains('open')) { menus.closeAll(); t.parentElement.classList.add('open'); }
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); e.preventDefault(); return; }  // (the menu took it: nothing after it does, goal 76)
+    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); e.preventDefault(); e.stopPropagation(); return; }  // (the menu took it: nothing after it does, not a focused canvas either, goal 76)
     if (e.key === 'Escape') { const c = document.querySelector('.menu.context, .popover') || document.querySelector('.dialog-layer');
       if (c) { menus.dismiss(c); e.preventDefault(); e.stopPropagation(); return; } }
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
