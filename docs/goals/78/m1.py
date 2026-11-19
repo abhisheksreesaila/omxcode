@@ -149,19 +149,32 @@ def gtk():
 
 # Heights (review 1): a chart's and the table's S and NW handles change sizes inside the card too (the chart's canvas, the grid);
 # then a second drag of the same card must start where the first ended.
-HEIGHTS = [("chart0", "s", 0, 80, False), ("chart0", "nw", 40, -60, False), ("chart0", "s", 0, 60, False), ("table", "s", 0, -120, False),
-           ("table", "nw", 32, 40, False), ("table", "s", 0, 48, False),
+HEIGHTS = [("chart0", "s", 0, 80, ""), ("chart0", "nw", 40, -60, ""), ("chart0", "s", 0, 60, ""), ("table", "s", 0, -120, ""),
+           ("table", "nw", 32, 40, ""), ("table", "s", 0, 48, ""),
            # (review 2: half way the page scrolls and the app hears "view", the button still held: the drag must not rebase)
-           ("chart0", "e", 120, 0, True), ("table", "s", 0, 60, True)]
+           ("chart0", "e", 120, 0, "view"), ("table", "s", 0, 60, "view"),
+           # (review 3: half way a Ctrl+wheel notch zooms out to 91 %, the button still held; last, so the drags before it are at 100 %)
+           ("chart0", "e", 120, 0, "zoom")]
 
 
-def expect_heights(cards, frames_of, label, tol=0):
-    """Each drag's frames against resized() from where the last one on that card ended; ([problems], final rects)."""
+def expect_heights(cards, frames_of, label, tol=0, zoom_after=None):
+    """Each drag's frames against resized() from where the last one on that card ended; ([problems], final rects).
+    The model for a zoom half way (frame m = STEPS // 2), with P_k the pointer's movement since the press in screen points and the
+    zoom z0 = 1 before, z1 after: frame k <= m is the start + P_k / z0; frame k > m is frame m's rect + (P_k - P_m) / z1 (the
+    hosts restart the press where the last frame sent was, at the new zoom; the app truncates offsets to whole points)."""
     probs, now = [], dict(cards)
-    for (tag, h, dx, dy, _), frames in zip(HEIGHTS, frames_of):
-        exp = [resized(now[tag], h, round(dx * k / STEPS), round(dy * k / STEPS)) for k in range(1, STEPS + 1)]
-        if len(frames) != STEPS or any(max(abs(a - b) for a, b in zip(f, e)) > tol for f, e in zip(frames, exp)):
-            probs.append(f"{label} {tag} {h} {dx},{dy}: frames {frames} not {exp}")
+    m = STEPS // 2
+    for (tag, h, dx, dy, mode), frames in zip(HEIGHTS, frames_of):
+        if mode == "zoom":
+            z1 = (zoom_after or 100) / 100
+            rm = resized(now[tag], h, int(dx * m / STEPS), int(dy * m / STEPS))
+            exp = [resized(now[tag], h, int(dx * k / STEPS), int(dy * k / STEPS)) if k <= m else
+                   resized(rm, h, int((dx * k / STEPS - dx * m / STEPS) / z1), int((dy * k / STEPS - dy * m / STEPS) / z1)) for k in range(1, STEPS + 1)]
+        else:
+            exp = [resized(now[tag], h, round(dx * k / STEPS), round(dy * k / STEPS)) for k in range(1, STEPS + 1)]
+        t = max(tol, 1) if mode == "zoom" else tol  # (a zoomed card's box is read back through the zoom: a point of rounding)
+        if len(frames) != STEPS or any(max(abs(a - b) for a, b in zip(f, e)) > t for f, e in zip(frames, exp)):
+            probs.append(f"{label} {tag} {h} {dx},{dy} {mode}: frames {frames} not {exp}")
         now[tag] = exp[-1]
     return probs, now
 
@@ -169,23 +182,27 @@ def expect_heights(cards, frames_of, label, tol=0):
 def gtk_heights():
     d = c.DATA
     steps = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", "shortcut:Ctrl+Shift+C", "pause:1500", "boardscroll:0", "boards:h0"]
-    for tag, h, dx, dy, view in HEIGHTS:
-        steps += [f"freedrag:{tag}={h},{dx},{dy},{STEPS},alt" + ("+view" if view else ""), "pause:300", f"boards:h-{tag}-{h}-{dy}"]
+    for tag, h, dx, dy, mode in HEIGHTS:
+        steps += [f"freedrag:{tag}={h},{dx},{dy},{STEPS},alt" + ("+" + mode if mode else ""), "pause:300", f"boards:h-{tag}-{h}-{dy}-{mode}"]
     steps.append(f"shot:{c.OUT}/m1-gtk-5-heights.png")
     out = c.gtk(steps, "m1-gtk-heights", open_path=d / "fleet.csv")
     b = c.boards(out)
     dr = c.drags(out)
-    probs, final = expect_heights(b["h0"]["cards"], [x[3] for x in dr], "GTK")
-    last = b[f"h-table-s-60"]["cards"]
+    zl = [l.split() for l in out.splitlines() if l.startswith("LIVEZOOM: ")]
+    z1 = int(zl[0][-1]) if zl else None
+    probs, final = expect_heights(b["h0"]["cards"], [x[3] for x in dr], "GTK", zoom_after=z1)
+    last = b["h-chart0-e-0-zoom"]["asked"]  # (page points: the board is at 91 % by then)
     if out.count("LIVEVIEW: ") != 2:
         probs.append(f"GTK: {out.count('LIVEVIEW: ')} mid-drag scrolls, not 2")
+    if z1 != 91:
+        probs.append(f"GTK: the mid-drag Ctrl+wheel left the zoom at {z1} (want 91)")
     for tag in ("chart0", "table"):
         if last[tag] != final[tag]:
             probs.append(f"GTK: {tag} ended at {last[tag]}, its last frame said {final[tag]}")
     if probs:
         return False, "GTK heights: " + "; ".join(probs)[:1200]
-    return True, (f"GTK: S and NW of chart0 and the table live, each second drag from where the first ended, and two drags with a scroll and a "
-                  f"view event half way still exact (chart0 {final['chart0']}, table {final['table']})")
+    return True, (f"GTK: S and NW of chart0 and the table live, each second drag from where the first ended, two drags with a scroll and a "
+                  f"view event half way and one with a Ctrl+wheel to {z1} % half way still exact (chart0 {final['chart0']}, table {final['table']})")
 
 
 def gtk_perf():
@@ -274,18 +291,36 @@ def web():
           const cv = o('chart0').querySelector('[data-kind=canvas]'), g = o('table').querySelector('[data-tag=grid]');
           return { chart: [o('chart0').offsetHeight, cv ? cv.offsetHeight : -1], table: [o('table').offsetHeight, g ? g.offsetHeight : -1] }; }"""
 
+        views = []  # (every "view" the page posts: BOARD_VIEW, number 13)
+        page.on("request", lambda r: views.append(1) if r.method == "POST" and "number=13&" in ((r.post_data or "") + "&") else None)
+        scrolls, zooms = [], []
+
         def scroll_and_wait(page):  # (the page scrolled 40 pt mid-drag; past the 150 ms after which the page sends "view")
-            page.evaluate("() => { const sc = document.querySelector('.board').parentElement; sc.scrollTop += 40; }")
+            n0 = len(views)
+            before = page.evaluate("() => document.querySelector('.board').parentElement.scrollTop")
+            page.evaluate("""() => { const sc = document.querySelector('.board').parentElement;  // (40 pt whichever way the page can go)
+              sc.scrollTop += sc.scrollTop + sc.clientHeight + 40 <= sc.scrollHeight ? 40 : -40; }""")
             page.wait_for_timeout(400)
+            after = page.evaluate("() => document.querySelector('.board').parentElement.scrollTop")
+            scrolls.append((before, after, len(views) - n0))
+
+        def wheel_zoom(page):  # (a Ctrl+wheel notch out over the canvas, the button still held)
+            page.keyboard.down("Control")
+            page.mouse.wheel(0, 120)
+            page.keyboard.up("Control")
+            page.wait_for_timeout(700)
+            zooms.append(page.evaluate("() => Number(document.querySelector('.board').dataset.zoom)"))
 
         seen["inside0"] = page.evaluate(INNER)  # (before any drag: the distance between each card and what's inside it)
-        for tag, hd, dx, dy, view in HEIGHTS:
-            cur, frames = c.web_drag(page, tag, hd, dx, dy, steps=STEPS, alt=True, mid=scroll_and_wait if view else None,
+        for tag, hd, dx, dy, mode in HEIGHTS:
+            cur, frames = c.web_drag(page, tag, hd, dx, dy, steps=STEPS, alt=True, mid={"view": scroll_and_wait, "zoom": wheel_zoom}.get(mode),
                                      shot=c.OUT / "m1-web-5-chart-height-mid-drag.png" if (tag, hd) == ("chart0", "s") and not hs else None)
             hs.append(frames)
             page.wait_for_timeout(300)
             insides.append((tag, page.evaluate(INNER)))
         seen["insides"] = insides
+        seen["scrolls"] = scrolls
+        seen["zooms"] = zooms
         # (review 2: a size mark from an older screen is dropped; one for this screen is applied: the guard, then the path)
         seen["marks"] = page.evaluate("""async () => {
           const g = document.querySelector('[data-tag=grid]'), id = g.id.slice(1), box = document.getElementById('mojoui-sizes'), v = document.getElementById('mojoui-v').value;
@@ -319,7 +354,13 @@ def web():
     if r2.returncode != 0 or "hdrags" not in seen:
         return False, f"web heights run: exit {r2.returncode}: {out2[-600:]}"
     probs = []
-    hp, final = expect_heights({k: tuple(v[:4]) for k, v in seen["h0"]["cards"].items()}, seen["hdrags"], "web", tol=2)
+    wz = seen["zooms"][0] if seen["zooms"] else None
+    hp, final = expect_heights({k: tuple(v[:4]) for k, v in seen["h0"]["cards"].items()}, seen["hdrags"], "web", tol=2, zoom_after=wz)
+    if wz != 91:
+        hp.append(f"web: the mid-drag Ctrl+wheel left the zoom at {wz} (want 91)")
+    for before, after, posted in seen["scrolls"]:  # (review 3: the scroll really happened, and the page told the app before the next frame)
+        if abs(after - before) < 39 or posted < 1:
+            hp.append(f"web: the mid-drag scroll went {before} -> {after} with {posted} view posts (want 40 pt, and at least one post before the next frame)")
     probs += hp
     endc = {k: tuple(v[:4]) for k, v in seen["h1"]["cards"].items()}
     for tag in ("chart0", "table"):
@@ -379,7 +420,8 @@ def web():
     if probs:
         return False, "web: " + "; ".join(probs)[:1500]
     return True, (f"web: telemetry at {card}; the table {t0[2]} -> {got[-1]} live over 6 frames, scrolled right {sl:.0f}+{cw} of {sw}; "
-                  f"S and NW of chart0 and the table live, second drags from where the first ended, two with a scroll and a view half way; after each drag the grid "
+                  f"S and NW of chart0 and the table live, second drags from where the first ended, two with a scroll and a view half way "
+                  f"(scrollTop before, after, view posts: {seen['scrolls']}), one with a Ctrl+wheel to {wz} % half way; after each drag the grid "
                   f"and the chart's canvas keep their distance to the card ({gaps['table']}, {gaps['chart']} pt); a stale size mark dropped, a current one applied; "
                   f"8 handles live with their cursors; zoom 33 % shows all {len(z['cards'])} cards; Ctrl+0; Alt+T tidy: no overlap")
 

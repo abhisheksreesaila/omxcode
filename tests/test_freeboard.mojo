@@ -267,7 +267,10 @@ def main() raises:
     assert_equal(rb[0].w, 470)
     rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 30, 0, rb)
     assert_equal(rb[0].w, 490)
-    fr.end()  # (an end mid-drag rebases: the next frame adds its whole offset to the moved rect: the review-2 bug, kept off "view")
-    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 40, 0, rb)
-    assert_equal(rb[0].w, 530)
+    # (a host restarting the press mid-drag (a zoom changed: review 3) sends FIRST_FRAME with the offset counted from the last frame
+    # it sent: 0 on that frame, so the card stays where it was, then only what the pointer moved since)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP + FIRST_FRAME), 0, 0, rb)
+    assert_equal(rb[0].w, 490)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 22, 0, rb)
+    assert_equal(rb[0].w, 512)
     print("rebase: ok")

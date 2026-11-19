@@ -615,6 +615,11 @@ struct BoardChild(Copyable, Movable):
     var resizing: Bool
     var handle: Int  # a free canvas's drag: which handle (mojoui.freeboard), HANDLE_NONE: none
     var live: Bool  # a free canvas's drag has sent a motion frame (it moved)
+    var zscale: Float64  # the zoom the drag's offsets are measured at (the press's, or the last zoom change's)
+    var base_x: Float64  # the gesture's offset the press counts from (0; after a zoom mid-drag, the last frame sent's)
+    var base_y: Float64
+    var sent_x: Float64  # the gesture's offset at the last frame sent
+    var sent_y: Float64
 
     def __init__(out self, board: Int, node: Int, index: Int, widget: Int, fixed: Int, drag: Int):
         self.board = board
@@ -627,6 +632,11 @@ struct BoardChild(Copyable, Movable):
         self.resizing = False
         self.handle = HANDLE_NONE
         self.live = False
+        self.zscale = 1.0
+        self.base_x = 0
+        self.base_y = 0
+        self.sent_x = 0
+        self.sent_y = 0
 
 
 def arrive_on_spring(w: Int):
@@ -1097,6 +1107,11 @@ struct GtkHost[A: App](Movable):
                         entry.resizing = b.resizing
                         entry.handle = b.handle
                         entry.live = b.live
+                        entry.zscale = b.zscale
+                        entry.base_x = b.base_x
+                        entry.base_y = b.base_y
+                        entry.sent_x = b.sent_x
+                        entry.sent_y = b.sent_y
             mine.append(entry^)
         var boards = List[BoardChild]()
         for b in self.boards:
@@ -5220,11 +5235,21 @@ def free_hit[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: Int, x
 
 def free_send[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], bi: Int, kind: Int, off_x: Float64, off_y: Float64, alt: Bool, host_addr: Int, first: Bool = False):
     """A free canvas's drag to the app: a motion frame (BOARD_LIVE; `first`: the drag's first, it starts afresh) or its end
-    (PAN / ZOOM), in the page's points."""
+    (PAN / ZOOM), in the page's points: the gesture's offset from its base at the zoom it's measured at. A zoom mid-drag
+    restarts the press where the last frame sent was, at the new zoom, as a first frame (review 3; the web does the same)."""
+    var sc = board_scale(host[].rt.shown.nodes[host[].boards[bi].board])
+    var restart = first
+    if sc != host[].boards[bi].zscale:
+        host[].boards[bi].zscale = sc
+        host[].boards[bi].base_x = host[].boards[bi].sent_x
+        host[].boards[bi].base_y = host[].boards[bi].sent_y
+        restart = True
     var b = host[].boards[bi].copy()
-    var sc = board_scale(host[].rt.shown.nodes[b.board])
-    var handle = b.handle + (NO_SNAP if alt or host[].test_alt else 0) + (FIRST_FRAME if first else 0)
-    var d = host[].rt.gesture(b.board, kind, Float64(b.index), Float64(handle), off_x / sc, off_y / sc, 1)
+    var handle = b.handle + (NO_SNAP if alt or host[].test_alt else 0) + (FIRST_FRAME if restart else 0)
+    var d = host[].rt.gesture(b.board, kind, Float64(b.index), Float64(handle), (off_x - b.base_x) / b.zscale, (off_y - b.base_y) / b.zscale, 1)
+    if 0 <= bi < len(host[].boards):
+        host[].boards[bi].sent_x = off_x
+        host[].boards[bi].sent_y = off_y
     host[].apply(d, host_addr)
 
 
@@ -5249,6 +5274,11 @@ def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: In
         ref b = host[].boards[hit[0]]
         b.handle = hit[1]
         b.live = False
+        b.zscale = board_scale(host[].rt.shown.nodes[b.board])  # (offsets measured at the press's zoom, from the press)
+        b.base_x = 0
+        b.base_y = 0
+        b.sent_x = 0
+        b.sent_y = 0
         b.active = hit[1] != HANDLE_NONE
         b.resizing = hit[1] != HANDLE_NONE and hit[1] != HANDLE_MOVE
         if b.resizing:  # (an edge or a corner: claimed now, so the card's content never sees the press)
@@ -7156,7 +7186,8 @@ def run_step[A: App](host_addr: Int, step: String):
         var dy = Float64(to_int(parts[2]))
         var steps = to_int(parts[3]) if len(parts) > 3 else 6
         host[].test_alt = len(parts) > 4 and parts[4].startswith("alt")
-        var mid_view = len(parts) > 4 and parts[4].endswith("view")  # (…,alt+view: half way, the page scrolls and the app hears "view", as 120 ms after a real scroll)
+        var mid_view = len(parts) > 4 and parts[4].endswith("view")
+        var mid_zoom = len(parts) > 4 and parts[4].endswith("zoom")  # (…,alt+zoom: half way, a Ctrl+wheel notch out through the host's own zoom, the button held)  # (…,alt+view: half way, the page scrolls and the app hears "view", as 120 ms after a real scroll)
         wait_allocated(host[].boards[bi].widget)
         var g = host[].boards[bi].drag
         var board = host[].boards[bi].board
@@ -7194,12 +7225,13 @@ def run_step[A: App](host_addr: Int, step: String):
                 draws1 += cv.draws
             print("LIVEMS: " + kv[0] + " " + String(k) + " update " + one_decimal(Float32(Float64(t1 - t0) / 1e6)) + " frame "
                   + one_decimal(Float32(Float64(t2 - t0) / 1e6)) + " draws " + String(draws1 - draws0) + " of " + String(len(host[].canvases)), flush=True)
+            var scn = board_scale(host[].rt.shown.nodes[board]) if 0 <= board < len(host[].rt.shown.nodes) else sc  # (the zoom now)
             for ref b in host[].boards:  # (the card as GTK laid it out on this frame, in page points)
                 if host[].rt.shown.nodes[b.node].name == tag:
                     var rect = List[Float32](length=4, fill=0)
                     if external_call["gtk_widget_compute_bounds", c_int](b.widget, b.fixed, Int(rect.unsafe_ptr())) != 0:
-                        print("LIVE: " + tag + " " + String(k) + "/" + String(steps) + " " + String(Int(Float64(rect[0]) / sc + 0.5)) + "," + String(Int(Float64(rect[1]) / sc + 0.5))
-                              + " " + String(Int(Float64(rect[2]) / sc + 0.5)) + "x" + String(Int(Float64(rect[3]) / sc + 0.5)), flush=True)
+                        print("LIVE: " + tag + " " + String(k) + "/" + String(steps) + " " + String(Int(Float64(rect[0]) / scn + 0.5)) + "," + String(Int(Float64(rect[1]) / scn + 0.5))
+                              + " " + String(Int(Float64(rect[2]) / scn + 0.5)) + "x" + String(Int(Float64(rect[3]) / scn + 0.5)), flush=True)
                     _ = len(rect)
                     break
             if 0 <= board < len(host[].rt.shown.nodes):  # (the snap guides showing on this frame: "LIVEGUIDE: k x,y wxh")
@@ -7207,6 +7239,12 @@ def run_step[A: App](host_addr: Int, step: String):
                     ref gn = host[].rt.shown.nodes[c]
                     if gn.name == "board-guide" and gn.x >= 0:
                         print("LIVEGUIDE: " + String(k) + " " + String(gn.x) + "," + String(gn.y) + " " + String(gn.w) + "x" + String(gn.h), flush=True)
+            if k == steps // 2 and mid_zoom:
+                board_wheel_zoom[A](host, g, 1, host_addr)
+                settle()
+                pump()
+                wait_frame(host[].window)
+                print("LIVEZOOM: " + tag + " after frame " + String(k) + " zoom " + String(Int(board_scale(host[].rt.shown.nodes[board]) * 100 + 0.5)), flush=True)
             if k == steps // 2 and mid_view:
                 for sc2 in host[].board_scrollers:
                     if sc2[0] == board:
