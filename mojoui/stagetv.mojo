@@ -53,8 +53,10 @@ comptime TV_RADIUS_BAR = 32.0  # the pill's corners …
 comptime TV_RADIUS_OPEN = 30.0  # … become the stage's
 comptime TV_PAD_V = 16  # the body's inside (.tv-body: 16px 18px 8px)
 comptime TV_PAD_H = 18
+comptime TV_PHONE_PAD_H = 6  # a phone's body sides inside its 14 pt inset: the card nearly as wide as the screen (goal 77 M7f)
 comptime TV_GAP = 16  # the card to the conversation
 comptime TV_THREAD_MIN = 240  # the conversation's least width, else 30 % (.tv-main: minmax(0, 1fr) minmax(240px, 30%))
+comptime TV_CARD_MIN = 360  # side by side only when the card keeps this much beside the conversation; else stacked
 comptime TV_CHAT_MAX = 720  # with no card, the conversation centred at most this wide
 
 comptime TV_YOU = 0  # StageMsg.who
@@ -152,23 +154,25 @@ struct TVLayout(Copyable, Movable, ImplicitlyCopyable):
     var thread_w: Int
     var inset: Int
     var compact: Bool
+    var stacked: Bool  # the card over the conversation (a phone; a column too narrow for both side by side: a portrait tablet)
 
 
 def tv_layout(area_w: Float64, area_h: Float64, compact: Bool, has_card: Bool) -> TVLayout:
     """The open TV's parts at the TV canvas's size (the centre column; a phone: the window). Desktop: the body is the
-    column above the bar, the card takes what the conversation leaves (1fr | max(240, 30 %)). A phone: the box 14 in from
-    the sides and the top, the card over the conversation (1.4fr / 1fr)."""
+    column above the bar, the card takes what the conversation leaves (1fr | max(240, 30 %)), or, when that would leave the
+    card under TV_CARD_MIN (a portrait tablet's narrow column), the card over the conversation as on a phone. A phone: the box
+    14 in from the sides and the top, the card over the conversation (1.4fr / 1fr)."""
     var inset = TV_PHONE_PAD if compact else 0
     var body_h = Int(area_h) - (TV_PHONE_STRIP * 2 + TV_BAR_H + TV_PHONE_PAD if compact else TV_BOTTOM + TV_BAR_H + TV_TOP)
     body_h = max(body_h, 0)
-    var inner_w = Int(area_w) - 2 * (TV_PAD_H + inset)
+    var inner_w = Int(area_w) - 2 * ((TV_PHONE_PAD_H if compact else TV_PAD_H) + inset)
     if not has_card:
-        return TVLayout(body_h, 0, 0, min(inner_w, TV_CHAT_MAX), inset, compact)
-    if compact:
-        var room = max(body_h - 2 * TV_PAD_V - 48 - TV_GAP, 0)  # (48: the head and its gap)
-        return TVLayout(body_h, inner_w, Int(Float64(room) * 1.4 / 2.4), inner_w, inset, compact)
+        return TVLayout(body_h, 0, 0, min(inner_w, TV_CHAT_MAX), inset, compact, compact)
     var thread_w = max(TV_THREAD_MIN, Int(Float64(inner_w) * 0.30))
-    return TVLayout(body_h, max(inner_w - TV_GAP - thread_w, 0), 0, thread_w, inset, compact)
+    if compact or inner_w - TV_GAP - thread_w < TV_CARD_MIN:
+        var room = max(body_h - 2 * TV_PAD_V - 48 - TV_GAP, 0)  # (48: the head and its gap)
+        return TVLayout(body_h, inner_w, Int(Float64(room) * 1.4 / 2.4), inner_w, inset, compact, True)
+    return TVLayout(body_h, max(inner_w - TV_GAP - thread_w, 0), 0, thread_w, inset, compact, False)
 
 
 # ---------- the state ----------
@@ -205,6 +209,7 @@ struct StageTV(Copyable, Movable):
     var area_h: Float64
     var closed_by: String  # why it last closed: "x", "quiet", "app"
     var frames: Int  # frames ticked (a checker's count)
+    var drawn: Bool  # the TV canvas has told its size (area_w/area_h); until then they are guessed from the window (resize)
 
     def __init__(out self, canvas: Int = 0, veil: Int = 0, on_frame: Int = NO_MSG, on_close: Int = NO_MSG, quiet_ms: Int = TV_QUIET_MS):
         self.canvas = canvas
@@ -235,6 +240,7 @@ struct StageTV(Copyable, Movable):
         self.area_h = 0
         self.closed_by = ""
         self.frames = 0
+        self.drawn = False
 
     def on(self) -> Bool:
         """The Stage has a TV (a canvas to draw its box on)."""
@@ -243,9 +249,17 @@ struct StageTV(Copyable, Movable):
     def draws(self, canvas: Int) -> Bool:
         return self.canvas != 0 and (canvas == self.canvas or canvas == self.veil)
 
-    def resize(mut self, width: Int):
-        """The window's width (App.resize): a phone's one column (≤ 760) draws the box inset, its body stacked."""
+    def resize(mut self, width: Int, height: Int = 0):
+        """The window's size (App.resize): a phone's one column (≤ 760) draws the box inset, its body stacked. With the height,
+        and until the TV canvas has drawn once, its size is guessed from the window (the centre column as mojoui.stage lays it
+        out, under the top bar), so the body can arrive in a window that hasn't painted yet (a test window that is never shown)."""
         self.compact = width <= 760
+        if height > 0 and not self.drawn:
+            var w = Float64(width)
+            if not self.compact:  # (the centre column: minmax(0, 2.75fr) of three, or 2.6fr of two under 1000)
+                w = (w - 54.0) * 2.75 / 4.75 if width >= 1000 else (w - 45.0) * 2.6 / 3.6
+            self.area_w = w
+            self.area_h = Float64(height) - (0.0 if self.compact else 52.0)
         self.version += 1
 
     def set_reduced(mut self, reduced: Bool):
@@ -446,6 +460,7 @@ struct StageTV(Copyable, Movable):
             var h = s.points_height()
             if w < 2 * Float64(TV_BAR_H) or h < 2 * Float64(TV_BAR_H):  # (a canvas not laid out yet, the web's 1x1 first frame: not the column)
                 return
+            self.drawn = True
             if w != self.area_w or h != self.area_h:
                 self.area_w = w
                 self.area_h = h
@@ -469,8 +484,8 @@ struct StageTV(Copyable, Movable):
                 return
             if self.veils_card_only():  # the card's column (and the title over it, which changes with it)
                 var lay = self.layout()
-                var right = Float64(lay.inset + TV_PAD_H + (lay.card_w if not lay.compact else lay.card_w)) + Float64(TV_GAP) / 2
-                if lay.compact:
+                var right = Float64(lay.inset + TV_PAD_H + lay.card_w) + Float64(TV_GAP) / 2
+                if lay.stacked:
                     _paint(s, 0, 0, s.points_width() * k, Float64(TV_PAD_V + 48 + lay.card_h + TV_GAP // 2) * k, 0, with_alpha(look.card, a))
                 else:
                     _paint(s, 0, 0, right * k, s.points_height() * k, 0, with_alpha(look.card, a))
@@ -657,8 +672,9 @@ def tv_body(tv: StageTV, content: TVContent) -> View:
     var main: View
     var has_card = tv.card != "" and len(content.card.nodes) > 0
     if has_card:
-        var card = VStack(Scroll(content.card.copy(), height=0).grow().fill(), spacing=0).fill().arrive().tag("stage-tv-card")
-        if lay.compact:
+        var card = VStack(Scroll(content.card.copy(), height=0).grow().fill(), spacing=0).fill().arrive().tag(
+            "stage-tv-card-compact" if lay.stacked else "stage-tv-card")  # (a phone: the card's own frame is enough, no second one round it)
+        if lay.stacked:
             main = VStack(card^.height(lay.card_h), content.thread.copy(), spacing=TV_GAP).grow().fill()
         else:
             main = HStack(card^.width(lay.card_w), VStack(content.thread.copy(), spacing=0).width(lay.thread_w).fill(), spacing=TV_GAP).grow().fill()
@@ -668,7 +684,7 @@ def tv_body(tv: StageTV, content: TVContent) -> View:
         if len(content.chips.nodes) > 0:
             col.append(content.chips.copy())
         main = HStack(VStack(col^, spacing=12).width(lay.thread_w).fill(), spacing=0).justify(CENTER).grow().fill()
-    var body = VStack(head, main, spacing=12).padding(TV_PAD_V, TV_PAD_H + lay.inset).grow().fill().tag("stage-tv")
+    var body = VStack(head, main, spacing=12).padding(TV_PAD_V, (TV_PHONE_PAD_H if lay.compact else TV_PAD_H) + lay.inset).grow().fill().tag("stage-tv")
     var veil_frames = tv.on_frame if tv.leave_t0 >= 0 or tv.lift_t0 >= 0 else NO_MSG
     return Overlay(body, Canvas(tv.veil, tv.version, on_frame=veil_frames).passthrough().grow().fill().tag("stage-tv-veil")).height(lay.body_h).fill()
 

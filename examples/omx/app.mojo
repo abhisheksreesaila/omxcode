@@ -71,7 +71,7 @@ from mojoui.looker import Looker
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme, Palette
-from mojoui.utf8 import head
+from mojoui.utf8 import head, boundary
 from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, POINT, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
 from mojoui.voiceui import VoiceDock, VoiceLane
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, TAPPED, DROPPED, tile_icon
@@ -290,7 +290,7 @@ struct Main(App):
     def resize(mut self, width: Int, height: Int):
         self.width = width
         self.height = height
-        self.tv.resize(width)
+        self.tv.resize(width, height)
         var cols = 2 if stage_compact(width) else 4
         if cols != self.tiles.cols:
             self.tiles.set_columns(cols)
@@ -1041,7 +1041,7 @@ struct Main(App):
         if (s == LOOP_SPEAKING or s == LOOP_THINKING or lingers) and self.reply != "":
             var r = self.reply
             if r.byte_length() > 90:
-                var cut = r.byte_length() - 90
+                var cut = boundary(r, r.byte_length() - 90)  # (a character's first byte: a reply is UTF-8, "Belém")
                 var tail = String(r[byte = cut:])
                 var sp = tail.find(" ")
                 r = "…" + (String(tail[byte = sp + 1:]) if sp >= 0 else tail)

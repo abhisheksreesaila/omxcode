@@ -644,6 +644,7 @@ def counter_tv_roles(p: Palette) -> List[Surface]:
                         icon_size=18, icon_ink=p.ink)
     out.append(close^)
     out.append(Surface("stage-tv-card", counter_ground(dark), 22, 22, -1, -1, -1, 14, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
+    out.append(box("stage-tv-card-compact", 0, -1, 0, 0))  # (a phone's TV: the card without a second frame round it)
     out.append(Surface("stage-msg-you", p.ink, 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False))
     out.append(Surface("stage-msg-omx", counter_ground(dark), 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False))
     out.append(words("stage-msg-meta", 11, 600, 0))  # (its bubble's ink: .cb-msg small)

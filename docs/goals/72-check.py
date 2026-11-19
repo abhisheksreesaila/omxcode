@@ -740,7 +740,7 @@ def kill_painter():
 def typed(text, then, open_box=False):
     """Steps that type `text` into the app's question box (`open_box`: open it first; the Type button toggles it, so only the first
     question taps it), then `then` (a wait or a waitfor)."""
-    return ("tap:type;wait:500;" if open_box else "") + f"enter:Type to omx={text};{then}"
+    return ("tap:Type;wait:500;" if open_box else "") + f"enter:Type to omx={text};{then}"  # (the button's title: on the Stage its tag is its role, goal 77 D-7866)
 
 
 def blank_png(path):

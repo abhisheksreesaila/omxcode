@@ -459,7 +459,7 @@ RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientR
 # clipped to its board; left out when scrolled away). Page pixels (the full-page shot's).
 REGIONS = """() => { const out = [], roles = { sidebar: 'sidebar', toolbar: 'toolbar', 'status-bar': 'status', inspector: 'inspector',
   'stage-top': 'stage-top', 'stage-left': 'stage-left', 'stage-centre': 'stage-centre', 'stage-right': 'stage-right', 'stage-panel': 'stage-panel', 'stage-bar': 'stage-bar',
-  'stage-tv': 'stage-tv', 'stage-tv-card': 'stage-tv-card', 'stage-tv-thread': 'stage-tv-thread' };
+  'stage-tv': 'stage-tv', 'stage-tv-card': 'stage-tv-card', 'stage-tv-card-compact': 'stage-tv-card', 'stage-tv-thread': 'stage-tv-thread' };
   const box = e => { const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; };
   const push = (name, b) => { if (b.w >= 1 && b.h >= 1) out.push({ name, x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) }); };
   for (const e of document.querySelectorAll('#mojoui-root [data-tag]'))

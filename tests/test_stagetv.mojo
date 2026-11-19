@@ -81,6 +81,14 @@ def test_open_morph() raises:
     assert_equal(tv.box(700, 740).h, full)
     assert_equal(tv.box(700, 740).y, 14.0)
     assert_equal(tv.box(700, 740).radius, 30.0)
+    # a window that has not painted yet (goal 77 M7f: a test window never shown): the size guessed from resize(w, h)
+    var blind = StageTV(3, 4, on_frame=30, on_close=31)
+    blind.resize(1280, 820)
+    assert_true(blind.area_w > 600 and blind.area_w < 760 and blind.area_h == 768.0, "guessed " + String(blind.area_w) + " x " + String(blind.area_h))
+    blind.open(1_000 * MS, "Your to-do list", "todo")
+    _ = blind.tick(1_200 * MS)
+    assert_true(blind.body, "the body arrives without a draw once the window's size is known")
+    assert_true(blind.layout().body_h > 600, "a body as tall as the column: " + String(blind.layout().body_h))
 
 
 def test_swap_and_close() raises:
@@ -171,6 +179,10 @@ def test_layout() raises:
     assert_equal(chat.thread_w, 720)
     var phone = tv_layout(390, 844, True, True)
     assert_true(phone.compact and phone.card_h > 0 and phone.inset == 14)
+    assert_true(phone.stacked and phone.card_w == 390 - 2 * (14 + 6), "a phone's card nearly the screen's width: " + String(phone.card_w))
+    assert_false(l.stacked, "700: the card (408) beside the conversation")
+    var tablet = tv_layout(560, 1128, False, True)  # (a portrait tablet's centre column: the card would keep 268 beside it)
+    assert_true(tablet.stacked and tablet.card_w == 560 - 36 and tablet.card_h > 0 and tablet.inset == 0, "a narrow column stacks: " + String(tablet.card_w))
 
 
 def tagged(v: View, name: String) -> List[Int]:

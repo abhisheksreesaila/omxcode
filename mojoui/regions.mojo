@@ -25,6 +25,8 @@ def region_of(role: String) -> String:
     """A role tag's region name ("status-bar" → "status"), "" for a tag that names no region."""
     if role == "status-bar":
         return "status"
+    if role == "stage-tv-card-compact":  # (a phone's TV card: the same region)
+        return "stage-tv-card"
     for r in materialize[REGION_ROLES]():
         if r == role:
             return role
