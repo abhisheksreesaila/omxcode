@@ -138,6 +138,12 @@ def step_bad(what, b, where="linux"):
             bad.append(f"wall_p95 {b['wall_p95']} wall_max {b['wall_max']}")
         if b.get("renderer", "").startswith("gpu2d") and int(b.get("cpu_frames", "1")) != 0:
             bad.append(f"cpu_frames {b.get('cpu_frames')} (frames drawn off the GPU)")
+    if where == "linux":  # (added 11-18, D-7564, nothing lowered: renderer= names only the last frame's path; every timed
+        # frame of a GPU run must have been drawn by gpu2d-GL, as the Mac's cpu_frames=0)
+        if "gpu_frames" not in b:
+            bad.append("no gpu_frames")
+        elif int(b["gpu_frames"]) != int(b["n"]):
+            bad.append(f"gpu_frames {b['gpu_frames']} of {b['n']} (frames drawn off the GPU)")
     return f"{what} " + ", ".join(bad) if bad else ""
 
 

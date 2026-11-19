@@ -525,6 +525,27 @@ struct GtkCanvas(Copyable, Movable):
     var pending_h: Int
     var pending_blended: Bool
     var on_gpu: Bool  # the last frame went through the GPU 2D renderer (mojoui.gpu2d_gl), not GSK nodes
+    # drawing ahead (D-7560): an animating GPU 2D canvas draws its next frame right after this frame's paint, while the
+    # GPU is idle, sampled at the next frame's time; the next frame's tick shows it if nothing changed since, else drops it
+    var ahead_slot: Int  # the GPU 2D ring slot drawn ahead, not shown yet (-1: none)
+    var ahead_changes: Int  # Runtime.changes, the node's version, the size and the frame time it was drawn for
+    var ahead_version: Int
+    var ahead_w: Int
+    var ahead_h: Int
+    var ahead_scale: Float64
+    var ahead_due: Int  # (frame-clock µs)
+    var ahead_again: Bool  # the frame drawn ahead asked for another (still animating)
+    var ahead_ms: Float64  # its draw's CPU time
+    var aheads: Int  # frames shown from a drawn-ahead picture, and drawn-ahead pictures dropped (framebench counts them)
+    var ahead_dropped: Int
+    var hands: Int  # pictures handed to GTK (any path); the frame that showed the last one (Host.paints_done's count, -1:
+    var shown_frame: Int  # handed outside a frame), and whether it was drawn by the GPU 2D renderer
+    var shown_gpu: Bool
+    var ahead_opaque: Bool  # the frame drawn ahead is opaque everywhere (GPU2D.opaque when it was drawn)
+    var ahead_still: Bool  # less motion was on when it was drawn
+    var frame_sent_us: Int  # the frame event for this frame time went out early, with the drawing ahead (0: none)
+    var bench_draw_ms: Float64  # (framebench) CPU time of this canvas's draws since the step's gesture, and of those that
+    var bench_inframe_ms: Float64  # ran inside a frame's paint (already in that frame's paint time)
 
     def __init__(out self, node: Int, widget: Int):
         self.node = node
@@ -575,6 +596,25 @@ struct GtkCanvas(Copyable, Movable):
         self.pending_h = 0
         self.pending_blended = False
         self.on_gpu = False
+        self.ahead_slot = -1
+        self.ahead_changes = 0
+        self.ahead_version = 0
+        self.ahead_w = 0
+        self.ahead_h = 0
+        self.ahead_scale = 1
+        self.ahead_due = 0
+        self.ahead_again = False
+        self.ahead_ms = 0
+        self.aheads = 0
+        self.ahead_dropped = 0
+        self.hands = 0
+        self.shown_frame = -1
+        self.shown_gpu = False
+        self.ahead_opaque = False
+        self.ahead_still = False
+        self.frame_sent_us = 0
+        self.bench_draw_ms = 0
+        self.bench_inframe_ms = 0
 
 
 struct BoardChild(Copyable, Movable):
@@ -750,6 +790,15 @@ struct GtkHost[A: App](Movable):
     var g2d_ctx: Int
     var g2d_state: Int
     var g2d_wait: Bool
+    var draw_ahead: Bool  # animating GPU 2D canvases draw their next frame after this frame's paint (D-7560; MOJOUI_DRAW_AHEAD=0: off)
+    var ahead_input: Bool  # (trial) a GPU 2D canvas input made stale between frames draws then too, not at the next tick
+    var ahead_hooked: Bool  # the frame clock's after-paint is connected for it, and an idle turn is queued to draw ahead
+    var ahead_queued: Bool
+    var ahead_due_us: Int  # the next frame's time (frame-clock µs) and the display's refresh interval, from the last paint
+    var ahead_interval_us: Int
+    var in_paint: Bool  # between the frame clock's before-paint and after-paint (when paint_timed)
+    var paints_done: Int  # frames painted since paint_timed (after-paints); the last 64 paint times by paints_done % 64
+    var paint_ring: List[Float64]
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -774,6 +823,15 @@ struct GtkHost[A: App](Movable):
         self.g2d_ctx = 0
         self.g2d_state = 0
         self.g2d_wait = False
+        self.draw_ahead = getenv("MOJOUI_DRAW_AHEAD") != "0"
+        self.ahead_input = getenv("MOJOUI_DRAW_AHEAD") == "input"
+        self.ahead_hooked = False
+        self.ahead_queued = False
+        self.ahead_due_us = 0
+        self.ahead_interval_us = 16667
+        self.in_paint = False
+        self.paints_done = 0
+        self.paint_ring = List[Float64](length=64, fill=0)
         self.partial_ok = getenv("MOJOUI_NO_PARTIAL") == ""
         self.scene_mode = getenv("MOJOUI_SCENE") != "0"  # (the default since goal 27, D-261; 0: the pixel path)
         self.layouts = Dict[String, Int]()
@@ -3006,6 +3064,7 @@ struct GtkHost[A: App](Movable):
         var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom, p)
         self.trace_diff("event gesture", t0, d)
         self.apply(d, self_addr)
+        self.ahead_after_input(self_addr)
 
     def canvas_key(mut self, ci: Int, name: String, modifiers: Int, self_addr: Int):
         if ci < 0 or ci >= len(self.canvases):
@@ -3014,6 +3073,7 @@ struct GtkHost[A: App](Movable):
         var d = self.rt.key(self.canvases[ci].node, name, modifiers)
         self.trace_diff("event key " + name, t0, d)
         self.apply(d, self_addr)
+        self.ahead_after_input(self_addr)
 
     def pointer(self, ci: Int) -> Tuple[Float64, Float64]:
         """Where the pointer is over canvas ci (its centre if it hasn't been seen)."""
@@ -3030,7 +3090,11 @@ struct GtkHost[A: App](Movable):
             return False
         var node = self.canvases[ci].node
         var now = Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock))
-        if self.rt.shown.nodes[node].msg2 != 0:
+        var sent = self.canvases[ci].frame_sent_us
+        self.canvases[ci].frame_sent_us = 0
+        if self.rt.shown.nodes[node].msg2 != 0 and sent > 0 and abs(now - sent) * 2 <= self.ahead_interval_us:
+            pass  # (this frame's event went out after the last paint, when its picture was drawn ahead, D-7560)
+        elif self.rt.shown.nodes[node].msg2 != 0:
             var last = self.canvases[ci].last_us
             self.canvases[ci].last_us = now
             if self.canvases[ci].frames == 0:
@@ -3051,7 +3115,7 @@ struct GtkHost[A: App](Movable):
                 return False
         else:
             self.canvases[ci].last_us = 0
-        self.draw_canvas(ci, self_addr)
+        self.draw_canvas(ci, self_addr, False, now)
         if ci < len(self.canvases) and self.idle(ci):
             self.canvases[ci].quiet += 1
             if self.canvases[ci].quiet >= 30:  # (~0.5 s: lets late relayouts, e.g. lists filling in, settle)
@@ -3113,13 +3177,14 @@ struct GtkHost[A: App](Movable):
             print("mojoui: GPU canvas pictures go to the screen without a copy to the CPU (" + how + "; " + pr[].why + ")", flush=True)
         return True
 
-    def gpu2d_gpu_ms(mut self) -> Float64:
-        """The GPU time of the GPU 2D renderer's last frame timed (ms; -1 when GL has no timer queries or none was)."""
+    def gpu2d_gpu_ms(mut self, every: Bool = False) -> Float64:
+        """The GPU time of the GPU 2D renderer's last frame timed, or (every) of all its frames timed since the last call,
+        summed (ms; -1 when GL has no timer queries or none was)."""
         if self.g2d == 0 or self.g2d_ctx == 0:
             return -1
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
-        var ns = self.gpu2d()[].gl.gpu_time()
+        var ns = self.gpu2d()[].gl.gpu_time(not every)
         if prev != 0:
             external_call["gdk_gl_context_make_current", NoneType](prev)
         else:
@@ -3129,7 +3194,7 @@ struct GtkHost[A: App](Movable):
     def gpu2d(self) -> Pointer[GPU2D, MutUntrackedOrigin]:
         return Pointer[GPU2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
 
-    def gpu2d_ready(mut self) -> Bool:
+    def gpu2d_ready(mut self, self_addr: Int) -> Bool:
         """Whether .gpu() canvases draw with the GPU 2D renderer: the first time, makes a GDK GL context (GL 3.3 core or
         GLES 3.0, whichever GDK gives) and starts the GL backend in it (shaders compiled, the atlas uploaded: nothing
         compiles mid-frame), and tells the app which (mojoui.gpu2d_backend). No: GSK nodes, as every other canvas."""
@@ -3144,6 +3209,8 @@ struct GtkHost[A: App](Movable):
         var gl_renderer = rname.find("GL") >= 0 or rname.find("Ngl") >= 0  # (GskGLRenderer, GskNglRenderer)
         if not gl_renderer and getenv("MOJOUI_GPU2D") != "force":
             why = "GTK's renderer is " + rname + ", which copies GL textures through the CPU (D-737)"
+            if not Self.A.GPU_2D and getenv("GSK_RENDERER") == "" and getenv("MOJOUI_GPU2D") != "0":
+                why += "; the first screen had no .gpu() canvas: declare App.GPU_2D = True so GTK's GL renderer is picked at start (D-7562)"
             set_backend_name("cpu (" + why + ")")
             print("mojoui: .gpu() canvases: GSK nodes (" + why + ")", flush=True)
             return False
@@ -3180,6 +3247,10 @@ struct GtkHost[A: App](Movable):
                 external_call["g_object_unref", NoneType](ctx)
         if self.g2d_state == 1:
             set_backend_name("gpu2d-GL (" + self.gpu2d()[].gl.why + "; shown by " + rname + ")")
+            var clock = external_call["gtk_widget_get_frame_clock", Int](self.window) if self.window != 0 else 0
+            if clock != 0 and not self.ahead_hooked:  # (drawing ahead, D-7560: after each paint, see on_ahead_after_paint)
+                self.ahead_hooked = True
+                connect(clock, "after-paint", on_ahead_after_paint[Self.A], self_addr)
         else:
             set_backend_name("cpu (" + why + "; GSK nodes on " + rname + ")")
         print("mojoui: .gpu() canvases: " + ("the GPU 2D renderer, " + self.gpu2d()[].gl.why if self.g2d_state == 1 else "GSK nodes (" + why + ")"), flush=True)
@@ -3189,6 +3260,15 @@ struct GtkHost[A: App](Movable):
         """The canvas's display list drawn by the GPU 2D renderer into a ring texture and shown as a GdkGLTexture
         (GTK's release callback frees the slot; GTK waits on the frame's GL fence before sampling it). False: every
         texture is still held, or GL failed (then .gpu() canvases go back to GSK nodes for good)."""
+        var slot = self.gpu2d_draw(ci, widget, sc, w, h)
+        if slot < 0:
+            return False
+        self.gpu2d_hand(widget, slot, w, h, self.gpu2d()[].opaque)
+        return True
+
+    def gpu2d_draw(mut self, ci: Int, widget: Int, sc: Scene, w: Int, h: Int) -> Int:
+        """The canvas's display list drawn by the GPU 2D renderer into a ring texture, fenced and held (not shown yet):
+        its slot, or -1 (every texture still held, or GL failed: then .gpu() canvases go back to GSK nodes for good)."""
         var g = self.gpu2d()
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
@@ -3206,13 +3286,22 @@ struct GtkHost[A: App](Movable):
                 print("mojoui: the GPU 2D renderer failed (" + g[].gl.why + "): .gpu() canvases use GSK nodes from now on", flush=True)
                 self.g2d_state = -1
                 set_backend_name("cpu (the GPU 2D renderer failed: " + g[].gl.why + ")")
-            return False
+            return -1
         if not self.canvases[ci].on_gpu:  # (from GSK nodes to the GPU path: the kept nodes and layer textures go)
             self.canvases[ci].on_gpu = True
             var staying = List[Bool](length=len(self.canvases), fill=True)
             staying[ci] = False
             self.release_canvases(staying)
         Pointer[Int, MutUntrackedOrigin](unsafe_from_address=g[].gl.busy_flag(slot))[] = 1
+        if self.rt.trace:
+            print("TRACE: gpu2d " + String(w) + "x" + String(h) + " batches " + ms(g[].batch_ns) + " ms, GL " + ms(g[].render_ns) + " ms, GPU wait " + ms(wait_ns) + " ms, layers rebuilt "
+                  + String(g[].rebuilt) + " reused " + String(g[].reused) + " grown " + String(g[].grown) + " (runs " + String(g[].runs_built) + " -> " + String(g[].runs_merged) + "), uploaded " + String(g[].gl.uploaded // 1024) + " KB (" + ms(g[].gl.upload_ns) + " ms; polygon plan " + ms(g[].gl.plan_ns) + " ms), "
+                  + String(g[].gl.draws) + " draws, " + String(g[].gl.poly_groups) + " polygon groups")
+        return slot
+
+    def gpu2d_hand(mut self, widget: Int, slot: Int, w: Int, h: Int, opaque: Bool):
+        """A GPU 2D ring texture (drawn, fenced, held) → the picture, as a GdkGLTexture."""
+        var g = self.gpu2d()
         var b = external_call["gdk_gl_texture_builder_new", Int]()
         external_call["gdk_gl_texture_builder_set_sync", NoneType](b, g[].gl.sync[slot])
         external_call["gdk_gl_texture_builder_set_context", NoneType](b, self.g2d_ctx)
@@ -3221,16 +3310,87 @@ struct GtkHost[A: App](Movable):
         external_call["gdk_gl_texture_builder_set_height", NoneType](b, c_int(h))
         # an opaque frame as GDK_MEMORY_R8G8B8X8 (GTK neither converts its alpha nor blends it), else GDK_MEMORY_R8G8B8A8
         # (straight alpha, what the backend draws)
-        external_call["gdk_gl_texture_builder_set_format", NoneType](b, c_int(31 if g[].opaque and getenv("MOJOUI_GPU2D_OPAQUE") != "0" else 5))
+        external_call["gdk_gl_texture_builder_set_format", NoneType](b, c_int(31 if opaque and getenv("MOJOUI_GPU2D_OPAQUE") != "0" else 5))
         var tex = external_call["gdk_gl_texture_builder_build", Int](b, on_gl_texture_released, g[].gl.busy_flag(slot))
         external_call["g_object_unref", NoneType](b)
         external_call["gtk_picture_set_paintable", NoneType](widget, tex)
         external_call["g_object_unref", NoneType](tex)
-        if self.rt.trace:
-            print("TRACE: gpu2d " + String(w) + "x" + String(h) + " batches " + ms(g[].batch_ns) + " ms, GL " + ms(g[].render_ns) + " ms, GPU wait " + ms(wait_ns) + " ms, layers rebuilt "
-                  + String(g[].rebuilt) + " reused " + String(g[].reused) + " grown " + String(g[].grown) + " (runs " + String(g[].runs_built) + " -> " + String(g[].runs_merged) + "), uploaded " + String(g[].gl.uploaded // 1024) + " KB (" + ms(g[].gl.upload_ns) + " ms; polygon plan " + ms(g[].gl.plan_ns) + " ms), "
-                  + String(g[].gl.draws) + " draws, " + String(g[].gl.poly_groups) + " polygon groups")
-        return True
+
+    def frame_ns(self, frame_us: Int) -> Int:
+        """A frame-clock time (µs, g_get_monotonic_time's clock) on mojoui.clock.now_ns's clock (ns, what Scene.t_ns
+        holds); 0 for 0."""
+        if frame_us <= 0:
+            return 0
+        return Int(perf_counter_ns()) + (frame_us - Int(external_call["g_get_monotonic_time", Int64]())) * 1000
+
+    def wants_ahead(self, ci: Int) -> Bool:
+        """Canvas ci draws its next frame ahead (D-7560): a GPU 2D canvas, ticking, that will draw again next frame
+        because it is animating (it asked for another frame, or takes frame events), with nothing drawn ahead yet."""
+        ref c = self.canvases[ci]
+        ref n = self.rt.shown.nodes[c.node]
+        return (self.draw_ahead and self.g2d_state == 1 and self.scene_mode and c.armed and c.on_gpu and c.ahead_slot < 0
+                and n.hint == "gpu" and (n.msg2 != 0 or c.drawn == -1 or (self.ahead_input and c.drawn != n.value)))
+
+    def ahead_after_input(mut self, self_addr: Int):
+        """(ahead_input) After input on a canvas, between frames: a GPU 2D canvas it made stale draws in an idle turn."""
+        if not self.ahead_input or self.in_paint or self.ahead_queued or self.g2d_state != 1:
+            return
+        for k in range(len(self.canvases)):
+            if self.wants_ahead(k):
+                var now = Int(external_call["g_get_monotonic_time", Int64]())
+                if self.ahead_due_us <= now:  # (the frame clock idled: the next frame's time isn't known yet)
+                    self.ahead_due_us = now + self.ahead_interval_us
+                self.ahead_queued = True
+                _ = external_call["g_idle_add", c_uint](on_ahead_idle[Self.A], self_addr)
+                return
+
+    def drop_ahead(mut self, ci: Int):
+        """Canvas ci's frame drawn ahead won't be shown (something changed since it was drawn): its slot is free again."""
+        if ci < 0 or ci >= len(self.canvases) or self.canvases[ci].ahead_slot < 0:
+            return
+        if self.g2d != 0:
+            Pointer[Int, MutUntrackedOrigin](unsafe_from_address=self.gpu2d()[].gl.busy_flag(self.canvases[ci].ahead_slot))[] = 0
+        self.canvases[ci].ahead_slot = -1
+        self.canvases[ci].ahead_dropped += 1
+
+    def draw_ahead_now(mut self, self_addr: Int):
+        """Right after a frame's paint (an idle turn: input already waiting goes first): every canvas that wants_ahead
+        draws the next frame now, while the GPU is idle, its animations sampled at that frame's time. The frame events
+        go out first, then the draws, so no canvas's early frame is made stale by another's event; each frame drawn
+        ahead remembers Runtime.changes after all of it, and the next tick shows it only if nothing changed since."""
+        var due = self.ahead_due_us
+        var n = len(self.canvases)
+        var want = List[Bool](length=n, fill=False)
+        for ci in range(n):
+            want[ci] = self.wants_ahead(ci)
+        for ci in range(n):
+            var node = self.canvases[ci].node
+            if want[ci] and self.rt.shown.nodes[node].msg2 != 0:
+                var last = self.canvases[ci].last_us
+                self.canvases[ci].last_us = due
+                self.canvases[ci].frame_sent_us = due
+                if self.canvases[ci].frames == 0:
+                    self.canvases[ci].first_us = due
+                self.canvases[ci].frames += 1
+                var t0 = perf_counter_ns()
+                var d = self.rt.frame(node, due - last if last > 0 else self.ahead_interval_us)
+                self.trace_diff("event frame (ahead)", t0, d)
+                var widget = self.canvases[ci].widget
+                self.apply(d, self_addr)
+                if d.rebuild or len(self.canvases) != n:  # (new widgets: they tick and draw as usual)
+                    for k in range(len(self.canvases)):
+                        if self.canvases[k].widget == widget:
+                            self.canvases[k].armed = False
+                            self.arm(k, self_addr)
+                    return
+        for ci in range(n):
+            if want[ci]:
+                self.draw_canvas(ci, self_addr, True, due)
+                if len(self.canvases) != n:
+                    return
+        for ci in range(n):
+            if want[ci] and self.canvases[ci].ahead_slot >= 0:
+                self.canvases[ci].ahead_changes = self.rt.changes
 
     def flush_pending(mut self, ci: Int, show: Bool):
         """MOJOUI_PRESENT_LAG=1 keeps a canvas's last GPU picture back a frame: when the canvas stops redrawing, show it
@@ -3262,8 +3422,80 @@ struct GtkHost[A: App](Movable):
         external_call["gtk_picture_set_paintable", NoneType](widget, tex)
         external_call["g_object_unref", NoneType](tex)
 
-    def draw_canvas(mut self, ci: Int, self_addr: Int):
-        """Asks the app to paint canvas ci at its real pixel size (if its size or version changed)."""
+    def draw_ahead_canvas(mut self, ci: Int, widget: Int, node: Int, wpx: Int, hpx: Int, scale: Float64, due_us: Int, self_addr: Int):
+        """draw_canvas(ahead=True): the next frame (at due_us) drawn now by the GPU 2D renderer and kept, not shown."""
+        if not (self.scene_mode and self.canvases[ci].on_gpu and self.g2d_state == 1 and self.rt.shown.nodes[node].hint == "gpu"):
+            return
+        var version = self.rt.shown.nodes[node].value
+        var drawn = self.canvases[ci].drawn
+        if not (drawn == -1 or drawn != version or self.canvases[ci].wpx != wpx or self.canvases[ci].hpx != hpx):
+            return  # (nothing new to draw: a frame event that changed nothing)
+        var t0 = perf_counter_ns()
+        var sc = Scene(0, 0, 1)
+        swap(sc, self.canvases[ci].spare)
+        sc.reset(wpx, hpx, scale)
+        sc.is_still = not animations_enabled()
+        sc.t_ns = self.frame_ns(due_us)
+        var r = self.rt.draw_scene(node, sc)
+        if not r[0]:
+            swap(sc, self.canvases[ci].spare)
+            return
+        var again = sc.again
+        var slot = self.gpu2d_draw(ci, widget, sc, wpx, hpx)
+        if slot < 0:  # (every texture held, or GL failed: the tick draws it as usual)
+            swap(sc, self.canvases[ci].spare)
+            self.apply(r[1], self_addr)
+            return
+        swap(self.canvases[ci].spare, self.canvases[ci].prev)  # (the layer cache now holds this list: it is prev)
+        self.canvases[ci].prev = sc^
+        var took = Float64(Int(perf_counter_ns() - t0)) / 1e6
+        var opaque = self.gpu2d()[].opaque
+        var in_paint = self.in_paint
+        ref c = self.canvases[ci]
+        c.ahead_slot = slot
+        c.ahead_changes = -1  # (set once every canvas has drawn ahead: draw_ahead_now)
+        c.ahead_version = version
+        c.ahead_w = wpx
+        c.ahead_h = hpx
+        c.ahead_scale = scale
+        c.ahead_due = due_us
+        c.ahead_again = again
+        c.ahead_opaque = opaque
+        c.ahead_still = not animations_enabled()
+        c.ahead_ms = took
+        c.draws += 1
+        c.draw_ms = took
+        c.paint_ms = took
+        c.upload_ms = 0
+        c.bench_draw_ms += took
+        if in_paint:
+            c.bench_inframe_ms += took
+        if self.rt.trace:
+            print("TRACE: draw canvas ahead " + String(self.rt.shown.nodes[node].style) + " " + String(wpx) + "x" + String(hpx) + " " + String(took) + " ms, for the frame at +"
+                  + String((due_us - Int(external_call["g_get_monotonic_time", Int64]())) // 1000) + " ms")
+        self.apply(r[1], self_addr)
+
+    def show_ahead(mut self, ci: Int, widget: Int):
+        """Canvas ci's frame drawn ahead goes to the picture (its tick, nothing changed since it was drawn)."""
+        var slot = self.canvases[ci].ahead_slot
+        self.canvases[ci].ahead_slot = -1
+        self.gpu2d_hand(widget, slot, self.canvases[ci].ahead_w, self.canvases[ci].ahead_h, self.canvases[ci].ahead_opaque)
+        var frame = self.paints_done if self.in_paint else -1
+        ref c = self.canvases[ci]
+        c.wpx = c.ahead_w
+        c.hpx = c.ahead_h
+        c.scale = c.ahead_scale
+        c.drawn = c.ahead_version if not c.ahead_again else -1
+        c.aheads += 1
+        c.hands += 1
+        c.shown_frame = frame
+        c.shown_gpu = True
+
+    def draw_canvas(mut self, ci: Int, self_addr: Int, ahead: Bool = False, frame_us: Int = 0):
+        """Asks the app to paint canvas ci at its real pixel size (if its size or version changed), for the frame at
+        frame_us (frame-clock µs; 0: now). A frame drawn ahead for this one is shown instead when nothing changed since
+        (D-7560). ahead=True: draws the next frame now (frame_us is its time) into a GPU 2D texture kept for that
+        frame's tick; only a GPU 2D canvas that drew its last frame on the GPU draws ahead."""
         var widget = self.canvases[ci].widget
         var node = self.canvases[ci].node
         var w = Int(external_call["gtk_widget_get_width", c_int](widget))
@@ -3277,6 +3509,20 @@ struct GtkHost[A: App](Movable):
         var wpx = Int(Float64(w) * scale + 0.5)
         var hpx = Int(Float64(h) * scale + 0.5)
         var version = self.rt.shown.nodes[node].value
+        if ahead:
+            self.draw_ahead_canvas(ci, widget, node, wpx, hpx, scale, frame_us, self_addr)
+            return
+        if self.canvases[ci].ahead_slot >= 0:  # a frame drawn ahead for this one: shown if nothing changed since
+            var timed = self.canvases[ci].ahead_again or self.rt.shown.nodes[node].msg2 != 0  # (a still picture: its time doesn't matter)
+            var on_time = frame_us <= 0 or not timed or abs(frame_us - self.canvases[ci].ahead_due) * 2 <= self.ahead_interval_us
+            var same = (self.canvases[ci].ahead_changes == self.rt.changes and self.canvases[ci].ahead_version == version
+                        and self.canvases[ci].ahead_w == wpx and self.canvases[ci].ahead_h == hpx and self.canvases[ci].ahead_scale == scale
+                        and self.canvases[ci].ahead_still == (not animations_enabled()) and self.g2d_state == 1)
+            if on_time and same:
+                self.show_ahead(ci, widget)
+                return
+            self.drop_ahead(ci)
+            self.canvases[ci].drawn = -1  # (drawn now instead, as it would have been)
         if wpx == self.canvases[ci].wpx and hpx == self.canvases[ci].hpx and version == self.canvases[ci].drawn:
             return
         var t0 = perf_counter_ns()
@@ -3284,12 +3530,14 @@ struct GtkHost[A: App](Movable):
         var d = Diff(False, List[Patch]())
         var t1 = t0
         var drew_scene = False
+        var via_gpu2d = False
         if self.scene_mode:  # the display list, drawn by GTK's own renderer (render nodes; GPU on a real display)
-            var on_gpu = self.rt.shown.nodes[node].hint == "gpu" and self.gpu2d_ready()  # (before the app draws: it may ask which)
+            var on_gpu = self.rt.shown.nodes[node].hint == "gpu" and self.gpu2d_ready(self_addr)  # (before the app draws: it may ask which)
             var sc = Scene(0, 0, 1)
             swap(sc, self.canvases[ci].spare)
             sc.reset(wpx, hpx, scale)
             sc.is_still = not animations_enabled()
+            sc.t_ns = self.frame_ns(frame_us)  # (animations sample the frame's time, as a frame drawn ahead does)
             var r = self.rt.draw_scene(node, sc)
             if r[0]:
                 drew_scene = True
@@ -3297,6 +3545,7 @@ struct GtkHost[A: App](Movable):
                 again = sc.again
                 t1 = perf_counter_ns()
                 if on_gpu and self.gpu2d_show(ci, widget, sc, wpx, hpx):
+                    via_gpu2d = True
                     if self.rt.trace:
                         print("TRACE: gpu2d app draw_scene " + ms(Int(t1) - Int(t0)) + " ms, " + String(sc.ops()) + " ops")
                     t1 = perf_counter_ns()  # (the GPU path: draw_ms is all of it, the app's draw, batches, GL and the wait)
@@ -3345,6 +3594,12 @@ struct GtkHost[A: App](Movable):
         self.canvases[ci].scale = scale
         self.canvases[ci].drawn = version if not again else -1  # mid-animation: draw again next frame
         self.canvases[ci].draws += 1
+        self.canvases[ci].hands += 1
+        self.canvases[ci].shown_frame = self.paints_done if self.in_paint else -1
+        self.canvases[ci].shown_gpu = via_gpu2d
+        self.canvases[ci].bench_draw_ms += self.canvases[ci].draw_ms
+        if self.in_paint:
+            self.canvases[ci].bench_inframe_ms += self.canvases[ci].draw_ms
         if self.rt.trace:
             print("TRACE: draw canvas " + String(self.rt.shown.nodes[node].style) + " " + String(wpx) + "x" + String(hpx) + " " + String(self.canvases[ci].draw_ms) + " ms (paint "
                   + String(self.canvases[ci].paint_ms) + ", upload " + String(self.canvases[ci].upload_ms) + ")")
@@ -3671,6 +3926,7 @@ struct GtkHost[A: App](Movable):
         for k in range(len(self.canvases)):
             if k < len(staying) and staying[k]:
                 continue
+            self.drop_ahead(k)
             for n in self.canvases[k].layer_nodes:
                 if n != 0:
                     external_call["gsk_render_node_unref", NoneType](n)
@@ -4328,7 +4584,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     of N moves to and fro, where moves that hit nothing don't redraw and count as unchanged; deepzoom: zoom's steps
     after an untimed 8× zoom, past a page texture's 4096 px cap), each followed by the frame that shows it. A frame's
     work = handling the gesture (the app's update and the diff) + the canvas's redraw (draw_scene and the replay into
-    render nodes, or draw() and the upload) + GTK's paint of that frame (before-paint to after-paint) + a round trip to
+    render nodes, or draw() and the upload; every draw of the canvas since the gesture, a frame drawn ahead included, and
+    a GPU 2D canvas's GPU time for each) + GTK's paint of the frame that shows the new picture (before-paint to
+    after-paint, without the canvas's own draws inside it, already counted; D-7563) + a round trip to
     the display after it (gdk_display_sync: the X server's own drawing, which cairo's paint only queues) + the canvas's
     whole picture rendered to a texture by the same renderer (raster: GTK paints only damage; this is the full cost, so
     the sum is an upper bound). Pan and draw
@@ -4367,6 +4625,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if g2d_timed:
         host[].gpu2d()[].gl.timing = True
     var gpus = List[Float64]()
+    var gpu_frames = 0  # timed frames whose picture the GPU 2D renderer drew (D-7564)
+    var aheads0 = host[].canvases[ci].aheads
+    var dropped0 = host[].canvases[ci].ahead_dropped
     var missed_suspended = 0  # (missed frames while the window was suspended: hidden, another workspace)
     var ring_full0 = host[].gpu2d()[].gl.full if host[].g2d != 0 else 0
     var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
@@ -4417,8 +4678,15 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var missed = 0
     var unchanged = 0
     var last_kind = 0
+    aheads0 = host[].canvases[ci].aheads
+    dropped0 = host[].canvases[ci].ahead_dropped
     for i in range(count):
+        if g2d_timed:  # (nothing timed before the gesture is counted in it)
+            _ = host[].gpu2d_gpu_ms(True)
         var draws0 = host[].canvases[ci].draws
+        var hands0 = host[].canvases[ci].hands
+        host[].canvases[ci].bench_draw_ms = 0
+        host[].canvases[ci].bench_inframe_ms = 0
         var t0 = perf_counter_ns()
         var kind = PAN
         if what == "pan":
@@ -4466,16 +4734,17 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             host[].canvases[ci].pressure = 0.3 + 0.6 * Float64(i % 50) / 50.0
             host[].canvas_send(ci, PAN, x, y, 3, 2, 1, host_addr)
         var ev_ms = Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6
-        var paints0 = len(host[].frame_paints)
         var drew = False
         var painted = False
+        var shown_in = -1  # the frame (paints_done's count) that shows the new picture
         var by = perf_counter_ns() + (150_000_000 if what == "erase" else 2_000_000_000)  # (a miss doesn't redraw)
-        while perf_counter_ns() < by:  # (the redraw, then the frame painted after it)
+        while perf_counter_ns() < by:  # (the redraw, then the frame that shows it, painted)
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
             if not drew and host[].canvases[ci].draws != draws0:
                 drew = True
-                paints0 = len(host[].frame_paints)
-            if drew and len(host[].frame_paints) > paints0:
+            if shown_in < 0 and host[].canvases[ci].hands != hands0:  # (handed outside a frame: the next one paints it)
+                shown_in = host[].canvases[ci].shown_frame if host[].canvases[ci].shown_frame >= 0 else host[].paints_done
+            if drew and shown_in >= 0 and host[].paints_done > shown_in:
                 painted = True
                 break
         var prev_kind = last_kind
@@ -4489,8 +4758,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 if surf != 0 and (Int(external_call["gdk_toplevel_get_state", c_int](surf)) & (1 << 16)) != 0:
                     missed_suspended += 1  # (GDK_TOPLEVEL_STATE_SUSPENDED: the compositor isn't showing the window)
             continue
-        var dm = host[].canvases[ci].draw_ms
-        var pm = host[].frame_paints[len(host[].frame_paints) - 1]
+        var dm = host[].canvases[ci].bench_draw_ms
+        var pm = max(host[].paint_ring[shown_in % 64] - host[].canvases[ci].bench_inframe_ms, 0.0)
+        if host[].canvases[ci].shown_gpu:
+            gpu_frames += 1
         var ts = perf_counter_ns()  # (a round trip to the display: with cairo on X11 the X server draws after the paint returns)
         external_call["gdk_display_sync", NoneType](display)
         var sm = Float64(Int(perf_counter_ns()) - Int(ts)) / 1e6
@@ -4508,8 +4779,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                     external_call["g_object_unref", NoneType](tex)
                 external_call["gsk_render_node_unref", NoneType](root)
         var rm = Float64(Int(perf_counter_ns()) - Int(tr)) / 1e6
-        if g2d_timed:  # (the GPU time of the canvas's last frame: the one whose CPU time draw_ms holds)
-            var gms = host[].gpu2d_gpu_ms()
+        if g2d_timed:  # (the GPU time of every frame the canvas drew since the gesture: those dm holds the CPU time of)
+            var gms = host[].gpu2d_gpu_ms(True)
             if gms >= 0:
                 dm += gms
                 gpus.append(gms)
@@ -4550,6 +4821,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     counts += " missed_suspended=" + String(missed_suspended)
     if host[].g2d != 0:
         counts += " ring_full=" + String(host[].gpu2d()[].gl.full - ring_full0)
+    counts += " gpu_frames=" + String(gpu_frames) + " ahead=" + String(host[].canvases[ci].aheads - aheads0) + " ahead_dropped=" + String(host[].canvases[ci].ahead_dropped - dropped0)
     if len(gpus) > 0:
         counts += " gpu_p95=" + one_decimal(Float32(pct(gpus, 0.95))) + " gpu_max=" + one_decimal(Float32(pct(gpus, 1.0))) + (
             " gpu_by=timer" if g2d_timed else " gpu_by=wait")
@@ -4795,12 +5067,17 @@ def on_gaps_tick(widget: Int, clock: Int, data: Int) abi("C") -> c_int:
 
 def on_before_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     host_at[A](host_addr)[].paint_t0 = Int(perf_counter_ns())
+    host_at[A](host_addr)[].in_paint = True
 
 
 def on_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
+    host[].in_paint = False
     if host[].paint_t0 > 0:
-        host[].frame_paints.append(Float64(Int(perf_counter_ns()) - host[].paint_t0) / 1e6)
+        var took = Float64(Int(perf_counter_ns()) - host[].paint_t0) / 1e6
+        host[].paint_ring[host[].paints_done % 64] = took
+        host[].paints_done += 1
+        host[].frame_paints.append(took)
         host[].frame_times.append(Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock)) * 1000)
         var nf = len(host[].frame_times)  # (MOJOUI_TRACE, D-1702: a skipped frame says when, and how long GTK's paint took)
         if host[].rt.trace and nf > 1 and host[].frame_times[nf - 1] - host[].frame_times[nf - 2] > 34_000_000:
@@ -4810,6 +5087,40 @@ def on_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
             host[].frame_times = List[Int]()
         if len(host[].frame_paints) > 4096:
             host[].frame_paints = List[Float64]()
+
+
+def on_ahead_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
+    """After each frame's paint (once the GPU 2D renderer runs): when a canvas will draw again next frame (animating),
+    an idle turn draws it now, ahead (D-7560). Idle priority: input already waiting is handled first, and goes into it."""
+    var host = host_at[A](host_addr)
+    if not host[].draw_ahead or host[].g2d_state != 1:
+        return
+    var ft = Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock))
+    var out = List[Int64](length=2, fill=0)
+    external_call["gdk_frame_clock_get_refresh_info", NoneType](clock, Int64(ft), Int(out.unsafe_ptr()), Int(out.unsafe_ptr()) + 8)
+    var interval = Int(out[0]) if out[0] > 0 else 16667
+    _ = len(out)
+    host[].ahead_interval_us = interval
+    host[].ahead_due_us = ft + interval
+    if host[].ahead_queued:
+        return
+    var any = False
+    for k in range(len(host[].canvases)):
+        if host[].wants_ahead(k):
+            any = True
+    if not any:
+        return
+    host[].ahead_queued = True
+    _ = external_call["g_idle_add", c_uint](on_ahead_idle[A], host_addr)
+
+
+def on_ahead_idle[A: App](host_addr: Int) abi("C") -> c_int:
+    var host = host_at[A](host_addr)
+    host[].ahead_queued = False
+    if busy() or host[].has_pending:  # (mid-change: the tick draws it as usual)
+        return 0
+    host[].draw_ahead_now(host_addr)
+    return 0  # G_SOURCE_REMOVE
 
 
 def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
@@ -7407,7 +7718,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     host[].rt.app.appearance(host[].dark_told == 1)  # (and again when the person switches)
     connect3(styles, "notify::dark", on_dark_changed[A], host_addr)
     host[].rt.shown = host[].rt.view()  # (its spacing tokens in the theme's points)
-    gpu2d_renderer(host[].rt.shown.nodes)  # (before the window is realized: GTK picks its renderer then)
+    gpu2d_renderer(host[].rt.shown.nodes, A.GPU_2D)  # (before the window is realized: GTK picks its renderer then)
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
@@ -7500,12 +7811,18 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["g_application_quit", NoneType](gapp)
 
 
-def gpu2d_renderer(nodes: List[Node]):
-    """An app whose first screen has a Canvas(…).gpu() gets GTK's GL renderer (GSK_RENDERER=gl, unless set, or
-    MOJOUI_GPU2D=0): it samples the GPU 2D renderer's GL textures as they are, where GTK's Vulkan renderer copies each
-    one through the CPU on NVIDIA (D-737; ~30 ms a frame at 1699×1384, measured for goal 75). Apps without one keep
-    GTK's default renderer and an untouched environment (D-752)."""
+def gpu2d_renderer(nodes: List[Node], declared: Bool):
+    """An app that declares App.GPU_2D, or whose first screen has a Canvas(…).gpu(), gets GTK's GL renderer
+    (GSK_RENDERER=gl, unless set, or MOJOUI_GPU2D=0): it samples the GPU 2D renderer's GL textures as they are, where
+    GTK's Vulkan renderer copies each one through the CPU on NVIDIA (D-737; ~30 ms a frame at 1699×1384, measured for
+    goal 75). GTK picks a window's renderer when it is realized and keeps it, so this is decided here, at start (D-7562).
+    Apps with neither keep GTK's default renderer and an untouched environment (D-752)."""
     if getenv("GSK_RENDERER") != "" or getenv("MOJOUI_GPU2D") == "0":
+        return
+    if declared:
+        var k = String("GSK_RENDERER")
+        var v = String("gl")
+        _ = external_call["setenv", c_int](k.as_c_string_span(), v.as_c_string_span(), c_int(0))
         return
     for ref n in nodes:
         if n.kind == CANVAS and n.hint == "gpu":

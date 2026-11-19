@@ -1573,6 +1573,31 @@ def _fills(f: Frame2D) -> Int:
     return out
 
 
+comptime CACHES = 8  # canvases whose layer caches GPU2D keeps at once (the least recently drawn goes beyond)
+
+
+struct LayerCache(Movable):
+    """One canvas's cached layers (GPU2D.draw): batches, the zoom each was built at, what its fills do to alpha, and
+    the GL buffer set each layer's buffers live in (sets are never shared between canvases)."""
+
+    var owner: Int
+    var frames: List[Frame2D]
+    var built: Int
+    var built_k: List[Float64]
+    var fills: List[Int]
+    var sets: List[Int]
+    var used: Int  # GPU2D.stamp when it last drew
+
+    def __init__(out self):
+        self.owner = 0
+        self.frames = List[Frame2D]()
+        self.built = 0
+        self.built_k = List[Float64]()
+        self.fills = List[Int]()
+        self.sets = List[Int]()
+        self.used = 0
+
+
 struct GPU2D(Movable):
     """What a host keeps for its .gpu() canvases: the GL backend, the baked font and its atlas (uploaded once), and the
     last frame's batches and GPU buffers per layer. draw() rebuilds and uploads only the layers that changed since the
@@ -1603,6 +1628,12 @@ struct GPU2D(Movable):
     # a host may hand it over as an opaque texture (the toolkit then skips its alpha conversion and blending)
     var built_k: List[Float64]  # the zoom each cached layer was built at (merge_runs pads boxes by 4 px at that zoom:
     # a layer reused more than 4× further out is rebuilt, so its pads stay ≥ 1 px)
+    var sets: List[Int]  # the GL buffer set of each of the owner's layers
+    var others: List[LayerCache]  # other canvases' caches, kept while they don't draw (D-7561: two .gpu() canvases on one
+    # screen each keep their layers; the least recently drawn of more than CACHES canvases is dropped)
+    var next_set: Int  # GL buffer sets handed out so far; sets freed by a dropped cache are reused first
+    var free_sets: List[Int]
+    var stamp: Int
 
     def __init__(out self):
         self.gl = GL2D()
@@ -1623,6 +1654,57 @@ struct GPU2D(Movable):
         self.built_k = List[Float64]()
         self.fills = List[Int]()
         self.opaque = False
+        self.sets = List[Int]()
+        self.others = List[LayerCache]()
+        self.next_set = 0
+        self.free_sets = List[Int]()
+        self.stamp = 0
+
+    def caches(self) -> Int:
+        """How many canvases' layer caches are kept (the one drawn last included)."""
+        return len(self.others) + (1 if self.owner != 0 else 0)
+
+    def _switch(mut self, owner: Int):
+        """Makes `owner`'s cache the active one (self.frames …): the active one is stashed, owner's taken from the stash
+        (or a fresh one, with no layers built)."""
+        if owner == self.owner:
+            return
+        var mine = LayerCache()
+        mine.owner = self.owner
+        swap(mine.frames, self.frames)
+        swap(mine.built_k, self.built_k)
+        swap(mine.fills, self.fills)
+        swap(mine.sets, self.sets)
+        mine.built = self.built
+        mine.used = self.stamp
+        var found = -1
+        for k in range(len(self.others)):
+            if self.others[k].owner == owner:
+                found = k
+        var theirs = LayerCache()
+        if found >= 0:
+            swap(theirs, self.others[found])
+            _ = self.others.pop(found)
+        theirs.owner = owner
+        swap(self.frames, theirs.frames)
+        swap(self.built_k, theirs.built_k)
+        swap(self.fills, theirs.fills)
+        swap(self.sets, theirs.sets)
+        self.built = theirs.built
+        self.owner = owner
+        if mine.owner != 0:
+            self.others.append(mine^)
+        else:  # (owner 0 is no canvas in particular: never kept, its buffer sets reused)
+            for st in mine.sets:
+                self.free_sets.append(st)
+        while len(self.others) >= CACHES:  # (the least recently drawn goes; its buffer sets are reused)
+            var old = 0
+            for k in range(len(self.others)):
+                if self.others[k].used < self.others[old].used:
+                    old = k
+            for st in self.others[old].sets:
+                self.free_sets.append(st)
+            _ = self.others.pop(old)
 
     def start(mut self, es: Bool) -> Bool:
         """With the host's GL context current: programs, buffers, the atlas. False: gl.why says why."""
@@ -1643,11 +1725,19 @@ struct GPU2D(Movable):
         if slot < 0:
             return -1
         var t0 = perf_counter_ns()
+        self.stamp += 1
+        self._switch(owner)
         var n = scene.layers()
         while len(self.frames) < n:
             self.frames.append(Frame2D())
             self.built_k.append(1.0)
             self.fills.append(0)
+        while len(self.sets) < n:  # (this canvas's own GL buffers for each layer)
+            if len(self.free_sets) > 0:
+                self.sets.append(self.free_sets.pop())
+            else:
+                self.sets.append(self.next_set)
+                self.next_set += 1
         var cached = owner == self.owner and self.built > 0 and prev.w == scene.w and prev.h == scene.h and prev.k == scene.k
         var dirty = List[Bool](length=n, fill=True)
         var grew = List[Int](length=n, fill=-1)  # a layer that only grew: the first run added (its upload starts there)
@@ -1729,7 +1819,7 @@ struct GPU2D(Movable):
             self.built = 0
             return -1
         for i in range(n):
-            self.gl.layer(self.frames[i], i, dirty[i], grew[i])
+            self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
         if not self.gl.end(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0

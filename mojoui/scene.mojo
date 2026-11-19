@@ -13,6 +13,7 @@
 from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon
 from mojoui.text import Font, REGULAR, LEFT
+from mojoui.clock import now_ns
 
 comptime OP_RECT = 1  # x, y, w, h, radius
 comptime OP_CIRCLE = 2  # x, y, radius
@@ -44,6 +45,11 @@ trait Painter:
 
     def set_again(mut self):
         """Mid-animation: the host draws the next frame too."""
+        ...
+
+    def time_ns(self) -> Int:
+        """When this frame will be shown (mojoui.clock.now_ns's clock, ns). Animations sample their time here, not from
+        the clock: a host may draw a frame ahead of time (D-7560), and then it is shown later than it is drawn."""
         ...
 
     def begin_layer(mut self, key: String):
@@ -141,6 +147,9 @@ struct SurfacePainter(Painter, Movable):
     def set_again(mut self):
         self.s.again = True
 
+    def time_ns(self) -> Int:
+        return now_ns()
+
     def begin_layer(mut self, key: String):
         self.tx = 0
         self.ty = 0
@@ -197,6 +206,7 @@ struct Scene(Painter, Movable, Copyable):
     var k: Float64
     var is_still: Bool
     var again: Bool
+    var t_ns: Int  # when the frame will be shown (now_ns's clock), set by a host; 0: now (time_ns reads the clock)
     var kinds: List[UInt8]
     var nums: List[Float32]
     var colors: List[UInt32]
@@ -219,6 +229,7 @@ struct Scene(Painter, Movable, Copyable):
         self.k = scale
         self.is_still = False
         self.again = False
+        self.t_ns = 0
         self.kinds = List[UInt8](capacity=4096)
         self.nums = List[Float32](capacity=4096 * STRIDE)
         self.colors = List[UInt32](capacity=4096)
@@ -242,6 +253,7 @@ struct Scene(Painter, Movable, Copyable):
         self.k = scale
         self.is_still = False
         self.again = False
+        self.t_ns = 0
         self.kinds.clear()
         self.nums.clear()
         self.colors.clear()
@@ -272,6 +284,9 @@ struct Scene(Painter, Movable, Copyable):
 
     def set_again(mut self):
         self.again = True
+
+    def time_ns(self) -> Int:
+        return self.t_ns if self.t_ns > 0 else now_ns()
 
     def ops(self) -> Int:
         return len(self.kinds)

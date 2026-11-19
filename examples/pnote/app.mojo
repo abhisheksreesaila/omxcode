@@ -30,7 +30,7 @@ from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, I
 from mojoui.mindmap import MindMap, MapView
 from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
-from mojoui.gpu2d_backend import backend_name
+from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
 
 comptime NEW_PAGE = 1
@@ -183,6 +183,7 @@ struct Row(Copyable, Movable):
 
 
 struct Main(App):
+    comptime GPU_2D = True  # (a note's canvas asks for the GPU 2D renderer when a canvas note opens, on any screen, D-7562)
     var db: Optional[Database]
     var problem: String
     var gpu: Bool  # the note's canvas asks for the GPU 2D renderer (Canvas(…).gpu()); PNOTE_GPU=0: GSK nodes (the baseline)
@@ -225,6 +226,8 @@ struct Main(App):
         self.db = None
         self.problem = ""
         self.gpu = environment("PNOTE_GPU", "1") != "0"
+        if not self.gpu:
+            turn_off_gpu2d()  # (the baseline: GTK's own renderer, though Main declares GPU_2D)
         self.gpu_told = False
         self.rows = List[Row]()
         self.shown = List[Int]()

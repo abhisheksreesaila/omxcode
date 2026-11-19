@@ -169,6 +169,58 @@ def grown_page(mut gl: GL2D, atlas: GlyphAtlas, font: Font) raises:
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the grown page differs from the CPU executor")
 
 
+def two_canvases(font: Font, atlas: GlyphAtlas) raises:
+    """Two .gpu() canvases on one screen (D-7561): each keeps its own layers. A page of ink (canvas 1) and a mind map
+    (canvas 2) drawn in turn, twice: the second round rebuilds no layer of either, and each picture still matches the CPU
+    executor. Then more canvases than GPU2D keeps: the least recently drawn is dropped, the rest stay cached."""
+    var g = GPU2D()
+    assert_true(g.start(False), "GPU2D.start: " + g.gl.why)
+    var a = Scene(1000, 700, 1.0)
+    whiteboard_big(a, 100)
+    var m = mindmap_of(60)
+    var b = Scene(800, 600, 1.0)
+    b.is_still = True
+    b.fill(0xFFFFFFFF)
+    m.paint(b, font, MapView(400, 300, 0.7))
+    var empty = Scene(0, 0, 1.0)
+    _ = g.draw(a, empty, 1, 1000, 700)
+    _ = g.draw(b, empty, 2, 800, 600)
+    var sa = g.draw(a, a, 1, 1000, 700)
+    var rebuilt_a = g.rebuilt
+    var reused_a = g.reused
+    var got_a = List[UInt32](length=1000 * 700, fill=0)
+    assert_true(sa >= 0 and g.gl.read(g.gl.tex[sa], 1000, 700, Int(got_a.unsafe_ptr())), "canvas 1 again")
+    var sb = g.draw(b, b, 2, 800, 600)
+    var rebuilt_b = g.rebuilt
+    var reused_b = g.reused
+    var got_b = List[UInt32](length=800 * 600, fill=0)
+    assert_true(sb >= 0 and g.gl.read(g.gl.tex[sb], 800, 600, Int(got_b.unsafe_ptr())), "canvas 2 again")
+    var da = diff(cpu_of(build_batches(a, atlas, font), atlas), got_a)
+    var db = diff(cpu_of(build_batches(b, atlas, font), atlas), got_b)
+    print("   two canvases in turn: canvas 1 rebuilt", rebuilt_a, "reused", reused_a, "(mean", round(da.mean, 4), "levels,", round(da.far, 4),
+          "% far); canvas 2 rebuilt", rebuilt_b, "reused", reused_b, "(mean", round(db.mean, 4), "levels,", round(db.far, 4), "% far); caches", g.caches())
+    assert_true(rebuilt_a == 0 and reused_a == a.layers(), "canvas 1 rebuilt layers after canvas 2 drew")
+    assert_true(rebuilt_b == 0 and reused_b == b.layers(), "canvas 2 rebuilt layers after canvas 1 drew")
+    assert_true(da.mean <= 1.5 and da.far <= 0.5 and db.mean <= 1.5 and db.far <= 0.5, "a cached canvas's picture differs from the CPU executor")
+    for owner in range(3, 11):  # (canvases 3–10: 10 canvases in all, more than GPU2D keeps)
+        _ = g.draw(a, empty, owner, 1000, 700)
+    assert_true(g.caches() <= 8, "GPU2D keeps at most 8 canvases' layers")
+    _ = g.draw(a, a, 10, 1000, 700)
+    assert_true(g.rebuilt == 0, "the canvas drawn last stays cached")
+    _ = g.draw(a, a, 1, 1000, 700)
+    var dropped = g.rebuilt
+    var sets_before = g.next_set
+    var sd = g.draw(b, empty, 11, 800, 600)  # (a new canvas: its layers go in buffer sets a dropped canvas left)
+    var got_d = List[UInt32](length=800 * 600, fill=0)
+    assert_true(sd >= 0 and g.gl.read(g.gl.tex[sd], 800, 600, Int(got_d.unsafe_ptr())), "canvas 11 drawn")
+    var dd = diff(cpu_of(build_batches(b, atlas, font), atlas), got_d)
+    print("   10 canvases: caches", g.caches(), "; the least recently drawn (canvas 1) rebuilt", dropped, "layers; a new canvas made", g.next_set - sets_before, "new buffer sets (reused a dropped canvas's): mean", round(dd.mean, 4), "levels")
+    assert_true(dropped == a.layers(), "the least recently drawn canvas was dropped from the cache")
+    assert_true(g.next_set == sets_before, "a new canvas reuses the buffer sets a dropped one left")
+    assert_true(dd.mean <= 1.5 and dd.far <= 0.5, "a canvas drawn in reused buffer sets differs from the CPU executor")
+    g.gl.close()
+
+
 def main() raises:
     var ctx = headless_gl33()
     assert_true(ctx != 0, "a headless GL 3.3 core context (EGL device platform)")
@@ -234,6 +286,7 @@ def main() raises:
     compare_merged("mindmap (" + String(m.nodes()) + " topics)", ms, gl, atlas, font)
 
     grown_page(gl, atlas, font)
+    two_canvases(font, atlas)
 
     # a frame's GPU time for the scenes (the judged sizes: 1440×900 windows; 1,000 strokes; 645 objects; 300 topics)
     print("frame times:")

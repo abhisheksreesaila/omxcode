@@ -27,3 +27,10 @@ def on_gpu() -> Bool:
     """The host draws .gpu() canvases on the GPU."""
     var n = backend_name()
     return n.startswith("gpu2d")
+
+
+def turn_off_gpu2d():
+    """This process's .gpu() canvases draw the toolkit's way (a baseline run, e.g. pnote's PNOTE_GPU=0): the host starts
+    no GPU 2D backend and, though the app declares App.GPU_2D, keeps the toolkit's default renderer (D-7562). Call it
+    from the app's __init__ (before the host opens its window); it sets MOJOUI_GPU2D=0 in this process only."""
+    _ = setenv("MOJOUI_GPU2D", "0", True)

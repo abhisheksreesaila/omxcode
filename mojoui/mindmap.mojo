@@ -35,7 +35,6 @@ from mojoui.history import History, Snapshot
 from mojoui.textedit import TextEdit, Styler, ParaLook, StyleSpan, Pos, adv, decode_at, utf8_len, SHIFT, CTRL, ALT
 from mojoui.canvas import rgba
 from mojoui.spring import Spring
-from std.time import perf_counter_ns
 
 comptime RIGHT_SIDE = 1
 comptime LEFT_SIDE = -1
@@ -1388,7 +1387,7 @@ struct MindMap(Movable):
         if p.still():
             self.settle()
         elif not self.manual:
-            var now = Int(perf_counter_ns())
+            var now = p.time_ns()  # (when this frame is shown: a host may draw it ahead, D-7560)
             var dt = 0.0
             if self.animating and self.clock_ns > 0:
                 dt = min(Float64(now - self.clock_ns) / 1e6, 50.0)  # (a stalled frame is not skipped through)

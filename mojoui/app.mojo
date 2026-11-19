@@ -79,6 +79,12 @@ trait App(Movable, Deinitable):
     Every app with a GPU canvas declares it (examples/gpu, lens, particles; D-5310): its pictures then never leave the
     GPU where the host can take them, and fall back to the copy where it can't. Apps without one leave it False, so
     they start no CUDA and keep GTK's own renderer. Plain pixel functions draw into a canvas with Gpu.draw."""
+    comptime GPU_2D: Bool = False
+    """True: a canvas may ask for the GPU 2D renderer (Canvas(…).gpu()) on any screen, not only the first. GTK picks its
+    renderer once, when the window opens, and the GPU 2D renderer needs its GL renderer (its Vulkan one copies GL
+    textures through the CPU on NVIDIA, D-737), so the GTK host asks for it at start for an app that declares this or
+    whose first screen has a .gpu() canvas (D-7562). An app that shows a .gpu() canvas later without declaring it gets
+    GSK nodes there, and the host says once why and what to declare. Other apps keep GTK's own renderer (D-752)."""
 
     def __init__(out self):
         """The starting state. Hosts create the app themselves."""
@@ -272,6 +278,8 @@ struct Runtime[A: App](Movable):
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
     var closed: Bool  # App.closing was told
+    var changes: Int  # the app's state changed this many times (every update, resize, appearance): a host that drew a
+    # frame ahead of time shows it only if this hasn't moved since (D-7560)
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -288,6 +296,7 @@ struct Runtime[A: App](Movable):
         self.budget_ns = 0
         self.armed_at = 0
         self.closed = False
+        self.changes = 0
         self.take_effects()  # (what the starting state asks for)
 
     def watch(mut self, budget_ms: Int):
@@ -313,6 +322,7 @@ struct Runtime[A: App](Movable):
     def _update(mut self, event: Event):
         """update(), timed by the watchdog."""
         var t0 = self._t0()
+        self.changes += 1
         self.app.update(event)
         self._slow("update", "msg=" + String(event.message) + ("" if event.name == "" else "/" + event.name), t0)
 
@@ -568,11 +578,13 @@ struct Runtime[A: App](Movable):
 
     def resize(mut self, width: Int, height: Int) -> Diff:
         """The window's content area changed size: the app hears it, then the screen catches up."""
+        self.changes += 1
         self.app.resize(width, height)
         return self.refresh()
 
     def appearance(mut self, dark: Bool) -> Diff:
         """The system's light or dark mode: the app hears it, then the screen catches up."""
+        self.changes += 1
         self.app.appearance(dark)
         return self.refresh()
 
