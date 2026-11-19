@@ -26,6 +26,30 @@ the table's place (charts and pivots keep their own x, y, w, h); View ▸ Canvas
 a table column linked to a player card's `file` draws its cells as links. A small framework sample, `examples/canvas`, shows the
 model alone.
 
+## Review round 1 (NEEDS WORK) and what changed
+
+1. **"Tile the cards" was dead**: CANVAS_MODE had ABOUT_CLOSE's number (77), whose branch came first. Now 94; KEEP_INSPECTOR has
+   its own version bump back; `scripts/msgs.py` now fails when two `m ==` messages share a number (it only checked ranges).
+   M4 ticks the Settings checkbox (no OMX_CANVAS) and reads `canvas=tiled` and the tiled rects, then unticks it (D-7819).
+2. **Web heights**: a card's height resize also resizes what's inside it (a chart's canvas, the grid), which was a whole-screen
+   rebuild that dropped the drag. Size-only changes anywhere inside a free card now go to the web as size marks applied as
+   styles. Every drag starts afresh (hosts mark the first frame, FIRST_FRAME; omxplorer ends a drag on any other board event).
+   M1 drags S and NW of a chart and of the table, then a second drag of each, on GTK and the web, frame by frame (D-7820, D-7821).
+3. **Performance**: live drag frames (and their end) no longer bump omxplorer's version, which every canvas's version adds; a
+   hover redraws only the grid; GTK draws a resized canvas at its new size by itself. Measured with 10 cards: PERF (D-7822).
+4. **The default look**: goal 73 M3's measurements now also run on the free canvas (78 M4 `depth`, cards found from the hosts'
+   own boxes): DEPTH (D-7826). Goal 73 M3 itself, goal 73 M2 and goal 47's directed DROID clip still run tiled
+   (OMX_CANVAS=tiled): **the directed DROID clip (docs/img/clip-robots*.mp4, goal 47) shows the tiled layout, not the default
+   free canvas**; it was not re-recorded.
+5. **Keys in a field**: the web's and GTK's shortcut handlers skip arrows, Home/End/Page and Alt+letter while a field has focus;
+   AppKit gives ⌥-only shortcuts no key equivalent. On a Mac the Arrange actions therefore have no keys (AppKit maps Ctrl to ⌘
+   and ignores Super): they are in the Mac menu bar's Arrange menu, and zoom is off there. M2 types in the formula bar: the keys
+   pass to the field, then fire again on the grid (D-7823).
+6. **Links**: "=" is refused only when the last word is entirely a number: `fleet.clip = Robot runs 2024.file` is a key link
+   (unit test both ways, D-7824).
+7. **AppKit zoom**: `mojoui.freeboard.HOST_ZOOMS` (GTK and the web): elsewhere the zoom items are disabled, the zoom stays 100,
+   a saved zoom reads as 100, and omxplorer's View ▸ Canvas shows only Tidy (D-7825).
+
 ## Results (78-check)
 
 | | Result |
@@ -108,3 +132,9 @@ Unverified on the owner's desktop (the window class is GTK's application id, `de
   soft above it.
 - Not done: the reviewer, the merge to main, the push and the Linux download (the contract's "Done means"; out of this
   sub-agent's scope: never push or merge).
+
+## After review round 1: the chain (2026-11-19)
+- Goal 76's M3 (goal 73 M1–M4 with 71 → 70 → 68 → 47 inside) on 5b948f72: goal 73 M1–M3 PASS; its M4 FAIL in that run on goal
+  68 M2 ("Run it on all didn't fill the similarity column") and goal 47 M8 (SLOW lines), both while the GPU was busy with other
+  work. Rerun alone on the same build with the GPU free: `68-check M2: PASS` (BGE's similarity column filled by the agent) and
+  `47-check M8: PASS ... 0 SLOW on GTK`. The full chain was not rerun end to end after that.
