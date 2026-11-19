@@ -4,6 +4,12 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 76: a tabbed ribbon; the side panels closed until asked (2026-11-18)
+- **Setup:** worktree ../mojo-ui-g76 (branch `goal-76-ribbon` off main 1bf85bec), finished in ../mojo-ui-g76-fix after the building delegate stalled mid-M3; merged onto main 224f162d (goal 72) in ../mojo-ui-g76-merge. The owner picked both layouts from mockups.
+- **Worked:** `mojoui.ribbon` (tabs of captioned tool groups, compact mode, hidden tabs' tools still reachable by agents and test steps via `View.hidden()`); omxplorer's menu bar, toolbar and rail became Home · Insert · Data · Format · View (+ Report), none of 57 actions lost, shortcuts kept; right-hand panels start closed, inserting opens none, ✕ and Esc close them; GitHub's macos-15/26 runs native.
+- **Broke and fixed:** four review rounds: Esc only worked with the grid focused (now a window Escape item and Esc a card's canvas took, never mid-edit); a chart's word showed Learn/Story; Settings showed the open panel not the saved choice; the Mac wrapped group captions a letter wide; goal 62's and scenario.py's steps pressed tools that moved (and goal 62's data path pointed at a deleted folder).
+- **Means:** the cards get the whole width; the owner's next ask (11-18) is a free canvas: cards anywhere at any size, live resize from every edge, Super-key moves, a visible video column. Report: docs/goals/76-report.md.
+---
 ## Goal 73: links you type with help, a Board that grows, cards with depth (2026-11-17)
 - **Setup:** worktree ../mojo-ui-g73, branch `goal-73-links-canvas` off main cc33c9d7; three milestones built in parallel worktrees (g73-links, g73-board, g73-look) and merged. Data: goal 47's DROID folder (fleet.csv, telemetry.parquet, clips).
 - **Worked:** Links autocomplete as chips under the field (`fl` → `fleet.`, `fleet.ep` → `episode`, `=`/`~`, the second end), Return completes a partial draft; a Board that grows downwards and scrolls (a +600 pt drag makes the table 600 pt taller; a 6th card goes in a new row instead of squeezing); Liquid cards on a darker canvas with one soft shadow (+10 L* step, every text pair ≥ 4.5:1). Proven on GTK (headless, real input) and the web host.
