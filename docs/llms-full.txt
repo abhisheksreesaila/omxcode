@@ -1134,6 +1134,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `MdEdit (Markdown drawn and edited in place: marks hidden off the caret's line, task boxes, lists, code blocks)` | `mojoui/mdedit.mojo` | Canvas, Canvas: keys (focus on press), Canvas: press, release, double | ✅ | 🔨 | ❌ | ❌ | ❌ | ❌ | pnote |
 | `ObjectLayer (free objects on a canvas: text, stickies, shapes, pictures, ink, arrows; select, handles, rotate, z, undo)` | `mojoui/objectlayer.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ❌ | ❌ | ❌ | pnote |
 | `MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)` | `mojoui/mindmap.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ❌ | ❌ | ❌ | pnote |
+| `GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)` | `mojoui/gpu2d.mojo` | Canvas, Canvas frames (animation) | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
 | `Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)` | `mojoui/tablecard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, dashboard |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -1187,7 +1188,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
-| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer, pnote |
 | `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)` | `mojoui/documentset.mojo` | Canvas, Canvas: pan, zoom, tap, Card, TextField, Dropdown, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -1211,12 +1212,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 194 | 11 | 0 |
-| Web | 174 | 14 | 17 |
-| Android | 19 | 65 | 121 |
-| Mac (AppKit) | 5 | 165 | 35 |
-| iPhone (UIKit) | 0 | 136 | 69 |
-| Agent (MCP) | 66 | 46 | 93 |
+| Linux (GTK) | 195 | 11 | 0 |
+| Web | 174 | 15 | 17 |
+| Android | 19 | 66 | 121 |
+| Mac (AppKit) | 5 | 166 | 35 |
+| iPhone (UIKit) | 0 | 137 | 69 |
+| Agent (MCP) | 66 | 46 | 94 |
 
 ## Inside one app, not components yet (the debt)
 

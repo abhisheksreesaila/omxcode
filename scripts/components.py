@@ -177,6 +177,8 @@ COMPOSITES = [
     ("MdEdit (Markdown drawn and edited in place: marks hidden off the caret's line, task boxes, lists, code blocks)", "mojoui/mdedit.mojo", ["Canvas", "Canvas: keys (focus on press)", "Canvas: press, release, double"], "MdEdit("),
     ("ObjectLayer (free objects on a canvas: text, stickies, shapes, pictures, ink, arrows; select, handles, rotate, z, undo)", "mojoui/objectlayer.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: press, release, double", "Canvas: keys (focus on press)"], "ObjectLayer("),
     ("MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)", "mojoui/mindmap.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)"], "MindMap("),
+    # goal 75: the Scene on the GPU (GL on Linux, Metal on the Mac; a CPU executor as reference and fallback)
+    ("GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)", "mojoui/gpu2d.mojo", ["Canvas", "Canvas frames (animation)"], "backend_name("),  # (apps opt in with Canvas(…).gpu(); backend_name( names the ones that report the renderer, since a bare gpu( matches other APIs)
     ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
