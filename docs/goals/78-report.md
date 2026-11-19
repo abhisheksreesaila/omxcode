@@ -184,3 +184,13 @@ Unverified on the owner's desktop (the window class is GTK's application id, `de
   `47-check M8: PASS ... 0 SLOW on GTK`. The full chain was not rerun end to end after that.
   Their printed verdicts (`M2: PASS … a similarity column (BGE, by the agent)`, `M8: PASS … 0 SLOW on GTK`) are kept in
   build/g78/solo-reruns-68m2-47m8.txt (the console of that run, copied there; the checks write no file of their own).
+
+## Review rounds 4 and 5 (web drags)
+- Round 4: a Ctrl+wheel after the last frame then a release with no move put the card back at the press on the web; the release
+  is now flagged FIRST_FRAME when the zoom changed (D-7833), and a drag reads the zoom from the board on the page, since a zoom's
+  answer can replace the pressed element (D-7834). M1's zoom-then-release proof fails without D-7833 (chart0 back at 725, its
+  last frame 790: build/g78/r6-m1-without-release-fix.txt) and passes with it (r6-m1.txt); before D-7834 it passed both ways.
+- Round 5: a release the page never saw (Alt+Tab, let go elsewhere) ends the drag where its last frame left the card, with that
+  frame's Alt (D-7835). M1's lost-release proof fails without it (chart0 at width 240, its last frame 718:
+  r7-m1-without-lost-release-fix.txt) and passes with it (r7-m1.txt).
+- GitHub's macOS 15 and 26 runs: success on 3fffa2ca (44601025991) and on ea8ef1f8 (round 3); rounds 4–5 changed only the web host.

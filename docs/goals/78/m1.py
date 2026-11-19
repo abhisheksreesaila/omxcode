@@ -339,6 +339,15 @@ def web():
         page.wait_for_timeout(400)
         seen["zoomend"] = {"last": list(zf[-1]), "after": list(page.evaluate(c.CARDS_JS)["cards"]["chart0"][:4]), "zoomed": len(zooms) > zn,
                            "zoom": zooms[-1] if zooms else None}
+        # (review 5: a release the page never saw (Alt+Tab, let go elsewhere): the pointer comes back 400 pt away with no button
+        # held; the drag ends where its last frame left the card, not there)
+        def lost_release(page):
+            page.evaluate("""() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, pointerType: 'mouse', isPrimary: true,
+              buttons: 0, clientX: 30, clientY: 30, bubbles: true }))""")
+            page.wait_for_timeout(600)
+        _, lf = c.web_drag(page, "chart0", "e", -60, 0, steps=STEPS, alt=True, before_up=lost_release)
+        page.wait_for_timeout(400)
+        seen["lostup"] = {"last": list(lf[-1]), "after": list(page.evaluate(c.CARDS_JS)["cards"]["chart0"][:4])}
         inner = page.evaluate("() => { const o = document.querySelector('.board > .object[data-tag=chart0]'), cv = o.querySelector('[data-kind=canvas]');"
                               " return [o.offsetHeight, cv ? cv.offsetHeight : -1]; }")
         seen["inner"] = inner
@@ -377,6 +386,9 @@ def web():
     ze = seen["zoomend"]
     if not ze["zoomed"] or ze["zoom"] in (None, wz) or max(abs(x - y) for x, y in zip(ze["last"], ze["after"])) > 2:
         probs.append(f"web: zoom ({wz} -> {ze['zoom']}) after the last frame, then a release: chart0 at {ze['after']}, its last frame said {ze['last']}")
+    lu = seen["lostup"]
+    if max(abs(x - y) for x, y in zip(lu["last"], lu["after"])) > 2:
+        probs.append(f"web: a release the page never saw, the pointer back at (30, 30): chart0 at {lu['after']}, its last frame said {lu['last']}")
     mk = seen["marks"]
     if mk["stale"] != [mk["before"], 0] or mk["fresh"] != "333px":
         probs.append(f"web size marks: a stale one left the grid at {mk['stale']} (was {mk['before']!r}), a current one set {mk['fresh']!r} (want 333px)")

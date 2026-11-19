@@ -628,13 +628,14 @@ BOARD_JS = r"""
       e.preventDefault(); e.stopPropagation();  // (an edge is the canvas's, not the card content's)
       let z = zoomOf(board), x0 = e.clientX, y0 = e.clientY, lastX = x0, lastY = y0;
       const index = Number(obj.dataset.index);
-      const d = { obj, h, live: false }; dragging = d;  // (this drag's own state: a second touch's drag never shares it, review 4)
+      const d = { obj, h, live: false, alt: e.altKey }; dragging = d;  // (this drag's own state: a second touch's drag never shares it, review 4)
       board.setPointerCapture(e.pointerId);
       let sent = 0, first = true;
       const pid = e.pointerId;
       const move = ev => {
         if (ev.pointerId !== pid) return;
-        if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) { up(ev); return; }  // (a release the page never saw: Alt+Tab mid-drag)
+        if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) {  // (a release the page never saw: Alt+Tab mid-drag; it ends where the
+          up({ pointerId: pid, clientX: lastX, clientY: lastY, altKey: d.alt }); return; }  // last frame left the card, with that frame's Alt, review 5)
         if (zoomOf(board) !== z) {  // (the zoom changed mid-drag: the press starts again where the last frame sent was, at the new
           z = zoomOf(board); x0 = lastX; y0 = lastY; first = true;  // zoom; the app rebases on the card as that frame left it, review 3)
         }
@@ -647,6 +648,7 @@ BOARD_JS = r"""
         }
         const now = performance.now(); if (!first && now - sent < 12) return; sent = now;
         post(LIVE, index, h + (ev.altKey ? 100 : 0) + (first ? 1000 : 0), dx, dy);  // (FIRST_FRAME: the app starts this drag afresh)
+        d.alt = ev.altKey;
         first = false; lastX = ev.clientX; lastY = ev.clientY;
       };
       const up = ev => {
