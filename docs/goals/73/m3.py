@@ -88,6 +88,7 @@ def edge_of(png, mode, host="gtk"):
 
 
 def check():
+    os.environ["OMX_CANVAS"] = "tiled"  # (goal 78: the card edges are found where the tiling puts the cards; the free canvas is the default now)
     OUT.mkdir(parents=True, exist_ok=True)
     notes = []
     # 1. the contrast test

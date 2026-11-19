@@ -69,7 +69,8 @@ def clip():
         data()
         out = []
         for what in ("robots-shots", "robots"):
-            r = run(["pixi", "run", "python", "scripts/clips.py", what], 3600)
+            r = run(["pixi", "run", "python", "scripts/clips.py", what], 3600, dict(os.environ, OMX_CANVAS="tiled"))  # (goal 78: the directed clip's
+            # beats find the cards where the tiling puts them (the chart inside the telemetry card's column); the free canvas is the default now)
             out.append(r.stdout + r.stderr)
             if r.returncode:
                 (G47 / "check-clip.txt").write_text("\n".join(out))

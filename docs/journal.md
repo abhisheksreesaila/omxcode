@@ -1459,3 +1459,5 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - GTK zoom 50 % didn't show every card in a 632-high room (1488 tall): the check zooms to 33 %.
 - Canvas hover: put the flag in the canvas's options first; `.settable()` overwrites them (the grid is settable): moved it to the canvas's text.
 - Keys: after Tidy the telemetry card sits right of the table, so the Alt sequence focuses right/left, not down/up.
+- Fill (Super/Alt+F) put the card exactly in the visible part, then the focused card's reveal scrolled 88 pt (it keeps cards clear of the islands): no reveal on Fill.
+- Goal 76's chain, run 1 on the free canvas: 73 M2/M3 and 47 M8 measure the tiling; 68 M0 reads a file its own later milestone writes (a fresh worktree lacks it). Run 2 with OMX_CANVAS=tiled for those three steps: 73 M1–M4 PASS; 76 M3 then stops at the AppKit cross build (libSystem symbols, as on main).

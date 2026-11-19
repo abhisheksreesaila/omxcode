@@ -628,6 +628,8 @@ struct Main(App):
         self.table_h_set = 0
         self.board_tiles = BoardTiles(TILE_MIN_W, TILE_MIN_H)
         self.free = read_setting(APP, "canvas", "free") != "tiled"
+        if environment("OMX_CANVAS") != "":  # (a run's own choice over the setting: OMX_CANVAS=tiled for the older checks that measure the tiling, goal 78)
+            self.free = environment("OMX_CANVAS") != "tiled"
         self.fb = FreeBoard(FREE_MIN_W, FREE_MIN_H)
         self.table_touched = False
         self.reveal = -1
@@ -4462,7 +4464,7 @@ struct Main(App):
                         if act >= ACT_MOVE and act <= ACT_TIDY and (self.fb.focus == 0 or act == ACT_TIDY):
                             self.table_touched = True
                         self.place_cards(places)
-                    if act < ACT_TIDY and self.fb.focus >= 0:  # (the focused card into view)
+                    if act < ACT_FILL and self.fb.focus >= 0:  # (the focused card into view; a filled one is the view already)
                         self.reveal = self.fb.focus
                         self.reveal_count += 1
                 else:
