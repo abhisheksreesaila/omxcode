@@ -118,7 +118,7 @@ from mojoui.video import VideoSource
 from mojoui.learn import LearnPanel, LP_ADD, LP_LEARN, LP_PICK, LP_ROWS, with_label_column, learn_sheet, label_rows
 from mojoui.draw import rect as draw_rect, with_alpha
 from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
-from mojoui.tablecard import TableCards, sql_name, ACTION_MIN_W
+from mojoui.tablecard import TableCards, sql_name, ACTION_MIN_W, TC_GRID
 from mojoui.videocard import VideoWork
 from mojoui.videojobs import expect_analysis, Analyzed, Reel, analyze_job, reel_job, analyzer_names, analyzer_note, analyzer_rows, marks_of, flag_frames, segments_of, flag_columns, matching_column, lookup, codes_of
 from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
@@ -2757,14 +2757,15 @@ struct Main(App):
             self.message = "Couldn't compute that chart: " + String(e)
         self.version += 1
 
-    def any_cell_editing(self) -> Bool:
-        """A cell being edited in the sheet's grid or a table card's, on screen or scrolled out of sight: its Esc cancels the
-        edit and leaves the docked panel alone (review round 3, D-7627)."""
-        if self.grid.editing:
-            return True
+    def editing_at(self, m: Int) -> Bool:
+        """Whether the grid this key went to (the sheet's, or table card k's) is editing a cell, on screen or scrolled out of
+        sight: its Esc cancels the edit and leaves the docked panel alone. Only that grid: another card's leftover edit
+        never makes Esc dead (review rounds 3 and 4, D-7627)."""
+        if m == GRID:
+            return self.grid.editing
         for k in range(len(self.tables)):
-            if self.tables.cards[k].grid.editing:
-                return True
+            if m == self.tables.msg(k) + TC_GRID:
+                return self.tables.cards[k].grid.editing
         return False
 
     def show_inspector(mut self):
@@ -3839,7 +3840,7 @@ struct Main(App):
             self.ribbon_at = m - RIBBON_TAB
             self.version += 1
             return
-        if event.number == KEY and event.text == "Escape" and self.inspector_open and not self.any_cell_editing():
+        if event.number == KEY and event.text == "Escape" and self.inspector_open and not self.editing_at(m):
             # (an Escape a canvas took (a table card's grid, a document, a video, the sheet's own grid) with no cell being
             # edited anywhere, shown or scrolled out of sight: the docked panel closes, as the window's Escape item does where
             # no canvas has the keyboard; the canvas still gets the key below, review rounds 2 and 3, D-7623, D-7627)
@@ -4930,7 +4931,7 @@ struct Main(App):
                           Item("Sheet", SHOW_SHEET, icon="sheet", checked=on_sheet and self.sheet_tab == 0, disabled=not on_sheet),
                           Item("Report", SHOW_REPORT, icon="chart-bar", checked=on_sheet and self.sheet_tab == 1, disabled=not on_sheet), Separator(),
                           Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet), Separator(),
-                          Item("Close panel", DOCK_CLOSE, icon="x", shortcut="Escape", disabled=not on_sheet or not self.inspector_open or self.any_cell_editing())]),
+                          Item("Close panel", DOCK_CLOSE, icon="x", shortcut="Escape", disabled=not on_sheet or not self.inspector_open or self.grid.editing)]),
             Menu("Insert", [Item("Chart", INSERT_CHART, icon="chart-bar", shortcut="Ctrl+Shift+C", disabled=not on_sheet),
                             Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet),
                             Item("Video…", INSERT_VIDEO, icon="video", disabled=not on_sheet), Item("Image…", INSERT_IMAGE, icon="image", disabled=not on_sheet),
