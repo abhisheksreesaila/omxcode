@@ -39,7 +39,7 @@ def resized(r, handle, dx, dy):
 
 
 def units():
-    labels = ["handles", "move", "resize", "snap", "nosnap", "extent", "free", "sync", "tidy", "keys", "fill", "zoom", "canvas", "act"]
+    labels = ["handles", "move", "resize", "snap", "nosnap", "extent", "free", "sync", "tidy", "keys", "fill", "zoom", "canvas", "act", "events", "setzoom", "rebase"]
     ok, out, missing = c.mojo_test("tests/test_freeboard.mojo", labels)
     return (True, f"test_freeboard {len(labels)} ok") if ok else (False, f"test_freeboard: missing {missing}: {out[-600:]}")
 
@@ -149,13 +149,16 @@ def gtk():
 
 # Heights (review 1): a chart's and the table's S and NW handles change sizes inside the card too (the chart's canvas, the grid);
 # then a second drag of the same card must start where the first ended.
-HEIGHTS = [("chart0", "s", 0, 80), ("chart0", "nw", 40, -60), ("chart0", "s", 0, 60), ("table", "s", 0, -120), ("table", "nw", 32, 40), ("table", "s", 0, 48)]
+HEIGHTS = [("chart0", "s", 0, 80, False), ("chart0", "nw", 40, -60, False), ("chart0", "s", 0, 60, False), ("table", "s", 0, -120, False),
+           ("table", "nw", 32, 40, False), ("table", "s", 0, 48, False),
+           # (review 2: half way the page scrolls and the app hears "view", the button still held: the drag must not rebase)
+           ("chart0", "e", 120, 0, True), ("table", "s", 0, 60, True)]
 
 
 def expect_heights(cards, frames_of, label, tol=0):
     """Each drag's frames against resized() from where the last one on that card ended; ([problems], final rects)."""
     probs, now = [], dict(cards)
-    for (tag, h, dx, dy), frames in zip(HEIGHTS, frames_of):
+    for (tag, h, dx, dy, _), frames in zip(HEIGHTS, frames_of):
         exp = [resized(now[tag], h, round(dx * k / STEPS), round(dy * k / STEPS)) for k in range(1, STEPS + 1)]
         if len(frames) != STEPS or any(max(abs(a - b) for a, b in zip(f, e)) > tol for f, e in zip(frames, exp)):
             probs.append(f"{label} {tag} {h} {dx},{dy}: frames {frames} not {exp}")
@@ -166,20 +169,23 @@ def expect_heights(cards, frames_of, label, tol=0):
 def gtk_heights():
     d = c.DATA
     steps = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", "shortcut:Ctrl+Shift+C", "pause:1500", "boardscroll:0", "boards:h0"]
-    for tag, h, dx, dy in HEIGHTS:
-        steps += [f"freedrag:{tag}={h},{dx},{dy},{STEPS},alt", "pause:300", f"boards:h-{tag}-{h}-{dy}"]
+    for tag, h, dx, dy, view in HEIGHTS:
+        steps += [f"freedrag:{tag}={h},{dx},{dy},{STEPS},alt" + ("+view" if view else ""), "pause:300", f"boards:h-{tag}-{h}-{dy}"]
     steps.append(f"shot:{c.OUT}/m1-gtk-5-heights.png")
     out = c.gtk(steps, "m1-gtk-heights", open_path=d / "fleet.csv")
     b = c.boards(out)
     dr = c.drags(out)
     probs, final = expect_heights(b["h0"]["cards"], [x[3] for x in dr], "GTK")
-    last = b[f"h-table-s-48"]["cards"]
+    last = b[f"h-table-s-60"]["cards"]
+    if out.count("LIVEVIEW: ") != 2:
+        probs.append(f"GTK: {out.count('LIVEVIEW: ')} mid-drag scrolls, not 2")
     for tag in ("chart0", "table"):
         if last[tag] != final[tag]:
             probs.append(f"GTK: {tag} ended at {last[tag]}, its last frame said {final[tag]}")
     if probs:
         return False, "GTK heights: " + "; ".join(probs)[:1200]
-    return True, f"GTK: S and NW of chart0 and the table live, each second drag from where the first ended (chart0 {final['chart0']}, table {final['table']})"
+    return True, (f"GTK: S and NW of chart0 and the table live, each second drag from where the first ended, and two drags with a scroll and a "
+                  f"view event half way still exact (chart0 {final['chart0']}, table {final['table']})")
 
 
 def gtk_perf():
@@ -263,11 +269,33 @@ def web():
         page.keyboard.press("Control+Shift+c")
         page.wait_for_timeout(1500)
         seen["h0"] = page.evaluate(c.CARDS_JS)
-        hs = []
-        for tag, hd, dx, dy in HEIGHTS:
-            cur, frames = c.web_drag(page, tag, hd, dx, dy, steps=STEPS, alt=True,
+        hs, insides = [], []
+        INNER = """() => { const o = t => document.querySelector(`.board > .object[data-tag=${t}]`);
+          const cv = o('chart0').querySelector('[data-kind=canvas]'), g = o('table').querySelector('[data-tag=grid]');
+          return { chart: [o('chart0').offsetHeight, cv ? cv.offsetHeight : -1], table: [o('table').offsetHeight, g ? g.offsetHeight : -1] }; }"""
+
+        def scroll_and_wait(page):  # (the page scrolled 40 pt mid-drag; past the 150 ms after which the page sends "view")
+            page.evaluate("() => { const sc = document.querySelector('.board').parentElement; sc.scrollTop += 40; }")
+            page.wait_for_timeout(400)
+
+        seen["inside0"] = page.evaluate(INNER)  # (before any drag: the distance between each card and what's inside it)
+        for tag, hd, dx, dy, view in HEIGHTS:
+            cur, frames = c.web_drag(page, tag, hd, dx, dy, steps=STEPS, alt=True, mid=scroll_and_wait if view else None,
                                      shot=c.OUT / "m1-web-5-chart-height-mid-drag.png" if (tag, hd) == ("chart0", "s") and not hs else None)
             hs.append(frames)
+            page.wait_for_timeout(300)
+            insides.append((tag, page.evaluate(INNER)))
+        seen["insides"] = insides
+        # (review 2: a size mark from an older screen is dropped; one for this screen is applied: the guard, then the path)
+        seen["marks"] = page.evaluate("""async () => {
+          const g = document.querySelector('[data-tag=grid]'), id = g.id.slice(1), box = document.getElementById('mojoui-sizes'), v = document.getElementById('mojoui-v').value;
+          const before = g.style.height, put = (ver, h) => { const m = document.createElement('i'); m.hidden = true; m.dataset.kind = 'size';
+            Object.assign(m.dataset, { node: id, v: ver, w: '0', h: String(h), minw: '0', maxw: '0' }); box.append(m); };
+          put(String(Number(v) - 1), 77); await new Promise(r => setTimeout(r, 200));
+          const stale = [g.style.height, box.children.length];
+          put(v, 333); await new Promise(r => setTimeout(r, 200));
+          const fresh = g.style.height; g.style.height = before;
+          return { before, stale, fresh }; }""")
         seen["hdrags"] = hs
         seen["h1"] = page.evaluate(c.CARDS_JS)
         inner = page.evaluate("() => { const o = document.querySelector('.board > .object[data-tag=chart0]'), cv = o.querySelector('[data-kind=canvas]');"
@@ -299,6 +327,18 @@ def web():
             probs.append(f"web: {tag} ended at {endc[tag]}, its last frame said {final[tag]}")
     if seen["inner"][1] <= 0 or seen["inner"][1] > seen["inner"][0]:
         probs.append(f"web: chart0's canvas {seen['inner'][1]} tall in a {seen['inner'][0]} card")
+    mk = seen["marks"]
+    if mk["stale"] != [mk["before"], 0] or mk["fresh"] != "333px":
+        probs.append(f"web size marks: a stale one left the grid at {mk['stale']} (was {mk['before']!r}), a current one set {mk['fresh']!r} (want 333px)")
+    # (after every drag, what's inside the dragged card followed it: the table's grid and the chart's canvas keep the distance to
+    # their card's height they had before any drag (the table: its 44 pt title band plus the card's padding, 66 on the web))
+    i0 = seen["inside0"]
+    gaps = {"table": i0["table"][0] - i0["table"][1], "chart": i0["chart"][0] - i0["chart"][1]}
+    for tag, ins in seen["insides"]:
+        key = "table" if tag == "table" else "chart"
+        card_h, inner_h = ins[key]
+        if inner_h <= 0 or abs((card_h - inner_h) - gaps[key]) > 2:
+            probs.append(f"web: after a {tag} drag what's inside is {inner_h} tall in a {card_h} card (before any drag: {gaps[key]} less)")
     t0 = seen["tele"]["cards"]["table"][:4]
     card = seen["tele"]["cards"].get("tablecard0", [None] * 4)[:4]
     if card[0] != 0 or card[1] != t0[1] + t0[3] + c.GAP:
@@ -339,7 +379,8 @@ def web():
     if probs:
         return False, "web: " + "; ".join(probs)[:1500]
     return True, (f"web: telemetry at {card}; the table {t0[2]} -> {got[-1]} live over 6 frames, scrolled right {sl:.0f}+{cw} of {sw}; "
-                  f"S and NW of chart0 and the table live, second drags from where the first ended (chart0 {final['chart0']}, canvas {seen['inner'][1]} in {seen['inner'][0]}); "
+                  f"S and NW of chart0 and the table live, second drags from where the first ended, two with a scroll and a view half way; after each drag the grid "
+                  f"and the chart's canvas keep their distance to the card ({gaps['table']}, {gaps['chart']} pt); a stale size mark dropped, a current one applied; "
                   f"8 handles live with their cursors; zoom 33 % shows all {len(z['cards'])} cards; Ctrl+0; Alt+T tidy: no overlap")
 
 

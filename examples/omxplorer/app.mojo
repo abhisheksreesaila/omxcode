@@ -4427,8 +4427,8 @@ struct Main(App):
             self.inserting = 0
             self.version += 1
         elif (m == MOVE or m == RESIZE) and self.free:  # (the free canvas, mojoui.freeboard: live drags, zoom, what shows)
-            if event.text != "live" and event.text != "":  # (anything but a drag between a drag's frames: the next drag starts afresh)
-                self.fb.end()
+            if event.text == "zoom":  # (a zoom changes what a press's offset means: the next frame starts afresh; a scroll's "view" or a
+                self.fb.end()         # card's "focus" mid-drag never does: the drag would rebase on the moved rect, review 2; FIRST_FRAME starts each drag)
             if event.text == "zoom":
                 self.fb.set_zoom(zoom_by(self.fb.zoom, event.zoom))
             elif event.text == "view":

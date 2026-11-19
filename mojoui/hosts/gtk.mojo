@@ -7155,7 +7155,8 @@ def run_step[A: App](host_addr: Int, step: String):
         var dx = Float64(to_int(parts[1]))
         var dy = Float64(to_int(parts[2]))
         var steps = to_int(parts[3]) if len(parts) > 3 else 6
-        host[].test_alt = len(parts) > 4 and parts[4] == "alt"
+        host[].test_alt = len(parts) > 4 and parts[4].startswith("alt")
+        var mid_view = len(parts) > 4 and parts[4].endswith("view")  # (…,alt+view: half way, the page scrolls and the app hears "view", as 120 ms after a real scroll)
         wait_allocated(host[].boards[bi].widget)
         var g = host[].boards[bi].drag
         var board = host[].boards[bi].board
@@ -7206,6 +7207,15 @@ def run_step[A: App](host_addr: Int, step: String):
                     ref gn = host[].rt.shown.nodes[c]
                     if gn.name == "board-guide" and gn.x >= 0:
                         print("LIVEGUIDE: " + String(k) + " " + String(gn.x) + "," + String(gn.y) + " " + String(gn.w) + "x" + String(gn.h), flush=True)
+            if k == steps // 2 and mid_view:
+                for sc2 in host[].board_scrollers:
+                    if sc2[0] == board:
+                        var vadj = external_call["gtk_scrolled_window_get_vadjustment", Int](sc2[1])
+                        external_call["gtk_adjustment_set_value", NoneType](vadj, external_call["gtk_adjustment_get_value", Float64](vadj) + 40)
+                pump()
+                send_views[A](host, host_addr)
+                settle()
+                print("LIVEVIEW: " + tag + " after frame " + String(k), flush=True)
             if k == steps // 2 and getenv("MOJOUI_SHOTS_EACH") != "":  # (the drag itself, half way)
                 wait_frame(host[].window)
                 save_png(host[].window, getenv("MOJOUI_SHOTS_EACH") + "-" + two_digits(host[].step_no) + "a.png")

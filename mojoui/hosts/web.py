@@ -661,7 +661,7 @@ BOARD_JS = r"""
   }
   const sized = m => {  // (a node inside a free card resized live: its new size as its style, mojoui.freeboard)
     const el = document.getElementById('n' + m.dataset.node), d = m.dataset; m.remove();
-    if (!el) return;
+    if (!el || d.v !== shape()) return;  // (from an older screen: its n<i> is another node now, as #mojoui-v guards every other answer)
     el.style.width = Number(d.w) ? d.w + 'px' : ''; el.style.height = Number(d.h) ? d.h + 'px' : '';
     el.style.minWidth = Number(d.minw) ? d.minw + 'px' : ''; el.style.maxWidth = Number(d.maxw) ? d.maxw + 'px' : '';
   };
@@ -1495,7 +1495,8 @@ def inside_free_card(s, i):
 def size_mark(s, i):
     """Node i's sizes for BOARD_JS to set as its style (appended to #mojoui-sizes, applied and removed at once)."""
     n = s.nodes[i]
-    mark = I(hidden=True, data_kind="size", data_node=str(i), data_w=str(n["w"]), data_h=str(n["h"]), data_minw=str(n["min_w"]), data_maxw=str(n["max_w"]))
+    mark = I(hidden=True, data_kind="size", data_node=str(i), data_v=str(s.shape), data_w=str(n["w"]), data_h=str(n["h"]), data_minw=str(n["min_w"]),
+             data_maxw=str(n["max_w"]))  # (v: the screen it numbers nodes for; a mark that outlives its screen is dropped, review 2)
     return Div(mark, hx_swap_oob="beforeend:#mojoui-sizes")
 
 

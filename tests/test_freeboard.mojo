@@ -1,13 +1,14 @@
 # mojoui.freeboard (goal 78): the free canvas's placement model.
 #   scripts/mxbuild.sh tests/test_freeboard.mojo -o build/test_freeboard && build/test_freeboard
 # Prints "handles: ok", "move: ok", "resize: ok", "snap: ok", "nosnap: ok", "extent: ok", "free: ok", "sync: ok",
-# "tidy: ok", "keys: ok", "fill: ok", "zoom: ok", "canvas: ok", "act: ok".
+# "tidy: ok", "keys: ok", "fill: ok", "zoom: ok", "canvas: ok", "act: ok", "events: ok", "setzoom: ok", "rebase: ok".
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.freeboard import (FreeBoard, FreeCanvas, handle_at, handle_cursor, handle_point, drag_rect, extent, first_free, tidy,
                               nearest, nudge, grow, zoom_step, zoom_by, zoom_to_fit, board_zoom, is_free, overlaps,
                               HANDLE_NONE, HANDLE_SE, HANDLE_N, HANDLE_S, HANDLE_E, HANDLE_W, HANDLE_NE, HANDLE_NW, HANDLE_SW,
                               HANDLE_MOVE, MARGIN, GUIDES, DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_DOWN,
-                              act_keys, arrange_menu, ACT_FOCUS, ACT_MOVE, ACT_NUDGE, ACT_RESIZE, ACT_FILL, ACT_TIDY, ACT_ZOOM_OUT, ACT_ZOOM_RESET)
+                              act_keys, arrange_menu, ACT_FOCUS, ACT_MOVE, ACT_NUDGE, ACT_RESIZE, ACT_FILL, ACT_TIDY, ACT_ZOOM_OUT, ACT_ZOOM_RESET,
+                              NO_SNAP, FIRST_FRAME, HOST_ZOOMS)
 from mojoui.tiling import Rect, GAP
 from mojoui.view import View, Text, BOARD, BOARD_FOCUS
 
@@ -225,3 +226,48 @@ def main() raises:
             shortcuts += 1
     assert_equal(shortcuts, 2 * 18 + 3)
     print("act: ok")
+
+
+    # events: FreeBoard.on_drag reads event.y = handle + NO_SNAP (Alt) + FIRST_FRAME (a drag's first frame)
+    var ev: List[Rect] = [Rect(0, 0, 400, 300), Rect(408, 0, 300, 300)]
+    var fe = FreeBoard(200, 120)
+    assert_equal(NO_SNAP, 100)
+    assert_equal(FIRST_FRAME, 1000)
+    var em = fe.on_drag(1, True, Float64(HANDLE_MOVE + NO_SNAP + FIRST_FRAME), -5, 3, ev)  # (1108: a move, no snap, the first frame)
+    assert_equal(s(em), "403,3 300x300")  # (no snap: 403 stays, though 400 is within 8)
+    assert_equal(fe.dragging, 1)
+    var sn = fe.on_drag(1, True, Float64(HANDLE_MOVE), -5, 3, ev)  # (8: the same drag, snapping now: the left edge 403 lands on the first card's edge 400, the nearer line; the top on 0)
+    assert_equal(s(sn), "400,0 300x300")
+    var rz = fe.on_drag(0, False, Float64(HANDLE_E + FIRST_FRAME), 50, 0, ev)  # (1003: the E edge, snapping, a new drag on another card)
+    assert_equal(s(rz), "0,0 450x300")
+    var se = fe.on_drag(0, False, Float64(HANDLE_SE + NO_SNAP), 20, 20, ev)  # (100: the old corner, no snap; handle 0 decodes as SE)
+    assert_equal(s(se), "0,0 420x320")
+    print("events: ok")
+
+    # setzoom: a saved or wheeled zoom is held to the steps' ends where the host zooms (GTK and the web build here)
+    var fz = FreeBoard()
+    assert_true(HOST_ZOOMS)
+    fz.set_zoom(10)
+    assert_equal(fz.zoom, 25)
+    fz.set_zoom(900)
+    assert_equal(fz.zoom, 200)
+    fz.set_zoom(67)
+    assert_equal(fz.zoom, 67)
+    print("setzoom: ok")
+
+    # rebase: while card i is dragged its press's rects are kept; FIRST_FRAME starts afresh from the rects now (a drag whose end
+    # never arrived, the same card pressed again), and an end() between frames would rebase too (what omxplorer must not do on "view")
+    var rb: List[Rect] = [Rect(0, 0, 400, 300)]
+    var fr = FreeBoard(200, 120)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP + FIRST_FRAME), 40, 0, rb)
+    assert_equal(rb[0].w, 440)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 60, 0, rb)  # (dx from the press: 400 + 60, not 440 + 60)
+    assert_equal(rb[0].w, 460)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP + FIRST_FRAME), 10, 0, rb)  # (a new press on the same card: from 460)
+    assert_equal(rb[0].w, 470)
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 30, 0, rb)
+    assert_equal(rb[0].w, 490)
+    fr.end()  # (an end mid-drag rebases: the next frame adds its whole offset to the moved rect: the review-2 bug, kept off "view")
+    rb[0] = fr.on_drag(0, False, Float64(HANDLE_E + NO_SNAP), 40, 0, rb)
+    assert_equal(rb[0].w, 530)
+    print("rebase: ok")
