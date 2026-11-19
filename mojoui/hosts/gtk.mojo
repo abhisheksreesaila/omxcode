@@ -2068,6 +2068,10 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(0))
                     external_call["gtk_widget_set_valign", NoneType](child, c_int(0))
                     external_call["gtk_overlay_add_overlay", NoneType](w, child)
+                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the overlay's whole width at its top or bottom edge, no margin, its own height (mojoui.stage's TV, D-7811)
+                    external_call["gtk_widget_set_halign", NoneType](child, c_int(0))
+                    external_call["gtk_widget_set_valign", NoneType](child, c_int(2 if self.rt.shown.nodes[c].y == END else 1))
+                    external_call["gtk_overlay_add_overlay", NoneType](w, child)
                 else:  # an island: pinned to an edge, 12 pt in, its natural size
                     ref pin = self.rt.shown.nodes[c]
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(1 if pin.x == START else (2 if pin.x == END else ALIGN_CENTER)))

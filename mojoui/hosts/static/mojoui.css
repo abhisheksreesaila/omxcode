@@ -103,6 +103,7 @@ dialog.alert .buttons { display: flex; gap: 8px; justify-content: center; }
 .overlay > .island.h-start { left: 0; } .overlay > .island.h-end { right: 0; }
 .overlay > .island.h-center { left: 50%; transform: translateX(-50%); }
 .overlay > .island.v-start { top: 0; } .overlay > .island.v-end { bottom: 0; }
+.overlay > .band { position: absolute; z-index: 5; left: 0; right: 0; display: flex; flex-direction: column; } .overlay > .band.v-start { top: 0; } .overlay > .band.v-end { bottom: 0; } .overlay > .band > * { flex: none; min-width: 0; }  /* a band across the overlay's edge (.pin(STRETCH, END)), no island's chrome: mojoui.stage's TV and chat bar (goal 77 M7d) */
 .overlay > .island.cover { inset: 0; margin: 0; transform: none; display: flex; flex-direction: column; } .overlay > .island.cover > * { flex: 1 1 0; min-height: 0; }  .overlay > .island.cover { pointer-events: none; }  /* a layer over the whole overlay (the cloud frame, the pointer ring): it only shows, presses go to the page (goal 77) */
 .menubar { display: flex; align-items: center; gap: 2px; }
 .menu { position: relative; }

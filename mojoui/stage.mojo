@@ -27,8 +27,9 @@
 # points (no CSS grid on GTK).
 
 from mojoui.view import View, Text, Button, TextField, Icon, VStack, HStack, Spacer, Scroll, ICON_ONLY, SUBTLE, NO_MSG
-from mojoui.view import CENTER, START
+from mojoui.view import CENTER, START, END, STRETCH, Overlay, Canvas
 from mojoui.table import capitals
+from mojoui.stagetv import StageTV, TVContent, tv_body
 
 comptime STAGE_PHONE = 760  # this wide or narrower: one column (the prototype's @media (max-width: 760px))
 comptime STAGE_NARROW = 1000  # narrower than this: no right column (max-width: 1000px)
@@ -83,12 +84,35 @@ def _gap(points: Int) -> View:
     return VStack(spacing=0).width(points)
 
 
+def _below_gap(var band: View) -> View:
+    """A side band with the top bar's 14 above it (when the columns own that gap: a Stage with a TV)."""
+    return VStack(_gap(0).height(STAGE_PAD_TOP), band^.grow(), spacing=0).fill().tag("stage-side-wrap")
+
+
+def _tv_layers(var base: View, tv: StageTV, content: TVContent, var bar_part: View, tail: Int) -> View:
+    """The TV over a column whose bottom holds the chat bar (D-7810): `base` with the bar's room left empty; the TV's
+    canvas over it (the veil over the tiles, the growing box: see-through, presses pass); a band across the bottom with the
+    real chat bar (`bar_part`, the same TextField whether open or not) and, while open, the TV's body above it, `tail`
+    points of room under the bar."""
+    var box = Canvas(tv.canvas, tv.version, on_frame=tv.on_frame if tv.ticking() else NO_MSG).passthrough().grow().fill().tag("stage-tv-box")
+    var band_items = List[View]()
+    if tv.body and tv.area_h > 0:
+        band_items.append(tv_body(tv, content))
+    band_items.append(bar_part^)
+    if tail > 0:
+        band_items.append(_gap(0).height(tail))
+    var band = VStack(band_items^, spacing=0).fill().pin(STRETCH, END).tag("stage-tv-band")
+    return Overlay(base^, box^, band^)
+
+
 def Stage(top: View, left: View, centre: View, right: View, bar: View, width: Int, height: Int,
-          compact_panel: Int = STAGE_COMPACT_PANEL) -> View:
+          compact_panel: Int = STAGE_COMPACT_PANEL, tv: StageTV = StageTV(), content: TVContent = TVContent()) -> View:
     """The four regions and the chat bar at a window `width` × `height` (App.resize hands it: pass what it said). `top`
     spans the window; `left` and `right` sit in shaded bands that run to the window's edges and bottom; `centre` fills
     the raised panel (a Canvas of tiles: give it grow/fill); `bar` (StageChat) sits under the panel in a pill 64 high.
-    On a phone the regions stack and scroll, and the bar stays at the bottom."""
+    On a phone the regions stack and scroll, and the bar stays at the bottom.
+    `tv` (mojoui.stagetv, M7d): when it has a canvas, the chat bar can grow into the TV over the whole centre column (a
+    phone: the window), showing `content` (the card, the conversation, the chips) while it is open."""
     var lay = stage_layout(width)
     var bar_box = HStack(bar.copy().grow(), spacing=0).align(CENTER).padding(6, 6).height(STAGE_BAR_H).fill().tag("stage-bar")
     if lay.compact:
@@ -98,19 +122,34 @@ def Stage(top: View, left: View, centre: View, right: View, bar: View, width: In
                             spacing=STAGE_PAD_TOP).padding(STAGE_PAD_TOP, STAGE_PHONE_PAD).fill()
         var page = Scroll(column, height=0).grow().fill()
         var strip = HStack(bar_box.copy().grow(), spacing=0).padding(8, STAGE_PHONE_PAD).fill().tag("stage-phone-bar")
+        if tv.on():
+            var base = VStack(page, _gap(0).height(STAGE_BAR_H + 16), spacing=0).grow().fill()
+            return _tv_layers(base^, tv, content, strip^, 0).grow().fill().tag("stage")
         return VStack(page, strip, spacing=0).grow().fill().tag("stage")
-    var top_row = HStack(_gap(STAGE_PAD_X), top.copy().grow().tag("stage-top"), _gap(STAGE_PAD_X), spacing=0).align(CENTER).padding(STAGE_PAD_TOP, 0).fill()
+    var top_line = HStack(_gap(STAGE_PAD_X), top.copy().grow().tag("stage-top"), _gap(STAGE_PAD_X), spacing=0).align(CENTER)
+    var top_row = top_line.copy().padding(STAGE_PAD_TOP, 0).fill()
+    if tv.on():  # (the 14 under the top bar moves into the columns: the TV's canvas reaches into it, so the spring's
+        # overshoot pokes up into the gap as the prototype's does rather than being cut flat; D-7812)
+        top_row = VStack(_gap(0).height(STAGE_PAD_TOP), top_line^.fill(), spacing=0).fill()
     var half = STAGE_GAP // 2  # (a band's shade stops half a gap short of the centre, as the prototype's st-shade)
     var left_band = HStack(_gap(STAGE_PAD_X), VStack(left.copy().fill(), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-left"),
                            _gap(half), spacing=0).width(STAGE_PAD_X + lay.side + half).fill().tag("stage-side")
     var panel = VStack(centre.copy().grow().fill(), spacing=0).padding(STAGE_PANEL_PAD).grow().fill().tag("stage-panel")
-    var centre_col = VStack(panel, bar_box, _gap(0).height(STAGE_BOTTOM - STAGE_ROW_GAP), spacing=STAGE_ROW_GAP).grow().fill().tag("stage-centre")
+    var centre_col: View
+    if tv.on():
+        var stack = VStack(panel, _gap(0).height(STAGE_BAR_H), _gap(0).height(STAGE_BOTTOM - STAGE_ROW_GAP), spacing=STAGE_ROW_GAP).grow().fill()
+        var base = VStack(_gap(0).height(STAGE_PAD_TOP), stack^, spacing=0).grow().fill()
+        centre_col = _tv_layers(base^, tv, content, bar_box^, STAGE_BOTTOM).grow().fill().tag("stage-centre")
+        left_band = _below_gap(left_band^)
+    else:
+        centre_col = VStack(panel, bar_box, _gap(0).height(STAGE_BOTTOM - STAGE_ROW_GAP), spacing=STAGE_ROW_GAP).grow().fill().tag("stage-centre")
     var cols = List[View]()
     cols.append(left_band^)
     cols.append(centre_col^)
     if lay.right:
-        cols.append(HStack(_gap(half), VStack(right.copy().fill(), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-right"),
-                           _gap(STAGE_PAD_X), spacing=0).width(half + lay.side + STAGE_PAD_X).fill().tag("stage-side"))
+        var right_band = HStack(_gap(half), VStack(right.copy().fill(), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-right"),
+                                _gap(STAGE_PAD_X), spacing=0).width(half + lay.side + STAGE_PAD_X).fill().tag("stage-side")
+        cols.append(_below_gap(right_band^) if tv.on() else right_band^)
     else:
         cols.append(_gap(STAGE_PAD_X - half))  # (the centre 18 from the window's right edge: 9 of gap + 9 here)
     var body = HStack(cols, spacing=half).grow().fill()

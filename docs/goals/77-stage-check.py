@@ -242,7 +242,20 @@ def m7c():
 
 
 def m7d():
-    return ("BLOCKED", "the TV: not built yet")
+    """The TV (mojoui.stagetv): the unit test, examples/stage built for Linux and the web, then on GTK (headless) and the web
+    host (headless Chromium, a fixed-wait session) the chat bar grown into the TV and back, sampled frame by frame from the
+    app's own record (the box's height monotonic to within 2 %, settled <= 1.1 s; the tiles' veil up while open, down after;
+    the body's timing; a swap that keeps the box still), the regions read back (open: the body covers the panel, the card
+    inside it on the left; closed: no body), the web's box measured in real screenshots, the quiet closing it by itself;
+    pictures docs/goals/77/m7d-*.png. scripts/g77_stagetv_check.py."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts/g77_stagetv_check.py"
+    spec = importlib.util.spec_from_file_location("g77_stagetv_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.run()
 
 
 def m7e():

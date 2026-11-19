@@ -16,6 +16,7 @@ from mojoui.markdown import markdown_roles
 from mojoui.timeline import timeline_roles
 from mojoui.logview import logpane_roles
 from themes.omxqua_kit import kit_roles
+from mojoui.stagetv import TVLook
 
 # ---- tokens.css, the root (both modes) and the Developer family ----
 comptime FONT = "Geist"  # --oq-font
@@ -607,7 +608,42 @@ def counter_roles(p: Palette) -> List[Surface]:
     var round = Surface("stage-pill-compact", p.card, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
                         icon_size=18, icon_ink=p.ink)
     out.append(round^)
+    out += counter_tv_roles(p)
     return out^
+
+
+def counter_tv_roles(p: Palette) -> List[Surface]:
+    """mojoui.stagetv's roles (goal 77 M7d, the prototype's .st-tv / .tv-* / .cb-msg): the TV's layers (the box is drawn on
+    its canvas: counter_tv_look), its head (omx in small caps, the title, a round ×), the card's well on the stage's ground,
+    the conversation's bubbles (you: the ink, omx: the ground), the chips."""
+    var dark = p.dark
+    var out = List[Surface]()
+    for r in ["stage-side-wrap", "stage-tv-box", "stage-tv-band", "stage-tv-veil", "stage-tv", "stage-tv-head", "stage-tv-thread", "stage-tv-chips"]:
+        out.append(box(r, 0, -1, -1, -1))
+    var kicker = words("stage-tv-kicker", 11, 650, p.ink2, 0.8)  # (.tv-k: 650 11px, .07em, capitals)
+    out.append(kicker^)
+    var title = words("stage-tv-title", 18, 650, p.ink, -0.36)  # (.tv-head b: 18px, -.02em)
+    title.one_line = True
+    out.append(title^)
+    var close = Surface("stage-tv-close", p.line, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False,
+                        icon_size=18, icon_ink=p.ink)
+    out.append(close^)
+    out.append(Surface("stage-tv-card", counter_ground(dark), 22, 22, -1, -1, -1, 14, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
+    out.append(Surface("stage-msg-you", p.ink, 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False))
+    out.append(Surface("stage-msg-omx", counter_ground(dark), 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False))
+    out.append(words("stage-msg-meta", 11, 600, 0))  # (its bubble's ink: .cb-msg small)
+    out.append(words("stage-msg-text", 15, 0, 0))
+    var chip = Surface("stage-tv-chip", counter_ground(dark), RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 14, 0, [], 0, 0, 0, -1, "", 14, p.ink, 550, 0, 0, 0, 0, False,
+                       height=38, icon_size=16, icon_ink=p.ink)
+    out.append(chip^)
+    return out^
+
+
+def counter_tv_look(dark: Bool) -> TVLook:
+    """What mojoui.stagetv draws its box with in the Counter family: the chat bar's card colour, the stage's ground (the
+    tiles fade into it), the room (a phone's page), the open box's shadow (gitaway's sh3; night: sh2)."""
+    var p = counter_palette(dark)
+    return TVLook(p.card, counter_ground(dark), p.page, counter_sh3(dark))
 
 
 def counter_gtk(p: Palette, cls: String) -> String:
@@ -623,6 +659,12 @@ def counter_gtk(p: Palette, cls: String) -> String:
                + w + "button.mui-tag-stage-mic image { color: " + card + "; -gtk-icon-size: 22px; }\n"
                + w + "button.mui-tag-stage-pill, " + w + "button.flat.mui-tag-stage-pill { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
                + w + "button.flat.mui-tag-stage-pill label, " + w + "button.flat.mui-tag-stage-pill image { color: " + ink + "; }\n")
+    var line = css_color(p.line)
+    var ground = hex_of(counter_ground(p.dark))
+    out += (w + "button.mui-tag-stage-tv-close, " + w + "button.image-button.mui-tag-stage-tv-close, " + w + "button.flat.mui-tag-stage-tv-close { min-width: 36px; min-height: 36px; padding: 0; border-radius: 18px; background: " + line + "; box-shadow: none; }\n"
+            + w + "button.mui-tag-stage-tv-close image { color: " + ink + "; -gtk-icon-size: 18px; }\n"
+            + w + "button.mui-tag-stage-tv-chip, " + w + "button.flat.mui-tag-stage-tv-chip { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + ground + "; box-shadow: none; }\n"
+            + w + "button.mui-tag-stage-tv-chip label, " + w + "button.mui-tag-stage-tv-chip image { color: " + ink + "; }\n")
     out += w + "button.mui-tag-stage-pill-compact, " + w + "button.image-button.mui-tag-stage-pill-compact, " + w + "button.flat.mui-tag-stage-pill-compact { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
     var roles = List[String]()
     roles.append("stage-avatar")
@@ -645,6 +687,8 @@ def counter_web(p: Palette, cls: String) -> String:
     var card = hex_of(p.card)
     var sh1 = shadow_css(counter_sh1(p.dark))
     var out = (b + "[data-tag=stage-side]:first-child { border-top-left-radius: 0; } " + b + "[data-tag=stage-side]:last-child { border-top-right-radius: 0; }\n"
+               + b + "[data-tag=stage-side-wrap] > [data-tag=stage-side] { border-top-left-radius: 28px; border-top-right-radius: 28px; } "  # (a Stage with a TV: each band under its own 14, D-7812)
+               + b + "[data-tag=stage-side-wrap]:first-child > [data-tag=stage-side] { border-top-left-radius: 0; } " + b + "[data-tag=stage-side-wrap]:last-child > [data-tag=stage-side] { border-top-right-radius: 0; }\n"
                + b + "[data-tag=stage-input] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
                + b + "[data-tag=stage-input] input[type=text]:focus { box-shadow: none; outline: none; } " + b + "[data-tag=stage-input] input::placeholder { color: " + hex_of(p.ink2) + "; }\n"
                + b + "[data-tag=stage-input] .field { flex: 1; }\n"
@@ -652,6 +696,11 @@ def counter_web(p: Palette, cls: String) -> String:
                + b + "button[data-tag=stage-mic] svg { width: 22px; height: 22px; color: " + card + "; }\n"
                + b + "button[data-tag=stage-pill-compact] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n"
                + b + "button.subtle[data-tag=stage-pill], " + b + "button[data-tag=stage-pill] { height: 38px; min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n")
+    var line = css_color(p.line)
+    var ground = hex_of(counter_ground(p.dark))
+    out += (b + "button[data-tag=stage-tv-close] { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 18px; background: " + line + "; color: " + ink + "; box-shadow: none; }\n"
+            + b + "button[data-tag=stage-tv-close] svg { width: 18px; height: 18px; }\n"
+            + b + "button[data-tag=stage-tv-chip] { height: 38px; min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + ground + "; color: " + ink + "; box-shadow: none; }\n")
     for s in counter_roles(p):
         if s.role.startswith("stage-avatar"):
             out += (b + "button.subtle[data-tag=" + s.role + "], " + b + "button[data-tag=" + s.role + "] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: "

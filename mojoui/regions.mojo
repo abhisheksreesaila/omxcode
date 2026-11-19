@@ -16,7 +16,9 @@ from mojoui.view import View, BOARD, TEXT, HEADLINE
 
 comptime REGION_ROLES: List[String] = ["sidebar", "toolbar", "status-bar", "inspector",
                                       # mojoui.stage's regions (goal 77 M7a): the top bar, the three columns, the stage, the chat bar
-                                      "stage-top", "stage-left", "stage-centre", "stage-right", "stage-panel", "stage-bar"]
+                                      "stage-top", "stage-left", "stage-centre", "stage-right", "stage-panel", "stage-bar",
+                                      # the TV (goal 77 M7d): its body, the card in it, the conversation
+                                      "stage-tv", "stage-tv-card", "stage-tv-thread"]
 
 
 def region_of(role: String) -> String:

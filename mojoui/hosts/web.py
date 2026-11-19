@@ -50,6 +50,7 @@ CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 START, CENTER, END = 1, 2, 3
+STRETCH = 4  # (align only; an Overlay island pinned STRETCH is a band)
 SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES = 1, 2, 3, 4, 5, 6, 7, 8, 9
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
@@ -752,6 +753,8 @@ CANVAS_JS = r"""
     async function one(tick) {
       const m = meta(), version = m ? m.dataset.version : '', skin = skinNow(), seq = ++st.seq;
       const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { await new Promise(ok => requestAnimationFrame(ok)); return 'ok'; }  // (not laid out yet, a screen just rebuilt: a 1x1 frame would wipe the picture it kept; up to 30 frames, D-7813)
+      st.unsized = 0;
       const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
       const params = { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
@@ -834,6 +837,8 @@ CANVAS_JS = r"""
           const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+          if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); continue; }  // (not laid out yet: as in one(), D-7813)
+          st.unsized = 0;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
           const res = await getFrame(sid, n, { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
@@ -971,6 +976,13 @@ CANVAS_JS = r"""
     if (first) { if (!first.mojoui) attach(first); first.querySelector('canvas').focus({ preventScroll: true }); }
   }
   document.addEventListener('DOMContentLoaded', () => { scan(); focusFirst(); });
+  // A rebuilt screen's canvases are wired up (each shows the picture it kept) before the browser paints it, not ~20 ms
+  // later at afterSettle: in between, a new <canvas> painted blank (the Stage's TV flashed as its body arrived, D-7813).
+  // One microtask per answer, however many elements it swapped.
+  let scanQueued = false;
+  const scanSoon = () => { if (scanQueued) return; scanQueued = true; queueMicrotask(() => { scanQueued = false; scan(); }); };
+  document.addEventListener('htmx:oobAfterSwap', scanSoon);
+  document.addEventListener('htmx:afterSwap', scanSoon);
   document.addEventListener('htmx:afterSettle', () => {
     scan();
     release();
@@ -1841,6 +1853,9 @@ def render_node(s, i, sid):
                 h = {START: "start", END: "end"}.get(ch["x"], "center")
                 v = "end" if ch["y"] == END else "start"
                 cover = " cover" if ch["fills"] and ch["grows"] else ""  # (a layer over the whole overlay: mojoui.orb.RimView)
+                if ch["x"] == STRETCH:  # (a band, .pin(STRETCH, START or END): the overlay's whole width at an edge, no margin, no island's chrome; mojoui.stage's TV, D-7811)
+                    kids.append(Div(render(s, c, sid), cls=f"band v-{v}"))
+                    continue
                 kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}{cover}"))
         return Div(*kids, cls="overlay", id=nid, data_kind="overlay")
     if kind == CANVAS:
