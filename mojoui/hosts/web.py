@@ -176,6 +176,8 @@ MENU_JS = r"""
     const name = (e.metaKey && !mac ? 'Super+' : '') + (e.ctrlKey || (e.metaKey && mac) ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + key;
     const typing = e.target.matches && e.target.matches('input, textarea, [contenteditable], [contenteditable] *');
     if (typing && ['Ctrl+C', 'Ctrl+X', 'Ctrl+V', 'Ctrl+A', 'Ctrl+Z'].includes(name)) return;  // a field's own copy, paste, select all, undo
+    if (typing && (/^(Arrow|Home|End|Page)/.test(key) || (e.altKey && !e.ctrlKey && !e.metaKey && key.length === 1))) return;  // (a field's own word jumps and
+    // selections, and a Mac's ⌥ characters (ƒ, †): never a canvas's Arrange keys, goal 78)
     const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === name);
     if (item) { e.preventDefault(); e.stopPropagation(); menus.closeAll(); item.click(); }
   }, true);
@@ -618,7 +620,7 @@ BOARD_JS = r"""
       const z = zoomOf(board), x0 = e.clientX, y0 = e.clientY, index = Number(obj.dataset.index);
       dragging = { obj, h, live: false };
       board.setPointerCapture(e.pointerId);
-      let sent = 0;
+      let sent = 0, first = true;
       const move = ev => {
         const dx = (ev.clientX - x0) / z, dy = (ev.clientY - y0) / z;
         if (!dragging.live) {
@@ -627,8 +629,9 @@ BOARD_JS = r"""
           board.querySelectorAll(':scope > .object.raised').forEach(o => o.classList.remove('raised'));
           obj.classList.add('raised');  // (the dragged card on top)
         }
-        const now = performance.now(); if (now - sent < 12) return; sent = now;
-        post(LIVE, index, h + (ev.altKey ? 100 : 0), dx, dy);
+        const now = performance.now(); if (!first && now - sent < 12) return; sent = now;
+        post(LIVE, index, h + (ev.altKey ? 100 : 0) + (first ? 1000 : 0), dx, dy);  // (FIRST_FRAME: the app starts this drag afresh)
+        first = false;
       };
       const up = ev => {
         board.removeEventListener('pointermove', move); board.removeEventListener('pointerup', up); board.removeEventListener('pointercancel', up);
@@ -650,7 +653,14 @@ BOARD_JS = r"""
     const view = () => { const z = zoomOf(board); post(BVIEW, sc.scrollLeft / z, sc.scrollTop / z, sc.clientWidth / z, sc.clientHeight / z); };
     sc.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(view, 150); });
   }
-  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { if (b.classList.contains('free')) free(b); else attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place); };
+  const sized = m => {  // (a node inside a free card resized live: its new size as its style, mojoui.freeboard)
+    const el = document.getElementById('n' + m.dataset.node), d = m.dataset; m.remove();
+    if (!el) return;
+    el.style.width = Number(d.w) ? d.w + 'px' : ''; el.style.height = Number(d.h) ? d.h + 'px' : '';
+    el.style.minWidth = Number(d.minw) ? d.minw + 'px' : ''; el.style.maxWidth = Number(d.maxw) ? d.maxw + 'px' : '';
+  };
+  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { if (b.classList.contains('free')) free(b); else attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place);
+    document.querySelectorAll('#mojoui-sizes > [data-kind=size]').forEach(sized); };
   scan();
   new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
 })();
@@ -1463,6 +1473,24 @@ def place_mark(s, i):
     sized = p >= 0 and free_board(s.nodes[p])  # (a free canvas's card: its size goes with its place, mojoui.freeboard)
     return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)),
              data_w=str(n["w"]) if sized else None, data_h=str(n["h"]) if sized else None)
+
+
+def inside_free_card(s, i):
+    """Whether node i sits inside a free canvas's card (mojoui.freeboard)."""
+    p = parent_of(s, i)
+    while p >= 0:
+        q = parent_of(s, p)
+        if q >= 0 and free_board(s.nodes[q]):
+            return True
+        p = q
+    return False
+
+
+def size_mark(s, i):
+    """Node i's sizes for BOARD_JS to set as its style (appended to #mojoui-sizes, applied and removed at once)."""
+    n = s.nodes[i]
+    mark = I(hidden=True, data_kind="size", data_node=str(i), data_w=str(n["w"]), data_h=str(n["h"]), data_minw=str(n["min_w"]), data_maxw=str(n["max_w"]))
+    return Div(mark, hx_swap_oob="beforeend:#mojoui-sizes")
 
 
 def free_board(n):
@@ -2604,7 +2632,7 @@ def make_app(module_dir):
         # While an alert is up the page behind is inert (no clicks, no keyboard focus);
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
-        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+        page = Main(version, Div(id="mojoui-sizes", hidden=True), busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
                     data_audio="1" if AUDIO else None,  # (the page opens its audio socket: docs/web-audio.md)
                     data_push="1" if PUSH else None,  # (playing canvases' pictures pushed: the public copy, or MOJOUI_PUSH=1)
                     data_agent="1" if AGENT_SOCKET else None, data_dev="1" if DEV else None)  # (widgets tell the host what they show only while an agent may read it)
@@ -2908,6 +2936,9 @@ def make_app(module_dir):
                 s.images[i] = s.images.get(i, 0) + 1
             if op == SET_SIZE and parent_of(s, i) >= 0 and free_board(s.nodes[parent_of(s, i)]):  # (a free canvas's card resized: its mark, live)
                 op = SET_PLACE
+            elif op == SET_SIZE and inside_free_card(s, i):  # (inside a free card being resized: the new size as a style, live; the
+                moved.append(size_mark(s, i))                # node isn't sent again, so its canvas keeps its picture and the drag its pointer)
+                continue
             if op == SET_PLACE or (op in (SET_VALUE, SET_TEXT) and target["kind"] == BOARD):  # (a Board's value: what to reveal; a free one's text: its zoom)
                 mark = place_mark(s, i)
                 mark.attrs["hx-swap-oob"] = "true"

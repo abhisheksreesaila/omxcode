@@ -147,6 +147,73 @@ def gtk():
                   + (f"; {len(slow)} SLOW update lines (see m1-gtk.log)" if slow else ""))
 
 
+# Heights (review 1): a chart's and the table's S and NW handles change sizes inside the card too (the chart's canvas, the grid);
+# then a second drag of the same card must start where the first ended.
+HEIGHTS = [("chart0", "s", 0, 80), ("chart0", "nw", 40, -60), ("chart0", "s", 0, 60), ("table", "s", 0, -120), ("table", "nw", 32, 40), ("table", "s", 0, 48)]
+
+
+def expect_heights(cards, frames_of, label, tol=0):
+    """Each drag's frames against resized() from where the last one on that card ended; ([problems], final rects)."""
+    probs, now = [], dict(cards)
+    for (tag, h, dx, dy), frames in zip(HEIGHTS, frames_of):
+        exp = [resized(now[tag], h, round(dx * k / STEPS), round(dy * k / STEPS)) for k in range(1, STEPS + 1)]
+        if len(frames) != STEPS or any(max(abs(a - b) for a, b in zip(f, e)) > tol for f, e in zip(frames, exp)):
+            probs.append(f"{label} {tag} {h} {dx},{dy}: frames {frames} not {exp}")
+        now[tag] = exp[-1]
+    return probs, now
+
+
+def gtk_heights():
+    d = c.DATA
+    steps = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800", "shortcut:Ctrl+Shift+C", "pause:1500", "boardscroll:0", "boards:h0"]
+    for tag, h, dx, dy in HEIGHTS:
+        steps += [f"freedrag:{tag}={h},{dx},{dy},{STEPS},alt", "pause:300", f"boards:h-{tag}-{h}-{dy}"]
+    steps.append(f"shot:{c.OUT}/m1-gtk-5-heights.png")
+    out = c.gtk(steps, "m1-gtk-heights", open_path=d / "fleet.csv")
+    b = c.boards(out)
+    dr = c.drags(out)
+    probs, final = expect_heights(b["h0"]["cards"], [x[3] for x in dr], "GTK")
+    last = b[f"h-table-s-48"]["cards"]
+    for tag in ("chart0", "table"):
+        if last[tag] != final[tag]:
+            probs.append(f"GTK: {tag} ended at {last[tag]}, its last frame said {final[tag]}")
+    if probs:
+        return False, "GTK heights: " + "; ".join(probs)[:1200]
+    return True, f"GTK: S and NW of chart0 and the table live, each second drag from where the first ended (chart0 {final['chart0']}, table {final['table']})"
+
+
+def gtk_perf():
+    """~10 cards (the table, 2 table cards, 6 charts, a pivot), the table's corner dragged live over 16 frames: per frame the
+    app's update + the patches applied (LIVEMS update), to the frame GTK laid out (frame), and how many canvases drew."""
+    d = c.DATA
+    steps = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800",
+             f"pick:Table={d / 'telemetry.parquet'}", "waitfor:close-telemetry=120000", "pause:800", f"pick:Table={d / 'limits.csv'}", "waitfor:close-limits=60000", "pause:800"]
+    steps += ["shortcut:Ctrl+Shift+C", "pause:900"] * 6 + ["shortcut:Ctrl+Shift+P", "pause:1500", "boards:p0", "boardscroll:0", "pause:500",
+              "freedrag:table=se,-320,-240,16,alt", "pause:500", "freedrag:tablecard0=e,240,0,16,alt", "pause:500", "boards:p1"]
+    out = c.gtk(steps, "m1-gtk-perf", open_path=d / "fleet.csv")
+    n = len(c.boards(out)["p0"]["cards"])
+    rows = [l.split() for l in out.splitlines() if l.startswith("LIVEMS: ")]
+    upd = sorted(float(r[4]) for r in rows)
+    frm = sorted(float(r[6]) for r in rows)
+    draws = [int(r[8]) for r in rows]
+    # (the SLOW lines from the drags on: the watchdog's 50 ms budget, MOJOUI_BUDGET_MS)
+    after = out[out.find("CURSOR: table se"):]
+    slow = [l for l in after.splitlines() if l.startswith("SLOW:")]
+    med = lambda v: v[len(v) // 2]
+    p95 = lambda v: v[min(len(v) - 1, int(round(0.95 * (len(v) - 1))))]
+    nums = (f"{n} cards, {len(rows)} live frames: update median {med(upd):.1f} ms, p95 {p95(upd):.1f} ms, max {upd[-1]:.1f}; to the laid-out frame "
+            f"median {med(frm):.1f} ms, p95 {p95(frm):.1f} ms; canvases drawn per frame after the first: max {max(draws[1:16] + draws[17:])}; SLOW at 50 ms: {len(slow)}")
+    (c.OUT / "m1-perf.txt").write_text(nums + "\n")
+    probs = []
+    if n < 10:
+        probs.append(f"only {n} cards")
+    if slow:
+        probs.append(f"{len(slow)} SLOW lines: {slow[:2]}")
+    if max(draws[1:16] + draws[17:]) > 2:
+        probs.append(f"canvases drawn per frame: {draws}")
+    return (False, "GTK perf: " + "; ".join(probs) + " (" + nums + ")") if probs else (True, "GTK perf: " + nums)
+
+
 def web():
     import drive
     d = c.DATA
@@ -192,13 +259,46 @@ def web():
         page.screenshot(path=str(c.OUT / "m1-web-4-tidy.png"))
         return "WEB: done\n"
 
+    def heights(page):
+        page.keyboard.press("Control+Shift+c")
+        page.wait_for_timeout(1500)
+        seen["h0"] = page.evaluate(c.CARDS_JS)
+        hs = []
+        for tag, hd, dx, dy in HEIGHTS:
+            cur, frames = c.web_drag(page, tag, hd, dx, dy, steps=STEPS, alt=True,
+                                     shot=c.OUT / "m1-web-5-chart-height-mid-drag.png" if (tag, hd) == ("chart0", "s") and not hs else None)
+            hs.append(frames)
+        seen["hdrags"] = hs
+        seen["h1"] = page.evaluate(c.CARDS_JS)
+        inner = page.evaluate("() => { const o = document.querySelector('.board > .object[data-tag=chart0]'), cv = o.querySelector('[data-kind=canvas]');"
+                              " return [o.offsetHeight, cv ? cv.offsetHeight : -1]; }")
+        seen["inner"] = inner
+        page.screenshot(path=str(c.OUT / "m1-web-5-heights.png"))
+        return "WEB: heights\n"
+
     steps = ";".join(["wait:Create table", "tap:Create table", "wait:Links", "pause:800", "tap:Insert", "pause:300",
                       f"pick:Table={d / 'telemetry.parquet'}", "pause:5000"])
     r, out = drive.web_run(c.WEB, steps, viewport=(c.W, c.H), color_scheme="light", env=env, during=during)
     (c.OUT / "m1-web.log").write_text(out)
     if r.returncode != 0 or "zoomed" not in seen or "tidy" not in seen:
         return False, f"web run: exit {r.returncode}, saw {list(seen)}: {out[-800:]}"
+    h = c.home("m1-web-h")
+    seen2 = {}
+    r2, out2 = drive.web_run(c.WEB, "wait:Create table;tap:Create table;wait:Links;pause:800", viewport=(c.W, c.H), color_scheme="light",
+                             env={"OMX_DOCUMENTS": str(h / "docs"), "OMX_CONFIG": str(h / "config"), "OMX_OPEN": str(d / "fleet.csv")},
+                             during=heights)
+    (c.OUT / "m1-web-heights.log").write_text(out2)
+    if r2.returncode != 0 or "hdrags" not in seen:
+        return False, f"web heights run: exit {r2.returncode}: {out2[-600:]}"
     probs = []
+    hp, final = expect_heights({k: tuple(v[:4]) for k, v in seen["h0"]["cards"].items()}, seen["hdrags"], "web", tol=2)
+    probs += hp
+    endc = {k: tuple(v[:4]) for k, v in seen["h1"]["cards"].items()}
+    for tag in ("chart0", "table"):
+        if max(abs(a - b) for a, b in zip(endc[tag], final[tag])) > 2:
+            probs.append(f"web: {tag} ended at {endc[tag]}, its last frame said {final[tag]}")
+    if seen["inner"][1] <= 0 or seen["inner"][1] > seen["inner"][0]:
+        probs.append(f"web: chart0's canvas {seen['inner'][1]} tall in a {seen['inner'][0]} card")
     t0 = seen["tele"]["cards"]["table"][:4]
     card = seen["tele"]["cards"].get("tablecard0", [None] * 4)[:4]
     if card[0] != 0 or card[1] != t0[1] + t0[3] + c.GAP:
@@ -239,6 +339,7 @@ def web():
     if probs:
         return False, "web: " + "; ".join(probs)[:1500]
     return True, (f"web: telemetry at {card}; the table {t0[2]} -> {got[-1]} live over 6 frames, scrolled right {sl:.0f}+{cw} of {sw}; "
+                  f"S and NW of chart0 and the table live, second drags from where the first ended (chart0 {final['chart0']}, canvas {seen['inner'][1]} in {seen['inner'][0]}); "
                   f"8 handles live with their cursors; zoom 33 % shows all {len(z['cards'])} cards; Ctrl+0; Alt+T tidy: no overlap")
 
 
@@ -252,10 +353,11 @@ def check():
         return False, why
     parts.append(why)
     c.build(("omxplorer", "linux"))
-    ok, why = gtk()
-    if not ok:
-        return False, why
-    parts.append(why)
+    for fn in (gtk, gtk_heights, gtk_perf):
+        ok, why = fn()
+        if not ok:
+            return False, why
+        parts.append(why)
     c.build(("omxplorer", "web"))
     ok, why = web()
     if not ok:

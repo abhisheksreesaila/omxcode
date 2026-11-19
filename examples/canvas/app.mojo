@@ -73,14 +73,13 @@ struct Main(App):
         var m = event.message
         if m == MOVE or m == RESIZE:
             if event.text == "zoom":
-                self.fb.zoom = zoom_by(self.fb.zoom, event.zoom)
+                self.fb.set_zoom(zoom_by(self.fb.zoom, event.zoom))
             elif event.text == "view":
                 self.fb.view = Rect(Int(event.x), Int(event.y), Int(event.dx), Int(event.dy))
             else:
-                var handle = HANDLE_MOVE if m == MOVE else Int(event.y) % 100
                 var k = event.number
                 if 0 <= k < len(self.rects):
-                    self.rects[k] = self.fb.drag(k, handle, Int(event.dx), Int(event.dy), self.rects, Int(event.y) < NO_SNAP)
+                    self.rects[k] = self.fb.on_drag(k, m == MOVE, event.y, event.dx, event.dy, self.rects)
                     if event.text != "live":
                         self.fb.end()
                         self.said = self.tags[k] + " " + String(self.rects[k])

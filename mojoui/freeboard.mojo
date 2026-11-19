@@ -23,6 +23,7 @@ from mojoui.tiling import Rect, GAP
 from mojoui.boardtiles import BoardTiles
 from mojoui.view import View, Board, VStack, BOARD_PLAIN, BOARD_FOCUS, NO_MSG
 from mojoui.menus import Menu, Item
+from std.sys import CompilationTarget, is_defined
 
 comptime HANDLE_NONE = -1
 comptime HANDLE_SE = 0  # (0: the old bottom-right corner, so an older host's resize, which sends 0, reads as it always did)
@@ -35,6 +36,7 @@ comptime HANDLE_NW = 6
 comptime HANDLE_SW = 7
 comptime HANDLE_MOVE = 8
 comptime NO_SNAP = 100  # added to event.y by hosts while Alt is held: the drag doesn't snap
+comptime FIRST_FRAME = 1000  # added to event.y by hosts on a drag's first motion frame: the drag starts afresh from the rects now
 
 comptime EDGE = 6  # the band inside each edge that resizes (points)
 comptime CORNER = 16  # a corner's square (the bottom-right one is the old grip's 24)
@@ -46,6 +48,8 @@ comptime MIN_W = 200
 comptime MIN_H = 120
 comptime GUIDES = 4  # guide lines a FreeCanvas carries (unused ones sit off the canvas)
 comptime ZOOMS: List[Int] = [25, 33, 50, 67, 80, 100, 125, 150, 200]  # the zoom steps, in percent
+comptime HOST_ZOOMS = CompilationTarget.is_linux() and not is_defined["MOJOUI_ANDROID"]()  # this build's host draws a free canvas zoomed (GTK and
+# the web, both Linux builds; AppKit, UIKit and Android show it at 100 %: their zoom items are disabled and a saved zoom is read as 100)
 
 comptime DIR_LEFT = 0
 comptime DIR_RIGHT = 1
@@ -563,10 +567,17 @@ struct FreeBoard(Copyable, Movable):
                 return True
         return False
 
-    def drag(mut self, i: Int, handle: Int, dx: Int, dy: Int, rects: List[Rect], snap: Bool = True) -> Rect:
-        """Card i dragged by `handle` dx, dy from where the press began (the first call keeps every rect as it was then);
-        its new rect, the guides set. It becomes the focused card; a filled card dragged is no longer filled."""
-        if self.dragging != i or len(self.start) != len(rects):
+    def on_drag(mut self, i: Int, moving: Bool, y: Float64, dx: Float64, dy: Float64, rects: List[Rect]) -> Rect:
+        """A host's drag event for card i (its on_move: `moving`, else on_resize; event.y carries the handle, NO_SNAP and
+        FIRST_FRAME; event.dx, dy from the press): its new rect (drag())."""
+        var code = Int(y)
+        return self.drag(i, HANDLE_MOVE if moving else code % 100, Int(dx), Int(dy), rects, code % 1000 < NO_SNAP, code >= FIRST_FRAME)
+
+    def drag(mut self, i: Int, handle: Int, dx: Int, dy: Int, rects: List[Rect], snap: Bool = True, first: Bool = False) -> Rect:
+        """Card i dragged by `handle` dx, dy from where the press began (the first call keeps every rect as it was then: a new
+        card, a host's FIRST_FRAME or an end() before begin afresh); its new rect, the guides set. It becomes the focused card;
+        a filled card dragged is no longer filled."""
+        if first or self.dragging != i or len(self.start) != len(rects):
             self.dragging = i
             self.start = rects.copy()
         self.focus = i
@@ -576,6 +587,11 @@ struct FreeBoard(Copyable, Movable):
         var r = drag_rect(self.start, i, handle, dx, dy, snap, g, self.min_w, self.min_h)
         self.guides = g^
         return r
+
+    def set_zoom(mut self, z: Int):
+        """The zoom (a saved one, a wheel's): kept between the steps' ends; 100 where the host doesn't zoom (HOST_ZOOMS)."""
+        var steps = materialize[ZOOMS]()
+        self.zoom = max(steps[0], min(z, steps[len(steps) - 1])) if HOST_ZOOMS else 100
 
     def end(mut self):
         """The drag let go: the guides go."""
@@ -623,9 +639,9 @@ struct FreeBoard(Copyable, Movable):
             except:
                 pass
             self.filled = -1
-        elif act == ACT_ZOOM_OUT:
+        elif act == ACT_ZOOM_OUT and HOST_ZOOMS:  # (a host that doesn't zoom keeps 100 %: Fill fits what it shows)
             self.zoom = zoom_step(self.zoom, True)
-        elif act == ACT_ZOOM_IN:
+        elif act == ACT_ZOOM_IN and HOST_ZOOMS:
             self.zoom = zoom_step(self.zoom, False)
         elif act == ACT_ZOOM_RESET:
             self.zoom = 100
@@ -708,11 +724,12 @@ def act_title(act: Int) -> String:
 
 def arrange_menu(base: Int, disabled: Bool = False) -> View:
     """The canvas's keys as a menu ("Arrange"): each action twice, on Super and on Alt (message base + ACT_…). Hide it
-    under a ribbon: the items still lend their shortcuts."""
+    under a ribbon: the items still lend their shortcuts. The zoom items are disabled where the host doesn't zoom (HOST_ZOOMS)."""
     var items = List[View]()
     for act in range(ACTS):
         var keys = act_keys(act)
-        items.append(Item(act_title(act), base + act, shortcut=keys[0], disabled=disabled))
+        var off = disabled or (act >= ACT_ZOOM_OUT and not HOST_ZOOMS)
+        items.append(Item(act_title(act), base + act, shortcut=keys[0], disabled=off))
         if keys[1] != "":
-            items.append(Item(act_title(act) + " (Alt)", base + act, shortcut=keys[1], disabled=disabled))
+            items.append(Item(act_title(act) + " (Alt)", base + act, shortcut=keys[1], disabled=off))
     return Menu("Arrange", items)

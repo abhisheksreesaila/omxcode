@@ -179,6 +179,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
             name = cut
         else:
             break
+    if mask & MASK_OPTION != 0 and mask & MASK_COMMAND == 0:  # (⌥ alone types ƒ, † … and moves by words in a field: never a key
+        return (String(""), 0)                                  # equivalent; goal 78's Alt bindings are the Super/Alt scheme's, not the Mac's)
     if name == "↑":
         return (String(chr(0xF700)), mask)  # NSUpArrowFunctionKey
     if name == "↓":

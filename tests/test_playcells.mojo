@@ -25,6 +25,16 @@ def main() raises:
         said = String(e)
     assert_true(said.find('an offset needs "~" (a time link)') >= 0, said)
     assert_true(said.find("fleet.t ~ video.t +1.2") >= 0, said)
+    var named = parse_link("fleet.clip = Robot runs 2024.file")  # (a card whose name ends in a number: a key link, not an offset)
+    assert_equal(named.kind, LINK_KEY)
+    assert_equal(named.b.card, "Robot runs 2024")
+    assert_equal(named.b.column, "file")
+    var said2 = String("")
+    try:
+        _ = parse_link("fleet.t = Robot runs 2024.t -0.5")
+    except e:
+        said2 = String(e)
+    assert_true(said2.find('fleet.t ~ Robot runs 2024.t -0.5') >= 0, said2)
     var key = parse_link("fleet.clip = video.file")
     assert_equal(key.kind, LINK_KEY)
     var time = parse_link("fleet.t ~ video.t +1.2")

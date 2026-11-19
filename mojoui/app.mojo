@@ -616,7 +616,7 @@ struct Runtime[A: App](Movable):
                 var what = "zoom" if kind == BOARD_ZOOM else ("view" if kind == BOARD_VIEW else "focus")
                 return self.dispatch(Event(n.msg, what, Int(x) if kind == BOARD_PICK else 0, x, y, dx, dy, zoom))
             if kind == BOARD_LIVE:  # (a free Board's drag, every motion frame: y = the handle, 8 = the title band: a move)
-                var live = n.msg if Int(y) % 100 == 8 else n.msg2
+                var live = n.msg if Int(y) % 100 == 8 else n.msg2  # (y: the handle + NO_SNAP + FIRST_FRAME, mojoui.freeboard)
                 if live == 0:
                     return Diff(False, [])
                 return self.dispatch(Event(live, "live", Int(x), x, y, dx, dy, zoom))

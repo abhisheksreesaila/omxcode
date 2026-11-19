@@ -12,6 +12,8 @@ from mojoui.view import View, BUTTON, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, A
 from mojoui.paragraph import link_href
 from mojoui.a11y import explicit_name
 from mojoui.diff import Diff, SET_SIZE, placed
+from mojoui.view import BOARD
+from mojoui.freeboard import is_free
 from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
@@ -72,18 +74,36 @@ def view_to_json(v: View) -> String:
     return out + "]"
 
 
+def _mark_inside(v: View, i: Int, mut marks: List[Bool]):
+    marks[i] = True
+    for c in v.nodes[i].children:
+        _mark_inside(v, c, marks)
+
+
+def in_free_cards(v: View) -> List[Bool]:
+    """Which nodes are a free canvas's card or inside one (mojoui.freeboard)."""
+    var out = List[Bool](length=len(v.nodes), fill=False)
+    for n in v.nodes:
+        if n.kind == BOARD and is_free(n.text):
+            for c in n.children:
+                _mark_inside(v, c, out)
+    return out^
+
+
 def sizes_only(d: Diff, shown: View) -> Bool:
     """A partial rebuild that keeps every node where it was (nothing came, went or moved between stacks) and whose sizes
-    are all a Board's cards' (a free canvas's live resize, mojoui.freeboard): the web takes it as patches, so a card being
-    dragged isn't swapped out under the pointer (a whole new screen would restart its canvases every frame)."""
+    are all a Board's cards' or, on a free canvas, anything's inside a card (a live resize also sizes the card's canvas, its
+    grid: mojoui.freeboard): the web takes it as patches, so a card being dragged isn't swapped out under the pointer (a
+    whole new screen would restart its canvases every frame and lose the drag's pointer capture)."""
     if not d.partial or len(d.resync) > 0 or len(d.kept) != len(shown.nodes):
         return False
     for j in range(len(d.kept)):
         if d.kept[j] != j:
             return False
     var on_board = placed(shown)
+    var inside = in_free_cards(shown)
     for p in d.patches:
-        if p.op == SET_SIZE and not on_board[p.node]:
+        if p.op == SET_SIZE and not on_board[p.node] and not inside[p.node]:
             return False
     return True
 

@@ -88,7 +88,7 @@ from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MA
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
 from mojoui.tiling import Rect as TileRect
 from mojoui.boardtiles import BoardTiles
-from mojoui.freeboard import FreeBoard, FreeCanvas, arrange_menu, ACTS, ACT_FOCUS, ACT_MOVE, ACT_FILL, ACT_TIDY, ACT_ZOOM_OUT, ACT_ZOOM_IN, ACT_ZOOM_RESET, HANDLE_MOVE, NO_SNAP, zoom_by
+from mojoui.freeboard import HOST_ZOOMS, FreeBoard, FreeCanvas, arrange_menu, ACTS, ACT_FOCUS, ACT_MOVE, ACT_FILL, ACT_TIDY, ACT_ZOOM_OUT, ACT_ZOOM_IN, ACT_ZOOM_RESET, HANDLE_MOVE, NO_SNAP, zoom_by
 from mojoui.sheetpage import (SheetObject, compute, shape_of, chart_view, chart_text, object_card, readout, free_spot, object_title, groups_of, OBJ_CHART, OBJ_PIVOT,
                               CHART_BAR, CHART_LINE, HEADER_H, chart_words, chart_choices, apply_choice, chosen, chart_sentence, SLOT_NAMES, slot_text,
                               number_columns, text_columns, COMBINES, ORDERS, TOPS, SLOT_COMBINE, SLOT_VALUE, SLOT_GROUP, SLOT_ORDER, SLOT_TOP,
@@ -100,7 +100,7 @@ from mojoui.chartask import ask, ask_reply
 from mojoui.reportpage import (ReportTile, ReportFilter, ReportPage, KpiTile, ChartTile, AddTile, new_tile, compute_tile, kpi_of, tile_fact, TILE_SUM, TILE_AVERAGE, TILE_COUNT,
                                TILE_CHART, TILE_DISTINCT, TILE_MEDIAN, TILE_LAST, TILE_NAMES)
 from mojoui.chartview import ChartView
-from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
+from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE, HOVER
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
@@ -834,7 +834,7 @@ struct Main(App):
                 self.fb = FreeBoard(FREE_MIN_W, FREE_MIN_H)
                 self.free = len(canvas) >= 6  # (goal 78: a free canvas as it was saved; an older file opens tiled, as before)
                 if self.free:
-                    self.fb.zoom = canvas[0]
+                    self.fb.set_zoom(canvas[0])
                     self.table_x = canvas[1]
                     self.table_y = canvas[2]
                     self.table_w = canvas[3]
@@ -2979,15 +2979,17 @@ struct Main(App):
             if self.trace:
                 print("TILES: " + String(e), flush=True)
 
-    def place_cards(mut self, places: List[TileRect]):
-        """Every card to its place (only the ones that moved: a card's version changes when it does)."""
+    def place_cards(mut self, places: List[TileRect], redraw: Bool = True):
+        """Every card to its place (only the ones that moved: a card's version changes when it does). `redraw` False: the
+        canvases keep their versions (a free canvas's drag: a canvas whose size changed is drawn again by its host anyway,
+        and the others don't change; goal 78 review 1)."""
         var cur = self.card_rects()
         var moved = False
         for i in range(min(len(places), len(cur))):
             if not (places[i] == cur[i]):
                 self.set_card_rect(i, places[i])
                 moved = True
-        if moved:
+        if moved and redraw:
             self.version += 1
 
     def first_number(self) -> Int:
@@ -4140,7 +4142,7 @@ struct Main(App):
                     self.select_cell(self.grid.cur_row, self.grid.cur_col)
                 except:
                     self.message = self.frame.name(self.grid.cur_col) + " can't be empty yet: type a value"
-            if action != 0:
+            if action != 0 and event.number != HOVER:  # (the pointer moving over links redraws only the grid: grid.version)
                 self.version += 1
         elif m == CELL_COMMIT or m == FX_COMMIT:
             if m == FX_COMMIT and not self.grid.editing:
@@ -4425,8 +4427,10 @@ struct Main(App):
             self.inserting = 0
             self.version += 1
         elif (m == MOVE or m == RESIZE) and self.free:  # (the free canvas, mojoui.freeboard: live drags, zoom, what shows)
+            if event.text != "live" and event.text != "":  # (anything but a drag between a drag's frames: the next drag starts afresh)
+                self.fb.end()
             if event.text == "zoom":
-                self.fb.zoom = zoom_by(self.fb.zoom, event.zoom)
+                self.fb.set_zoom(zoom_by(self.fb.zoom, event.zoom))
             elif event.text == "view":
                 self.fb.view = TileRect(Int(event.x), Int(event.y), Int(event.dx), Int(event.dy))
                 return
@@ -4436,14 +4440,14 @@ struct Main(App):
                 var k = event.number
                 var rects = self.card_rects()
                 if 0 <= k < len(rects):
-                    var handle = HANDLE_MOVE if m == MOVE else Int(event.y) % 100
-                    rects[k] = self.fb.drag(k, handle, Int(event.dx), Int(event.dy), rects, Int(event.y) < NO_SNAP)
+                    rects[k] = self.fb.on_drag(k, m == MOVE, event.y, event.dx, event.dy, rects)
                     if k == 0:
                         self.table_touched = True
                     if event.text != "live":
                         self.fb.end()
-                    self.place_cards(rects)
-            self.version += 1
+                    self.place_cards(rects, False)  # (no canvas version bumps on a drag: every grid and chart would draw again per frame)
+                return
+            self.version += 1  # (a zoom: the web draws its canvases again at the new density)
         elif m == MOVE or m == RESIZE:  # a card dragged by its title bar (dropped on another: they swap) or by its corner
             var tags = self.card_tags()
             var rects = self.card_rects()
@@ -5361,9 +5365,7 @@ struct Main(App):
         var view: List[RibbonGroup] = [ribbon_group("Panels", panels^),
                                        ribbon_group("Tabs", [ribbon_tool("Sheet", "sheet", SHOW_SHEET, "The sheet", on=on_sheet), ribbon_tool("Report", "chart-bar", SHOW_REPORT, "The Report", on=not on_sheet),
                                                              ribbon_tool("Rename tab", "rename", RENAME_TAB, "Rename the tab you're on")]),
-                                       ribbon_group("Canvas", [ribbon_tool("Tidy", "layout-grid", ARRANGE + ACT_TIDY, "Tile the cards side by side, nothing overlapping (Super+T or Alt+T)"),
-                                                               ribbon_tool("Zoom out", "zoom", ARRANGE + ACT_ZOOM_OUT, "See more of the canvas (Ctrl+- or Ctrl+wheel)"),
-                                                               ribbon_tool("Actual size", "square", ARRANGE + ACT_ZOOM_RESET, "Back to 100 % (Ctrl+0)")]),
+                                       ribbon_group("Canvas", self.canvas_tools()),
                                        ribbon_group("App", [ribbon_tool("Settings", "gear", SETTINGS, "Settings (Ctrl+,)"), ribbon_tool("About", "file", ABOUT, "About omxplorer")])]
         var tabs: List[RibbonTab] = [ribbon_tab("Home", home^), ribbon_tab("Insert", insert^), ribbon_tab("Data", data^), ribbon_tab("Format", fmt^), ribbon_tab("View", view^)]
         if not on_sheet:  # (the Report's own tools: tiles of a column, the filter every tile reads)
@@ -5372,6 +5374,14 @@ struct Main(App):
                 tiles.append(ribbon_tool(t.title, t.icon, t.message, t.tip))
             tabs.append(ribbon_tab("Report", [ribbon_group("Tiles", tiles^, self.report_controls()), ribbon_group("Filter", [], self.filter_controls())], contextual=True))
         return tabs^
+
+    def canvas_tools(self) -> List[RibbonTool]:
+        """View ▸ Canvas: Tidy, and the zoom where the host draws the canvas zoomed (mojoui.freeboard.HOST_ZOOMS)."""
+        var out: List[RibbonTool] = [ribbon_tool("Tidy", "layout-grid", ARRANGE + ACT_TIDY, "Tile the cards side by side, nothing overlapping (Super+T or Alt+T)")]
+        if HOST_ZOOMS:
+            out.append(ribbon_tool("Zoom out", "zoom", ARRANGE + ACT_ZOOM_OUT, "See more of the canvas (Ctrl+- or Ctrl+wheel)"))
+            out.append(ribbon_tool("Actual size", "square", ARRANGE + ACT_ZOOM_RESET, "Back to 100 % (Ctrl+0)"))
+        return out^
 
     def ribbon(self) -> View:
         """The sheet's ribbon (mojoui.ribbon): the mark and the File menu leading, the tabs, the status island trailing."""

@@ -24,7 +24,7 @@ from mojoui.view import (
 from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES
 from mojoui.boardlook import board_gtk_css
-from mojoui.freeboard import handle_at, handle_cursor, handle_point, handle_of, handle_name, board_zoom, is_free, HANDLE_NONE, HANDLE_MOVE, NO_SNAP
+from mojoui.freeboard import handle_at, handle_cursor, handle_point, handle_of, handle_name, board_zoom, is_free, HANDLE_NONE, HANDLE_MOVE, NO_SNAP, FIRST_FRAME
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
@@ -2776,6 +2776,7 @@ struct GtkHost[A: App](Movable):
     def apply_patches(mut self, patches: List[Patch], self_addr: Int, fresh: List[Bool] = List[Bool]()):
         """The patches onto the widgets; then every long list's rows again (fresh: nodes just built, which skip that)."""
         set_busy(True)
+        var sized_any = False
         for p in patches:
             var w = self.widgets[p.node]
             var kind = self.rt.shown.nodes[p.node].kind
@@ -2861,6 +2862,7 @@ struct GtkHost[A: App](Movable):
                 external_call["g_object_unref", NoneType](tex)
             elif p.op == SET_SIZE:
                 self.resize_widget(p.node)
+                sized_any = True
             elif p.op == SET_TIP:  # a canvas's words (its tooltip and accessible name), in place: the picture stays
                 var tip = p.text
                 external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
@@ -2900,6 +2902,8 @@ struct GtkHost[A: App](Movable):
                     _ = external_call["g_timeout_add", c_uint](c_uint(40), on_zoom_scroll[Self.A], self_addr)
                 _ = len(was)
             # SET_MSG needs nothing: events look the message up in rt.shown.
+        if sized_any:  # (a view resized in place, a free card's live resize: its canvases draw again at their new size on the next ticks,
+            self.arm_all(self_addr)  # with no new version; the others are idle at once)
         # Ask for the visible rows of every long list again: row text isn't part of the
         # view, so an edit that keeps the row count wouldn't show otherwise. GTK only
         # re-binds rows whose items changed, so the list gets fresh items (scroll is kept).
@@ -5063,6 +5067,12 @@ def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint
         if focus != 0 and (external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_editable_get_type", Int]()) != 0
                            or external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_text_view_get_type", Int]()) != 0):
             return 0  # a text field's own copy, cut, paste, select all and undo
+    var typed_in = external_call["gtk_root_get_focus", Int](host[].window)
+    if typed_in != 0 and (external_call["g_type_check_instance_is_a", c_int](typed_in, external_call["gtk_editable_get_type", Int]()) != 0
+                          or external_call["g_type_check_instance_is_a", c_int](typed_in, external_call["gtk_text_view_get_type", Int]()) != 0):
+        var key = key_name(Int(keyval))
+        if key.startswith("Arrow") or key == "Home" or key == "End" or key.startswith("Page") or ((Int(state) & 8) != 0 and (Int(state) & 4) == 0 and key.byte_length() == 1):
+            return 0  # (a field's own word jumps and selections: never a canvas's Arrange keys, goal 78)
     for i in range(len(host[].rt.shown.nodes)):
         ref n = host[].rt.shown.nodes[i]
         if n.kind == ITEM and len(n.options) > 0 and n.options[0] == name and n.value & DISABLED == 0 and n.msg != 0:
@@ -5208,11 +5218,12 @@ def free_hit[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: Int, x
     return (-1, HANDLE_NONE)
 
 
-def free_send[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], bi: Int, kind: Int, off_x: Float64, off_y: Float64, alt: Bool, host_addr: Int):
-    """A free canvas's drag to the app: a motion frame (BOARD_LIVE) or its end (PAN / ZOOM), in the page's points."""
+def free_send[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], bi: Int, kind: Int, off_x: Float64, off_y: Float64, alt: Bool, host_addr: Int, first: Bool = False):
+    """A free canvas's drag to the app: a motion frame (BOARD_LIVE; `first`: the drag's first, it starts afresh) or its end
+    (PAN / ZOOM), in the page's points."""
     var b = host[].boards[bi].copy()
     var sc = board_scale(host[].rt.shown.nodes[b.board])
-    var handle = b.handle + (NO_SNAP if alt or host[].test_alt else 0)
+    var handle = b.handle + (NO_SNAP if alt or host[].test_alt else 0) + (FIRST_FRAME if first else 0)
     var d = host[].rt.gesture(b.board, kind, Float64(b.index), Float64(handle), off_x / sc, off_y / sc, 1)
     host[].apply(d, host_addr)
 
@@ -5326,14 +5337,15 @@ def on_board_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host
     if bi < 0:
         return
     if is_free(host[].rt.shown.nodes[host[].boards[bi].board].text):  # (a free canvas: the app places the card on every frame)
-        if not host[].boards[bi].live:
+        var first = not host[].boards[bi].live
+        if first:
             if not host[].boards[bi].resizing and abs(off_x) + abs(off_y) < 4:  # (a press on the title band: a click until it moves)
                 return
             host[].boards[bi].live = True
             external_call["gtk_gesture_set_state", c_int](drag, c_int(1))
             ref lb = host[].boards[bi]  # (the dragged card on top)
             external_call["gtk_widget_insert_before", NoneType](lb.widget, lb.fixed, Int(0))
-        free_send[A](host, bi, BOARD_LIVE, off_x, off_y, (mods_of(drag) & ALT) != 0, host_addr)
+        free_send[A](host, bi, BOARD_LIVE, off_x, off_y, (mods_of(drag) & ALT) != 0, host_addr, first)
         return
     ref b = host[].boards[bi]
     ref n = host[].rt.shown.nodes[b.node]
@@ -7127,10 +7139,21 @@ def run_step[A: App](host_addr: Int, step: String):
             while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
                 pump()
             var f = Float64(k) / Float64(steps)
+            var draws0 = 0
+            for ref cv in host[].canvases:
+                draws0 += cv.draws
+            var t0 = perf_counter_ns()
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx * f * sc, dy * f * sc)
+            var t1 = perf_counter_ns()  # (the app's update, view, diff and the patches applied)
             settle()
             pump()
             wait_frame(host[].window)  # (laid out: what a person sees on this frame)
+            var t2 = perf_counter_ns()
+            var draws1 = 0
+            for ref cv in host[].canvases:
+                draws1 += cv.draws
+            print("LIVEMS: " + kv[0] + " " + String(k) + " update " + one_decimal(Float32(Float64(t1 - t0) / 1e6)) + " frame "
+                  + one_decimal(Float32(Float64(t2 - t0) / 1e6)) + " draws " + String(draws1 - draws0) + " of " + String(len(host[].canvases)), flush=True)
             for ref b in host[].boards:  # (the card as GTK laid it out on this frame, in page points)
                 if host[].rt.shown.nodes[b.node].name == tag:
                     var rect = List[Float32](length=4, fill=0)
