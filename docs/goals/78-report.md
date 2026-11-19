@@ -56,7 +56,7 @@ model alone.
    frame, so the "view" event a scroll sends (GTK 120 ms after it stops, the web 150 ms) rebased the drag on the already-moved rect.
    Now only a zoom ends a drag; FIRST_FRAME starts each new one. M1 scrolls and sends "view" half way through a chart's E drag and the
    table's S drag (GTK: `freedrag …,alt+view`; the web: a real scroll and a 400 ms hold, button down): every frame equals resized(start,
-   total offset). With the round-1 line put back the GTK proof fails (the chart 540 → 630 instead of 570) (D-7827).
+   total offset). With the round-1 line put back the GTK proof fails (the chart 540 → 630 instead of 570); that run was redone in round 3 with its console saved: `build/g78/r4-gtk-heights-with-round1-line.txt` (the verdict) and `.log` (the host's output) (D-7827).
 2. **Web size marks carry the screen version** (data-v); BOARD_JS drops a mark from another screen. M1 appends a stale and a current
    mark in the page: the stale one is dropped, the current one applied (D-7828).
 3. **Thicker proofs**: after every web drag the table's grid and the chart's canvas keep the distance to their card's height they had
@@ -67,6 +67,31 @@ Round 2's runs (consoles saved): `build/g78/r3-m123.txt` (78-check M1, M2, M3: *
 **PASS**: save/open, an older .omx tiled, the Settings checkbox, depth on both modes, the DROID story; BLOCKED only because the chain
 was skipped with G78_SKIP_76=1). The chain wasn't rerun for round 2: its changes touch only free-canvas drags and the web's size
 marks, which goal 76 M1/M2 and goal 73 M1–M3 (M2, M3 run tiled) don't exercise; they passed on round 1's fixes (above and below).
+
+## Review round 3 (NEEDS WORK) and what changed
+
+1. **A zoom mid-drag jumped the card by its whole offset**: omxplorer ended the drag on a zoom, and the next frame rebased on the moved
+   rect while the offset was still counted from the press. Now no board event ends a drag; the hosts restart the press when the zoom
+   changes mid-drag: from the last frame they sent, at the new zoom, as a FIRST_FRAME (GTK keeps the zoom the offsets are measured at,
+   their base and the last offset sent; the web keeps z, x0, y0 the same way). **The model**: frames up to the zoom (frame m) are
+   start + pointer / old zoom; frame k after it is frame m's rect + (pointer since frame m) / new zoom (the app truncates to whole
+   points). M1 Ctrl+wheels to 91 % half way through a chart's E drag on GTK (`freedrag …,alt+zoom`) and the web (Ctrl held, a real
+   wheel notch, the button down): e.g. GTK frame 3 = 660 + int(30 / 0.91) = 692, frame 4 = 660 + int(60 / 0.91) = 725. The
+   rebase unit test no longer locks in the doubled offset: it shows a FIRST_FRAME restart with offset 0 keeps the card, then only
+   the movement since counts (D-7830).
+   On the web this also found a second bug: the wheel lost the board's pointer capture in Chromium with no lostpointercapture or
+   pointerup, the next move went to a canvas, and the drag stalled with no end. The free drag now follows the pointer on the window
+   for its whole life (D-7831).
+2. **The web's mid-drag scroll proof could pass without scrolling** (and did: on its first run the page was already at its bottom).
+   It now scrolls 40 pt whichever way the page can go, and fails unless scrollTop changed by 40 and a request hook counted at least
+   one "view" post before the next frame (D-7832).
+3. The round-1-line failure is now saved (see round 2, item 1). With that line back, the zoom drag fails too.
+
+Round 3's runs (consoles saved): `build/g78/r4-m123.txt` (78-check M1, M2, M3: **PASS**; perf with 10 cards: update median 0.4 ms,
+p95 0.5 ms, one canvas drawn per frame, 0 SLOW; the web scroll step 630 → 590 and 0 → 40 pt with one view post each) and
+`build/g78/r4-m4.txt` (M4's own parts **PASS**: save/open, an older .omx tiled, the Settings checkbox, depth on both modes, the DROID
+story, which drags; BLOCKED only because goal 76's chain was skipped with G78_SKIP_76=1: round 3 changes only free-canvas drags, which
+goal 76 M1/M2 and goal 73 M1–M3 don't exercise).
 
 ## Results (78-check)
 
