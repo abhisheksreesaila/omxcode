@@ -106,7 +106,7 @@ def group_view(g: RibbonGroup, compact: Bool) -> View:
     var tools = HStack(row^, spacing=2).align(CENTER)
     if compact:
         return tools^.tag("ribbon-group")
-    return VStack(tools^, Spacer(), Text(g.caption, CAPTION).tag("ribbon-caption"), spacing=0).align(CENTER).height(RIBBON_BAND_H - 8).tag("ribbon-group")
+    return VStack(tools^, Spacer(), HStack(Text(g.caption, CAPTION).tag("ribbon-caption")), spacing=0).align(CENTER).height(RIBBON_BAND_H - 8).tag("ribbon-group")
 
 
 def band_view(tab: RibbonTab, shown: Bool, compact: Bool) -> View:
