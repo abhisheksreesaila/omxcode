@@ -151,7 +151,7 @@ CARDS_JS = """() => { const b = document.querySelector('.board'), sc = b.parentE
            guides: [...b.querySelectorAll(':scope > .object[data-tag=board-guide]')].map(e => [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]).filter(g => g[0] >= 0) }; }"""
 
 
-def web_drag(page, tag, handle, dx, dy, steps=6, alt=False, shot=None, read=None, mid=None):
+def web_drag(page, tag, handle, dx, dy, steps=6, alt=False, shot=None, read=None, mid=None, before_up=None):
     """Card `tag` grabbed by `handle` with the real mouse (where window.mojouiFreeHandle says a hand grabs it), moved dx, dy in
     `steps` moves (Alt held: no snap), let go. Returns (the cursor there, [each frame's card box (x, y, w, h) in page points])."""
     page.evaluate("""([t, h, dx, dy]) => { const sc = document.querySelector('.board').parentElement, v = sc.getBoundingClientRect(), p = window.mojouiFreeHandle(t, h);
@@ -185,6 +185,8 @@ def web_drag(page, tag, handle, dx, dy, steps=6, alt=False, shot=None, read=None
             page.screenshot(path=str(shot))
         if mid and k == steps // 2:  # (something happens half way, the button still held: a scroll, a pause)
             mid(page)
+    if before_up:  # (something happens after the last frame, the button still held, then the release with no move: a zoom)
+        before_up(page)
     page.mouse.up()
     if alt:
         page.keyboard.up("Alt")

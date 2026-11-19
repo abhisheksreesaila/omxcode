@@ -333,6 +333,12 @@ def web():
           return { before, stale, fresh }; }""")
         seen["hdrags"] = hs
         seen["h1"] = page.evaluate(c.CARDS_JS)
+        # (review 4: a Ctrl+wheel after the last frame, then a release with no move: the card stays where that frame left it)
+        zn = len(zooms)
+        _, zf = c.web_drag(page, "chart0", "e", 60, 0, steps=STEPS, alt=True, before_up=wheel_zoom)
+        page.wait_for_timeout(400)
+        seen["zoomend"] = {"last": list(zf[-1]), "after": list(page.evaluate(c.CARDS_JS)["cards"]["chart0"][:4]), "zoomed": len(zooms) > zn,
+                           "zoom": zooms[-1] if zooms else None}
         inner = page.evaluate("() => { const o = document.querySelector('.board > .object[data-tag=chart0]'), cv = o.querySelector('[data-kind=canvas]');"
                               " return [o.offsetHeight, cv ? cv.offsetHeight : -1]; }")
         seen["inner"] = inner
@@ -368,6 +374,9 @@ def web():
             probs.append(f"web: {tag} ended at {endc[tag]}, its last frame said {final[tag]}")
     if seen["inner"][1] <= 0 or seen["inner"][1] > seen["inner"][0]:
         probs.append(f"web: chart0's canvas {seen['inner'][1]} tall in a {seen['inner'][0]} card")
+    ze = seen["zoomend"]
+    if not ze["zoomed"] or ze["zoom"] in (None, wz) or max(abs(x - y) for x, y in zip(ze["last"], ze["after"])) > 2:
+        probs.append(f"web: zoom ({wz} -> {ze['zoom']}) after the last frame, then a release: chart0 at {ze['after']}, its last frame said {ze['last']}")
     mk = seen["marks"]
     if mk["stale"] != [mk["before"], 0] or mk["fresh"] != "333px":
         probs.append(f"web size marks: a stale one left the grid at {mk['stale']} (was {mk['before']!r}), a current one set {mk['fresh']!r} (want 333px)")

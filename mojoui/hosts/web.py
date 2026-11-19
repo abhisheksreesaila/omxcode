@@ -625,19 +625,20 @@ BOARD_JS = r"""
       e.preventDefault(); e.stopPropagation();  // (an edge is the canvas's, not the card content's)
       let z = zoomOf(board), x0 = e.clientX, y0 = e.clientY, lastX = x0, lastY = y0;
       const index = Number(obj.dataset.index);
-      dragging = { obj, h, live: false };
+      const d = { obj, h, live: false }; dragging = d;  // (this drag's own state: a second touch's drag never shares it, review 4)
       board.setPointerCapture(e.pointerId);
       let sent = 0, first = true;
       const pid = e.pointerId;
       const move = ev => {
         if (ev.pointerId !== pid) return;
+        if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) { up(ev); return; }  // (a release the page never saw: Alt+Tab mid-drag)
         if (zoomOf(board) !== z) {  // (the zoom changed mid-drag: the press starts again where the last frame sent was, at the new
           z = zoomOf(board); x0 = lastX; y0 = lastY; first = true;  // zoom; the app rebases on the card as that frame left it, review 3)
         }
         const dx = (ev.clientX - x0) / z, dy = (ev.clientY - y0) / z;
-        if (!dragging.live) {
+        if (!d.live) {
           if (h === HMOVE && Math.abs(dx) + Math.abs(dy) < 4) return;
-          dragging.live = true;
+          d.live = true;
           board.querySelectorAll(':scope > .object.raised').forEach(o => o.classList.remove('raised'));
           obj.classList.add('raised');  // (the dragged card on top)
         }
@@ -648,10 +649,11 @@ BOARD_JS = r"""
       const up = ev => {
         if (ev.pointerId !== pid) return;
         window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true);
-        const was = dragging; dragging = null;
-        if (!was.live) return;
-        if (zoomOf(board) !== z) { z = zoomOf(board); x0 = lastX; y0 = lastY; }  // (a zoom since the last frame: from that frame, as move())
-        post(h === HMOVE ? PAN : ZOOM, index, h + (ev.altKey ? 100 : 0) + (first ? 1000 : 0), (ev.clientX - x0) / z, (ev.clientY - y0) / z);
+        if (dragging === d) dragging = null;
+        if (!d.live) return;
+        let restart = false;  // (a zoom since the last frame: the end starts again from that frame, flagged FIRST_FRAME as move()
+        if (zoomOf(board) !== z) { z = zoomOf(board); x0 = lastX; y0 = lastY; restart = true; }  // does, or the card went back, review 4)
+        post(h === HMOVE ? PAN : ZOOM, index, h + (ev.altKey ? 100 : 0) + (restart ? 1000 : 0), (ev.clientX - x0) / z, (ev.clientY - y0) / z);
       };
       // (followed on the window, not only through the board's pointer capture: a Ctrl+wheel mid-drag lost the capture without a
       // lostpointercapture or a pointerup in Chromium, and the drag stalled with no end; review 3)
