@@ -265,7 +265,20 @@ def m7d():
 
 
 def m7e():
-    return ("BLOCKED", "sides, pins and charms: not built yet")
+    """Sides, pins and charms (mojoui.stagefeed, livetiles' drop zones and phone columns, mojoui.charms): the unit tests, examples/stage
+    built for Linux and the web, then on GTK (headless) and the web host (headless Chromium, fixed waits) from the app's own record: weather
+    in Today on a plain morning and the large tile on the rain day; a synthetic drag pins the to-do tile (off the grid, 0 holes, in Pinned)
+    and Unpin brings it back; each occasion's charm on its tile (the record) and in the picture (differs from charms off); the Live timer
+    row changes over 2 s; at 390 x 844 two columns with no words overlapping; pictures docs/goals/77/m7e-*.png.
+    scripts/g77_stage_sides_check.py."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts/g77_stage_sides_check.py"
+    spec = importlib.util.spec_from_file_location("g77_stage_sides_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.run()
 
 
 def m7f():

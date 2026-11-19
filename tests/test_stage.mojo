@@ -3,7 +3,7 @@
 # the Stage and its parts set styled by omxqua's Counter family (light and night).
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.view import View, Text, Canvas, VStack, HStack, SCROLL, NO_MSG
-from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat
+from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
 from mojoui.stage import stage_layout, stage_compact, STAGE_PHONE, STAGE_NARROW
 from themes.omxqua import omxqua_counter, counter_ground, counter_shade
 
@@ -28,8 +28,8 @@ def screen(width: Int) -> View:
     var compact = stage_compact(width)
     var top = HStack(StageAvatar("All", 0, 1), StageAvatar("A", 2, 2), StagePill("settings", "Settings", 3, compact), spacing=8)
     var left = VStack(StageClock("10:59", "Wednesday, November 18", "9° · clear", compact), StageLabel("pin", "Pinned"),
-                      StageList([StageCard("map-pin", "Pinned", "A day in Lisbon", "3 stops", 3)], compact), spacing=10)
-    var right = VStack(StageLabel("zap", "Live"), StageList([StageRow("timer", "Pasta", "7:20", 4)]), spacing=10)
+                      StageList([StageCard("map-pin", "Pinned", "A day in Lisbon", "3 stops", 3, on_unpin=9)], compact), StageNote("Nothing else today"), spacing=10)
+    var right = VStack(StageLabel("zap", "Live"), StageList([StageRow("timer", "Pasta", "7:20", 4), StageRow("car", "Traffic", "Roads are clear", 3)]), spacing=10)
     var chat = StageChat(Canvas(2, 1), "", "Ask omx, or just say “omx”", 4, 5, 6)
     return Stage(top, left, Canvas(1, 1), right, chat, width)
 

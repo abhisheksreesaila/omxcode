@@ -548,6 +548,7 @@ def counter_roles(p: Palette) -> List[Surface]:
               "stage-live"]:  # (containers: a side's scroller, M7e's sections)
         out.append(box(r, 0, -1, -1, -1))
     out.append(words("stage-note", 12.5, 0, p.ink2))  # (an empty list's line: quiet, as a card's sub line)
+    out.append(box("stage-drop", mix(p.card, p.ink, 0.10) if not dark else mix(p.card, p.ink, 0.16), 18, -1, -1))  # (Pinned while a tile is dragged over it)
     var unpin = Surface("stage-unpin", 0, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
                         icon_size=15, icon_ink=p.ink2)
     out.append(unpin^)

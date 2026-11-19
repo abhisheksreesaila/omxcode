@@ -200,10 +200,11 @@ def StageCard(icon: String, head: String, title: String, sub: String = "", hue: 
     var items = List[View]()
     var head_row = List[View]()
     head_row.append(_kind(icon, hue))
-    head_row.append(Text(capitals(head)).tag("stage-card-head"))
-    if on_unpin != NO_MSG:
-        head_row.append(Spacer())
+    if on_unpin != NO_MSG:  # (the head grows to the button: GTK measures its capitals without their tracking, D-7789b)
+        head_row.append(Text(capitals(head)).grow().tag("stage-card-head"))
         head_row.append(Button("Unpin " + head, on_unpin, ICON_ONLY, "pin-off").width(28).height(28).tag("stage-unpin"))
+    else:
+        head_row.append(Text(capitals(head)).tag("stage-card-head"))
     items.append(HStack(head_row^, spacing=8).align(CENTER).fill())
     items.append(Text(title).tag("stage-card-title"))
     if sub != "":

@@ -1306,7 +1306,7 @@
    },
    "LiveTiles": {
     "type": "object",
-    "description": "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint, an icon (car, cloud, todo, cal, gift, cam, timer, plane, home), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.",
+    "description": "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint (a name: the theme's palette says what it looks like), an icon (a Lucide name: car, cloud, cloud-rain, list-todo, calendar, gift, camera, timer, plane, home, trophy, utensils, backpack), a charm for an occasion (bag, pennant, hat, umbrella, tag, turkey or pin), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.",
     "properties": {
      "component": {
       "const": "LiveTiles"

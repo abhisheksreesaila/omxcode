@@ -4,7 +4,7 @@
 # corner grip. One drawing serves GTK, the web host and the Mac: every host only shows the Canvas's pixels.
 #
 #   var tiles = LiveTiles()
-#   var t = Tile("traffic", hx("#15803D"), "Traffic", "Leave by 8:05", "Bridge is slow", icon="car")
+#   var t = Tile("traffic", 0, "Traffic", "Leave by 8:05", "Bridge is slow", icon="car"); t.tint = "green"   (a palette tint)
 #   t.faces.append(Face("26 min to school", "via the river road")); t.why = "you leave in 20 minutes"; t.actions = [...]
 #   tiles.set_tiles(list)                 # most urgent first; a tile with `big` makes the layout [xl, w, w]; call again
 #                                         # whenever importance or contents change: what moved glides there (water)
@@ -12,8 +12,13 @@
 #   update: G -> tiles.gesture(event.number, event.x, event.y)       (PRESS, PAN, RELEASE, TAP)
 #           F -> _ = tiles.frame(event.number)                        (microseconds; True while something moves)
 #           for r in tiles.take_results(): r.kind = TAPPED | ACTION (r.text = the action) | REORDERED (r.text = the ids in
-#                                          the new order, comma-separated) | RESIZED (r.text = "s", "w", "l", "xl")
-#   draw:   tiles.draw(surface, TileLook.of(palette), font)          (fills the canvas with look.ground first)
+#                                          the new order, comma-separated) | RESIZED (r.text = "s", "w", "l", "xl") |
+#                                          DROPPED (let go over a drop zone: r.text = its name; the caller takes the tile)
+#   tiles.drop_zone("pinned", Box(…))  a place outside the grid (canvas points; a side column) a tile can be dragged onto;
+#                                      tiles.hover_zone names the one a dragged tile is over (light it up)
+#   tiles.set_columns(2)               a phone: two columns of 112 pt rows (compact_height() says how tall the canvas is)
+#   draw:   tiles.draw(surface, TileLook.of(palette), font)          (fills the canvas with look.ground first; a tile's
+#           tint, its Lucide icon (mojoui.vector) and its charm (mojoui.charms) all take their colours from the palette)
 #   tiles.parts(card, canvas_tag)  -> List[Part]   each tile pointable by its head and id (mojoui.pointer area parts);
 #   tiles.spots(card, canvas_tag)                  ...and reported as moving spots every draw, so the ring follows a glide
 #   tiles.layout() -> TileLayout   ids shown, their sizes and cells, the ids that did not fit (the caller shows them
@@ -69,6 +74,7 @@ comptime GRIP = 30.0  # the corner grip's square, points
 comptime LIFT = 1.04
 comptime FOCUS_LIFT = 1.025  # a tile the pointer is on rises this much (goal 77 M7c, as an Iso block rises: D-7755)
 comptime FADE_FROM = 0.3  # the words stay clear until this far into the water's time
+comptime MIN_AREA = 64.0  # a canvas smaller than this (points, either side) isn't laid out yet: draw() leaves the tiles where they are
 comptime ROW_COMPACT = 112.0  # a phone's rows, points (two columns; the page scrolls: the prototype's grid-auto-rows)
 comptime COMPACT_ROWS = 64  # (rows a phone's grid may use: no tile set comes near it)
 
@@ -1167,8 +1173,11 @@ struct LiveTiles(Copyable, Movable):
 
     def draw(mut self, mut s: Surface, look: TileLook, font: Font):
         var k = s.scale
-        self.set_area(Float64(s.width) / k, Float64(s.height) / k)
         s.fill(look.ground)
+        if Float64(s.width) / k < MIN_AREA or Float64(s.height) / k < MIN_AREA:
+            return  # (a canvas not laid out yet: the web host can ask a 1 x 1 frame of a canvas it just rebuilt; taking that size
+            # would snap every tile to a degenerate grid and back, killing the water motion. As StageTV, D-7813)
+        self.set_area(Float64(s.width) / k, Float64(s.height) / k)
         var still = s.still or self.reduced
         var lay = self.layout()
         self.drawn_ids.clear()
