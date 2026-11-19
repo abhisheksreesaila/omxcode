@@ -165,6 +165,8 @@ def gtk(d):
         "tap:Links", "pause:500", f"regions:{OUT}/gtk-12.json", "tapat:table-telemetry=500,600", "pause:500", "key:table-telemetry=Escape", "pause:500", f"regions:{OUT}/gtk-13.json",  # (round 2: a card's canvas has it)
         "tap:Links", "pause:500", "tapat:grid=500,300", "pause:300", "typekeys:grid=7", "pause:300", "key:grid=Escape", "pause:500",
         f"regions:{OUT}/gtk-14.json", "key:grid=Escape", "pause:500", f"regions:{OUT}/gtk-15.json",  # (round 3: Esc cancels an edit first, the panel stays; the next Esc closes it)
+        "tap:Links", "pause:500", f"regions:{OUT}/gtk-16.json", "doubletap:table-telemetry=500,600", "pause:300", "tapat:grid=500,300", "pause:300",
+        "key:grid=Escape", "pause:500", f"regions:{OUT}/gtk-17.json",  # (round 4: a table card's edit left behind never makes the sheet's Esc dead)
         "shortcut:Ctrl+S", "pause:1500",
         "tap:ribbon-tab-home", "pause:300", f"shot:{OUT}/gtk-tab-home.png",
         "tap:ribbon-tab-data", "pause:300", f"shot:{OUT}/gtk-tab-data.png",
@@ -189,7 +191,8 @@ def gtk(d):
                             (6, True, "Ctrl+Shift+I"), (7, False, "Esc on the sheet"), (8, False, "Ctrl+Shift+C (a chart: no panel)"),
                             (10, True, "Insert > Links again"), (11, False, "Esc reaching the window"),
                             (12, True, "Links once more"), (13, False, "Esc in the telemetry card"),
-                            (14, True, "Esc cancelling a cell's edit (the panel stays)"), (15, False, "the next Esc")):
+                            (14, True, "Esc cancelling a cell's edit (the panel stays)"), (15, False, "the next Esc"),
+                            (16, True, "Links again"), (17, False, "Esc on the sheet after a table card's edit")):
         why = geometry(OUT / f"gtk-{k}.json", panel, "GTK " + where)
         if why:
             return why
