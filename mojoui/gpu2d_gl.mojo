@@ -45,6 +45,7 @@ from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
 from mojoui.gpu2d import (Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
+from mojoui.gpu2d_dmabuf import DmabufExport
 
 comptime RING = 6  # textures in the ring: one on screen, one being drawn, the rest waiting for the toolkit to let go
 
@@ -578,6 +579,7 @@ struct GL2D(Movable):
     var gpu_ns: Int  # what the last gpu_time() read
     var poly_groups: Int  # stencil-and-cover groups last frame (fan + cover draws each)
     var draws: Int  # GL draw calls last frame
+    var dmabuf: DmabufExport  # the ring textures as dmabufs, when a host starts it (dmabuf.start; D-7570)
 
     def __init__(out self):
         self.ok = False
@@ -647,6 +649,7 @@ struct GL2D(Movable):
         self.gpu_ns = -1
         self.poly_groups = 0
         self.draws = 0
+        self.dmabuf = DmabufExport(RING)
 
     def at(self, k: Int) -> Int:
         return Int(self.out.unsafe_ptr()) + 8 * k
@@ -869,6 +872,7 @@ struct GL2D(Movable):
         self.next_slot = (pick + 1) % RING
         if self.tex[pick] != 0 and self.tw[pick] == w and self.th[pick] == h:
             return pick
+        self.dmabuf.forget(pick)
         self.delete(F_DELETE_TEXTURES, self.tex[pick])
         self.tex[pick] = self.make_texture(w, h)
         self.tw[pick] = w
@@ -1512,6 +1516,7 @@ struct GL2D(Movable):
         """Every GL object this made (the context current). ok is False afterwards; safe to call twice."""
         if self.fp[F_DELETE_TEXTURES] == 0:
             return
+        self.dmabuf.close()
         for i in range(RING):
             if self.sync[i] != 0:
                 fcall[NoneType](self.f(F_DELETE_SYNC), self.sync[i])

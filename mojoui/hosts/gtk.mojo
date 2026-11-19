@@ -25,7 +25,7 @@ from mojoui.boardlook import board_gtk_css
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
-from mojoui.present import Presenter, gpu_canvas_gate
+from mojoui.present import Presenter, gpu_canvas_gate, fcall
 from mojoui.gpu2d_gl import GPU2D
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
@@ -53,7 +53,7 @@ from mojoui.hosts.web import view_to_json, control_event
 from mojoui.json import Json
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
-from std.math import log2, floor
+from std.math import log2, floor, ceil
 from std.time import perf_counter_ns, sleep
 
 comptime G_APPLICATION_NON_UNIQUE = 32
@@ -546,6 +546,18 @@ struct GtkCanvas(Copyable, Movable):
     var frame_sent_us: Int  # the frame event for this frame time went out early, with the drawing ahead (0: none)
     var bench_draw_ms: Float64  # (framebench) CPU time of this canvas's draws since the step's gesture, and of those that
     var bench_inframe_ms: Float64  # ran inside a frame's paint (already in that frame's paint time)
+    # graphics offload (D-7570): a .gpu() canvas's picture inside a GtkGraphicsOffload (0: none), itself inside a box
+    # whose layout snaps it to whole logical and device pixels (GTK offloads only then); the dmabuf texture handed last
+    # (0: the last picture went as a GL texture) and whether GTK's subsurface showed it, read after the paint (the paint
+    # count it was seen in, -1: not yet); frames refused (GTK composited the dmabuf itself) and a back-off after one
+    var offload: Int
+    var snap: Int
+    var dmabuf_tex: Int
+    var offload_check: Bool
+    var offload_paint: Int
+    var offloaded: Int
+    var offload_refused: Int
+    var offload_backoff: Int
 
     def __init__(out self, node: Int, widget: Int):
         self.node = node
@@ -615,6 +627,14 @@ struct GtkCanvas(Copyable, Movable):
         self.frame_sent_us = 0
         self.bench_draw_ms = 0
         self.bench_inframe_ms = 0
+        self.offload = 0
+        self.snap = 0
+        self.dmabuf_tex = 0
+        self.offload_check = False
+        self.offload_paint = -1
+        self.offloaded = 0
+        self.offload_refused = 0
+        self.offload_backoff = 0
 
 
 struct BoardChild(Copyable, Movable):
@@ -790,6 +810,8 @@ struct GtkHost[A: App](Movable):
     var g2d_ctx: Int
     var g2d_state: Int
     var g2d_wait: Bool
+    var offload_told: Bool  # the one-time line about graphics offload (D-7570) is out; offload_why: why it isn't used
+    var offload_why: String
     var draw_ahead: Bool  # animating GPU 2D canvases draw their next frame after this frame's paint (D-7560; MOJOUI_DRAW_AHEAD=0: off)
     var ahead_input: Bool  # (trial) a GPU 2D canvas input made stale between frames draws then too, not at the next tick
     var ahead_hooked: Bool  # the frame clock's after-paint is connected for it, and an idle turn is queued to draw ahead
@@ -799,6 +821,8 @@ struct GtkHost[A: App](Movable):
     var in_paint: Bool  # between the frame clock's before-paint and after-paint (when paint_timed)
     var paints_done: Int  # frames painted since paint_timed (after-paints); the last 64 paint times by paints_done % 64
     var paint_ring: List[Float64]
+    var paint_counter: List[Int]  # each of those paints' frame counter and when it ended (monotonic µs): framebench reads
+    var paint_end_us: List[Int]  # when the compositor presented it (GTK's frame timings, D-7572)
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -822,6 +846,8 @@ struct GtkHost[A: App](Movable):
         self.g2d = 0
         self.g2d_ctx = 0
         self.g2d_state = 0
+        self.offload_told = False
+        self.offload_why = String("")
         self.g2d_wait = False
         self.draw_ahead = getenv("MOJOUI_DRAW_AHEAD") != "0"
         self.ahead_input = getenv("MOJOUI_DRAW_AHEAD") == "input"
@@ -832,6 +858,8 @@ struct GtkHost[A: App](Movable):
         self.in_paint = False
         self.paints_done = 0
         self.paint_ring = List[Float64](length=64, fill=0)
+        self.paint_counter = List[Int](length=64, fill=-1)
+        self.paint_end_us = List[Int](length=64, fill=0)
         self.partial_ok = getenv("MOJOUI_NO_PARTIAL") == ""
         self.scene_mode = getenv("MOJOUI_SCENE") != "0"  # (the default since goal 27, D-261; 0: the pixel path)
         self.layouts = Dict[String, Int]()
@@ -1694,7 +1722,17 @@ struct GtkHost[A: App](Movable):
             self.widgets[i] = w
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
-            external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
+            var shown = w
+            if node.hint == "gpu" and offload_unavailable() == "":  # (D-7570: the picture can go to the compositor as a
+                # subsurface; a box snaps it to whole logical and device pixels, which GTK's offload needs)
+                var off = external_call["gtk_graphics_offload_new", Int](w)
+                var snap = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
+                external_call["gtk_widget_set_layout_manager", NoneType](snap, external_call["gtk_custom_layout_new", Int](0, on_snap_measure, on_snap_allocate))
+                external_call["gtk_box_append", NoneType](snap, off)
+                self.canvases[ci].offload = off
+                self.canvases[ci].snap = snap
+                shown = snap
+            external_call["gtk_scrolled_window_set_child", NoneType](holder, shown)
             if node.size != 1:  # (no Tab stop of its own, as on the web: only a canvas that takes keys is one; the scrolled
                 external_call["gtk_widget_set_can_focus", NoneType](holder, c_int(0))  # window grabs itself by can-focus, not focusable)
             external_call["gtk_widget_set_size_request", NoneType](holder, c_int(-1 if sized else 320), c_int(-1 if node.sized_height() else 240))
@@ -3234,6 +3272,13 @@ struct GtkHost[A: App](Movable):
                 self.g2d = Int(g)
                 self.g2d_ctx = ctx
                 self.g2d_state = 1
+                var off_why = offload_unavailable()
+                if off_why == "":  # (D-7570: the ring textures as dmabufs, for graphics offload; EGL on GTK's Wayland display)
+                    if not g[].gl.dmabuf.start(external_call["gdk_wayland_display_get_egl_display", Int](display)):
+                        off_why = g[].gl.dmabuf.why.copy()
+                if off_why != "":
+                    self.offload_why = off_why
+                    print("mojoui: .gpu() canvases: no graphics offload (" + off_why + "); frames go to GTK as GL textures", flush=True)
             else:
                 why = g[].gl.why.copy()
                 g[].gl.close()
@@ -3263,7 +3308,7 @@ struct GtkHost[A: App](Movable):
         var slot = self.gpu2d_draw(ci, widget, sc, w, h)
         if slot < 0:
             return False
-        self.gpu2d_hand(widget, slot, w, h, self.gpu2d()[].opaque)
+        self.gpu2d_hand(ci, widget, slot, w, h, self.gpu2d()[].opaque)
         return True
 
     def gpu2d_draw(mut self, ci: Int, widget: Int, sc: Scene, w: Int, h: Int) -> Int:
@@ -3299,8 +3344,13 @@ struct GtkHost[A: App](Movable):
                   + String(g[].gl.draws) + " draws, " + String(g[].gl.poly_groups) + " polygon groups")
         return slot
 
-    def gpu2d_hand(mut self, widget: Int, slot: Int, w: Int, h: Int, opaque: Bool):
-        """A GPU 2D ring texture (drawn, fenced, held) → the picture, as a GdkGLTexture."""
+    def gpu2d_hand(mut self, ci: Int, widget: Int, slot: Int, w: Int, h: Int, opaque: Bool):
+        """A GPU 2D ring texture (drawn, fenced, held) → the picture: as a dmabuf texture GTK offloads to the compositor
+        when it can (offload_hand, D-7570), else as a GdkGLTexture."""
+        if self.offload_hand(ci, widget, slot, w, h, opaque):
+            return
+        self.canvases[ci].dmabuf_tex = 0
+        self.canvases[ci].offload_check = False
         var g = self.gpu2d()
         var b = external_call["gdk_gl_texture_builder_new", Int]()
         external_call["gdk_gl_texture_builder_set_sync", NoneType](b, g[].gl.sync[slot])
@@ -3315,6 +3365,106 @@ struct GtkHost[A: App](Movable):
         external_call["g_object_unref", NoneType](b)
         external_call["gtk_picture_set_paintable", NoneType](widget, tex)
         external_call["g_object_unref", NoneType](tex)
+
+    def offload_hand(mut self, ci: Int, widget: Int, slot: Int, w: Int, h: Int, opaque: Bool) -> Bool:
+        """Graphics offload (D-7570): an opaque frame of a canvas inside a GtkGraphicsOffload, placed on whole logical
+        and device pixels, goes to the picture as a GdkDmabufTexture of the ring texture (exported once per texture),
+        carrying the frame's fence in the dmabuf itself, so GTK attaches it to its subsurface and the compositor waits
+        for the GPU, not GTK. False (the frame goes as a GL texture): no offload widget, no dmabuf export, a see-through
+        frame (straight alpha: the compositor would need the color-representation protocol), the picture not on whole
+        pixels yet (its box is asked to place it again), or a back-off after GTK refused one."""
+        ref c = self.canvases[ci]
+        var g = self.gpu2d()
+        if c.offload == 0 or not g[].gl.dmabuf.ok or not opaque or getenv("MOJOUI_GPU2D_OPAQUE") == "0":
+            return False
+        if c.offload_backoff > 0:
+            c.offload_backoff -= 1
+            return False
+        if not self.on_whole_pixels(widget, w, h):
+            if c.snap != 0:
+                external_call["gtk_widget_queue_allocate", NoneType](c.snap)
+            return False
+        var prev = external_call["gdk_gl_context_get_current", Int]()
+        external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
+        var ok = g[].gl.dmabuf.export(slot, g[].gl.tex[slot]) and g[].gl.dmabuf.fence(slot)
+        if prev != 0:
+            external_call["gdk_gl_context_make_current", NoneType](prev)
+        else:
+            external_call["gdk_gl_context_clear_current", NoneType]()
+        if not ok:
+            self.offload_off("the ring texture's dmabuf: " + g[].gl.dmabuf.why)
+            return False
+        var fourcc = g[].gl.dmabuf.fourcc[slot]
+        if (fourcc & 0xFF) == 0x41:  # 'A' → 'X' (AB24 → XB24): the same layout, its alpha ignored (an opaque frame)
+            fourcc = (fourcc & ~0xFF) | 0x58
+        var b = external_call["gdk_dmabuf_texture_builder_new", Int]()
+        external_call["gdk_dmabuf_texture_builder_set_display", NoneType](b, external_call["gdk_display_get_default", Int]())
+        external_call["gdk_dmabuf_texture_builder_set_width", NoneType](b, c_uint(w))
+        external_call["gdk_dmabuf_texture_builder_set_height", NoneType](b, c_uint(h))
+        external_call["gdk_dmabuf_texture_builder_set_fourcc", NoneType](b, c_uint(fourcc))
+        external_call["gdk_dmabuf_texture_builder_set_modifier", NoneType](b, UInt64(g[].gl.dmabuf.modifier[slot]))
+        external_call["gdk_dmabuf_texture_builder_set_premultiplied", NoneType](b, c_int(1))
+        external_call["gdk_dmabuf_texture_builder_set_n_planes", NoneType](b, c_uint(1))
+        external_call["gdk_dmabuf_texture_builder_set_fd", NoneType](b, c_uint(0), c_int(g[].gl.dmabuf.fd[slot]))
+        external_call["gdk_dmabuf_texture_builder_set_stride", NoneType](b, c_uint(0), c_uint(g[].gl.dmabuf.stride[slot]))
+        external_call["gdk_dmabuf_texture_builder_set_offset", NoneType](b, c_uint(0), c_uint(g[].gl.dmabuf.offset[slot]))
+        var err = List[Int](length=1, fill=0)
+        var tex = external_call["gdk_dmabuf_texture_builder_build", Int](b, on_gl_texture_released, g[].gl.busy_flag(slot), Int(err.unsafe_ptr()))
+        external_call["g_object_unref", NoneType](b)
+        if tex == 0:
+            var msg = c_str(Pointer[Int, MutUntrackedOrigin](unsafe_from_address=err[0] + 8)[]) if err[0] != 0 else String("")
+            _ = len(err)
+            self.offload_off("GTK took no dmabuf texture (" + msg + ")")
+            return False
+        _ = len(err)
+        external_call["gtk_picture_set_paintable", NoneType](widget, tex)
+        external_call["g_object_unref", NoneType](tex)
+        c.dmabuf_tex = tex
+        c.offload_check = True
+        if not self.offload_told:
+            self.offload_told = True
+            print("mojoui: .gpu() canvases: frames go to GTK as dmabufs for graphics offload (" + g[].gl.dmabuf.why + ")", flush=True)
+        return True
+
+    def offload_off(mut self, why: String):
+        """Graphics offload stops for good (the frames go as GL textures), saying why once."""
+        if self.g2d != 0:
+            self.gpu2d()[].gl.dmabuf.ok = False
+        self.offload_why = why
+        print("mojoui: .gpu() canvases: no graphics offload (" + why + "); frames go to GTK as GL textures", flush=True)
+
+    def on_whole_pixels(self, widget: Int, w: Int, h: Int) -> Bool:
+        """The picture widget sits on whole logical and device pixels of its surface and its texture (w × h) is exactly
+        its size in device pixels: GTK offloads it 1:1."""
+        var native = external_call["gtk_widget_get_native", Int](widget)
+        if native == 0:
+            return False
+        var surface = external_call["gtk_native_get_surface", Int](native)
+        var lw = Int(external_call["gtk_widget_get_width", c_int](widget))
+        var lh = Int(external_call["gtk_widget_get_height", c_int](widget))
+        var scale = external_call["gdk_surface_get_scale", Float64](surface) if surface != 0 else 1.0
+        var r = snap_rect(widget, lw, lh)
+        return (r[0] == 0 and r[1] == 0 and r[2] == lw and r[3] == lh
+                and abs(Float64(lw) * scale - Float64(w)) < 1e-3 and abs(Float64(lh) * scale - Float64(h)) < 1e-3)
+
+    def offload_after_paint(mut self):
+        """After a paint: for each canvas whose last picture went as a dmabuf texture, whether GTK's subsurface shows it
+        (offload_texture: GTK's own state); a refused one makes the canvas show GL textures for a while (GTK composited
+        the dmabuf itself, without waiting on our fence: only the compositor's implicit sync does that, D-7570)."""
+        for ci in range(len(self.canvases)):
+            ref c = self.canvases[ci]
+            if not c.offload_check:
+                continue
+            c.offload_check = False
+            var t = offload_texture(c.offload, c.widget)
+            if t == c.dmabuf_tex and t != 0:
+                c.offloaded += 1
+                c.offload_paint = self.paints_done
+            elif t >= 0:
+                c.offload_refused += 1
+                c.offload_backoff = 60
+                if self.rt.trace:
+                    print("TRACE: offload refused for canvas " + String(ci) + " (GTK composited the dmabuf); GL textures for 60 frames", flush=True)
 
     def frame_ns(self, frame_us: Int) -> Int:
         """A frame-clock time (µs, g_get_monotonic_time's clock) on mojoui.clock.now_ns's clock (ns, what Scene.t_ns
@@ -3479,7 +3629,7 @@ struct GtkHost[A: App](Movable):
         """Canvas ci's frame drawn ahead goes to the picture (its tick, nothing changed since it was drawn)."""
         var slot = self.canvases[ci].ahead_slot
         self.canvases[ci].ahead_slot = -1
-        self.gpu2d_hand(widget, slot, self.canvases[ci].ahead_w, self.canvases[ci].ahead_h, self.canvases[ci].ahead_opaque)
+        self.gpu2d_hand(ci, widget, slot, self.canvases[ci].ahead_w, self.canvases[ci].ahead_h, self.canvases[ci].ahead_opaque)
         var frame = self.paints_done if self.in_paint else -1
         ref c = self.canvases[ci]
         c.wpx = c.ahead_w
@@ -4589,7 +4739,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     after-paint, without the canvas's own draws inside it, already counted; D-7563) + a round trip to
     the display after it (gdk_display_sync: the X server's own drawing, which cairo's paint only queues) + the canvas's
     whole picture rendered to a texture by the same renderer (raster: GTK paints only damage; this is the full cost, so
-    the sum is an upper bound). Pan and draw
+    the sum is an upper bound; not counted for a frame GTK's subsurface showed under graphics offload, which GTK never
+    composites: printed beside as work_raster_p95/max, D-7571). Pan and draw
     are drags (PRESS, the moves, RELEASE): the app's current tool says what they do. Prints FRAMEBENCH
     with p50/p95/max of the work and of its parts, the layers built and reused, each layer key's whole builds and
     appends (built_by_layer, appended_by_layer: key:count), the textures rendered, and the renderer GTK used."""
@@ -4630,6 +4781,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var dropped0 = host[].canvases[ci].ahead_dropped
     var missed_suspended = 0  # (missed frames while the window was suspended: hidden, another workspace)
     var ring_full0 = host[].gpu2d()[].gl.full if host[].g2d != 0 else 0
+    var no_raster = getenv("MOJOUI_BENCH_RASTER") == "0"  # (diagnosis only: the raster check skipped, to see what it costs the rest)
+    var offloaded = 0  # timed frames GTK showed through its subsurface (graphics offload, read from GTK's own state)
+    var refused0 = host[].canvases[ci].offload_refused
     var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
     while (not host[].canvases_drawn() or busy() or host[].has_pending) and perf_counter_ns() < wait_by:
         pump()
@@ -4674,6 +4828,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         bench_wait[A](host_addr, ci, 200_000_000)
     var syncs = List[Float64]()
     var rasters = List[Float64]()
+    var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
+    var shown_wait = List[Int]()  # (frame counter, paint end µs) pairs whose presentation time hasn't come back yet
+    var clock_fb = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+    var works_raster = List[Float64]()  # each frame's work with the raster counted whether or not GTK composited the frame
     var display = external_call["gdk_display_get_default", Int]()
     var missed = 0
     var unchanged = 0
@@ -4762,6 +4920,12 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         var pm = max(host[].paint_ring[shown_in % 64] - host[].canvases[ci].bench_inframe_ms, 0.0)
         if host[].canvases[ci].shown_gpu:
             gpu_frames += 1
+        shown_wait.append(host[].paint_counter[shown_in % 64])
+        shown_wait.append(host[].paint_end_us[shown_in % 64])
+        presented(clock_fb, shown_wait, shown)
+        var was_offloaded = host[].canvases[ci].offload_paint == shown_in  # (GTK's subsurface showed this frame's picture: D-7570)
+        if was_offloaded:
+            offloaded += 1
         var ts = perf_counter_ns()  # (a round trip to the display: with cairo on X11 the X server draws after the paint returns)
         external_call["gdk_display_sync", NoneType](display)
         var sm = Float64(Int(perf_counter_ns()) - Int(ts)) / 1e6
@@ -4769,7 +4933,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         # ~0 ms with 1,000 strokes on screen: GTK redraws only damage, and cairo on X11 queues; this is the full cost)
         var tr = perf_counter_ns()
         var paintable = external_call["gtk_picture_get_paintable", Int](host[].canvases[ci].widget)
-        if paintable != 0 and renderer != 0:
+        if paintable != 0 and renderer != 0 and not no_raster:
             var snap = external_call["gtk_snapshot_new", Int]()
             external_call["gdk_paintable_snapshot", NoneType](paintable, snap, w, h)
             var root = external_call["gtk_snapshot_free_to_node", Int](snap)
@@ -4785,7 +4949,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 dm += gms
                 gpus.append(gms)
         rasters.append(rm)
-        sm += rm
+        works_raster.append(ev_ms + dm + pm + sm + rm)
+        if not was_offloaded:  # (D-7571: an offloaded frame's picture is never composited by GTK, on screen or anywhere
+            sm += rm  # else in the frame; the raster, GTK compositing it offscreen, is printed beside, not counted)
         events.append(ev_ms)
         draws.append(dm)
         paints.append(pm)
@@ -4821,6 +4987,15 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     counts += " missed_suspended=" + String(missed_suspended)
     if host[].g2d != 0:
         counts += " ring_full=" + String(host[].gpu2d()[].gl.full - ring_full0)
+    counts += " offload=" + String(offloaded) + " offload_refused=" + String(host[].canvases[ci].offload_refused - refused0)
+    var settle_by = perf_counter_ns() + 200_000_000  # (the last frames' presentation times come back a frame or two later)
+    while len(shown_wait) > 0 and perf_counter_ns() < settle_by:
+        _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        presented(clock_fb, shown_wait, shown)
+    counts += " shown_n=" + String(len(shown)) + " shown_p50=" + one_decimal(Float32(pct(shown, 0.5))) + " shown_p95=" + one_decimal(Float32(pct(shown, 0.95))) + " shown_max=" + one_decimal(Float32(pct(shown, 1.0)))
+    counts += " work_raster_p95=" + one_decimal(Float32(pct(works_raster, 0.95))) + " work_raster_max=" + one_decimal(Float32(pct(works_raster, 1.0)))
+    if host[].offload_why != "":
+        counts += " offload_why=" + host[].offload_why.replace(" ", "_")
     counts += " gpu_frames=" + String(gpu_frames) + " ahead=" + String(host[].canvases[ci].aheads - aheads0) + " ahead_dropped=" + String(host[].canvases[ci].ahead_dropped - dropped0)
     if len(gpus) > 0:
         counts += " gpu_p95=" + one_decimal(Float32(pct(gpus, 0.95))) + " gpu_max=" + one_decimal(Float32(pct(gpus, 1.0))) + (
@@ -4832,6 +5007,25 @@ def frame_bench[A: App](host_addr: Int, rest: String):
           + " draw_max=" + one_decimal(Float32(pct(draws, 1.0))) + " raster_max=" + one_decimal(Float32(pct(rasters, 1.0)))
           + " release_p95=" + one_decimal(Float32(pct(releases, 0.95))) + " release_max=" + one_decimal(Float32(pct(releases, 1.0)))
           + " after_max=" + one_decimal(Float32(pct(afters, 1.0))) + counts, flush=True)
+
+
+def presented(clock: Int, mut wait: List[Int], mut shown: List[Float64]):
+    """(framebench, D-7572) For each (frame counter, paint end µs) pair waiting: once GTK's frame timings for that frame
+    are complete, the time from the paint's end to the compositor presenting it (wp_presentation, as GTK reads it) goes
+    into shown; a frame GTK no longer keeps timings for (16 frames back) or that has no presentation time is dropped."""
+    var keep = List[Int]()
+    var k = 0
+    while k + 1 < len(wait):
+        var t = external_call["gdk_frame_clock_get_timings", Int](clock, Int64(wait[k])) if clock != 0 and wait[k] >= 0 else 0
+        if t != 0 and external_call["gdk_frame_timings_get_complete", c_int](t) == 0:
+            keep.append(wait[k])
+            keep.append(wait[k + 1])
+        elif t != 0:
+            var pt = Int(external_call["gdk_frame_timings_get_presentation_time", Int64](t))
+            if pt > 0:
+                shown.append(Float64(pt - wait[k + 1]) / 1000.0)
+        k += 2
+    wait = keep^
 
 
 def raster_once(widget: Int, renderer: Int):
@@ -5076,6 +5270,8 @@ def on_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     if host[].paint_t0 > 0:
         var took = Float64(Int(perf_counter_ns()) - host[].paint_t0) / 1e6
         host[].paint_ring[host[].paints_done % 64] = took
+        host[].paint_counter[host[].paints_done % 64] = Int(external_call["gdk_frame_clock_get_frame_counter", Int64](clock))
+        host[].paint_end_us[host[].paints_done % 64] = Int(external_call["g_get_monotonic_time", Int64]())
         host[].paints_done += 1
         host[].frame_paints.append(took)
         host[].frame_times.append(Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock)) * 1000)
@@ -5093,6 +5289,7 @@ def on_ahead_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     """After each frame's paint (once the GPU 2D renderer runs): when a canvas will draw again next frame (animating),
     an idle turn draws it now, ahead (D-7560). Idle priority: input already waiting is handled first, and goes into it."""
     var host = host_at[A](host_addr)
+    host[].offload_after_paint()  # (D-7570: whether GTK's subsurface shows each canvas's dmabuf frame)
     if not host[].draw_ahead or host[].g2d_state != 1:
         return
     var ft = Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock))
@@ -7830,6 +8027,112 @@ def gpu2d_renderer(nodes: List[Node], declared: Bool):
             var v = String("gl")
             _ = external_call["setenv", c_int](k.as_c_string_span(), v.as_c_string_span(), c_int(0))
             return
+
+
+# ---------- graphics offload (goal 75, D-7570): a .gpu() canvas's frames go to the compositor as a subsurface ----------
+
+
+def offload_unavailable() -> String:
+    """'' when a .gpu() canvas's picture can be offloaded (GTK hands it to the compositor as a Wayland subsurface, so GTK
+    neither composites it nor waits on its fence), else why not: MOJOUI_OFFLOAD=0, not Wayland (X11, Xvfb: the canvas
+    shows as before), GTK older than 4.14."""
+    if getenv("MOJOUI_OFFLOAD") == "0":
+        return "turned off (MOJOUI_OFFLOAD=0)"
+    if Int(external_call["gtk_get_major_version", c_uint]()) != 4 or Int(external_call["gtk_get_minor_version", c_uint]()) < 14:
+        return "GTK older than 4.14 has no graphics offload"
+    var display = external_call["gdk_display_get_default", Int]()
+    if display == 0:
+        return "no display"
+    var name = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](display)))
+    if name.find("Wayland") < 0:
+        return "not a Wayland display (" + name + ")"
+    return ""
+
+
+def snap_step(scale: Float64) -> Int:
+    """The smallest whole number of logical pixels that is also a whole number of device pixels at this scale (1 at
+    1× and 2×, 2 at 1.5×, 5 at 1.6×, 4 at 1.25×; 1 when there is none under 120, the fractional-scale protocol's unit)."""
+    for q in range(1, 121):
+        var d = Float64(q) * scale
+        if abs(d - Float64(Int(d + 0.5))) < 1e-4:
+            return q
+    return 1
+
+
+def snap_rect(widget: Int, width: Int, height: Int) -> List[Int]:
+    """Where a child of `widget` (width × height) lands on whole logical and device pixels of its window's surface:
+    [dx, dy, w, h] inside it (GTK offloads a texture only at such a rectangle, D-7570); [0, 0, width, height] when the
+    widget isn't in a window yet."""
+    var native = external_call["gtk_widget_get_native", Int](widget)
+    if native == 0:
+        return [0, 0, width, height]
+    var surface = external_call["gtk_native_get_surface", Int](native)
+    if surface == 0:
+        return [0, 0, width, height]
+    var pin = List[Float32](length=2, fill=0)
+    var pout = List[Float32](length=2, fill=0)
+    if external_call["gtk_widget_compute_point", c_int](widget, native, Int(pin.unsafe_ptr()), Int(pout.unsafe_ptr())) == 0:
+        return [0, 0, width, height]
+    var st = List[Float64](length=2, fill=0)
+    external_call["gtk_native_get_surface_transform", NoneType](native, Int(st.unsafe_ptr()), Int(st.unsafe_ptr()) + 8)
+    var x = Float64(pout[0]) + st[0]
+    var y = Float64(pout[1]) + st[1]
+    _ = len(pin)
+    var q = Float64(snap_step(external_call["gdk_surface_get_scale", Float64](surface)))
+    var x0 = ceil(x / q - 1e-4) * q
+    var y0 = ceil(y / q - 1e-4) * q
+    var x1 = floor((x + Float64(width)) / q + 1e-4) * q
+    var y1 = floor((y + Float64(height)) / q + 1e-4) * q
+    if x1 <= x0 or y1 <= y0:
+        return [0, 0, width, height]
+    return [Int(x0 - x + 0.5), Int(y0 - y + 0.5), Int(x1 - x0 + 0.5), Int(y1 - y0 + 0.5)]
+
+
+def on_snap_measure(widget: Int, orientation: c_int, for_size: c_int, minimum: Int, natural: Int, min_base: Int, nat_base: Int) abi("C"):
+    """The snapping box asks for no size (as the scrolled window around a canvas: its size comes from the layout)."""
+    Pointer[c_int, MutUntrackedOrigin](unsafe_from_address=minimum)[] = 0
+    Pointer[c_int, MutUntrackedOrigin](unsafe_from_address=natural)[] = 0
+    if min_base != 0:
+        Pointer[c_int, MutUntrackedOrigin](unsafe_from_address=min_base)[] = -1
+    if nat_base != 0:
+        Pointer[c_int, MutUntrackedOrigin](unsafe_from_address=nat_base)[] = -1
+
+
+def on_snap_allocate(widget: Int, width: c_int, height: c_int, baseline: c_int) abi("C"):
+    """The snapping box places its child (the GtkGraphicsOffload) on whole logical and device pixels inside itself:
+    at most snap_step − 1 logical pixels in from each edge (D-7570)."""
+    var child = external_call["gtk_widget_get_first_child", Int](widget)
+    if child == 0:
+        return
+    var r = snap_rect(widget, Int(width), Int(height))
+    var pt = List[Float32](length=2, fill=0)
+    pt[0] = Float32(r[0])
+    pt[1] = Float32(r[1])
+    var xf = external_call["gsk_transform_translate", Int](0, Int(pt.unsafe_ptr())) if r[0] != 0 or r[1] != 0 else 0
+    _ = len(pt)
+    external_call["gtk_widget_allocate", NoneType](child, c_int(r[2]), c_int(r[3]), c_int(-1), xf)
+
+
+def offload_texture(offload: Int, child: Int) -> Int:
+    """The texture GTK's own subsurface for a GtkGraphicsOffload shows now (0: none, i.e. GTK composites the picture
+    itself), or -1 when it can't be read. GTK has no public getter, so this reads GTK 4.14–4.24's own state: the widget's
+    subsurface (GtkGraphicsOffload {GtkWidget; child; subsurface}: checked by the child pointer and the subsurface's type
+    name) and the texture its class's get_texture returns (GdkSubsurfaceClass {GObjectClass; attach; detach; get_texture})."""
+    if offload == 0 or Int(external_call["gtk_get_minor_version", c_uint]()) > 24:
+        return -1
+    if Pointer[Int, MutUntrackedOrigin](unsafe_from_address=offload + 32)[] != child:
+        return -1
+    var sub = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=offload + 40)[]
+    if sub == 0:
+        return 0
+    var name = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](sub)))
+    if name != "GdkWaylandSubsurface":
+        return -1
+    var klass = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=sub)[]
+    var get_texture = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=klass + 136 + 16)[]
+    if get_texture == 0:
+        return -1
+    return fcall[Int](get_texture, sub)
 
 
 def on_gl_texture_released(flag: Int) abi("C"):

@@ -13,7 +13,9 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.scene import Scene, Painter
 from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu, PIPE_POLY
-from mojoui.gpu2d_gl import GL2D, GPU2D, headless_gl33
+from mojoui.gpu2d_gl import GL2D, GPU2D, headless_gl33, gl_proc
+from mojoui.present import fcall, dl_open, dl_sym
+from std.ffi import c_uint, c_int
 from mojoui.gpu2d_merge import merge_runs
 from mojoui.ink import Stroke
 from mojoui.objectlayer import import_fabric
@@ -169,6 +171,65 @@ def grown_page(mut gl: GL2D, atlas: GlyphAtlas, font: Font) raises:
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the grown page differs from the CPU executor")
 
 
+def signed32(x: Int) -> Int:
+    var v = x & 0xFFFFFFFF
+    return v - (1 << 32) if v >= 0x80000000 else v
+
+
+def dmabuf_page(atlas: GlyphAtlas, font: Font) raises:
+    """D-7570: a drawn ring texture exported as a dmabuf (what a compositor is handed under graphics offload), the
+    frame's fence imported into it, then the dmabuf imported back as a new GL texture (EGL_EXT_image_dma_buf_import,
+    as a compositor does) and read: the same pixels as the ring texture, and within M1's bounds of the CPU executor."""
+    var g = GPU2D()
+    assert_true(g.start(False), "GPU2D.start: " + g.gl.why)
+    var egl = dl_open("libEGL.so.1")
+    var dpy = fcall[Int](dl_sym(egl, "eglGetCurrentDisplay"))
+    if not g.gl.dmabuf.start(dpy):
+        print("   dmabuf: not on this EGL display (" + g.gl.dmabuf.why + "); hosts show GL textures instead")
+        g.gl.close()
+        return
+    var page = Scene(1000, 700, 1.0)
+    whiteboard_big(page, 100)
+    var empty = Scene(0, 0, 1.0)
+    var s = g.draw(page, empty, 1, 1000, 700)
+    assert_true(s >= 0, "draw: " + g.gl.why)
+    assert_true(g.gl.dmabuf.export(s, g.gl.tex[s]), "export: " + g.gl.dmabuf.why)
+    var fd0 = g.gl.dmabuf.fd[s]
+    assert_true(g.gl.dmabuf.export(s, g.gl.tex[s]) and g.gl.dmabuf.fd[s] == fd0, "a texture is exported once")
+    assert_true(g.gl.dmabuf.fence(s), "the frame's fence into the dmabuf")
+    var mod = g.gl.dmabuf.modifier[s]
+    var attrs: List[Int32] = [0x3057, 1000, 0x3056, 700, 0x3271, Int32(g.gl.dmabuf.fourcc[s]), 0x3272, Int32(fd0),
+                              0x3273, Int32(g.gl.dmabuf.offset[s]), 0x3274, Int32(g.gl.dmabuf.stride[s]),
+                              0x3443, Int32(signed32(mod)), 0x3444, Int32(signed32(mod >> 32)), 0x3038]
+    var image = fcall[Int](gl_proc("eglCreateImageKHR"), dpy, 0, c_uint(0x3270), 0, Int(attrs.unsafe_ptr()))
+    _ = len(attrs)
+    assert_true(image != 0, "the dmabuf imports back (EGL_EXT_image_dma_buf_import)")
+    var tex2 = g.gl.gen(16)  # F_GEN_TEXTURES
+    fcall[NoneType](g.gl.f(18), c_uint(0x0DE1), c_uint(tex2))  # glBindTexture
+    fcall[NoneType](gl_proc("glEGLImageTargetTexture2DOES"), c_uint(0x0DE1), image)
+    fcall[NoneType](g.gl.f(18), c_uint(0x0DE1), c_uint(0))
+    var direct = List[UInt32](length=1000 * 700, fill=0)
+    var via = List[UInt32](length=1000 * 700, fill=0)
+    assert_true(g.gl.read(g.gl.tex[s], 1000, 700, Int(direct.unsafe_ptr())), "ring texture read")
+    assert_true(g.gl.read(tex2, 1000, 700, Int(via.unsafe_ptr())), "dmabuf texture read: GL error " + String(g.gl.error()))
+    var same = 0
+    for i in range(len(direct)):
+        if direct[i] == via[i]:
+            same += 1
+    var want = cpu_of(build_batches(page, atlas, font), atlas)
+    var d = diff(want, via)
+    print("   dmabuf (" + String(chr(g.gl.dmabuf.fourcc[s] & 0xFF)) + String(chr((g.gl.dmabuf.fourcc[s] >> 8) & 0xFF)) + String(chr((g.gl.dmabuf.fourcc[s] >> 16) & 0xFF))
+          + String(chr((g.gl.dmabuf.fourcc[s] >> 24) & 0xFF)) + ", modifier " + hex(mod) + ", stride " + String(g.gl.dmabuf.stride[s]) + "): read back through the dmabuf,",
+          len(direct) - same, "of", len(direct), "pixels differ from the ring texture; vs the CPU executor mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far;",
+          g.gl.dmabuf.fenced, "fenced")
+    g.gl.delete(17, tex2)
+    _ = fcall[c_uint](gl_proc("eglDestroyImageKHR"), dpy, image)
+    g.gl.close()
+    assert_true(g.gl.dmabuf.fd[s] == -1, "close() closes the dmabuf fds")
+    assert_true(same == len(direct), "the dmabuf holds the ring texture's pixels")
+    assert_true(d.mean <= 1.5 and d.far <= 0.5, "the dmabuf's picture differs from the CPU executor")
+
+
 def two_canvases(font: Font, atlas: GlyphAtlas) raises:
     """Two .gpu() canvases on one screen (D-7561): each keeps its own layers. A page of ink (canvas 1) and a mind map
     (canvas 2) drawn in turn, twice: the second round rebuilds no layer of either, and each picture still matches the CPU
@@ -287,6 +348,7 @@ def main() raises:
 
     grown_page(gl, atlas, font)
     two_canvases(font, atlas)
+    dmabuf_page(atlas, font)
 
     # a frame's GPU time for the scenes (the judged sizes: 1440×900 windows; 1,000 strokes; 645 objects; 300 topics)
     print("frame times:")

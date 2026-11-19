@@ -93,7 +93,9 @@ def desktop(scene, gpu=True):
                PNOTE_IMPORT=str(NOTE), MOJOUI_TEST=";".join(["window:1440x900"] + STEPS[scene] + ["quit"]))
     if not gpu:
         env["PNOTE_GPU"] = "0"
-    r = run([str(APP)], 900, env=env)
+    # (11-18, D-7573: on a hidden headless Hyprland output, same GPU and compositor, so no window pops up in front of the
+    # owner; MOJOUI_TESTSCREEN=0 shows it on the desktop again)
+    r = run([str(ROOT / "scripts" / "testscreen"), str(APP)], 900, env=env)
     out = r.stdout + r.stderr
     (OUT / f"desk-{scene}-{'gpu' if gpu else 'cpu'}.log").write_text(out)
     return out, ""
