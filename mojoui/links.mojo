@@ -407,6 +407,12 @@ def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
     var t = String(text.strip())
     if t.find(" = ") >= 0:
         var parts = t.split(" = ")
+        var rhs = String(parts[1].strip())
+        var words = rhs.split(" ")
+        for k in range(1, len(words)):  # ("a.t = b.t +1.2": an offset only means something on a time link)
+            var w = String(words[k])
+            if w != "" and (w.startswith("+") or w.startswith("-") or (Int(w.as_bytes()[0]) >= 48 and Int(w.as_bytes()[0]) <= 57)):
+                raise Error('an offset needs "~" (a time link): "' + String(parts[0].strip()) + " ~ " + String(words[0]) + " " + w + '"; "=" matches equal values')
         return Link.key(_end(String(parts[0])), _end(String(parts[1])), by)
     if t.find(" ~ ") >= 0:
         var parts = t.split(" ~ ")
@@ -791,7 +797,7 @@ struct Links(Movable, Sized):
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         items.append(self.chips())
         if self.problem != "":
-            items.append(Text(self.problem, CAPTION))
+            items.append(Text(self.problem, CAPTION).tag("link-problem"))
         if len(self.items) > 0:
             var opts: List[String] = ["Unlink…"]
             for l in self.items:
@@ -829,7 +835,7 @@ struct Links(Movable, Sized):
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         add.append(self.chips())
         if self.problem != "":
-            add.append(Text(self.problem, CAPTION))
+            add.append(Text(self.problem, CAPTION).tag("link-problem"))
         var out = List[View]()
         rows.insert(0, Text("On this sheet", CAPTION).tone(TONE_STRONG))  # (a plain heading: Liquid's section-title role wrapped a long one)
         add.insert(0, Text("Add a link", CAPTION).tone(TONE_STRONG))

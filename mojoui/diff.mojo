@@ -111,7 +111,7 @@ def node_patches(a: Node, b: Node, i: Int, on_board: Bool, mut patches: List[Pat
         patches.append(Patch(SET_VALUE, i, "", b.value))
     if b.kind == CANVAS and a.msg2 != b.msg2:
         patches.append(Patch(SET_FRAMES, i, "", b.msg2))
-    if b.kind == CANVAS and (a.tip != b.tip or a.label != b.label):
+    if b.kind == CANVAS and (a.tip != b.tip or a.label != b.label or a.cursor != b.cursor):
         patches.append(Patch(SET_TIP, i, b.tip, 0))
     if a.pixels != b.pixels:
         patches.append(Patch(SET_IMAGE, i, "", 0))

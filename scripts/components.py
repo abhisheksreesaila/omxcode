@@ -75,6 +75,8 @@ FEATURES = [
     ("Board: phone-width list", "(automatic under 720 pt)", r"board_list|max-width: 719px", "workbook"),
     ("Board: tones (dimmed, lifted, held, a drop target)", "Board(tones=[BOARD_DIM, BOARD_LIFT, …])", r"SET_TONES", "omxplorer"),
     ("Board: hold a child (350 ms, still)", "Board(on_hold=…)", r"on_hold_timer|data-hold", "omxplorer"),
+    ("Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus)", "mojoui.freeboard.FreeCanvas", r"is_free\(|free_board\(|board\.free", "omxplorer"),
+    ("Canvas: hover and cursor", "Canvas(hover=True): HOVER; .cursor(name)", r"\bHOVER\b|data-hover|dataset\.hover", "omxplorer"),
     ("Canvas: click-through (shows only)", "Canvas(…).passthrough()", r"node\.size == 2|data-passthrough", "omxplorer"),
     ("Overlay islands", "Overlay(base, *islands) + .pin(h, v)", r"\bOVERLAY\b", "workbook"),
     ("Themes on top (themes/, or yours)", "def theme(self) -> Theme", r"gtk_css|web_css|theme_key|paint_native|mod\.theme", "themes"),
@@ -136,6 +138,7 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
 COMPOSITES = [
     ("Ink stroke (pressure ink, round ends, the eraser's hit test)", "mojoui/ink.mojo", ["Canvas", "Canvas: pen pressure", "Scene: polygon fill"], "Stroke("),
     ("DataGrid", "mojoui/datagrid.mojo", ["Canvas", "Canvas: press, release, double", "Canvas: keys (focus on press)", "In-place editor", "TextField: Escape cancels", "Editor that echoes the grid's typing", "Board: drag, resize, snap"], "DataGrid("),
+    ("Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)", "mojoui/freeboard.mojo", ["Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus)", "Board: drag, resize, snap", "Board: scrolls, reveals a child", "MenuBar"], "FreeCanvas("),
     ("PivotTable", "mojoui/pivot.mojo", ["Grid", "Scroll", "Text tones"], "PivotTable("),
     ("ChartView", "mojoui/chartview.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "ChartView"),
     ("KpiView", "mojoui/kpi.mojo", ["Card tones", "Text tones", "Canvas"], "KpiView("),

@@ -1446,3 +1446,16 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-18 (goal 76 M3, part 1)
 - 73-check on the ribbon: M1 failed (its panel-edge probe hit a chip, the panel hadn't moved), M2 failed (panels closed → a 1416-wide board tiles three cards in one row; the proof's L-shape needs the inspector open, its old default), M3 failed (it clicked the Chart tool by coordinates, now Underline; probes at y=162 hit the formula bar). Steps updated (D-7618); then M2's seven-cards part exposed a real bug: the launch Board 21 pt taller than its room (D-7619). Rebuilt: 73 M1, M2, M3 PASS.
+
+## 2026-11-18 (goal 78: free canvas, keys, video you can see)
+- mojoui.freeboard first, with its own test (14 groups): handles, drag_rect with soft snap, extent, first_free, sync, tidy (a fresh BoardTiles), nearest/nudge/grow, zoom steps, FreeCanvas, the key actions. A GAP-outside snap target for a card above pulled a width to 508 instead of 500: GAP targets now only for cards beside each other.
+- The worktree had no pixi env (`pixi install` once; each worktree keeps its own).
+- GTK live resize: the LIVE probe first read the old size on every frame: compute_bounds before GTK's layout pass; the probe now waits for a frame (wait_frame) and the sizes change frame by frame.
+- examples/canvas, a small framework sample, made host work quick (17 s builds against omxplorer's ~4 min).
+- Web: any size change was a whole-screen rebuild (web.py treats every partial diff as one): a live resize would have swapped the dragged card each frame. A size-only partial diff (identity `kept`, no resync, sizes all on Board children) now goes as patches; a free card's mark carries w/h.
+- Web: a rounded corner's cut-out isn't the card for elementFromPoint, so the NW grab missed: free hit-testing goes by the cards' boxes.
+- Web: the first M1 web pass "scrolled right 0 + 2476 of 2476": the page itself had widened to the canvas. `contain: inline-size` on the free scroller; the check now also requires the scroller to stay within the window and scrollLeft > 0.
+- Web zoom drew a zoomed card's canvas at its zoomed size in points (big text, few columns): canvases on a zoomed free board now ask for scale = dpr × zoom.
+- GTK zoom 50 % didn't show every card in a 632-high room (1488 tall): the check zooms to 33 %.
+- Canvas hover: put the flag in the canvas's options first; `.settable()` overwrites them (the grid is settable): moved it to the canvas's text.
+- Keys: after Tidy the telemetry card sits right of the table, so the Alt sequence focuses right/left, not down/up.

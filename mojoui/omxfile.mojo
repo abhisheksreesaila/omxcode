@@ -24,7 +24,8 @@ def format_json(f: ColumnFormat) -> String:
             + ', "parens": ' + ("true" if f.parens else "false") + ', "symbol": ' + json_string(f.symbol) + "}")
 
 
-def metadata(sheet: Sheet, objects: List[SheetObject], tiles: List[ReportTile], filter: ReportFilter, tab_names: List[String] = []) -> String:
+def metadata(sheet: Sheet, objects: List[SheetObject], tiles: List[ReportTile], filter: ReportFilter, tab_names: List[String] = [],
+             canvas: List[Int] = []) -> String:
     var stored = sheet.stored()
     var meta = String('{"omx": ' + String(FORMAT) + ', "columns": [')
     for c in range(stored):
@@ -48,7 +49,12 @@ def metadata(sheet: Sheet, objects: List[SheetObject], tiles: List[ReportTile], 
             row += 1
         meta += ("" if first else ",") + "[" + String(cell[0]) + "," + String(saved) + "," + String(cell[2]) + "]"
         first = False
-    meta += '], "tabs": ['
+    if len(canvas) >= 6:  # (goal 78: a free canvas: its zoom and the table's place; the objects keep their own x, y, w, h)
+        meta += '], "canvas": {"free": 1, "zoom": ' + String(canvas[0]) + ', "table": [' + String(canvas[1]) + "," + String(canvas[2]) + "," + String(canvas[3]) + "," + String(canvas[4]) + "]"
+        meta += ', "touched": ' + String(canvas[5]) + "}"
+        meta += ', "tabs": ['
+    else:
+        meta += '], "tabs": ['
     for k in range(len(tab_names)):
         meta += ("," if k > 0 else "") + json_string(tab_names[k])
     meta += '], "objects": ['
@@ -110,11 +116,11 @@ def read_spec(j: Json, node: Int, mut o: SheetObject, sheet: Sheet):
 
 
 def save_omx(path: String, sheet: Sheet, objects: List[SheetObject] = [], tiles: List[ReportTile] = [],
-             filter: ReportFilter = ReportFilter(-1, 0), tab_names: List[String] = []) raises:
+             filter: ReportFilter = ReportFilter(-1, 0), tab_names: List[String] = [], canvas: List[Int] = []) raises:
     """Writes the table as it stands (every alive row, the edits applied), its styles, the sheet's charts and pivots,
     the Report (its tiles and filter) and the tabs' names to `path` (.omx)."""
     # uncompressed for now: a document saved on Linux must open on the Mac build, which has no zstd or snappy (vendoring static codecs for it is a follow-up)
-    var meta = metadata(sheet, objects, tiles, filter, tab_names)
+    var meta = metadata(sheet, objects, tiles, filter, tab_names, canvas)
     if sheet.streamed():  # (D-214: streamed out a row group at a time, the edits applied; atomic, so it may replace the file it reads)
         sheet.frame.save(path, meta, UNCOMPRESSED)
     else:
@@ -232,12 +238,27 @@ def open_document(path: String, mut objects: List[SheetObject], mut tiles: List[
 
 def open_document(path: String, mut objects: List[SheetObject], mut tiles: List[ReportTile], mut filter: ReportFilter,
                   mut tab_names: List[String]) raises -> Sheet:
+    var canvas = List[Int]()
+    return open_document(path, objects, tiles, filter, tab_names, canvas)
+
+
+def open_document(path: String, mut objects: List[SheetObject], mut tiles: List[ReportTile], mut filter: ReportFilter,
+                  mut tab_names: List[String], mut canvas: List[Int]) raises -> Sheet:
     """Reads `path` (.omx): returns the table and fills in the sheet's objects, the Report and the tabs' names as
     saved (the sheet's, the Report's; "" for one that keeps its own name). An object or tile that names a column the
     table doesn't have (or a kind this code doesn't know) is left out rather than trusted."""
     var j = Json()
     var sheet = read_document(path, j, True)
     tab_names = List[String]()
+    canvas = List[Int]()  # (goal 78: [zoom, table x, y, w, h, touched] for a free canvas; empty: an older file, which opens tiled)
+    var cv = j.get(0, "canvas")
+    if cv >= 0 and j.number(j.get(cv, "free")) == 1:
+        var t = j.get(cv, "table")
+        if j.size(t) == 4:
+            canvas.append(max(25, min(j.number(j.get(cv, "zoom"), 100), 200)))
+            for k in range(4):
+                canvas.append(max(j.number(j.at(t, k)), 0))
+            canvas.append(j.number(j.get(cv, "touched"), 1))
     var tabs = j.get(0, "tabs")  # (missing in files saved before goal 21)
     for k in range(min(j.size(tabs), 2)):
         var name = j.text(j.at(tabs, k))

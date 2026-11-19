@@ -65,6 +65,11 @@ comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the pla
 comptime WHEEL = 9  # a plain scroll (wheel, two-finger swipe) on a Canvas(scroll_pans=True): event.dx, dy = how far the
 #   content moves, in points (a swipe up moves it up); ctrl+scroll and pinch on that canvas still send ZOOM
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
+comptime HOVER = 14  # the pointer moved over a Canvas(hover=True): event.x, y (-1, -1: it left)
+comptime BOARD_LIVE = 11  # (hosts → Runtime.gesture on a free Board, mojoui.freeboard) a drag's motion frame: x = the card, y = its handle (+100: no snap), dx/dy from the press
+comptime BOARD_ZOOM = 12  # (the same) Ctrl+wheel on a free Board: zoom = the factor, x, y = the pointer on the canvas
+comptime BOARD_PICK = 15  # (the same) a press on a card that isn't the focused one: x = the card (click to focus, as a window manager)
+comptime BOARD_VIEW = 13  # (the same) the page scrolled: x, y = the visible part's top-left on the canvas, dx, dy = its size
 comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT
@@ -193,6 +198,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
     var label: String  # what a screen reader calls it when nothing on screen says so (.label()); never shown
     var arrives: Bool  # it arrives on a spring the first time it's shown (.arrive()): fades and rises into place
     var hidden: Bool  # in the tree but not drawn (.hidden()): agents and test steps still reach it (a ribbon's other tabs, D-7601)
+    var cursor: String  # a canvas's pointer shape now (.cursor(): "pointer" over a link it draws; "" the default); a patch, SET_TIP
 
     def __init__(
         out self,
@@ -240,6 +246,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
         self.label = ""
         self.arrives = False
         self.hidden = False
+        self.cursor = ""
 
     def __eq__(self, other: Self) -> Bool:
         return (
@@ -273,6 +280,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
             and self.height_from_parent == other.height_from_parent
             and (place or (self.x == other.x and self.y == other.y)) and (self.tip == other.tip or (self.kind == CANVAS and other.kind == CANVAS))  # (a canvas's tooltip, its words, is a patch: SET_TIP)
             and (self.label == other.label or (self.kind == CANVAS and other.kind == CANVAS))  # (a new label is a new layout; a canvas's is a patch, SET_TIP: its picture stays)
+            and (self.cursor == other.cursor or (self.kind == CANVAS and other.kind == CANVAS))  # (a canvas's pointer shape: a patch too)
             and self.hidden == other.hidden  # (shown or hidden: laid out again)
         )
 
@@ -370,6 +378,12 @@ struct View(Copyable, Movable):
         to `high` in `unit` ("seconds"). An agent sees a `value` argument on the canvas's tool; setting it sends the canvas's
         on_gesture with event.number = SET_TO and event.text = the number. The app clamps and applies it as it would a drag."""
         self.nodes[0].options = [unit, String(low), String(high)]
+        return self^
+
+    def cursor(var self, name: String) -> View:
+        """A canvas's pointer shape while over it (CSS names: "pointer" over a link it draws, "" the default). It changes
+        as a patch (goal 78: a video column's cells say they're links)."""
+        self.nodes[0].cursor = name
         return self^
 
     def tooltip(var self, text: String) -> View:
@@ -559,7 +573,7 @@ def LazyList(count: Int, list_id: Int, on_tap: Int = NO_MSG, height: Int = 320, 
     return _one(Node(LAZYLIST, "", on_tap, value=count, msg2=list_id, size=height, spacing=row_height))
 
 
-def Canvas(id: Int, version: Int, on_gesture: Int = NO_MSG, on_frame: Int = NO_MSG, keys: Bool = False, scroll_pans: Bool = False) -> View:
+def Canvas(id: Int, version: Int, on_gesture: Int = NO_MSG, on_frame: Int = NO_MSG, keys: Bool = False, scroll_pans: Bool = False, hover: Bool = False) -> View:
     """A surface the app paints itself: hosts call the app's `draw(id, surface)` at the canvas's
     real pixel size, and again whenever `version` changes or the canvas is resized.
     Drags, pinches, wheel zooms and taps send `on_gesture` (event.number = PAN, ZOOM or TAP).
@@ -568,8 +582,10 @@ def Canvas(id: Int, version: Int, on_gesture: Int = NO_MSG, on_frame: Int = NO_M
     key (a canvas without it never holds the keyboard: Tab moves on past it).
     A scroll zooms around the pointer (ZOOM); with `scroll_pans=True` a plain scroll pans instead (WHEEL: a drawing
     page, a map) and ctrl+scroll or a pinch zooms.
+    With `hover=True` the pointer moving over it sends `on_gesture` with event.number = HOVER (x, y; -1, -1 when it
+    leaves), so the app can mark what's under it (a link's underline) and set its .cursor().
     Size it with layout settings, e.g. `Canvas(0, v).grow().fill()`."""
-    return _one(Node(CANVAS, "", on_gesture, style=id, value=version, msg2=on_frame, size=1 if keys else 0, spacing=1 if scroll_pans else 0))
+    return _one(Node(CANVAS, "hover" if hover else "", on_gesture, style=id, value=version, msg2=on_frame, size=1 if keys else 0, spacing=1 if scroll_pans else 0))  # (text: hover; options are .settable()'s)
 
 
 def Divider() -> View:
@@ -650,6 +666,7 @@ comptime BOARD_DIM = 1  # stepped back (a peek's unrelated cards)
 comptime BOARD_LIFT = 2  # raised and ringed (a peek's linked cards)
 comptime BOARD_SOURCE = 3  # the card held
 comptime BOARD_TARGET = 4  # under a drag: a drop lands here
+comptime BOARD_FOCUS = 5  # the focused card on a free canvas (mojoui.freeboard): a quiet accent ring, no lift
 comptime HOLD_MS = 350  # how long a press on a Board child must stay still to be a hold
 
 

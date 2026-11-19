@@ -1018,6 +1018,8 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Board: tones (dimmed, lifted, held, a drop target) | `Board(tones=[BOARD_DIM, BOARD_LIFT, …])` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Board: hold a child (350 ms, still) | `Board(on_hold=…)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus) | `mojoui.freeboard.FreeCanvas` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Canvas: hover and cursor | `Canvas(hover=True): HOVER; .cursor(name)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
@@ -1204,6 +1206,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 |---|---|---|---|---|---|---|---|---|---|
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, maccheck, mxstudio, omx, omxplorer, workbook |
+| `Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)` | `mojoui/freeboard.mojo` | Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus), Board: drag, resize, snap, Board: scrolls, reveals a child, MenuBar | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | canvas, omxplorer |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
 | `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, dashboard, maccheck, media, mxstudio, omx, omxplorer, workbook |
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omx, omxplorer |
@@ -1316,12 +1319,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 189 | 13 | 0 |
-| Web | 174 | 11 | 17 |
-| Android | 19 | 64 | 119 |
-| Mac (AppKit) | 5 | 165 | 32 |
-| iPhone (UIKit) | 0 | 136 | 66 |
-| Agent (MCP) | 67 | 45 | 90 |
+| Linux (GTK) | 192 | 13 | 0 |
+| Web | 177 | 11 | 17 |
+| Android | 19 | 64 | 122 |
+| Mac (AppKit) | 5 | 165 | 35 |
+| iPhone (UIKit) | 0 | 136 | 69 |
+| Agent (MCP) | 67 | 45 | 93 |
 
 ## Inside one app, not components yet (the debt)
 

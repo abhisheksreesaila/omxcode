@@ -172,7 +172,8 @@ MENU_JS = r"""
     const fkey = /^F\d{1,2}$/.test(e.key);
     if (!(e.ctrlKey || e.metaKey || e.altKey || fkey)) return;
     const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-    const name = (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + key;
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);  // (a Mac's Command is Ctrl; elsewhere Meta is the Super key: goal 78's canvas keys)
+    const name = (e.metaKey && !mac ? 'Super+' : '') + (e.ctrlKey || (e.metaKey && mac) ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + key;
     const typing = e.target.matches && e.target.matches('input, textarea, [contenteditable], [contenteditable] *');
     if (typing && ['Ctrl+C', 'Ctrl+X', 'Ctrl+V', 'Ctrl+A', 'Ctrl+Z'].includes(name)) return;  // a field's own copy, paste, select all, undo
     const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === name);
@@ -484,10 +485,17 @@ BOARD_JS = r"""
     if (!p || p.classList.contains('moving')) return;  // (a drag in progress owns the position)
     if (p.classList.contains('board')) {
       p.style.width = d.w + 'px'; p.style.height = d.h + 'px';
+      if (d.zoom) { const was = Number(p.dataset.zoom || 100), z = Number(d.zoom), sc = p.parentElement;
+        if (was !== z) { const x = sc.scrollLeft * z / was, y = sc.scrollTop * z / was; p.dataset.zoom = d.zoom; p.style.zoom = z / 100;
+          requestAnimationFrame(() => { sc.scrollLeft = x; sc.scrollTop = y; }); } }
       const key = p.dataset.sid + '/' + p.dataset.node, token = Number(d.reveal || 0);
       if (token && revealed[key] !== token) { revealed[key] = token; requestAnimationFrame(() => reveal(p, token)); }
     }
-    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; p.dataset.tone = d.tone || '0'; }
+    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; p.dataset.tone = d.tone || '0';
+      if (d.w) {  // (a free canvas's card: its size too, and its content's own box: live while it's dragged)
+        p.style.width = d.w + 'px'; p.style.height = d.h + 'px'; p.dataset.w = d.w; p.dataset.h = d.h;
+        const inner = p.firstElementChild;
+        if (inner && inner !== mark && inner.style.width) { inner.style.width = d.w + 'px'; inner.style.height = d.h + 'px'; } } }
   }
   // Board(on_hold=…): a press on an object held still for HOLD_MS is a hold (number PRESS, x = its index); letting go
   // after it sends RELEASE. Any press counts (a canvas's too: its own gestures still run), but not on a control.
@@ -545,7 +553,104 @@ BOARD_JS = r"""
       obj.addEventListener('pointermove', move); obj.addEventListener('pointerup', up); obj.addEventListener('pointercancel', up);
     });
   }
-  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place); };
+  // A free canvas (mojoui.freeboard): an edge or corner of a card resizes it, its title band moves it, live: the app hears
+  // every pointer move (BOARD_LIVE: x = the card, y = the handle, +100 with Alt: no snap; dx/dy from the press, in page
+  // points) and answers with the card's place and size (its mark, applied at once), then PAN / ZOOM when it's let go.
+  // Ctrl+wheel zooms (BOARD_ZOOM); the page's scroll tells the app what shows (BOARD_VIEW). Hit-testing is
+  // mojoui.freeboard.handle_at's, the same numbers.
+  const LIVE = 11, BZOOM = 12, BVIEW = 13, PICK = 15, HMOVE = 8, NONE = -1, EDGE = 6, CORNER = 16, GRIP = 24, HEADER = 44;
+  const CURSORS = ['nwse-resize', 'ns-resize', 'ns-resize', 'ew-resize', 'ew-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'move'];
+  function handleAt(w, h, x, y) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return NONE;
+    if (x >= w - GRIP && y >= h - GRIP) return 0;
+    const l = x < CORNER, r = x >= w - CORNER, t = y < CORNER, b = y >= h - CORNER;
+    if (l && t && (x < EDGE || y < EDGE)) return 6;
+    if (r && t && (x >= w - EDGE || y < EDGE)) return 5;
+    if (l && b && (x < EDGE || y >= h - EDGE)) return 7;
+    if (y < EDGE) return 1;
+    if (y >= h - EDGE) return 2;
+    if (x < EDGE) return 4;
+    if (x >= w - EDGE) return 3;
+    return y < HEADER ? HMOVE : NONE;
+  }
+  const zoomOf = board => Number(board.dataset.zoom || 100) / 100;
+  function hit(board, e) {  // (by the cards' boxes, not what the pointer is over: a rounded corner's cut-out still grabs the corner)
+    let obj = null, raised = false;
+    for (const o of board.children) {
+      if (!o.classList.contains('object') || o.dataset.tag === 'board-guide') continue;
+      const r = o.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) continue;
+      if (raised && !o.classList.contains('raised')) continue;  // (the card dragged last stays on top)
+      obj = o; raised = o.classList.contains('raised');
+    }
+    if (!obj) return [null, NONE];
+    const f = obj.firstElementChild;  // (an in-place editor is typed in, never dragged)
+    if (f && (f.dataset.kind === 'field' || f.querySelector(':scope > [data-kind=field]'))) return [null, NONE];
+    const r = obj.getBoundingClientRect(), z = r.width / Math.max(obj.offsetWidth, 1) || zoomOf(board);
+    return [obj, handleAt(Math.round(r.width / z), Math.round(r.height / z), Math.floor((e.clientX - r.left) / z), Math.floor((e.clientY - r.top) / z))];
+  }
+  window.mojouiFreeHandle = (tag, handle) => {  // (tests) where a hand grabs that handle of card `tag`, in the window
+    const obj = document.querySelector(`.board.free > .object[data-tag="${tag}"]`); if (!obj) return null;
+    const r = obj.getBoundingClientRect(), w = r.width, h = r.height, z = w / Math.max(obj.offsetWidth, 1), e = EDGE / 2 * z;
+    const at = { n: [w / 2, e], s: [w / 2, h - 1 - e], e: [w - 1 - e, h / 2], w: [e, h / 2], ne: [w - 1 - e, e], nw: [e, e], sw: [e, h - 1 - e], se: [w - 8 * z, h - 8 * z], move: [(CORNER + 24) * z, HEADER / 2 * z] }[handle];
+    return at ? [r.left + at[0], r.top + at[1]] : null;
+  };
+  function free(board) {
+    if (board.mojouiFree) return;
+    board.mojouiFree = true;
+    const post = (number, x, y, dx, dy, zoom) => htmx.ajax('POST', `/e/${board.dataset.sid}`, { values: { n: Number(board.dataset.node), number,
+      x, y, dx, dy, zoom: zoom || 1, v: shape() }, swap: 'none', source: window.mojouiLane('board') });
+    let dragging = null;
+    board.addEventListener('pointermove', e => {  // (the pointer says what a press does: each edge and corner its own cursor)
+      if (dragging) return;
+      const [obj, h] = hit(board, e);
+      board.querySelectorAll(':scope > .object[data-grab]').forEach(o => { if (o !== obj || h === NONE) { delete o.dataset.grab; o.style.removeProperty('--grab'); } });
+      if (obj && h !== NONE) { obj.dataset.grab = '1'; obj.style.setProperty('--grab', CURSORS[h]); }
+      board.style.cursor = obj && h !== NONE ? CURSORS[h] : '';  // (a rounded corner's cut-out is the board's own)
+    });
+    board.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const [obj, h] = hit(board, e);
+      if (obj && obj.dataset.tone !== '5') post(PICK, Number(obj.dataset.index), 0, 0, 0);  // (a press on a card takes the focus, as a window manager's click)
+      if (!obj || h === NONE) return;
+      if (h === HMOVE && e.target.closest('input, textarea, select, button, a, [contenteditable]')) return;  // (the title band's own controls)
+      e.preventDefault(); e.stopPropagation();  // (an edge is the canvas's, not the card content's)
+      const z = zoomOf(board), x0 = e.clientX, y0 = e.clientY, index = Number(obj.dataset.index);
+      dragging = { obj, h, live: false };
+      board.setPointerCapture(e.pointerId);
+      let sent = 0;
+      const move = ev => {
+        const dx = (ev.clientX - x0) / z, dy = (ev.clientY - y0) / z;
+        if (!dragging.live) {
+          if (h === HMOVE && Math.abs(dx) + Math.abs(dy) < 4) return;
+          dragging.live = true;
+          board.querySelectorAll(':scope > .object.raised').forEach(o => o.classList.remove('raised'));
+          obj.classList.add('raised');  // (the dragged card on top)
+        }
+        const now = performance.now(); if (now - sent < 12) return; sent = now;
+        post(LIVE, index, h + (ev.altKey ? 100 : 0), dx, dy);
+      };
+      const up = ev => {
+        board.removeEventListener('pointermove', move); board.removeEventListener('pointerup', up); board.removeEventListener('pointercancel', up);
+        const was = dragging; dragging = null;
+        if (!was.live) return;
+        post(h === HMOVE ? PAN : ZOOM, index, h + (ev.altKey ? 100 : 0), (ev.clientX - x0) / z, (ev.clientY - y0) / z);
+      };
+      board.addEventListener('pointermove', move); board.addEventListener('pointerup', up); board.addEventListener('pointercancel', up);
+    }, true);
+    let wheelAt = 0;
+    board.addEventListener('wheel', e => {  // Ctrl+wheel (a pinch on a trackpad): zoom, not the browser's
+      if (!e.ctrlKey) return;
+      e.preventDefault(); e.stopPropagation();
+      const now = performance.now(); if (now - wheelAt < 60) return; wheelAt = now;
+      post(BZOOM, 0, 0, 0, 0, e.deltaY > 0 ? 1 / 1.1 : 1.1);
+    }, { passive: false, capture: true });
+    const sc = board.parentElement;
+    let timer = 0;
+    const view = () => { const z = zoomOf(board); post(BVIEW, sc.scrollLeft / z, sc.scrollTop / z, sc.clientWidth / z, sc.clientHeight / z); };
+    sc.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(view, 150); });
+  }
+  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { if (b.classList.contains('free')) free(b); else attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place); };
   scan();
   new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
 })();
@@ -558,7 +663,7 @@ CANVAS_JS = r"""
 // its version or size changes. Gestures: drag = PAN, wheel/pinch = ZOOM, click = TAP,
 // sent through htmx like any other event, so the rest of the page updates as usual.
 (() => {
-  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9;
+  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9, HOVER = 14;
   const shape = () => document.getElementById('mojoui-v').value;
   // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
   // (light/dark, a skin) redraws it even when its version didn't move (D-673)
@@ -708,12 +813,16 @@ CANVAS_JS = r"""
     e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
   }, true);
   window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
+  // A canvas on a zoomed free canvas (mojoui.freeboard, CSS zoom): drawn at its own size in points, at the zoomed pixel
+  // density (the app lays it out as at 100 %, crisp at the zoom), as GTK draws a scaled card's canvas.
+  const canvasZoom = div => { const b = div.closest('.board.free'); return b ? Number(b.dataset.zoom || 100) / 100 : 1; };
   // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
   // swap, not only when a frame arrives: words can change while the picture doesn't.
   window.mojouiWords = div => {
     const m = document.getElementById('n' + div.dataset.node + '-meta'), cv = div.querySelector('canvas');
     if (!m) return;
     if ((m.dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip; }
+    if (cv && cv.style.cursor !== (m.dataset.cursor || '')) cv.style.cursor = m.dataset.cursor || '';  // (.cursor(): a link under the pointer, goal 78)
     if (cv && (cv.getAttribute('aria-label') || '') !== (m.dataset.name || '')) cv.setAttribute('aria-label', m.dataset.name || '');
   };
   function attach(div) {
@@ -732,10 +841,10 @@ CANVAS_JS = r"""
     // overlap): only an answer newer than the picture shown is drawn. Returns what the loop does next.
     async function one(tick) {
       const m = meta(), version = m ? m.dataset.version : '', skin = skinNow(), seq = ++st.seq;
-      const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, zf = canvasZoom(div);
       const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
-      const params = { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
+      const params = { w, h, scale: dpr * zf, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
       const res = await getFrame(sid, n, params);
       if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {
         if (seq > st.drawnSeq) { st.drawn = version; st.skin = skin; }
@@ -814,10 +923,10 @@ CANVAS_JS = r"""
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
           const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
-          const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+          const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, zf = canvasZoom(div);
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
-          const res = await getFrame(sid, n, { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
+          const res = await getFrame(sid, n, { w, h, scale: dpr * zf, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
           if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {  // (the picture it shows is still the one: nothing sent)
             st.drawn = version; st.skin = skin;
             if (res.headers.get('X-Mojoui-Pending') === '1') update();
@@ -862,6 +971,7 @@ CANVAS_JS = r"""
       const q = events.queue, last = q[q.length - 1], same = last && last.n === n && last.number === kind;
       if (same && (kind === PAN || kind === WHEEL)) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
       else if (same && kind === ZOOM) { last.zoom *= zoom; }
+      else if (same && kind === HOVER) { last.x = x; last.y = y; }
       else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text, pressure });
       flushEvents();
     }
@@ -884,6 +994,16 @@ CANVAS_JS = r"""
       });
     }
     cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = at(e); send(SECONDARY, x, y, 0, 0, 1); });
+    if (div.dataset.hover === '1') {  // Canvas(hover=True): where the pointer is (HOVER; -1, -1 once it leaves), at most every 40 ms
+      let hoverAt = 0, hoverTimer = 0;
+      cv.addEventListener('pointermove', e => {
+        if (pointers.size) return;
+        const [x, y] = at(e), now = performance.now(); clearTimeout(hoverTimer);
+        if (now - hoverAt >= 40) { hoverAt = now; send(HOVER, x, y, 0, 0, 1); }
+        else hoverTimer = setTimeout(() => { hoverAt = performance.now(); send(HOVER, x, y, 0, 0, 1); }, 40);
+      });
+      cv.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); send(HOVER, -1, -1, 0, 0, 1); });
+    }
     const mods = e => (e.shiftKey ? 1 : 0) + (e.ctrlKey || e.metaKey ? 2 : 0) + (e.altKey ? 4 : 0);  // SHIFT, CTRL, ALT (mojoui.view)
     const pen = e => e.pointerType === 'pen' ? (e.pressure || 0) : 0;
     cv.addEventListener('pointerdown', e => {
@@ -1338,8 +1458,22 @@ def place_mark(s, i):
     n = s.nodes[i]
     if n["kind"] == BOARD:
         return I(hidden=True, id=f"n{i}-place", data_kind="place", data_w=str(n["spacing"]), data_h=str(n["size"]),
-                 data_reveal=str(n["value"]))
-    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)))
+                 data_reveal=str(n["value"]), data_zoom=str(board_zoom(n)) if free_board(n) else None)
+    p = parent_of(s, i)
+    sized = p >= 0 and free_board(s.nodes[p])  # (a free canvas's card: its size goes with its place, mojoui.freeboard)
+    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)),
+             data_w=str(n["w"]) if sized else None, data_h=str(n["h"]) if sized else None)
+
+
+def free_board(n):
+    """A free canvas (mojoui.freeboard): cards anywhere at any size, dragged live, zoomed."""
+    return n["kind"] == BOARD and n["text"].startswith("clips free")
+
+
+def board_zoom(n):
+    """A free canvas's zoom in percent (its text's z=…), 100 when none."""
+    m = re.search(r"\bz=(\d+)", n["text"])
+    return int(m.group(1)) if m else 100
 
 
 def object_tone(s, i):
@@ -1718,9 +1852,11 @@ def render_node(s, i, sid):
             kids.append(Div(render(s, c, sid), place_mark(s, c), cls="object", data_kind="object", data_index=str(k), data_tag=ch["name"],
                             data_x=str(ch["x"]), data_y=str(ch["y"]), data_w=str(ch["w"]), data_h=str(ch["h"]), data_tone=str(object_tone(s, c)),
                             style=f"left:{ch['x']}px;top:{ch['y']}px;width:{ch['w']}px;height:{ch['h']}px"))
-        board = Div(*kids, place_mark(s, i), cls="board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid, data_hold="1" if n["hint"] else None,
-                    style=f"width:{n['spacing']}px;height:{n['size']}px")
-        return Div(board, cls="board-scroll", id=nid)  # the page scrolls when it's bigger than its room
+        free = free_board(n)
+        board = Div(*kids, place_mark(s, i), cls="board free" if free else "board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid,
+                    data_hold="1" if n["hint"] else None, data_zoom=str(board_zoom(n)) if free else None,
+                    style=f"width:{n['spacing']}px;height:{n['size']}px" + (f";zoom:{board_zoom(n) / 100}" if free else ""))
+        return Div(board, cls="board-scroll free-scroll" if free else "board-scroll", id=nid)  # the page scrolls when it's bigger than its room
     if kind == DIALOG:  # modal over a scrim; ✕ and Escape are on_close (its content's own buttons close it otherwise)
         close = Button("✕", type="button", cls="dialog-close", title="Close", aria_label="Close", **dict(common, hx_vals=json.dumps({"n": i, "second": 1})))
         head = Div(H3(n["text"], id=f"{nid}-t"), close, cls="dialog-head")
@@ -1833,7 +1969,7 @@ def render_node(s, i, sid):
         sized_h = n["h"] or (n["height_from_parent"] if "height_from_parent" in n else n["grows"] or n["fills"])
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
-                   data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None,
+                   data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None, data_hover="1" if n["text"] == "hover" else None,
                    data_scroll="pan" if n["spacing"] == 1 else None,
                    style=";".join(([own] if own else []) + (["pointer-events:none"] if n["size"] == 2 else [])) or None)
     if kind == DIVIDER:
@@ -1850,7 +1986,8 @@ def render_node(s, i, sid):
 def canvas_meta(n, i):
     """What the canvas adapter needs to know (version, whether it wants frames), kept beside
     the <canvas> so a patch can replace it without clearing the picture."""
-    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""), data_name=n.get("a11y_name", ""))
+    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""), data_name=n.get("a11y_name", ""),
+             data_cursor=n.get("cursor", ""))
 
 
 def render_alert(s, i, sid):
@@ -2769,7 +2906,9 @@ def make_app(module_dir):
             target = s.nodes[i]
             if op == SET_IMAGE:
                 s.images[i] = s.images.get(i, 0) + 1
-            if op == SET_PLACE or (op == SET_VALUE and target["kind"] == BOARD):  # (a Board's value: what to reveal)
+            if op == SET_SIZE and parent_of(s, i) >= 0 and free_board(s.nodes[parent_of(s, i)]):  # (a free canvas's card resized: its mark, live)
+                op = SET_PLACE
+            if op == SET_PLACE or (op in (SET_VALUE, SET_TEXT) and target["kind"] == BOARD):  # (a Board's value: what to reveal; a free one's text: its zoom)
                 mark = place_mark(s, i)
                 mark.attrs["hx-swap-oob"] = "true"
                 moved.append(mark)
