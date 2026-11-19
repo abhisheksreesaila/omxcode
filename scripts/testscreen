@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# scripts/testscreen <command> [args...]
+#
+# Runs a GUI test command on a hidden screen, so its windows never show on the owner's monitor or take focus,
+# while still being drawn for real by Hyprland on the desktop GPU (owner, 2026-11-18: "choose a workspace and use
+# that as your default workspace for testing").
+#
+# How: a headless Hyprland output (MOJOTEST, sized and scaled like the owner's monitor, placed far above and left of it so the pointer can't
+# reach it) shows a workspace of its own (11 or so, which no key reaches). The command is launched by Hyprland with an exec rule that puts its
+# windows there silently. Nothing is written to the Hyprland config: the output and the rule live only until
+# Hyprland restarts, and this script makes them again when they're missing.
+#
+# The command gets this shell's environment and working directory; its stdout and stderr are streamed back and its
+# exit code is returned. Killing this script kills the command. Outside Hyprland (or with MOJOUI_TESTSCREEN=0) the
+# command just runs here.
+set -u
+[ $# -ge 1 ] || { echo "usage: scripts/testscreen <command> [args...]" >&2; exit 2; }
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr/" 2>/dev/null | head -1)
+  export HYPRLAND_INSTANCE_SIGNATURE
+fi
+if [ "${MOJOUI_TESTSCREEN:-1}" = "0" ] || [ -z "$HYPRLAND_INSTANCE_SIGNATURE" ] || ! command -v hyprctl >/dev/null \
+   || ! hyprctl version >/dev/null 2>&1; then
+  exec "$@"
+fi
+
+if ! hyprctl monitors all 2>/dev/null | grep -q "^Monitor MOJOTEST "; then
+  hyprctl output create headless MOJOTEST >/dev/null
+fi
+# the same size, refresh and scale as the owner's focused monitor, so a test draws as many device pixels as it would
+# there (a 1x hidden screen drew 2.56x fewer than the 1.6x desktop and flattered the timings, D-7573)
+read -r mode scale < <(hyprctl monitors -j | python3 -c '
+import json, sys
+ms = [m for m in json.load(sys.stdin) if m["name"] != "MOJOTEST"]
+m = next((m for m in ms if m.get("focused")), ms[0] if ms else None)
+print("%dx%d@%d %s" % (m["width"], m["height"], round(m["refreshRate"]), m["scale"]) if m else "1920x1200@60 1")')
+# far above and left of everything: the real monitor's "auto" position puts it right of the rightmost monitor, so a
+# screen placed to the side ends up touching it (the pointer could slip over); one far above shares no edge with it
+hyprctl eval "hl.monitor({ output = \"MOJOTEST\", mode = \"$mode\", position = \"-30000x-30000\", scale = $scale })" >/dev/null
+# the windows go to the workspace MOJOTEST is showing (a workspace it isn't showing gets no frames, so nothing would
+# paint); numbers above 10 have no key binding, so the owner never lands there by accident
+ws=$(hyprctl monitors all | awk '/^Monitor MOJOTEST /{m=1} m && /active workspace:/{print $3; exit}')
+[ -n "$ws" ] || { echo "testscreen: MOJOTEST shows no workspace" >&2; exit 1; }
+
+dir=$(mktemp -d "$XDG_RUNTIME_DIR/mojotest.XXXXXX")
+chmod 700 "$dir"
+cleanup() {
+  if [ -s "$dir/pid" ]; then kill "$(cat "$dir/pid")" 2>/dev/null; fi
+  [ -n "${tailpid:-}" ] && kill "$tailpid" 2>/dev/null
+  rm -rf "$dir"
+}
+trap 'cleanup; exit 143' INT TERM
+trap cleanup EXIT
+
+{
+  echo "#!/usr/bin/env bash"
+  declare -px 2>/dev/null | grep -v -E '^declare -[a-zA-Z-]*x[a-zA-Z-]* (BASH_[A-Z_]*|SHLVL|PWD|OLDPWD|_)='
+  printf 'cd %q || exit 1\n' "$PWD"
+  printf 'echo $$ > %q\n' "$dir/pid"
+  printf 'exec'; printf ' %q' "$@"; printf ' > %q 2>&1\n' "$dir/out"
+} > "$dir/run.sh"
+# exec replaces the shell, so the exit code is written by a wrapper around it
+printf '#!/usr/bin/env bash\nbash %q; echo $? > %q\n' "$dir/run.sh" "$dir/rc" > "$dir/go.sh"
+: > "$dir/out"
+
+hyprctl eval "hl.exec_cmd(\"bash $dir/go.sh\", { workspace = \"$ws silent\" })" >/dev/null
+
+tail -n +1 -f "$dir/out" &
+tailpid=$!
+while [ ! -s "$dir/rc" ]; do sleep 0.2; done
+sleep 0.3  # let tail flush the last lines
+kill "$tailpid" 2>/dev/null
+tailpid=""
+rc=$(cat "$dir/rc")
+exit "$rc"
