@@ -1429,3 +1429,12 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Links autocomplete: mojoui.links `complete`, chips under the field, omxplorer feeds videos' and folders' columns. tests/test_link_complete.mojo; docs/goals/73/m1.py PASS on GTK headless (real widgets) and the web host (agent tools).
 - Bug found by the proof: after Return the Links field showed the old link text again (a held change from the chip's own set_text, sent after the rebuild; D-7304). Fixed in the GTK host.
 - Not run: AppKit/iPhone (chips are plain Buttons; the AppKit test-step parser still looks fields up by hint only); no web-host picture (the agent host has no pixels); tests/test_links.mojo needs python duckdb, missing in this env.
+
+## Goal 77 M7b: live tiles (2026-11-18, unattended)
+- Built `mojoui/livetiles.mojo`: pure layout (preset, dense pack, cell_box, snap_size), the tile model, water/press/lift/face springs, gestures, drawing, parts, spots and a frame record. Added `soft_shadow` and `gradient_rect` to `mojoui/draw.mojo`. tests/test_livetiles: 11 checks.
+- Mojo: `self.set_user_size(self.active, …)` was refused (a mutable `self` aliasing an immutable field argument), so the field is copied first. `Int(W)` on a comptime float, and `Int(x) / 10.0`, fail with "the SIMD type must be floating point": use `Float64(Int(x)) / 10.0` and typed comptimes.
+- Two of my own test expectations were wrong (one tile's preset leaves 4 holes; `[xl, l, l]` places only the xl). I checked the rule and fixed the tests, not the code (D-7790).
+- The grip test pressed where a tile was going, not where it was drawn (no frames had run): it now runs the frames first, as a person would see the tiles.
+- GTK test runs: the window only shows when a step takes a shot (the calibration run drew nothing until one was added). After a tap, `settle()` runs pending work for up to 1 s, so a mid-motion `shot:` was impossible; added the in-app LIVETILES_SHOT (D-7797).
+- Speed: the whole canvas (1248x716, scale 1) is redrawn on the CPU every frame in about 22 ms: GTK headless draws a promotion in ~30 frames over 0.73 s, the web ~80. Good enough for now; a GPU or a cached shadow would help the bigger stages.
+- Result: 77-check M7B PASS: GTK settled in 732 ms wall with 1.24 % overshoot, the web in 728 ms with 1.28 %; the words at the final rect and size on every frame on both hosts; the drag reordered and the grip resized on both.

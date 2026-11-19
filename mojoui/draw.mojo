@@ -1,8 +1,10 @@
-# 2D drawing on a Surface: anti-aliased rounded rectangles, lines, circles and areas.
+# 2D drawing on a Surface: anti-aliased rounded rectangles, lines, circles and areas; soft_shadow (a CSS box-shadow from a
+# theme's Shadow) and gradient_rect (a CSS linear gradient in a rounded rectangle).
 # Coordinates are pixels (multiply points by surface.scale). Colours are rgba(...) values.
 
-from std.math import sqrt
+from std.math import sqrt, exp, sin, cos
 from mojoui.canvas import Surface
+from mojoui.theme import Shadow
 
 
 def blend(d: UInt32, color: UInt32, cov: Float64) -> UInt32:
@@ -225,3 +227,96 @@ def polygon(mut s: Surface, pts: List[Float64], color: UInt32, dx: Float64 = 0, 
             for i in range(w):
                 if cov[i] > 0:
                     plot(s, x0 + i, py, color, min(cov[i], 1.0))
+
+
+def _round_sdf(px: Float64, py: Float64, x: Float64, y: Float64, w: Float64, h: Float64, r: Float64) -> Float64:
+    """Signed distance from (px, py) to a rounded rectangle's edge: negative inside, in pixels."""
+    var hw = w / 2
+    var hh = h / 2
+    var rr = min(max(r, 0.0), min(hw, hh))
+    var qx = abs(px - (x + hw)) - (hw - rr)
+    var qy = abs(py - (y + hh)) - (hh - rr)
+    var ox = max(qx, 0.0)
+    var oy = max(qy, 0.0)
+    return sqrt(ox * ox + oy * oy) + min(max(qx, qy), 0.0) - rr
+
+
+def soft_shadow(mut s: Surface, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, sh: Shadow, k: Float64 = 1.0,
+                opaque_card: Bool = True):
+    """A CSS box-shadow (mojoui.theme.Shadow: y offset, blur, spread, colour, inset) for a rounded rectangle at (x, y, w, h)
+    pixels; `k` = pixels per point (the shadow's numbers are points). The blur is a Gaussian (CSS: blur = 2 sigma) taken
+    over the shape's signed distance. `opaque_card`: the card drawn next covers its own area, so pixels well inside it are
+    skipped (a see-through card: pass False). Inset shadows draw inside the edge (a dark card's top highlight)."""
+    var a0 = Float64(Int((sh.color >> 24) & 0xFF)) / 255.0
+    if a0 <= 0.0 or w <= 0 or h <= 0:
+        return
+    var dy = Float64(sh.y) * k
+    var sigma = Float64(sh.blur) * k / 2.0
+    var spread = Float64(sh.spread) * k
+    if sh.inset:  # inside the card, outside the card moved down by y (blur ignored: a hairline highlight)
+        for py in range(max(Int(y), 0), min(Int(y + h) + 1, s.height)):
+            for px in range(max(Int(x), 0), min(Int(x + w) + 1, s.width)):
+                var cx = Float64(px) + 0.5
+                var cy = Float64(py) + 0.5
+                var inside = min(max(0.5 - _round_sdf(cx, cy, x, y, w, h, radius), 0.0), 1.0)
+                if inside <= 0.0:
+                    continue
+                var moved = min(max(0.5 - _round_sdf(cx, cy, x, y + dy, w, h - dy, radius), 0.0), 1.0)
+                plot(s, px, py, sh.color, inside * (1.0 - moved))
+        return
+    var sx = x - spread
+    var sy = y + dy - spread
+    var sw = w + 2 * spread
+    var sh_h = h + 2 * spread
+    if sw <= 0 or sh_h <= 0:
+        return
+    var sr = max(radius + spread, 0.0)
+    var reach = 3.0 * sigma + 1.0
+    for py in range(max(Int(sy - reach), 0), min(Int(sy + sh_h + reach) + 1, s.height)):
+        var cy = Float64(py) + 0.5
+        for px in range(max(Int(sx - reach), 0), min(Int(sx + sw + reach) + 1, s.width)):
+            var cx = Float64(px) + 0.5
+            if opaque_card and _round_sdf(cx, cy, x, y, w, h, radius) < -1.0:
+                continue
+            var d = _round_sdf(cx, cy, sx, sy, sw, sh_h, sr)
+            var cov: Float64
+            if sigma <= 0.25:
+                cov = min(max(0.5 - d, 0.0), 1.0)
+            else:  # the normal CDF of -d / sigma (the logistic approximation: within 1 % of erf)
+                cov = 1.0 / (1.0 + exp(1.702 * d / sigma))
+            if cov > 0.002:
+                plot(s, px, py, sh.color, cov)
+
+
+def gradient_rect(mut s: Surface, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, c0: UInt32, c1: UInt32,
+                  angle_deg: Float64 = 180.0, stop: Float64 = 1.0):
+    """A rounded rectangle filled with a CSS linear-gradient(angle_deg, c0 0%, c1 stop): 180 runs top to bottom, 160 top-left
+    to bottom-right a little; past `stop` (0-1) it is c1. Anti-aliased edges like rect()."""
+    if w <= 0 or h <= 0:
+        return
+    var t = angle_deg * 3.141592653589793 / 180.0
+    var gx = sin(t)
+    var gy = -cos(t)
+    var length = abs(w * gx) + abs(h * gy)
+    var cx0 = x + w / 2
+    var cy0 = y + h / 2
+    for py in range(max(Int(y), 0), min(Int(y + h) + 1, s.height)):
+        var cy = Float64(py) + 0.5
+        for px in range(max(Int(x), 0), min(Int(x + w) + 1, s.width)):
+            var cx = Float64(px) + 0.5
+            var cov = min(max(0.5 - _round_sdf(cx, cy, x, y, w, h, radius), 0.0), 1.0)
+            if cov <= 0.0:
+                continue
+            var f = ((cx - cx0) * gx + (cy - cy0) * gy) / length + 0.5
+            var q = min(max(f / max(stop, 1e-6), 0.0), 1.0)
+            plot(s, px, py, _lerp_rgba(c0, c1, q), cov)
+
+
+def _lerp_rgba(a: UInt32, b: UInt32, t: Float64) -> UInt32:
+    var out = UInt32(0)
+    for i in range(4):
+        var sh = UInt32(8 * i)
+        var va = Float64(Int((a >> sh) & 0xFF))
+        var vb = Float64(Int((b >> sh) & 0xFF))
+        out |= UInt32(Int(va + (vb - va) * t + 0.5)) << sh
+    return out

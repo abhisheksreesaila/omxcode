@@ -12,7 +12,18 @@ def m7a():
 
 
 def m7b():
-    return ("BLOCKED", "live tiles: not built yet")
+    """Live tiles (mojoui.livetiles): the unit test, examples/livetiles built for Linux and the web, then on GTK (headless)
+    and the web host (headless Chromium) a promotion sampled frame by frame from the app's own record (the surface moves
+    monotonically to its new rect within 3 %, settles <= 1.1 s, the words at the final rect and size on every frame), a
+    synthetic drag that reorders and a grip drag that resizes; pictures docs/goals/77/m7b-*.png. scripts/g77_livetiles_check.py."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts/g77_livetiles_check.py"
+    spec = importlib.util.spec_from_file_location("g77_livetiles_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.run()
 
 
 def m7c():
