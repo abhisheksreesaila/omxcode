@@ -105,7 +105,9 @@ def mac(scene, gpu=True):
         return None, f"the Mac ({MAC_SSH}) isn't reachable"
     print(f"(opening a pnote window on the Mac for the {scene} scene, about a minute)", flush=True)
     steps = OUT / f"mac-{scene}.steps"
-    steps.write_text("\n".join(["window:1440x900"] + STEPS[scene] + ["quit"]) + "\n")
+    # (added 11-18 for M3, D-7542: on the GPU path the scene ends with gpucheck, Metal vs gpu2d's CPU executor on the
+    # scene as it stands, read back from an IOSurface: M1's bounds)
+    steps.write_text("\n".join(["window:1440x900"] + STEPS[scene] + (["gpucheck:note"] if gpu else []) + ["quit"]) + "\n")
     env = dict(os.environ, MAC_SSH=MAC_SSH,
                MAC_ENV=",".join([f"PNOTE_SCENE={scene}", "PNOTE_IMPORT={data}/bench-note.json"] + ([] if gpu else ["PNOTE_GPU=0"])))
     r = run(["scripts/mac-ssh", "pnote", str(steps), str(NOTE)], 3600, env=env)
@@ -191,7 +193,17 @@ def gpu_milestone(where, readback_test, ok_line):
         bad = silky(res, scene)
         if bad:
             return "FAIL", f"{scene} ({g}): {bad}"
-        said.append(f"{scene} {summary(res)}")
+        check = ""
+        if where == "mac":  # (the readback, M1's bounds: the app prints ok only when mean ≤ 1.5 and far ≤ 0.5 %)
+            m = re.search(r"^GPU2D METAL CHECK: (.*)$", out, re.M)
+            if not m or not m.group(1).endswith(" ok"):
+                return "FAIL", f"{scene}: readback {m.group(1) if m else '(no GPU2D METAL CHECK line)'}"
+            kv = dict(re.findall(r"(\w+)=([\d.]+)%?", m.group(1)))
+            nums = [float(kv.get(k, "999")) for k in ("mean", "far", "layers_mean", "layers_far")]
+            if nums[0] > 1.5 or nums[1] > 0.5 or nums[2] > 1.5 or nums[3] > 0.5:
+                return "FAIL", f"{scene}: readback outside M1's bounds: {m.group(1)}"
+            check = f" readback mean {nums[0]} far {nums[1]}%"
+        said.append(f"{scene} {summary(res)}{check}")
     return "PASS", f"silky ({where}): " + "; ".join(said)
 
 

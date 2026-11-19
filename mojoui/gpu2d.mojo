@@ -326,6 +326,54 @@ def _clip_op(mut clips: List[Float64], scene: Scene, op: Int, tx: Float64, ty: F
             _ = clips.pop()
 
 
+def _zigzag_start(path: List[Float32], p0: Int, n: Int) -> Int:
+    """Where a polygon's zig-zag triangles start (fill_layers): the index k whose chords k+j ↔ k−1−j, at j = n/8, n/4
+    and 3n/8, are shortest (squared lengths summed), searched every n/16 points and then around the best. 0 for small
+    polygons (any start covers them about once)."""
+    if n < 16:
+        return 0
+    var pts = path.unsafe_ptr() + p0
+    var j1 = n // 8
+    var j2 = n // 4
+    var j3 = 3 * n // 8
+
+    @always_inline
+    @parameter
+    def chord(k: Int, j: Int) -> Float32:
+        var a = k + j
+        if a >= n:
+            a -= n
+        var b = k - 1 - j
+        if b < 0:
+            b += n
+        var dx = pts[2 * a] - pts[2 * b]
+        var dy = pts[2 * a + 1] - pts[2 * b + 1]
+        return dx * dx + dy * dy
+
+    var stride = max(n // 16, 1)
+    var best = 0
+    var best_s: Float32 = 3e38
+    var k = 0
+    while k < n:
+        var sk = chord(k, j1) + chord(k, j2) + chord(k, j3)
+        if sk < best_s:
+            best_s = sk
+            best = k
+        k += stride
+    var c = best
+    for d in range(1 - stride, stride):
+        var kk = c + d
+        if kk < 0:
+            kk += n
+        elif kk >= n:
+            kk -= n
+        var sk = chord(kk, j1) + chord(kk, j2) + chord(kk, j3)
+        if sk < best_s:
+            best_s = sk
+            best = kk
+    return best
+
+
 def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0):
     """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
     rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
@@ -440,8 +488,13 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 # inside the polygon cancel in pairs, so their signed windings add up to the polygon's (like a fan from
                 # p0), but a ribbon (an ink outline: one side out, the other back) is covered about once instead of
                 # being swept by long fan triangles: ~10× less stencil work for a stroke (goal 75 M2)
-                var lo = 0
-                var hi = n - 1
+                # (started where the two chains face each other across the polygon: the start whose chords an eighth,
+                # a quarter and three eighths of the way round are shortest. An ink outline's list begins at the left
+                # edge, so a zig-zag from index 0 paired each left point with a right point a whole cap further on:
+                # slivers whose boxes summed to 35× the strokes' area; from the cap's middle they're ~the stroke, D-7537)
+                var rot = _zigzag_start(scene.path, p0, n)
+                var lo = rot
+                var hi = rot + n - 1
                 var upper = True
                 while hi - lo >= 2:
                     var ia: Int
@@ -455,6 +508,9 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         ib = hi
                         hi -= 1
                     var ic = hi if upper else lo
+                    ia = ia % n
+                    ib = ib % n
+                    ic = ic % n
                     if upper:
                         f.fan.append(scene.path[p0 + 2 * ia])
                         f.fan.append(scene.path[p0 + 2 * ia + 1])

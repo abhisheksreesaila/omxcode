@@ -34,6 +34,9 @@ from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.clock import now_ns
 from mojoui.canvas import Surface, MAC_GPU
+from mojoui.gpu2d import fill_batches, execute_cpu
+from mojoui.gpu2d_metal import MetalCanvas2D, metal_device_name, read_iosurface
+from mojoui.gpu2d_backend import set_backend_name
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, io_surface, AppleCanvas, MISSES
 from mojoui.hosts.mac_report import MacReport, MAX_SHOTS, pts
 from mojoui.hosts.appkit_webview import (
@@ -280,9 +283,17 @@ struct AppKitHost[A: App](Movable):
     var wait_until: Int  # (test steps) its deadline (now_ns)
     var probe_pending: Bool  # (test steps) a webjs: step's answer is still to be written in the log
     var dark_told: Int  # the system's light (0) or dark (1) mode as the app last heard it (App.appearance); -1: not yet
+    # goal 75 M3: Canvas(…).gpu() canvases whose app draws a Scene are drawn by mojoui.gpu2d on Metal (gpu2d_metal)
+    var g2d: Int  # the MetalCanvas2D on the heap (made at the first such draw), 0: not yet
+    var g2d_why: String  # "": Metal is here (probed at start); else why those canvases stay on the CPU path
+    var g2d_force: Bool  # MOJOUI_GPU2D=1: every canvas whose app draws a Scene takes the GPU path, .gpu() or not (testing)
+    var g2d_frames: Int  # pictures Metal drew so far (framebench's renderer=)
+    var g2d_parts: List[Float64]  # the last GPU frame's parts (ms): the app's Scene, the batches, Metal (encode + GPU), the GPU alone;
+    # then layers rebuilt, kept, grown, polygon groups planned and drawn (on the canvas)
 
     def __init__(out self):
         Self.A.init_shared()
+        var g2d_why = gpu2d_probe()  # (before the app is made: it may ask which backend it has, mojoui.gpu2d_backend)
         self.rt = Runtime(Self.A())
         self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines on stdout)
         self.window = 0
@@ -338,6 +349,11 @@ struct AppKitHost[A: App](Movable):
         self.wait_until = 0
         self.probe_pending = False
         self.dark_told = -1
+        self.g2d = 0
+        self.g2d_why = g2d_why
+        self.g2d_force = env("MOJOUI_GPU2D") == "1"
+        self.g2d_frames = 0
+        self.g2d_parts = List[Float64](length=13, fill=0)
         self.size_w = List[Int]()
         self.size_h = List[Int]()
         self.wraps = List[Int]()
@@ -2153,7 +2169,9 @@ struct AppKitHost[A: App](Movable):
                     var had = msg(w, "attributedStringValue")
                     if had != 0 and msg(had, "length") > 0:
                         var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
-                        _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(self.label_text(p.node, p.text)), attrs))
+                        var words = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(self.label_text(p.node, p.text)), attrs)
+                        _ = msg(w, "setAttributedStringValue:", words)
+                        _ = msg(words, "release")  # (the field keeps its own copy: one leaked a string per change, e.g. a zoom label's every frame)
                     else:
                         _ = msg(w, "setStringValue:", ns_string(self.label_text(p.node, p.text)))
                 elif kind == FIELD:
@@ -2828,8 +2846,23 @@ struct AppKitHost[A: App](Movable):
         if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
+        self.gpu_input(node)
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
+
+    def canvas_key(mut self, node: Int, name: String, mods: Int, self_addr: Int):
+        """A KEY on canvas node `node` (keyDown, and the test steps that stand for it)."""
+        self.gpu_input(node)
+        var d = self.rt.key(node, name, mods)
+        self.apply(d, self_addr)
+
+    def gpu_input(mut self, node: Int):
+        """Input reached canvas node `node`: when it's drawn by gpu2d on Metal, the GPU is woken now if it's idle (it's
+        about to draw a frame; D-7540)."""
+        if self.g2d == 0 or node < 0 or node >= len(self.rt.shown.nodes):
+            return
+        if self.rt.shown.nodes[node].hint == "gpu" or self.g2d_force:
+            Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)[].metal.wake()
 
     def tick(mut self, seconds: Float64, self_addr: Int):
         """Every display frame: frame events for canvases that asked, then redraws."""
@@ -2884,6 +2917,9 @@ struct AppKitHost[A: App](Movable):
         var version = self.rt.shown.nodes[node].value
         if wpx <= 0 or hpx <= 0 or (wpx == self.canvases[k].wpx and hpx == self.canvases[k].hpx and version == self.canvases[k].drawn):
             return
+        if self.g2d_why == "" and (self.rt.shown.nodes[node].hint == "gpu" or self.g2d_force):
+            if self.draw_gpu2d(k, wpx, hpx, scale, bounds, version, self_addr):
+                return
         if len(self.canvases[k].pixels) != wpx * hpx:
             self.canvases[k].pixels = List[UInt32](length=wpx * hpx, fill=0)
         var surface = Surface(Int(self.canvases[k].pixels.unsafe_ptr()), wpx, hpx, scale)
@@ -2896,19 +2932,165 @@ struct AppKitHost[A: App](Movable):
         var on_gpu = False
         comptime if MAC_GPU:
             on_gpu = self.show_iosurface(k, surface, bounds)
-        if not on_gpu:
-            var image = cg_image(self.canvases[k].pixels, wpx, hpx)
-            if image == 0:
-                self.report.note("canvas node " + String(node) + ": no CGImage from its pixels")
-                return
-            var picture = msg(msg(cls("NSImage"), "alloc"), "initWithCGImage:size:", image, bounds.width, bounds.height)
-            _ = msg(view, "setImage:", picture)
-            _ = msg(picture, "release")
-            cfunc[NoneType]("CGImageRelease", image)
+        if not on_gpu and not self.show_pixels(k, wpx, hpx, bounds):
+            return
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
         self.canvases[k].drawn = version
         self.apply(d, self_addr)
+
+    def show_pixels(mut self, k: Int, wpx: Int, hpx: Int, bounds: CGRect) -> Bool:
+        """The canvas's CPU pixels into its image view (a CGImage copy). False: no CGImage could be made."""
+        var image = cg_image(self.canvases[k].pixels, wpx, hpx)
+        if image == 0:
+            self.report.note("canvas node " + String(self.canvases[k].node) + ": no CGImage from its pixels")
+            return False
+        var picture = msg(msg(cls("NSImage"), "alloc"), "initWithCGImage:size:", image, bounds.width, bounds.height)
+        _ = msg(self.canvases[k].view, "setImage:", picture)
+        _ = msg(picture, "release")
+        cfunc[NoneType]("CGImageRelease", image)
+        return True
+
+    def gpu2d(mut self) -> Int:
+        """The Metal renderer for .gpu() canvases (made the first time one draws: the shaders compile once, the pipelines
+        and stencil states are built once), or 0 when Metal can't be set up: g2d_why says why, the backend name says
+        cpu from then on, and those canvases take the CPU path."""
+        if self.g2d == 0 and self.g2d_why == "":
+            var t0 = Int(now_ns())
+            var p = alloc(Layout[MetalCanvas2D].single()).unsafe_leak()  # (lives as long as the app)
+            p.unsafe_write(MetalCanvas2D())
+            if not p[].metal.ok:
+                self.g2d_why = p[].metal.why
+                set_backend_name("cpu (" + self.g2d_why + ")")
+                print("mojoui: gpu2d: no Metal path (" + self.g2d_why + "); GPU canvases are drawn on the CPU", flush=True)
+                self.report.note("gpu2d: no Metal path (" + self.g2d_why + ")")
+                return 0
+            self.g2d = Int(p)
+            var ms = Float64(Int(now_ns()) - t0) / 1e6
+            # the main thread draws these frames: it asks for the interactive class (a user is dragging), as an app's main
+            # thread launched by the Finder has; one started from a shell inherits the shell's (D-7539)
+            var qos0 = cfunc[UInt32]("qos_class_self")
+            if env("MOJOUI_QOS") != "0":
+                _ = cfunc[Int32]("pthread_set_qos_class_self_np", UInt32(0x21), Int32(0))  # QOS_CLASS_USER_INTERACTIVE
+            var qos1 = cfunc[UInt32]("qos_class_self")
+            print("mojoui: gpu2d on Metal (" + p[].metal.name + "): GPU canvases are drawn by our renderer, set up in " + one_decimal(ms) + " ms; main thread QoS "
+                  + String(Int(qos0)) + " → " + String(Int(qos1)) + " (33 interactive, 25 initiated, 21 default, 0 unspecified)", flush=True)
+            self.report.note("gpu2d: Metal on " + p[].metal.name + " (set up in " + one_decimal(ms) + " ms)")
+        return self.g2d
+
+    def ring_pick(mut self, k: Int, wpx: Int, hpx: Int, mtl: Int) -> Int:
+        """An IOSurface of canvas k's ring (wpx × hpx) that Core Animation isn't showing, made when the size changes; the
+        ring grows past three (to six) rather than tear or copy when the window server holds them all. -1: none.
+        (Not a CAMetalLayer: presenting drawables let the system pace the app to the display and lower its clocks
+        until each frame took ~8.5 ms, D-7535.)"""
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=mtl)
+        ref c = self.canvases[k]
+        if c.sw != wpx or c.sh != hpx:
+            for s in c.surfaces:  # (the old size's: released below, their wraps first)
+                c.retired.append(s)
+            c.surfaces.clear()
+            for _ in range(3):
+                var s = io_surface(wpx, hpx)
+                if s == 0:
+                    break
+                c.surfaces.append(s)
+            c.sw = wpx
+            c.sh = hpx
+            c.next = 0
+            if len(c.surfaces) == 0:
+                self.report.note("canvas node " + String(c.node) + ": no IOSurface of " + String(wpx) + "x" + String(hpx) + " px")
+        for x in c.retired:  # (render waits for the GPU: nothing still uses them)
+            g[].metal.forget(x)
+            cfunc[NoneType]("CFRelease", x)
+        c.retired.clear()
+        var n = len(c.surfaces)
+        for j in range(n):
+            var at = (c.next + j) % n
+            if cfunc[UInt8]("IOSurfaceIsInUse", c.surfaces[at]) == 0:
+                return at
+        if n > 0 and n < 6:
+            var s = io_surface(wpx, hpx)
+            if s != 0:
+                c.surfaces.append(s)
+                return n
+        return -1
+
+    def layer_show(mut self, k: Int, s: Int, bounds: CGRect):
+        """A sublayer of canvas k's view shows IOSurface s as its contents (Core Animation reads that memory: no copy)."""
+        ref c = self.canvases[k]
+        if c.layer == 0:
+            _ = msg(c.view, "setWantsLayer:", 1)
+            _ = msg(c.view, "setImage:", 0)
+            c.layer = msg(msg(cls("CALayer"), "alloc"), "init")
+            _ = msg(c.layer, "setContentsGravity:", ns_string("resize"))
+            _ = msg(msg(c.view, "layer"), "addSublayer:", c.layer)
+        _ = msg(cls("CATransaction"), "begin")
+        _ = msg(cls("CATransaction"), "setDisableActions:", 1)  # (no implicit fade between frames)
+        _ = msg(c.layer, "setFrame:", Float64(0), Float64(0), bounds.width, bounds.height)
+        _ = msg(c.layer, "setContents:", s)
+        _ = msg(c.layer, "setHidden:", 0)
+        _ = msg(cls("CATransaction"), "commit")
+
+    def draw_gpu2d(mut self, k: Int, wpx: Int, hpx: Int, scale: Float64, bounds: CGRect, version: Int, self_addr: Int) -> Bool:
+        """Canvas k on the GPU (goal 75 M3): the app's Scene (draw_scene) → gpu2d's batches, layer by layer (unchanged
+        layers keep theirs, D-7533) → Metal into a free IOSurface of the canvas's ring, waited for (a frame's work
+        includes the GPU's, and the picture is whole) and handed to Core Animation as a layer's contents (no copy).
+        When Metal can't take the frame (no free IOSurface, a failed command buffer) the same batches are drawn by
+        gpu2d's CPU executor and shown as before. False: the app draws no Scene (the host's usual path draws it)."""
+        var addr = self.gpu2d()
+        if addr == 0:
+            return False
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=addr)
+        var node = self.canvases[k].node
+        var t0 = Int(now_ns())
+        g[].scene.reset(wpx, hpx, scale)
+        var r = self.rt.draw_scene(node, g[].scene)
+        if not r[0]:
+            return False
+        var t1 = Int(now_ns())
+        var at = self.ring_pick(k, wpx, hpx, addr)
+        var on_gpu = False
+        if at >= 0:
+            var s = self.canvases[k].surfaces[at]
+            on_gpu = g[].render_scene(node, s, wpx, hpx)
+            self.g2d_parts[0] = Float64(t1 - t0) / 1e6
+            self.g2d_parts[1] = g[].build_ms
+            self.g2d_parts[2] = Float64(Int(now_ns()) - t1) / 1e6 - g[].build_ms
+            self.g2d_parts[4] = Float64(g[].rebuilt)
+            self.g2d_parts[5] = Float64(g[].kept)
+            self.g2d_parts[6] = Float64(g[].grown)
+            self.g2d_parts[7] = Float64(g[].groups)
+            self.g2d_parts[8] = Float64(g[].metal.drawn_groups)
+            self.g2d_parts[11] = g[].metal.idle_ms
+            self.g2d_parts[12] = Float64(g[].metal.woken)
+            if on_gpu:
+                if self.canvases[k].gpu_frames == 0:
+                    self.report.note("canvas node " + String(node) + ": drawn by gpu2d on Metal into an IOSurface, shown without a copy")
+                self.layer_show(k, s, bounds)
+                self.canvases[k].next = (at + 1) % len(self.canvases[k].surfaces)
+                self.canvases[k].gpu_frames += 1
+                self.g2d_frames += 1
+        if not on_gpu:
+            if len(self.canvases[k].pixels) != wpx * hpx:
+                self.canvases[k].pixels = List[UInt32](length=wpx * hpx, fill=0)
+            else:
+                for i in range(wpx * hpx):
+                    self.canvases[k].pixels[i] = 0
+            var surface = Surface(Int(self.canvases[k].pixels.unsafe_ptr()), wpx, hpx, scale)
+            fill_batches(g[].frame, g[].scene, g[].atlas, g[].font)
+            execute_cpu(g[].frame, g[].atlas, surface)
+            if self.canvases[k].layer != 0:
+                _ = msg(self.canvases[k].layer, "setHidden:", 1)
+            _ = self.show_pixels(k, wpx, hpx, bounds)
+        if wpx != self.canvases[k].wpx or hpx != self.canvases[k].hpx:
+            self.report.note("canvas node " + String(node) + " (id " + String(self.rt.shown.nodes[node].style) + ") drew " + String(wpx) + "x" + String(hpx)
+                             + " px on the " + ("GPU (gpu2d, Metal)" if on_gpu else "CPU (gpu2d's executor)"))
+        self.canvases[k].wpx = wpx
+        self.canvases[k].hpx = hpx
+        self.canvases[k].drawn = version if not g[].scene.again else -1  # (mid-animation: drawn again next frame, as GTK)
+        g[].end_frame()
+        self.apply(r[1], self_addr)
+        return True
 
     def offer_iosurface(mut self, k: Int, wpx: Int, hpx: Int, mut surface: Surface):
         """The Mac with its GPU (D-5311): offers this draw an IOSurface to draw into (surface.shared_*), the first of the
@@ -2977,21 +3159,11 @@ struct AppKitHost[A: App](Movable):
                 c.sh = 0
             return False
         if c.layer == 0:
-            _ = msg(c.view, "setWantsLayer:", 1)
-            _ = msg(c.view, "setImage:", 0)
-            c.layer = msg(msg(cls("CALayer"), "alloc"), "init")
-            _ = msg(c.layer, "setContentsGravity:", ns_string("resize"))
-            _ = msg(msg(c.view, "layer"), "addSublayer:", c.layer)
             self.report.note("canvas node " + String(c.node) + ": its GPU picture is shown from an IOSurface (Metal, no copy)")
             print("mojoui: GPU canvas pictures go to the screen without a copy (Metal draws into an IOSurface; Core Animation shows it)", flush=True)
-        _ = msg(cls("CATransaction"), "begin")
-        _ = msg(cls("CATransaction"), "setDisableActions:", 1)  # (no implicit fade between frames)
-        _ = msg(c.layer, "setFrame:", Float64(0), Float64(0), bounds.width, bounds.height)
-        _ = msg(c.layer, "setContents:", s)
-        _ = msg(c.layer, "setHidden:", 0)
-        _ = msg(cls("CATransaction"), "commit")
-        c.next = (at + 1) % 3
-        c.gpu_frames += 1
+        self.layer_show(k, s, bounds)
+        self.canvases[k].next = (at + 1) % 3
+        self.canvases[k].gpu_frames += 1
         return True
 
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
@@ -3391,8 +3563,7 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     var name = key_name_of(event)
     if name == "" or name.byte_length() > 32:
         return
-    var d = host[].rt.key(t[1], name, mods)
-    host[].apply(d, t[0])
+    host[].canvas_key(t[1], name, mods, t[0])
 
 
 def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
@@ -3589,8 +3760,7 @@ def canvas_key_step[A: App](host_addr: Int, which: String, name: String, mods: I
     var node = canvas_node_at(host[], which)
     if node < 0:
         return
-    var d = host[].rt.key(node, name, mods)
-    host[].apply(d, host_addr)
+    host[].canvas_key(node, name, mods, host_addr)
 
 
 def pct(xs: List[Float64], q: Float64) -> Float64:
@@ -3670,6 +3840,13 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var missed = 0
     var on_gpu = 0
     var on_cpu = 0
+    var on_g2d = 0
+    var g_scene = List[Float64]()
+    var g_batch = List[Float64]()
+    var g_metal = List[Float64]()
+    var g_gpu = List[Float64]()
+    var g_layers = List[String]()
+    var walls = List[Float64]()  # (each frame's wall time, the GPU waits included)  # (per GPU frame: layers rebuilt/kept/grown, polygon groups)
     if what == "draw" or what == "pan":  # (a drag: press, the moves, release; the app's tool decides what it does)
         host[].canvases[k].moved = False
         host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
@@ -3684,6 +3861,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             continue
         var drawn0 = host[].canvases[k].drawn
         var gpu0 = host[].canvases[k].gpu_frames
+        var g2d0 = host[].g2d_frames
         var t0 = Int(now_ns())
         if what == "pan":
             var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
@@ -3709,8 +3887,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             var ch = String(typed[byte = i % 20 : i % 20 + 1])
             if what == "grow":
                 ch = grow_keys[i]
-            var d = host[].rt.key(node, ch, 0)
-            host[].apply(d, host_addr)
+            host[].canvas_key(node, ch, 0, host_addr)
         else:  # draw: a wandering line across the page
             x += 3.0 + Float64(i % 5) * 0.4
             y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
@@ -3728,38 +3905,155 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             if host[].canvases[k].drawn != drawn0:  # (a rebuild made a new canvas: its picture is drawn from scratch)
                 drawn0 = -1
             host[].draw_canvas(k, host_addr)
-            drew = host[].canvases[k].drawn != drawn0
+            # (a GPU frame counts even when the version reads the same: mid-animation it stays -1, drawn every frame)
+            drew = host[].canvases[k].drawn != drawn0 or host[].g2d_frames != g2d0
         var t2 = Int(now_ns())
         _ = msg(window, "displayIfNeeded")
         _ = msg(cls("CATransaction"), "flush")
         var t3 = Int(now_ns())
+        # (a gpu2d frame's work: its CPU time and the GPU's time on it, not the time the thread slept while the GPU
+        # queued it or woke up: GTK's rule, D-7528, D-7541; the wall time is printed too)
+        var gms = 0.0
+        var slept = 0.0
+        if drew and host[].g2d_frames != g2d0:
+            var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=host[].g2d)
+            gms = g[].metal.gpu_ms
+            slept = g[].metal.blocked_ms
+            host[].g2d_parts[9] = g[].metal.wait_before_ms
+            host[].g2d_parts[10] = g[].metal.wait_after_ms
         if not drew:
             missed += 1
         else:
+            if host[].g2d_frames != g2d0:
+                on_g2d += 1
+                g_scene.append(host[].g2d_parts[0])
+                g_batch.append(host[].g2d_parts[1])
+                g_metal.append(host[].g2d_parts[2])
+                g_gpu.append(gms)
+                g_layers.append(String(Int(host[].g2d_parts[4])) + "/" + String(Int(host[].g2d_parts[5])) + "/" + String(Int(host[].g2d_parts[6])) + "/" + String(Int(host[].g2d_parts[8])) + ":" + String(Int(host[].g2d_parts[7]))
+                                + " w" + one_decimal(host[].g2d_parts[9]) + "+" + one_decimal(host[].g2d_parts[10]) + " i" + one_decimal(host[].g2d_parts[11])
+                                + " k" + String(Int(host[].g2d_parts[12])))
             if host[].canvases[k].gpu_frames != gpu0:
                 on_gpu += 1
             else:
                 on_cpu += 1
             var ev = Float64(t1 - t0) / 1e6
-            var dm = Float64(t2 - t1) / 1e6
+            var dm = Float64(t2 - t1) / 1e6 - slept + gms
             var pm = Float64(t3 - t2) / 1e6
             events.append(ev)
             draws.append(dm)
             paints.append(pm)
             works.append(ev + dm + pm)
+            walls.append(Float64(t3 - t0) / 1e6)
         pump_run_loop(0)  # (the window server's events, untimed)
     node = canvas_node_at(host[], tag)
     if node >= 0 and (what == "pan" or what == "draw"):
         host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
     host[].wake()
+    if env("MOJOUI_FRAMEBENCH_FRAMES") == "1":  # (every frame's work and its GPU parts, in order: where the slow ones fall)
+        var line = String("FRAMES: ") + what
+        for i in range(len(works)):
+            line += " " + one_decimal(works[i])
+            if i < len(g_scene):
+                line += "(" + one_decimal(g_scene[i]) + "/" + one_decimal(g_batch[i]) + "/" + one_decimal(g_metal[i]) + "/" + one_decimal(g_gpu[i]) + " " + g_layers[i] + ")"
+        print(line, flush=True)
     var renderer = String("AppKit-IOSurface") if on_cpu == 0 and on_gpu > 0 else (String("AppKit-CPU") if on_gpu == 0 else String("AppKit-mixed"))
+    if on_g2d > 0:  # (goal 75 M3: our renderer on Metal drew them; each frame's GPU work is in its draw time)
+        renderer = String("gpu2d-Metal") if on_g2d == len(works) else String("gpu2d-Metal-mixed")
     var scale = msg[Float64](window, "backingScaleFactor") if window != 0 else 0.0
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=0 renderer=" + renderer
           + " p50=" + one_decimal(pct(works, 0.5)) + " p95=" + one_decimal(pct(works, 0.95)) + " max=" + one_decimal(pct(works, 1.0))
           + " event_p95=" + one_decimal(pct(events, 0.95)) + " draw_p95=" + one_decimal(pct(draws, 0.95))
           + " paint_p95=" + one_decimal(pct(paints, 0.95)) + " draw_max=" + one_decimal(pct(draws, 1.0))
-          + " paint_max=" + one_decimal(pct(paints, 1.0)) + " gpu_frames=" + String(on_gpu) + " cpu_frames=" + String(on_cpu)
-          + " canvas=" + String(Int(w)) + "x" + String(Int(h)) + "pt@" + one_decimal(scale) + "x", flush=True)
+          + " paint_max=" + one_decimal(pct(paints, 1.0)) + " wall_p95=" + one_decimal(pct(walls, 0.95)) + " wall_max=" + one_decimal(pct(walls, 1.0)) + " gpu_frames=" + String(on_gpu) + " cpu_frames=" + String(on_cpu) + " gpu2d_frames=" + String(on_g2d)
+          + " canvas=" + String(Int(w)) + "x" + String(Int(h)) + "pt@" + one_decimal(scale) + "x"
+          + ((" scene_p95=" + one_decimal(pct(g_scene, 0.95)) + " batch_p95=" + one_decimal(pct(g_batch, 0.95)) + " metal_p95=" + one_decimal(pct(g_metal, 0.95))
+              + " gpu_p50=" + one_decimal(pct(g_gpu, 0.5)) + " gpu_p95=" + one_decimal(pct(g_gpu, 0.95)) + " scene_max=" + one_decimal(pct(g_scene, 1.0))
+              + " metal_max=" + one_decimal(pct(g_metal, 1.0)) + " gpu_max=" + one_decimal(pct(g_gpu, 1.0))) if on_g2d > 0 else String("")), flush=True)
+
+
+def gpu2d_probe() -> String:
+    """At start, before the app is made: whether Canvas(…).gpu() canvases can be drawn by gpu2d on Metal ("": yes), told
+    to the app through mojoui.gpu2d_backend ("gpu2d-Metal", or "cpu (why)"). MOJOUI_GPU2D=0: never (the CPU path)."""
+    if env("MOJOUI_GPU2D") == "0":
+        set_backend_name("cpu (MOJOUI_GPU2D=0)")
+        return "MOJOUI_GPU2D=0"
+    if metal_device_name() == "":
+        set_backend_name("cpu (no Metal device)")
+        return "no Metal device"
+    set_backend_name("gpu2d-Metal")
+    return ""
+
+
+def gpu_check[A: App](host_addr: Int, which: String):
+    """gpucheck:K (goal 75 M3): canvas K's current Scene drawn twice, by Metal (read back from an IOSurface) and by
+    gpu2d's CPU executor, and compared as M1's bounds say (mean ≤ 1.5 levels, ≤ 0.5 % of pixels with a channel more than
+    40 levels off). Prints `GPU2D METAL CHECK: … mean=… far=…% ok|FAIL`."""
+    var host = host_at[A](host_addr)
+    var node = canvas_node_at(host[], which)
+    var k = host[].canvas_at(node) if node >= 0 else -1
+    if k < 0:
+        print("GPU2D METAL CHECK: no canvas " + which, flush=True)
+        return
+    var addr = host[].gpu2d()
+    if addr == 0:
+        print("GPU2D METAL CHECK: no Metal (" + host[].g2d_why + ")", flush=True)
+        return
+    var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=addr)
+    var b = msg[CGRect](host[].canvases[k].view, "bounds")
+    var scale = msg[Float64](host[].window, "backingScaleFactor") if host[].window != 0 else 2.0
+    var w = Int(b.width * scale + 0.5)
+    var h = Int(b.height * scale + 0.5)
+    g[].scene.reset(w, h, scale)
+    var r = host[].rt.draw_scene(node, g[].scene)
+    if not r[0] or w <= 0 or h <= 0:
+        print("GPU2D METAL CHECK: canvas " + which + " draws no Scene", flush=True)
+        return
+    fill_batches(g[].frame, g[].scene, g[].atlas, g[].font)
+    var want = List[UInt32](length=w * h, fill=0)
+    var surface = Surface(Int(want.unsafe_ptr()), w, h, scale)
+    execute_cpu(g[].frame, g[].atlas, surface)
+    # the whole frame at once (render), then the path the screen takes (render_scene: layers kept from last frame where
+    # they didn't change, the rest built alone): both must match the CPU executor
+    var whole = metal_vs_cpu(g, want, w, h, False, node)
+    var layered = metal_vs_cpu(g, want, w, h, True, node)
+    g[].end_frame()
+    var ok = whole[0] <= 1.5 and whole[1] <= 0.5 and layered[0] <= 1.5 and layered[1] <= 0.5
+    print("GPU2D METAL CHECK: canvas=" + which + " " + String(w) + "x" + String(h) + " ops=" + String(g[].prev.ops()) + " mean=" + String(round(whole[0], 4))
+          + " far=" + String(round(whole[1], 4)) + "% differ=" + String(Int(whole[2])) + " layers_mean=" + String(round(layered[0], 4)) + " layers_far="
+          + String(round(layered[1], 4)) + "% gpu_ms=" + String(round(g[].metal.gpu_ms, 3)) + (" ok" if ok else " FAIL"), flush=True)
+    host[].canvases[k].drawn = -1  # (drawn again by the next tick: the check's Scene replaced nothing on screen)
+    host[].apply(r[1], host_addr)
+
+
+def metal_vs_cpu(g: Pointer[MetalCanvas2D, MutUntrackedOrigin], want: List[UInt32], w: Int, h: Int, layered: Bool, owner: Int) -> Tuple[Float64, Float64, Float64]:
+    """g's current Scene drawn by Metal into a fresh IOSurface (the whole frame, or layer by layer as the screen does),
+    read back and compared with `want`: (mean levels off, % of pixels with a channel more than 40 off, pixels that
+    differ at all); (999, 100, w·h) when Metal didn't draw it."""
+    var io = io_surface(w, h)
+    var drew = False
+    if io != 0:
+        drew = g[].render_scene(owner, io, w, h) if layered else g[].metal.render(g[].frame, io, w, h)
+    var got = read_iosurface(io, w, h) if drew else List[UInt32](length=w * h, fill=0)
+    if io != 0:
+        g[].metal.forget(io)
+        cfunc[NoneType]("CFRelease", io)
+    if not drew:
+        return (999.0, 100.0, Float64(w * h))
+    var total = 0
+    var far = 0
+    var differ = 0
+    for i in range(w * h):
+        var worst = 0
+        for c in range(3):
+            var d = abs(Int((want[i] >> UInt32(8 * c)) & 0xFF) - Int((got[i] >> UInt32(8 * c)) & 0xFF))
+            total += d
+            worst = max(worst, d)
+        if worst > 40:
+            far += 1
+        if worst > 0:
+            differ += 1
+    return (Float64(total) / Float64(3 * w * h), 100.0 * Float64(far) / Float64(w * h), Float64(differ))
 
 
 def find_node[A: App](host: AppKitHost[A], kind: Int, label: String, nth: Int, by_hint: Bool = False) -> Int:
@@ -4077,6 +4371,8 @@ def run_step[A: App](host_addr: Int, step: String):
                 host[].canvas_send(node, ZOOM, b.width / 2, b.height / 2, 0, 0, 2.0 ** (-dy / 4.0), host_addr)
     elif verb == "framebench":  # framebench:K=pan|zoom|draw|finish|type|grow,N: N gestures on canvas K, one frame each; percentiles of a frame's work
         frame_bench[A](host_addr, rest)
+    elif verb == "gpucheck":  # gpucheck:K: canvas K's Scene drawn by Metal and by gpu2d's CPU executor, compared (goal 75 M3)
+        gpu_check[A](host_addr, rest)
     elif verb == "quit":  # quit: the run ends after this step (GTK's word; the app's closing() runs on terminate)
         host[].step_at = len(host[].steps)
     elif verb == "resize" or verb == "window":  # resize:900x700 (window:WxH, GTK's word): the window's content size, as a drag of its edge ends
