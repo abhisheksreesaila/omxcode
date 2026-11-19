@@ -11,6 +11,8 @@
 #   m.paint(painter, font, MapView(cx, cy, 1.0))   # the root's centre lands at (cx, cy); zoom 1
 #   var id = m.hit(x, y)                     # the topic under a pointer (screen points, the last painted view), or -1
 #   var s = m.to_text(); m.from_text(s)      # an indented outline, one topic per line, flags kept
+#   var cam = MapCamera()                    # where the map is looked at: pan and zoom around the pointer (goal 75)
+#   _ = cam.gesture(event)                   # PAN, WHEEL, ZOOM move it; m.paint(p, font, cam.view(w, h, scale))
 #
 # Layout is a tidy tree per side, packed by outline (goal 75 M4): a topic's box comes from its text (wrapped at
 # max_text_w, measured with the same rule the TextEdit uses, so a topic doesn't jump when edited); its children sit a
@@ -35,6 +37,8 @@ from mojoui.history import History, Snapshot
 from mojoui.textedit import TextEdit, Styler, ParaLook, StyleSpan, Pos, adv, decode_at, utf8_len, SHIFT, CTRL, ALT
 from mojoui.canvas import rgba
 from mojoui.spring import Spring
+from mojoui.app import Event
+from mojoui.view import PAN, ZOOM, WHEEL
 
 comptime RIGHT_SIDE = 1
 comptime LEFT_SIDE = -1
@@ -184,6 +188,73 @@ struct MapView(Copyable, Movable, ImplicitlyCopyable):
     var dx: Float64
     var dy: Float64
     var k: Float64
+
+
+struct MapCamera(Copyable, Movable, ImplicitlyCopyable):
+    """Where a map is looked at (goal 75 review, D-7579): the root's offset from the canvas's centre (dx, dy, points) and
+    the zoom k (min_k…max_k). A drag (PAN) moves the map with the pointer, a plain scroll (WHEEL) moves it by the
+    event's dx, dy (how far the content moves, as every scrolling canvas reads it), and ZOOM scales it around the
+    pointer: the map point under (x, y) stays under it. Any map app composes it: gesture(e) for the events, view() for
+    the MapView to paint with. Pointer positions are in points of the canvas last given to view()."""
+
+    var dx: Float64
+    var dy: Float64
+    var k: Float64
+    var min_k: Float64
+    var max_k: Float64
+    var w: Float64  # the canvas's size in points, as last shown (zoom_at needs its centre)
+    var h: Float64
+
+    def __init__(out self, min_k: Float64 = 0.2, max_k: Float64 = 4.0):
+        self.dx = 0
+        self.dy = 0
+        self.k = 1
+        self.min_k = min_k
+        self.max_k = max_k
+        self.w = 800
+        self.h = 600
+
+    def reset(mut self):
+        """The root back in the middle at zoom 1."""
+        self.dx = 0
+        self.dy = 0
+        self.k = 1
+
+    def pan(mut self, dx: Float64, dy: Float64):
+        """The map moves by (dx, dy) points on screen."""
+        self.dx += dx
+        self.dy += dy
+
+    def zoom_at(mut self, x: Float64, y: Float64, factor: Float64):
+        """Zoom by `factor` (clamped to min_k…max_k) around (x, y): the map point under it stays put."""
+        var z = min(max(self.k * factor, self.min_k), self.max_k)
+        var cx = self.w / 2 + self.dx
+        var cy = self.h / 2 + self.dy
+        cx = x - (x - cx) * (z / self.k)
+        cy = y - (y - cy) * (z / self.k)
+        self.dx = cx - self.w / 2
+        self.dy = cy - self.h / 2
+        self.k = z
+
+    def gesture(mut self, e: Event) -> Bool:
+        """PAN, WHEEL and ZOOM move the camera (True); any other event is the app's (False)."""
+        if e.number == PAN or e.number == WHEEL:
+            self.pan(e.dx, e.dy)
+            return True
+        if e.number == ZOOM:
+            self.zoom_at(e.x, e.y, e.zoom)
+            return True
+        return False
+
+    def view(mut self, w: Float64, h: Float64, scale: Float64) -> MapView:
+        """The MapView for a canvas of w × h points drawn at `scale` device pixels a point (remembered for zoom_at)."""
+        self.w = w
+        self.h = h
+        return MapView((w / 2 + self.dx) * scale, (h / 2 + self.dy) * scale, scale * self.k)
+
+    def to_map(self, x: Float64, y: Float64) -> Tuple[Float64, Float64]:
+        """The map point (map units, the root's centre at 0, 0 before layout offsets) under (x, y) on the canvas."""
+        return ((x - self.w / 2 - self.dx) / self.k, (y - self.h / 2 - self.dy) / self.k)
 
 
 comptime MOTION_STIFFNESS = 600.0  # ω ≈ 24.5/s …

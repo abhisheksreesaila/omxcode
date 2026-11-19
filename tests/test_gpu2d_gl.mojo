@@ -282,6 +282,44 @@ def two_canvases(font: Font, atlas: GlyphAtlas) raises:
     g.gl.close()
 
 
+def map_pan(font: Font, atlas: GlyphAtlas) raises:
+    """A 300-topic mind map panned at pnote's canvas size on a 1.6× screen (goal 75 review, D-7578): its layer holds
+    text, whose batches depend on the zoom only (faces picked at size·k), not on where the layer sits, so a pan reuses
+    the layer through its new transform instead of rebuilding every topic each frame. 30 pan frames: none rebuilds a
+    layer after the first, and the last picture still matches the CPU executor's picture of that frame built whole."""
+    var m = mindmap_of(300)
+    var g = GPU2D()
+    assert_true(g.start(False), "GPU2D.start: " + g.gl.why)
+    var W = 1699
+    var H = 1384
+    var k = 1.6
+    var prev = Scene(0, 0, 1.0)
+    var rebuilt = 0
+    var cpu_ns = List[Int]()
+    var slot = -1
+    for f in range(30):
+        var s = Scene(W, H, k)
+        s.is_still = True
+        s.fill(0xFFFFFFFF)
+        m.paint(s, font, MapView((Float64(W) / k / 2 + Float64(f) * 7.3) * k, (Float64(H) / k / 2 - Float64(f) * 4.1) * k, k))
+        slot = g.draw(s, prev, 1, W, H)
+        assert_true(slot >= 0, "map pan frame drawn: " + g.gl.why)
+        if f > 0:
+            rebuilt += g.rebuilt
+            cpu_ns.append(g.batch_ns + g.render_ns)
+        prev = s^
+    var got = List[UInt32](length=W * H, fill=0)
+    assert_true(g.gl.read(g.gl.tex[slot], W, H, Int(got.unsafe_ptr())), "map pan read back")
+    var d = diff(cpu_of(build_batches(prev, atlas, font), atlas), got)
+    sort(cpu_ns)
+    print("   mindmap pan (300 topics, 1699x1384 at 1.6x): layers rebuilt in 29 pan frames", rebuilt, "; CPU per frame p50",
+          round(Float64(cpu_ns[len(cpu_ns) // 2]) / 1e6, 3), "ms, max", round(Float64(cpu_ns[len(cpu_ns) - 1]) / 1e6, 3),
+          "ms; last frame mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
+    assert_true(rebuilt == 0, "a panned mind map rebuilt its layers (text batches don't depend on where the layer sits)")
+    assert_true(d.mean <= 1.5 and d.far <= 0.5, "the panned mind map differs from the CPU executor")
+    g.gl.close()
+
+
 def main() raises:
     var ctx = headless_gl33()
     assert_true(ctx != 0, "a headless GL 3.3 core context (EGL device platform)")
@@ -348,6 +386,7 @@ def main() raises:
 
     grown_page(gl, atlas, font)
     two_canvases(font, atlas)
+    map_pan(font, atlas)
     dmabuf_page(atlas, font)
 
     # a frame's GPU time for the scenes (the judged sizes: 1440×900 windows; 1,000 strokes; 645 objects; 300 topics)

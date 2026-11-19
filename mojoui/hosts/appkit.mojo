@@ -3049,7 +3049,7 @@ struct AppKitHost[A: App](Movable):
             c.next = 0
             if len(c.surfaces) == 0:
                 self.report.note("canvas node " + String(c.node) + ": no IOSurface of " + String(wpx) + "x" + String(hpx) + " px")
-        for x in c.retired:  # (render waits for the GPU: nothing still uses them)
+        for x in c.retired:  # (forget drains every frame in flight first, D-7555: nothing still uses them)
             g[].metal.forget(x)
             cfunc[NoneType]("CFRelease", x)
         c.retired.clear()

@@ -939,7 +939,8 @@ struct GpuBuffers(Movable):
 
 def _ensure(device: Int, mut gb: GpuBuffers, slot: Int, nbytes: Int) -> Bool:
     """Buffer `slot` holds at least nbytes (grown by half again when it doesn't: a new buffer, the old released — safe:
-    every render waits for the GPU before it returns). True: it was replaced (its contents are gone)."""
+    its callers (upload, render) drain() every frame in flight first, D-7555). True: it was replaced (its contents are
+    gone)."""
     if gb.caps[slot] >= nbytes and gb.bufs[slot] != 0:
         return False
     var size = max(nbytes + nbytes // 2, 16384)
@@ -1222,8 +1223,8 @@ struct MetalCanvas2D(Movable):
     """What a host keeps to draw .gpu() canvases with Metal: the font and its atlas, the Metal pipelines, the Scene the
     app paints into (and last frame's, to compare), and the layers as the GPU holds them, with the GL backend's rules
     (D-7533, D-7538): a layer Scene.same_layer finds unchanged keeps its batches and buffers and is drawn through its
-    new transform when its batches don't depend on it (no text, fills, images or clips) and it isn't zoomed out more
-    than 4× from where it was built, or when it didn't move; a layer that only gained ops at its end (a finished
+    new transform when its batches don't depend on it (no fills, images or clips; text only at the zoom it was built
+    at, D-7578) and it isn't zoomed out more than 4× from where it was built, or when it didn't move; a layer that only gained ops at its end (a finished
     stroke) gets just those built, planned and uploaded after the rest; any other changed layer is built alone
     (fill_layers), its runs merged (merge_runs), planned and uploaded."""
 
@@ -1280,9 +1281,12 @@ struct MetalCanvas2D(Movable):
         for i in range(n):
             var span = sc.layer_range(i)
             var fixed = open == 0  # (its batches don't depend on its transform)
+            var zoom_bound = False  # (text: on the zoom only, not on where the layer sits: kept through a pan, D-7578)
             for op in range(span[0], span[1]):
                 var kind = Int(sc.kinds[op])
-                if kind == OP_TEXT or kind == OP_FILL or kind == OP_IMAGE:
+                if kind == OP_TEXT:
+                    zoom_bound = True
+                elif kind == OP_FILL or kind == OP_IMAGE:
                     fixed = False
                 elif kind == OP_CLIP:
                     fixed = False
@@ -1296,7 +1300,8 @@ struct MetalCanvas2D(Movable):
             var done = False
             if known and sc.same_layer(i, self.prev, i):
                 var near = sc.layer_tk[i] >= L.built_k * KEEP_ZOOMED_OUT
-                if same_place or (fixed and near):
+                var zoom_ok = not zoom_bound or sc.layer_tk[i] == L.built_k
+                if same_place or (fixed and near and zoom_ok):
                     self.kept += 1
                     done = True
             if not done and same_place and len(L.frame.layers) == 1 and len(L.frame.runs) < 96 and len(L.frame.images) == 0:

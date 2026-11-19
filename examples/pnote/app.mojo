@@ -27,7 +27,7 @@ from mojoui.theme import Theme
 from mojoui.mdedit import MdEdit
 from mojoui.textedit import now_ms
 from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, INK, CONNECTOR, H_ROTATE
-from mojoui.mindmap import MindMap, MapView
+from mojoui.mindmap import MindMap, MapCamera
 from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
@@ -208,11 +208,7 @@ struct Main(App):
     var my0: Float64
     var mx1: Float64
     var my1: Float64
-    var map_dx: Float64  # the map's pan (points from the canvas's centre)
-    var map_dy: Float64
-    var map_k: Float64  # the map's zoom
-    var box_w_canvas: Float64  # the note canvas's size (points), as last painted
-    var box_h_canvas: Float64
+    var map_cam: MapCamera  # where the map is looked at (pan, zoom around the pointer: mojoui.mindmap's camera)
     var scale: Float64  # the canvas's pixels per point (the last paint's)
     var font: Font
     var version: Int
@@ -249,11 +245,7 @@ struct Main(App):
         self.my0 = 0
         self.mx1 = 0
         self.my1 = 0
-        self.map_dx = 0
-        self.map_dy = 0
-        self.map_k = 1
-        self.box_w_canvas = 800
-        self.box_h_canvas = 600
+        self.map_cam = MapCamera()
         self.scale = 1
         self.font = Font()
         self.version = 0
@@ -487,9 +479,7 @@ struct Main(App):
             self.map = MindMap("Central topic")
             if body != "":
                 self.map.from_text(body)
-            self.map_dx = 0
-            self.map_dy = 0
-            self.map_k = 1
+            self.map_cam.reset()
         self.version += 1
 
     def closing(mut self):
@@ -535,18 +525,8 @@ struct Main(App):
         if self.open_kind == MAP:
             if kind == TAP:
                 _ = self.map.tap(e.x * self.scale, e.y * self.scale, t, self.font)
-            elif kind == WHEEL or (kind == PAN):
-                self.map_dx += e.dx if kind == PAN else -e.dx
-                self.map_dy += e.dy if kind == PAN else -e.dy
-            elif kind == ZOOM:  # (around the pointer: the point under it stays put)
-                var z = min(max(self.map_k * e.zoom, 0.2), 4.0)
-                var cx = self.box_w_canvas / 2 + self.map_dx
-                var cy = self.box_h_canvas / 2 + self.map_dy
-                cx = e.x - (e.x - cx) * (z / self.map_k)
-                cy = e.y - (e.y - cy) * (z / self.map_k)
-                self.map_dx = cx - self.box_w_canvas / 2
-                self.map_dy = cy - self.box_h_canvas / 2
-                self.map_k = z
+            else:
+                _ = self.map_cam.gesture(e)  # (PAN, WHEEL, ZOOM around the pointer)
             self.version += 1
             return
         if self.open_kind == PAGE:
@@ -861,9 +841,7 @@ struct Main(App):
                 p.rect(x0, y0, abs(self.mx1 - self.mx0), abs(self.my1 - self.my0), rgba(37, 99, 235, 30), 2)
         else:
             self.scale = k
-            self.box_w_canvas = w
-            self.box_h_canvas = h
-            self.map.paint(p, self.font, MapView((w / 2 + self.map_dx) * k, (h / 2 + self.map_dy) * k, k * self.map_k))
+            self.map.paint(p, self.font, self.map_cam.view(w, h, k))
 
     def draw_scene(mut self, canvas: Int, mut scene: Scene) -> Bool:
         self.tell_gpu()

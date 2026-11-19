@@ -66,7 +66,7 @@ FEATURES = [
     ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
     ("Scene: polygon fill", "Painter.polygon (non-zero, antialiased)", r"OP_POLY|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
     ("Scene: layer transform", "Painter.layer_transform (pan/zoom moves a kept layer)", r"layer_tx|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
-    ("Canvas: keys (focus on press)", "on_gesture: KEY (event.text, modifiers)", r"\"key-pressed\"|addEventListener\('keydown'", "mxstudio"),
+    ("Canvas: keys (focus on press)", "on_gesture: KEY (event.text, modifiers)", r"\"key-pressed\"|addEventListener\('keydown'|\"keyDown:\", on_canvas_key", "mxstudio"),  # (AppKit: its canvas view's keyDown:, goal 75 review)
     ("TextField: Escape cancels", "TextField(on_cancel=)", r"on_field_key|second: 2", "mxstudio"),
     ("Editor that echoes the grid's typing", "TextField(…).echo()", r"\.echo\(\): the canvas typing|value\"\] == 3", "mxstudio"),
     ("Board: drag, resize, snap", "Board(on_move, on_resize)", r"\bBOARD\b", "workbook"),
@@ -129,6 +129,20 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
            "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"}}
+
+# Composites a check runs on a host where no example in RUN_ON[host] reaches them (RUN_ON's Mac list is empty: the Mac
+# checks run single apps over scripts/mac-ssh): (module, host) → the check that runs it there. Set by hand and narrow:
+# ✅ only for what that check drives, its limits said; pnote's other editors (TextEdit, MdEdit) run on the Mac nowhere.
+COMPOSITE_RUN = {
+    ("mojoui/gpu2d.mojo", "Mac (AppKit)"): "tests/test_gpu2d_metal.mojo on the owner's M4 (every primitive and the three judged "
+                                           "scenes, Metal vs gpu2d's CPU executor) and docs/goals/75-check.py M3 (pnote's whiteboard, "
+                                           "canvas and mind map on Metal, read back in the app within M1's bounds)",
+    ("mojoui/objectlayer.mojo", "Mac (AppKit)"): "docs/goals/75-check.py M3 and M5 on the M4: pnote's 645-object canvas and "
+                                                 "1,000-stroke whiteboard panned, zoomed and drawn on (strokes landing in the layer); "
+                                                 "selection, handles, rotation and its keys aren't driven there",
+    ("mojoui/mindmap.mojo", "Mac (AppKit)"): "docs/goals/75-check.py M3 and M4 on the M4: pnote's 300-topic map panned, zoomed and "
+                                             "grown (20 topics added on springs, a collapse and an expand); its keys aren't driven there",
+}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
@@ -489,7 +503,7 @@ def render():
            "",
            "✅ implemented and run by a check on that platform · 🔨 implemented, builds, never run there · ❌ not implemented",
            "",
-           "Mac and iPhone builds are signed but haven't run on hardware yet; Android runs on the emulator.",
+           "iPhone builds are signed but haven't run on hardware yet; the Mac runs single apps over scripts/mac-ssh (✅ there only where such a check runs it); Android runs on the emulator.",
            "",
            "## Components",
            "",
@@ -529,6 +543,7 @@ def render():
             "| Component | Module | Made of | " + " | ".join(names) + " | Used by |",
             "|---|---|---|" + "---|" * len(names) + "---|"]
     comp_cells = {}
+    comp_why = []
     for name, module, parts, ctor in COMPOSITES:
         users = [e.name for e in sorted((ROOT / "examples").iterdir()) if (e / "app.mojo").exists() and composes(e.name, ctor, module)]
         row = []
@@ -537,9 +552,14 @@ def render():
             state = "❌" if "❌" in states else ("🔨" if "🔨" in states else "✅")
             if state == "✅" and not any(u in RUN_ON[h] for u in users):
                 state = "🔨"
+            if (module, h) in COMPOSITE_RUN:
+                state = "✅"
+                comp_why.append(f"- `{module}` ({h}): {COMPOSITE_RUN[(module, h)]}.")
             row.append(state)
             comp_cells.setdefault(h, []).append(state)
         out.append(f"| `{name}` | `{module}` | {', '.join(parts)} | " + " | ".join(row) + f" | {', '.join(users) or '—'} |")
+    if comp_why:
+        out += ["", "Run by a check of its own on that host (not through RUN_ON's examples):", ""] + comp_why
     out += ["", "## JavaScript widgets (WebComponent)", "",
             "Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent's state on that host, ✅ only "
             "where a check runs the app that ships the widget. Agent: ✅ where the widget describes itself and the agent's "

@@ -1607,8 +1607,8 @@ struct GPU2D(Movable):
     """What a host keeps for its .gpu() canvases: the GL backend, the baked font and its atlas (uploaded once), and the
     last frame's batches and GPU buffers per layer. draw() rebuilds and uploads only the layers that changed since the
     canvas's last frame (Scene.same_layer); a layer that only moved (a pan, a zoom) is drawn again from its buffers
-    through its new transform, unless its batches depend on the transform (text: the face is picked at the size on
-    screen; a fill: the whole canvas; clips). At the idle clocks the light load leaves the GPU in, re-sending a page
+    through its new transform, unless its batches depend on the transform (a fill: the whole canvas; clips; text only
+    on its zoom, the face picked at the size on screen: a text layer is reused through a pan, D-7578). At the idle clocks the light load leaves the GPU in, re-sending a page
     of ink every frame cost more than drawing it (2.3 MB of stencil vertices for the judged whiteboard)."""
 
     var gl: GL2D
@@ -1755,9 +1755,13 @@ struct GPU2D(Movable):
         for i in range(n):
             var span = scene.layer_range(i)
             var fixed = open == 0  # (its batches don't depend on its transform)
+            var zoom_bound = False  # (text: its batches depend on the zoom only, its faces picked at size·k; not on
+            # where the layer sits, so a pan at the zoom it was built at reuses it, D-7578)
             for op in range(span[0], span[1]):
                 var kind = Int(scene.kinds[op])
-                if kind == OP_TEXT or kind == OP_FILL or kind == OP_IMAGE:
+                if kind == OP_TEXT:
+                    zoom_bound = True
+                elif kind == OP_FILL or kind == OP_IMAGE:
                     fixed = False
                 elif kind == OP_CLIP:
                     fixed = False
@@ -1771,7 +1775,8 @@ struct GPU2D(Movable):
                                   and scene.layer_tk[i] == prev.layer_tk[i])
                 var has_images = len(self.frames[i].images) > 0
                 var near = scene.layer_tk[i] >= self.built_k[i] * 0.25
-                if (same_place or (fixed and near)) and not has_images:
+                var zoom_ok = not zoom_bound or scene.layer_tk[i] == self.built_k[i]
+                if (same_place or (fixed and near and zoom_ok)) and not has_images:
                     self.frames[i].layers[0].dx = scene.layer_tx[i]
                     self.frames[i].layers[0].dy = scene.layer_ty[i]
                     self.frames[i].layers[0].k = scene.layer_tk[i]

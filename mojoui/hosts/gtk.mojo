@@ -27,6 +27,7 @@ from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate, fcall
 from mojoui.gpu2d_gl import GPU2D
+from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
@@ -502,8 +503,9 @@ struct GtkCanvas(Copyable, Movable):
     var drag_y: Float64
     var start_x: Float64  # where the drag started (canvas points)
     var start_y: Float64
-    var ptr_x: Float64  # where the pointer is (-1: unknown)
-    var ptr_y: Float64
+    var ptr_x: Float64  # where the pointer is (canvas points; ptr_seen: it has been seen; a pointer in the snap box's
+    var ptr_y: Float64  # strip, D-7577, is a little outside the canvas, so negative is a place, not "unknown")
+    var ptr_seen: Bool
     var pinch: Float64  # the pinch's scale so far
     var moved: Bool  # the current press became a drag (so it's not a tap)
     var pressure: Float64  # the pen's pressure at the last press or move (0: the device has none), goal 40
@@ -558,6 +560,19 @@ struct GtkCanvas(Copyable, Movable):
     var offloaded: Int
     var offload_refused: Int
     var offload_backoff: Int
+    # (goal 75 review, D-7575) a dmabuf frame GTK may composite itself (not confirmed offloaded last time: the first,
+    # the first after a back-off or a GL-texture frame, after a refusal) is handed over only once our GL fence has
+    # signalled (GTK samples a dmabuf with no sync file wait): last_offloaded says GTK's subsurface showed the dmabuf
+    # handed last; frames fenced so far, and whether the one handed last was; refused frames handed unfenced (stays 0)
+    var last_offloaded: Bool
+    var last_fenced: Bool
+    var offload_fenced: Int
+    var offload_unfenced: Int
+    # (D-7577) the snap box steps aside (no inset, offload off) while frames can't be offloaded (see-through ones); its
+    # background is the canvas's own (bg_want: the scene's opaque fill, drawn last; bg: the one set)
+    var aside: Bool
+    var bg_want: UInt32
+    var bg: UInt32
 
     def __init__(out self, node: Int, widget: Int):
         self.node = node
@@ -587,6 +602,7 @@ struct GtkCanvas(Copyable, Movable):
         self.start_y = 0
         self.ptr_x = -1
         self.ptr_y = -1
+        self.ptr_seen = False
         self.pinch = 1
         self.moved = False
         self.layer_tex = List[Int]()
@@ -635,6 +651,13 @@ struct GtkCanvas(Copyable, Movable):
         self.offloaded = 0
         self.offload_refused = 0
         self.offload_backoff = 0
+        self.last_offloaded = False
+        self.last_fenced = False
+        self.offload_fenced = 0
+        self.offload_unfenced = 0
+        self.aside = False
+        self.bg_want = 0
+        self.bg = 0
 
 
 struct BoardChild(Copyable, Movable):
@@ -812,6 +835,7 @@ struct GtkHost[A: App](Movable):
     var g2d_wait: Bool
     var offload_told: Bool  # the one-time line about graphics offload (D-7570) is out; offload_why: why it isn't used
     var offload_why: String
+    var snap_css: Int  # the snap boxes' backgrounds (D-7577): one style sheet for the display, #mui-snap-<canvas> rules
     var draw_ahead: Bool  # animating GPU 2D canvases draw their next frame after this frame's paint (D-7560; MOJOUI_DRAW_AHEAD=0: off)
     var ahead_input: Bool  # (trial) a GPU 2D canvas input made stale between frames draws then too, not at the next tick
     var ahead_hooked: Bool  # the frame clock's after-paint is connected for it, and an idle turn is queued to draw ahead
@@ -848,6 +872,7 @@ struct GtkHost[A: App](Movable):
         self.g2d_state = 0
         self.offload_told = False
         self.offload_why = String("")
+        self.snap_css = 0
         self.g2d_wait = False
         self.draw_ahead = getenv("MOJOUI_DRAW_AHEAD") != "0"
         self.ahead_input = getenv("MOJOUI_DRAW_AHEAD") == "input"
@@ -1671,34 +1696,51 @@ struct GtkHost[A: App](Movable):
             var ci = len(self.canvases)
             var c = GtkCanvas(i, w)
             set_index(w, ci)
+            # (D-7570: the picture can go to the compositor as a subsurface; a box snaps it to whole logical and device
+            # pixels, which GTK's offload needs. The box takes the canvas's whole place, so the pointer controllers go
+            # on it: a press, move or scroll in the strip the snap leaves still reaches the canvas, D-7577)
+            var off = 0
+            var snap = 0
+            if node.hint == "gpu" and offload_unavailable() == "":
+                off = external_call["gtk_graphics_offload_new", Int](w)
+                if getenv("MOJOUI_OFFLOAD_REFUSE") == "1":  # (tests, D-7575: GTK composites every dmabuf itself)
+                    external_call["gtk_graphics_offload_set_enabled", NoneType](off, c_int(1))  # GTK_GRAPHICS_OFFLOAD_DISABLED
+                snap = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
+                external_call["gtk_widget_set_layout_manager", NoneType](snap, external_call["gtk_custom_layout_new", Int](0, on_snap_measure, on_snap_allocate))
+                external_call["gtk_box_append", NoneType](snap, off)
+                var sname = "mui-snap-" + String(ci)
+                external_call["gtk_widget_set_name", NoneType](snap, sname.as_c_string_span())
+                c.offload = off
+                c.snap = snap
+            var pw = snap if snap != 0 else w  # (the widget the pointer controllers go on)
             var drag = external_call["gtk_gesture_drag_new", Int]()
             set_index(drag, ci)
             connect_any(drag, "drag-begin", on_drag_begin[Self.A], self_addr)
             connect_any(drag, "drag-update", on_drag_update[Self.A], self_addr)
             connect_any(drag, "drag-end", on_drag_end[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, drag)
+            external_call["gtk_widget_add_controller", NoneType](pw, drag)
             var scroll = external_call["gtk_event_controller_scroll_new", Int](c_int(3 if node.spacing == 1 else 1))  # both axes when it pans, else vertical
             set_index(scroll, ci)
             connect_any(scroll, "scroll", on_scroll[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, scroll)
+            external_call["gtk_widget_add_controller", NoneType](pw, scroll)
             var motion = external_call["gtk_event_controller_motion_new", Int]()
             set_index(motion, ci)
             connect_any(motion, "motion", on_motion[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, motion)
+            external_call["gtk_widget_add_controller", NoneType](pw, motion)
             var pinch = external_call["gtk_gesture_zoom_new", Int]()
             set_index(pinch, ci)
             connect3(pinch, "begin", on_pinch_begin[Self.A], self_addr)
             connect_any(pinch, "scale-changed", on_pinch[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, pinch)
+            external_call["gtk_widget_add_controller", NoneType](pw, pinch)
             var click = external_call["gtk_gesture_click_new", Int]()
             set_index(click, ci)
             connect_any(click, "released", on_click_released[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, click)
+            external_call["gtk_widget_add_controller", NoneType](pw, click)
             var secondary = external_call["gtk_gesture_click_new", Int]()  # the right button: SECONDARY (a context menu)
             external_call["gtk_gesture_single_set_button", NoneType](secondary, c_uint(3))
             set_index(secondary, ci)
             connect_any(secondary, "released", on_secondary_released[Self.A], self_addr)
-            external_call["gtk_widget_add_controller", NoneType](w, secondary)
+            external_call["gtk_widget_add_controller", NoneType](pw, secondary)
             var keys = 0
             if node.size == 1:  # Canvas(keys=True): a press gives it the keyboard
                 external_call["gtk_widget_set_focusable", NoneType](w, c_int(1))
@@ -1708,6 +1750,8 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_add_controller", NoneType](w, keys)
             if node.size == 2:  # .passthrough(): it only shows; presses go to what's under it
                 external_call["gtk_widget_set_can_target", NoneType](w, c_int(0))
+                if snap != 0:
+                    external_call["gtk_widget_set_can_target", NoneType](snap, c_int(0))
             c.drag = drag
             c.scroll = scroll
             c.click = click
@@ -1722,17 +1766,7 @@ struct GtkHost[A: App](Movable):
             self.widgets[i] = w
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
-            var shown = w
-            if node.hint == "gpu" and offload_unavailable() == "":  # (D-7570: the picture can go to the compositor as a
-                # subsurface; a box snaps it to whole logical and device pixels, which GTK's offload needs)
-                var off = external_call["gtk_graphics_offload_new", Int](w)
-                var snap = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
-                external_call["gtk_widget_set_layout_manager", NoneType](snap, external_call["gtk_custom_layout_new", Int](0, on_snap_measure, on_snap_allocate))
-                external_call["gtk_box_append", NoneType](snap, off)
-                self.canvases[ci].offload = off
-                self.canvases[ci].snap = snap
-                shown = snap
-            external_call["gtk_scrolled_window_set_child", NoneType](holder, shown)
+            external_call["gtk_scrolled_window_set_child", NoneType](holder, snap if snap != 0 else w)
             if node.size != 1:  # (no Tab stop of its own, as on the web: only a canvas that takes keys is one; the scrolled
                 external_call["gtk_widget_set_can_focus", NoneType](holder, c_int(0))  # window grabs itself by can-focus, not focusable)
             external_call["gtk_widget_set_size_request", NoneType](holder, c_int(-1 if sized else 320), c_int(-1 if node.sized_height() else 240))
@@ -3116,10 +3150,28 @@ struct GtkHost[A: App](Movable):
     def pointer(self, ci: Int) -> Tuple[Float64, Float64]:
         """Where the pointer is over canvas ci (its centre if it hasn't been seen)."""
         ref c = self.canvases[ci]
-        if c.ptr_x >= 0:
+        if c.ptr_seen:
             return (c.ptr_x, c.ptr_y)
         return (Float64(Int(external_call["gtk_widget_get_width", c_int](c.widget))) / 2,
                 Float64(Int(external_call["gtk_widget_get_height", c_int](c.widget))) / 2)
+
+    def at_canvas(self, ci: Int, ctl: Int, x: Float64, y: Float64) -> Tuple[Float64, Float64]:
+        """(x, y) from the controller's widget into canvas ci's picture's points. The pointer controllers sit on the snap
+        box when there is one (D-7577): it holds the whole canvas place, the picture a little inside it, so a point in
+        the strip between them comes out just outside the picture (negative, or past its size), still the canvas's."""
+        var cw = external_call["gtk_event_controller_get_widget", Int](ctl)
+        var pic = self.canvases[ci].widget
+        if cw == 0 or cw == pic:
+            return (x, y)
+        var pin = List[Float32](length=2, fill=0)
+        var pout = List[Float32](length=2, fill=0)
+        pin[0] = Float32(x)
+        pin[1] = Float32(y)
+        var ok = external_call["gtk_widget_compute_point", c_int](cw, pic, Int(pin.unsafe_ptr()), Int(pout.unsafe_ptr())) != 0
+        var r = (Float64(pout[0]), Float64(pout[1])) if ok else (x, y)
+        _ = len(pin)
+        _ = len(pout)
+        return r
 
     def tick(mut self, ci: Int, clock: Int, self_addr: Int) -> Bool:
         """Every display frame: send a frame event if the canvas asked for them, then redraw if
@@ -3318,6 +3370,8 @@ struct GtkHost[A: App](Movable):
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
         var slot = g[].draw(sc, self.canvases[ci].prev, widget if self.canvases[ci].on_gpu else 0, w, h)
+        if self.canvases[ci].snap != 0:  # (the snap box's strip shows the canvas's own background, D-7577)
+            self.canvases[ci].bg_want = scene_background(sc)
         var t_wait = perf_counter_ns()
         if slot >= 0 and self.g2d_wait:  # (framebench: the GPU's part of the frame counted in draw_ms)
             g[].gl.wait(slot)
@@ -3351,6 +3405,7 @@ struct GtkHost[A: App](Movable):
             return
         self.canvases[ci].dmabuf_tex = 0
         self.canvases[ci].offload_check = False
+        self.canvases[ci].last_offloaded = False  # (the next dmabuf frame may be composited by GTK: fenced, D-7575)
         var g = self.gpu2d()
         var b = external_call["gdk_gl_texture_builder_new", Int]()
         external_call["gdk_gl_texture_builder_set_sync", NoneType](b, g[].gl.sync[slot])
@@ -3372,11 +3427,25 @@ struct GtkHost[A: App](Movable):
         carrying the frame's fence in the dmabuf itself, so GTK attaches it to its subsurface and the compositor waits
         for the GPU, not GTK. False (the frame goes as a GL texture): no offload widget, no dmabuf export, a see-through
         frame (straight alpha: the compositor would need the color-representation protocol), the picture not on whole
-        pixels yet (its box is asked to place it again), or a back-off after GTK refused one."""
-        ref c = self.canvases[ci]
+        pixels yet (its box is asked to place it again), or a back-off after GTK refused one. Offload gone for good (no
+        export): the snap box goes (unsnap); a see-through frame: it steps aside (no inset) until an opaque one (D-7577).
+        A frame GTK may composite itself (the dmabuf handed last wasn't seen on GTK's subsurface: the first, after a
+        back-off, a refusal or GL textures) is handed over only once our fence has signalled (D-7575)."""
         var g = self.gpu2d()
-        if c.offload == 0 or not g[].gl.dmabuf.ok or not opaque or getenv("MOJOUI_GPU2D_OPAQUE") == "0":
+        if self.canvases[ci].offload == 0:
             return False
+        if not g[].gl.dmabuf.ok:
+            self.unsnap(ci)
+            return False
+        if not opaque or getenv("MOJOUI_GPU2D_OPAQUE") == "0":
+            self.snap_aside(ci, True)
+            return False
+        if self.canvases[ci].aside:  # (an opaque frame again: the box snaps; this frame goes as a GL texture)
+            self.snap_aside(ci, False)
+            return False
+        if self.canvases[ci].bg != self.canvases[ci].bg_want:
+            self.snap_background(ci)
+        ref c = self.canvases[ci]
         if c.offload_backoff > 0:
             c.offload_backoff -= 1
             return False
@@ -3387,6 +3456,11 @@ struct GtkHost[A: App](Movable):
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
         var ok = g[].gl.dmabuf.export(slot, g[].gl.tex[slot]) and g[].gl.dmabuf.fence(slot)
+        var risky = not c.last_offloaded
+        if ok and risky:  # (GTK's own renderer samples a dmabuf without waiting on its sync file: our fence first)
+            g[].gl.wait(slot)
+            c.offload_fenced += 1
+        c.last_fenced = risky
         if prev != 0:
             external_call["gdk_gl_context_make_current", NoneType](prev)
         else:
@@ -3427,11 +3501,67 @@ struct GtkHost[A: App](Movable):
         return True
 
     def offload_off(mut self, why: String):
-        """Graphics offload stops for good (the frames go as GL textures), saying why once."""
+        """Graphics offload stops for good (the frames go as GL textures, each canvas's snap box goes at its next frame),
+        saying why once."""
         if self.g2d != 0:
             self.gpu2d()[].gl.dmabuf.ok = False
         self.offload_why = why
         print("mojoui: .gpu() canvases: no graphics offload (" + why + "); frames go to GTK as GL textures", flush=True)
+
+    def snap_aside(mut self, ci: Int, aside: Bool):
+        """Canvas ci's snap box steps aside (aside: its picture takes the whole canvas place, offload off, as if the box
+        weren't there) while its frames can't be offloaded (see-through), and snaps again for an opaque one (D-7577)."""
+        ref c = self.canvases[ci]
+        if c.snap == 0 or c.aside == aside:
+            return
+        c.aside = aside
+        var key = String("mojoui-aside")
+        external_call["g_object_set_data", NoneType](c.snap, key.as_c_string_span(), 1 if aside else 0)
+        var off = aside or getenv("MOJOUI_OFFLOAD_REFUSE") == "1"
+        external_call["gtk_graphics_offload_set_enabled", NoneType](c.offload, c_int(1 if off else 0))
+        external_call["gtk_widget_queue_allocate", NoneType](c.snap)
+
+    def unsnap(mut self, ci: Int):
+        """Graphics offload is gone for good (D-7570's export failed, or GTK took no dmabuf texture): canvas ci's picture
+        leaves the offload widget and its snap box for the scrolled window itself, the pointer controllers move back onto
+        it, and the box goes (D-7577)."""
+        ref c = self.canvases[ci]
+        if c.snap == 0:
+            return
+        var holder = external_call["gtk_widget_get_ancestor", Int](c.snap, external_call["gtk_scrolled_window_get_type", Int]())
+        if holder == 0:
+            return
+        var w = c.widget
+        _ = external_call["g_object_ref", Int](w)
+        for ctl in [c.drag, c.scroll, c.motion_ctl, c.pinch_ctl, c.click, c.secondary]:
+            if ctl != 0 and external_call["gtk_event_controller_get_widget", Int](ctl) == c.snap:
+                _ = external_call["g_object_ref", Int](ctl)  # (remove drops the box's reference; add takes ours)
+                external_call["gtk_widget_remove_controller", NoneType](c.snap, ctl)
+                external_call["gtk_widget_add_controller", NoneType](w, ctl)
+        external_call["gtk_graphics_offload_set_child", NoneType](c.offload, 0)
+        external_call["gtk_scrolled_window_set_child", NoneType](holder, w)  # (the box and the offload widget go with it)
+        external_call["g_object_unref", NoneType](w)
+        c.offload = 0
+        c.snap = 0
+        c.aside = False
+        c.bg = 0
+        c.last_offloaded = False
+
+    def snap_background(mut self, ci: Int):
+        """The snap boxes' style sheet again: each box (#mui-snap-<canvas>) painted with its canvas's own background
+        (the scene's opaque fill), so the strip the snap leaves shows no seam in light or dark (D-7577)."""
+        self.canvases[ci].bg = self.canvases[ci].bg_want
+        var rules = String("")
+        for k in range(len(self.canvases)):
+            ref c = self.canvases[k]
+            if c.snap == 0 or c.bg == 0:
+                continue
+            var v = c.bg
+            rules += "#mui-snap-" + String(k) + " { background-color: rgb(" + String(Int(v & 0xFF)) + ", " + String(Int((v >> 8) & 0xFF)) + ", " + String(Int((v >> 16) & 0xFF)) + "); }\n"
+        if self.snap_css == 0:
+            self.snap_css = external_call["gtk_css_provider_new", Int]()
+            external_call["gtk_style_context_add_provider_for_display", NoneType](external_call["gdk_display_get_default", Int](), self.snap_css, c_uint(802))
+        external_call["gtk_css_provider_load_from_string", NoneType](self.snap_css, rules.as_c_string_span())
 
     def on_whole_pixels(self, widget: Int, w: Int, h: Int) -> Bool:
         """The picture widget sits on whole logical and device pixels of its surface and its texture (w × h) is exactly
@@ -3457,11 +3587,14 @@ struct GtkHost[A: App](Movable):
                 continue
             c.offload_check = False
             var t = offload_texture(c.offload, c.widget)
+            c.last_offloaded = t == c.dmabuf_tex and t != 0  # (-1, unreadable: not known, so the next one is fenced)
             if t == c.dmabuf_tex and t != 0:
                 c.offloaded += 1
                 c.offload_paint = self.paints_done
             elif t >= 0:
                 c.offload_refused += 1
+                if not c.last_fenced:  # (GTK sampled it with nothing waiting for our GPU work: counted, should stay 0)
+                    c.offload_unfenced += 1
                 c.offload_backoff = 60
                 if self.rt.trace:
                     print("TRACE: offload refused for canvas " + String(ci) + " (GTK composited the dmabuf); GL textures for 60 frames", flush=True)
@@ -4727,6 +4860,118 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
     return 100.0 * Float64(n) / Float64(len(xs))
 
 
+def gl_check[A: App](host_addr: Int, which: String):
+    """gpucheck:K (goal 75 review, D-7575): canvas K drawn once more on the GPU path (a back-off cleared, so an opaque
+    frame goes as a dmabuf when offload is on), then the picture GTK holds rendered by GTK's own renderer, as GTK
+    composites it when its subsurface doesn't show it (MOJOUI_OFFLOAD_REFUSE=1 makes GTK refuse every one), read back
+    and compared with gpu2d's CPU executor on the Scene that frame drew: M1's bounds (mean ≤ 1.5 levels, ≤ 0.5 % of
+    pixels with a channel more than 40 off). Prints `GPU2D GL CHECK: … texture=<GdkDmabufTexture|GdkGLTexture>
+    offloaded=… fenced=… mean=… far=…% ok|FAIL`."""
+    var host = host_at[A](host_addr)
+    var node = canvas_node(host[], which)
+    var ci = -1
+    for k in range(len(host[].canvases)):
+        if host[].canvases[k].node == node:
+            ci = k
+    if ci < 0 or host[].g2d == 0 or not host[].canvases[ci].on_gpu:
+        print("GPU2D GL CHECK: canvas " + which + " isn't drawn by the GPU 2D renderer", flush=True)
+        return
+    var still_by = perf_counter_ns() + 3_000_000_000  # (an animating canvas settles first: the frame checked is the
+    while (host[].canvases[ci].prev.again or host[].canvases[ci].ahead_slot >= 0) and perf_counter_ns() < still_by:  # one shown)
+        pump()
+        external_call["g_usleep", NoneType](c_uint(1000))
+    host[].canvases[ci].offload_backoff = 0
+    host[].canvases[ci].drawn = -1
+    var hands0 = host[].canvases[ci].hands
+    host[].arm(ci, host_addr)
+    var by = perf_counter_ns() + 3_000_000_000
+    while host[].canvases[ci].hands == hands0 and perf_counter_ns() < by:
+        pump()
+        external_call["g_usleep", NoneType](c_uint(1000))
+    var after = perf_counter_ns() + 150_000_000  # (the frame's paint and after-paint: GTK's offload decision read)
+    while perf_counter_ns() < after:
+        pump()
+        external_call["g_usleep", NoneType](c_uint(1000))
+    ref c = host[].canvases[ci]
+    var w = c.wpx
+    var h = c.hpx
+    var paintable = external_call["gtk_picture_get_paintable", Int](c.widget)
+    var renderer = external_call["gtk_native_get_renderer", Int](host[].window)
+    if c.hands == hands0 or paintable == 0 or renderer == 0 or w <= 0 or h <= 0 or c.prev.width() != w or c.prev.height() != h:
+        print("GPU2D GL CHECK: canvas " + which + " drew no picture to check", flush=True)
+        return
+    var tname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](paintable)))
+    var snap = external_call["gtk_snapshot_new", Int]()
+    external_call["gdk_paintable_snapshot", NoneType](paintable, snap, Float64(w), Float64(h))  # (1:1, device pixels)
+    var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+    var got = List[UInt32](length=w * h, fill=0)
+    var drew = False
+    if root != 0:
+        var tex = external_call["gsk_renderer_render_texture", Int](renderer, root, 0)
+        if tex != 0 and Int(external_call["gdk_texture_get_width", c_int](tex)) == w and Int(external_call["gdk_texture_get_height", c_int](tex)) == h:
+            external_call["gdk_texture_download", NoneType](tex, Int(got.unsafe_ptr()), w * 4)  # (B8G8R8A8 premultiplied)
+            drew = True
+        if tex != 0:
+            external_call["g_object_unref", NoneType](tex)
+        external_call["gsk_render_node_unref", NoneType](root)
+    var g = host[].gpu2d()
+    var want = List[UInt32](length=w * h, fill=0)
+    var surface = Surface(Int(want.unsafe_ptr()), w, h, c.prev.scale())
+    execute_cpu(build_batches(c.prev, g[].atlas, g[].font), g[].atlas, surface)
+    var total = 0
+    var far = 0
+    for i in range(w * h):
+        var a = want[i]
+        var b = got[i]
+        var bb = ((b >> 16) & 0xFF) | (b & 0xFF00) | ((b & 0xFF) << 16)  # (BGRA bytes → our R, G, B order)
+        var worst = 0
+        for ch in range(3):
+            var d = abs(Int((a >> UInt32(8 * ch)) & 0xFF) - Int((bb >> UInt32(8 * ch)) & 0xFF))
+            total += d
+            worst = max(worst, d)
+        if worst > 40:
+            far += 1
+    var mean = Float64(total) / Float64(3 * w * h) if drew else 999.0
+    var far_pc = 100.0 * Float64(far) / Float64(w * h) if drew else 100.0
+    var ok = drew and mean <= 1.5 and far_pc <= 0.5
+    # the snap box (D-7577): none (no offload: never made, or gone for good), aside (see-through frames: no inset) or on;
+    # the picture's inset in it; what a press 0.5 pt inside the box's top-left corner (the strip, when inset) lands on
+    # and where the canvas gets it; the box's background vs the scene's
+    var snap_said = String(" snap=none")
+    if c.snap != 0:
+        var o = List[Float32](length=2, fill=0)
+        var at = List[Float32](length=2, fill=0)
+        _ = external_call["gtk_widget_compute_point", c_int](c.widget, c.snap, Int(o.unsafe_ptr()), Int(at.unsafe_ptr()))
+        var inset_x = Float64(at[0])
+        var inset_y = Float64(at[1])
+        # (in the strip on the side the snap left, halfway along it: the left one when inset there, else the top one)
+        var px = 0.5 if inset_x >= 1 else Float64(Int(external_call["gtk_widget_get_width", c_int](c.snap))) / 2
+        var py = 0.5 if inset_x < 1 else Float64(Int(external_call["gtk_widget_get_height", c_int](c.snap))) / 2
+        o[0] = Float32(px)
+        o[1] = Float32(py)
+        _ = external_call["gtk_widget_compute_point", c_int](c.snap, host[].window, Int(o.unsafe_ptr()), Int(at.unsafe_ptr()))
+        var shut = external_call["gtk_widget_get_can_target", c_int](host[].window) == 0  # (test windows ignore the real
+        if shut:  # pointer: targeting back on just for this pick)
+            external_call["gtk_widget_set_can_target", NoneType](host[].window, c_int(1))
+        var picked = external_call["gtk_widget_pick", Int](host[].window, Float64(at[0]), Float64(at[1]), c_int(0))
+        if shut:
+            external_call["gtk_widget_set_can_target", NoneType](host[].window, c_int(0))
+        var lands = String("snap") if picked == c.snap else (String("picture") if picked == c.widget else (
+            String("none") if picked == 0 else String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](picked)))))
+        var xy = host[].at_canvas(ci, c.drag, px, py)
+        _ = len(o)
+        _ = len(at)
+        var want_bg = scene_background(c.prev)
+        snap_said = (" snap=" + (String("aside") if c.aside else String("on")) + " inset=" + String(round(inset_x, 2)) + "," + String(round(inset_y, 2))
+                     + " strip_press=" + lands + " at " + String(round(px, 1)) + "," + String(round(py, 1)) + " strip_at=" + String(round(xy[0], 2)) + "," + String(round(xy[1], 2))
+                     + " bg=" + hex_rgb(c.bg) + " scene_bg=" + hex_rgb(want_bg))
+    print("GPU2D GL CHECK: canvas=" + which + " " + String(w) + "x" + String(h) + " texture=" + tname + " offloaded=" + String(Int(c.last_offloaded))
+          + " fenced=" + String(Int(c.last_fenced)) + " refused=" + String(c.offload_refused) + " fenced_frames=" + String(c.offload_fenced)
+          + " unfenced=" + String(c.offload_unfenced) + snap_said + " mean=" + String(round(mean, 4)) + " far=" + String(round(far_pc, 4)) + "%" + (" ok" if ok else " FAIL"), flush=True)
+    _ = len(got)
+    _ = len(want)
+
+
 def frame_bench[A: App](host_addr: Int, rest: String):
     """framebench:K=pan|zoom|draw|finish|erase|deepzoom|type|grow,N (goal 40; type: goal 74; grow: goal 75): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
     fro every 20; ZOOM by 1.01× around the middle, in then out; one pen stroke of N moves; finish: short strokes, press,
@@ -4784,6 +5029,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var no_raster = getenv("MOJOUI_BENCH_RASTER") == "0"  # (diagnosis only: the raster check skipped, to see what it costs the rest)
     var offloaded = 0  # timed frames GTK showed through its subsurface (graphics offload, read from GTK's own state)
     var refused0 = host[].canvases[ci].offload_refused
+    var fenced0 = host[].canvases[ci].offload_fenced  # (D-7575: dmabuf frames handed only after our fence signalled, and
+    var unfenced0 = host[].canvases[ci].offload_unfenced  # refused ones handed without that wait: should stay 0)
     var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
     while (not host[].canvases_drawn() or busy() or host[].has_pending) and perf_counter_ns() < wait_by:
         pump()
@@ -4988,6 +5235,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if host[].g2d != 0:
         counts += " ring_full=" + String(host[].gpu2d()[].gl.full - ring_full0)
     counts += " offload=" + String(offloaded) + " offload_refused=" + String(host[].canvases[ci].offload_refused - refused0)
+    counts += " offload_fenced=" + String(host[].canvases[ci].offload_fenced - fenced0) + " offload_unfenced=" + String(host[].canvases[ci].offload_unfenced - unfenced0)
     var settle_by = perf_counter_ns() + 200_000_000  # (the last frames' presentation times come back a frame or two later)
     while len(shown_wait) > 0 and perf_counter_ns() < settle_by:
         _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
@@ -5348,11 +5596,14 @@ def pen_pressure(controller: Int, test_pressure: Float64) -> Float64:
     return min(max(v[0], 0.0), 1.0)
 
 
-def on_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
+def on_drag_begin[A: App](drag: Int, x0: Float64, y0: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var ci = get_index(drag)
     if ci < 0 or ci >= len(host[].canvases):
         return
+    var at = host[].at_canvas(ci, drag, x0, y0)
+    var x = at[0]
+    var y = at[1]
     host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = 0
     host[].canvases[ci].drag_y = 0
@@ -5429,8 +5680,10 @@ def on_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int) abi("
     var host = host_at[A](host_addr)
     var ci = get_index(motion)
     if 0 <= ci < len(host[].canvases):
-        host[].canvases[ci].ptr_x = x
-        host[].canvases[ci].ptr_y = y
+        var at = host[].at_canvas(ci, motion, x, y)
+        host[].canvases[ci].ptr_x = at[0]
+        host[].canvases[ci].ptr_y = at[1]
+        host[].canvases[ci].ptr_seen = True
 
 
 def on_pinch_begin[A: App](pinch: Int, sequence: Int, host_addr: Int) abi("C"):
@@ -5452,6 +5705,10 @@ def on_pinch[A: App](pinch: Int, scale: Float64, host_addr: Int) abi("C"):
     var xy = List[Float64](length=2, fill=0)
     if external_call["gtk_gesture_get_bounding_box_center", c_int](pinch, Int(xy.unsafe_ptr()), Int(xy.unsafe_ptr()) + 8) == 0:
         var at = host[].pointer(ci)
+        xy[0] = at[0]
+        xy[1] = at[1]
+    else:
+        var at = host[].at_canvas(ci, pinch, xy[0], xy[1])
         xy[0] = at[0]
         xy[1] = at[1]
     host[].canvas_send(ci, ZOOM, xy[0], xy[1], 0, 0, factor, host_addr)
@@ -5560,7 +5817,8 @@ def on_secondary_released[A: App](click: Int, presses: c_int, x: Float64, y: Flo
     var ci = get_index(click)
     if ci < 0 or ci >= len(host[].canvases):
         return
-    host[].canvas_send(ci, SECONDARY, x, y, 0, 0, 1, host_addr)
+    var at = host[].at_canvas(ci, click, x, y)
+    host[].canvas_send(ci, SECONDARY, at[0], at[1], 0, 0, 1, host_addr)
 
 
 def on_item_clicked[A: App](button: Int, host_addr: Int) abi("C"):
@@ -5707,7 +5965,8 @@ def on_click_released[A: App](click: Int, presses: c_int, x: Float64, y: Float64
     var ci = get_index(click)
     if ci < 0 or ci >= len(host[].canvases) or host[].canvases[ci].moved:
         return
-    host[].canvas_send(ci, DOUBLE if presses == 2 else TAP, x, y, Float64(mods_of(click)), 0, 1, host_addr)  # (the first click of a double was a TAP; dx: modifiers)
+    var at = host[].at_canvas(ci, click, x, y)
+    host[].canvas_send(ci, DOUBLE if presses == 2 else TAP, at[0], at[1], Float64(mods_of(click)), 0, 1, host_addr)  # (the first click of a double was a TAP; dx: modifiers)
 
 
 def on_release_retry[A: App](host_addr: Int) abi("C") -> c_int:
@@ -6867,6 +7126,8 @@ def run_step[A: App](host_addr: Int, step: String):
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
     elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
         frame_bench[A](host_addr, rest)
+    elif verb == "gpucheck":  # gpucheck:K: canvas K's picture as GTK's renderer composites it vs gpu2d's CPU executor (D-7575)
+        gl_check[A](host_addr, rest)
     elif verb == "webjs":  # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, printed as JS: <json>
         var kv = split_at(rest, "=")
         var key = split_at(kv[0], "#")
@@ -8032,6 +8293,27 @@ def gpu2d_renderer(nodes: List[Node], declared: Bool):
 # ---------- graphics offload (goal 75, D-7570): a .gpu() canvas's frames go to the compositor as a subsurface ----------
 
 
+def hex_rgb(v: UInt32) -> String:
+    """#rrggbb of one of our colours (0xAABBGGRR); "none" for 0."""
+    if v == 0:
+        return "none"
+    comptime digits = "0123456789abcdef"
+    var out = String("#")
+    for sh in [0, 8, 16]:
+        var b = Int((v >> UInt32(sh)) & 0xFF)
+        out += String(digits[byte=b >> 4]) + String(digits[byte=b & 15])
+    return out
+
+
+def scene_background(sc: Scene) -> UInt32:
+    """The colour a scene fills its canvas with (its first opaque OP_FILL), 0 when it has none: what the snap box's strip
+    shows (D-7577)."""
+    for op in range(len(sc.kinds)):
+        if Int(sc.kinds[op]) == OP_FILL and (sc.colors[op] >> 24) == 0xFF:
+            return sc.colors[op]
+    return 0
+
+
 def offload_unavailable() -> String:
     """'' when a .gpu() canvas's picture can be offloaded (GTK hands it to the compositor as a Wayland subsurface, so GTK
     neither composites it nor waits on its fence), else why not: MOJOUI_OFFLOAD=0, not Wayland (X11, Xvfb: the canvas
@@ -8100,11 +8382,14 @@ def on_snap_measure(widget: Int, orientation: c_int, for_size: c_int, minimum: I
 
 def on_snap_allocate(widget: Int, width: c_int, height: c_int, baseline: c_int) abi("C"):
     """The snapping box places its child (the GtkGraphicsOffload) on whole logical and device pixels inside itself:
-    at most snap_step − 1 logical pixels in from each edge (D-7570)."""
+    at most snap_step − 1 logical pixels in from each edge (D-7570; up to 4 at 1.6×, D-7577); its whole size while the
+    canvas's frames can't be offloaded (stepped aside, D-7577)."""
     var child = external_call["gtk_widget_get_first_child", Int](widget)
     if child == 0:
         return
-    var r = snap_rect(widget, Int(width), Int(height))
+    var key = String("mojoui-aside")
+    var aside = external_call["g_object_get_data", Int](widget, key.as_c_string_span()) != 0  # (D-7577: no snapping)
+    var r = [0, 0, Int(width), Int(height)] if aside else snap_rect(widget, Int(width), Int(height))
     var pt = List[Float32](length=2, fill=0)
     pt[0] = Float32(r[0])
     pt[1] = Float32(r[1])

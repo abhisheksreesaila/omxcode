@@ -3,13 +3,17 @@
 # topic and one polygon per branch; the keys (Tab, Enter, typing, F2, Escape, Delete, arrows, Space); undo and redo of
 # every step, and the outline text round trip. Goal 75 M4: motion (topics glide on springs to their places, grow out of
 # their parent, shrink into it when removed or folded; frames are asked for only while something moves; less motion
-# jumps), per-frame paint+step time on a 300-topic map, and that map drawn to build/g75/map-ours.png.
+# jumps), per-frame paint+step time on a 300-topic map, and that map drawn to build/g75/map-ours.png. Goal 75 review:
+# the map's camera (MapCamera: a drag moves it with the pointer, a scroll by the content's dx/dy, ZOOM keeps the topic
+# under the pointer under it, at a 1.6× scale too), `mindmap camera: ok`.
 #   pixi run mojo run -I . tests/test_mindmap.mojo
 from std.testing import assert_equal, assert_true, assert_false
 from std.time import perf_counter_ns
 from std.os import makedirs
 
-from mojoui.mindmap import MindMap, MapView, RIGHT_SIDE, LEFT_SIDE, DONE_OPEN, DONE_YES
+from mojoui.mindmap import MindMap, MapView, MapCamera, RIGHT_SIDE, LEFT_SIDE, DONE_OPEN, DONE_YES
+from mojoui.app import Event
+from mojoui.view import PAN, ZOOM, WHEEL, TAP
 from mojoui.text import Font
 from mojoui.scene import Scene, SurfacePainter, OP_POLY
 from mojoui.canvas import Surface, rgba
@@ -539,6 +543,46 @@ def main() raises:
     assert_true(scl.again)
     assert_true(worst < 4.0)  # (the budget is 2 ms; noise on a busy machine is allowed for, the mean is printed)
     print("mindmap motion: ok")
+
+    # ---------------------------------------------------------------- the camera (goal 75 review, D-7579)
+    var cm = sample_map(60)
+
+    var cam = MapCamera()
+    var cw = 900.0
+    var ch = 640.0
+    var cs = 1.6  # (device pixels a point: the owner's 1.6× screen)
+    var scc = Scene(Int(cw * cs), Int(ch * cs), cs)
+    scc.is_still = True
+    cm.paint(scc, font, cam.view(cw, ch, cs))
+    # a drag and a scroll move the map by their dx, dy in points; other events aren't the camera's
+    assert_true(cam.gesture(Event(0, "", PAN, 300, 200, 12, -7)))
+    assert_true(cam.gesture(Event(0, "", WHEEL, 300, 200, -40, 25)))
+    assert_false(cam.gesture(Event(0, "", TAP, 300, 200)))
+    assert_true(abs(cam.dx - (12 - 40)) < 1e-9 and abs(cam.dy - (-7 + 25)) < 1e-9, "pan and scroll move the map by dx, dy")
+    # zoom around a topic's centre: the same topic stays under the pointer, the map point under it doesn't move
+    scc.reset(Int(cw * cs), Int(ch * cs), cs)
+    cm.paint(scc, font, cam.view(cw, ch, cs))
+    var tid = cm.children(0)[0]
+    var vx = (cm.boxes[tid].cx() * cm.view.k + cm.view.dx) / cs  # (the topic's centre in canvas points)
+    var vy = (cm.boxes[tid].cy() * cm.view.k + cm.view.dy) / cs
+    var before = cam.to_map(vx, vy)
+    for f in [2.0, 1.7, 0.4, 3.0]:
+        assert_true(cam.gesture(Event(0, "", ZOOM, vx, vy, 0, 0, f)))
+        scc.reset(Int(cw * cs), Int(ch * cs), cs)
+        cm.paint(scc, font, cam.view(cw, ch, cs))
+        var after = cam.to_map(vx, vy)
+        assert_true(abs(after[0] - before[0]) < 1e-6 and abs(after[1] - before[1]) < 1e-6, "zoom moved the map point under the pointer")
+        assert_equal(cm.hit(vx * cs, vy * cs), tid)
+    # the zoom stays within min_k…max_k
+    for _ in range(20):
+        _ = cam.gesture(Event(0, "", ZOOM, vx, vy, 0, 0, 2.0))
+    assert_equal(cam.k, 4.0)
+    for _ in range(40):
+        _ = cam.gesture(Event(0, "", ZOOM, vx, vy, 0, 0, 0.5))
+    assert_equal(cam.k, 0.2)
+    cam.reset()
+    assert_true(cam.dx == 0 and cam.dy == 0 and cam.k == 1, "reset")
+    print("mindmap camera: ok")
     print("mindmap motion frame (300 topics, step + paint into a Scene, add animation):", total / Float64(frames), "ms mean,", worst,
           "ms worst over", frames, "frames; overshoot", over * 100, "% of travel")
 

@@ -1,6 +1,7 @@
 # The Metal backend of the GPU 2D renderer (goal 75 M3), on a Mac with Metal: every primitive and three scenes like the
 # judged ones are drawn by Metal into an IOSurface, read back and compared with gpu2d's CPU executor (M1's bounds: mean
-# ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 levels off). Prints `gpu2d metal: ok`; on a Mac without Metal it says
+# ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 levels off); a 300-topic map panned through the layer cache rebuilds
+# nothing after its first frame (goal 75 review, D-7578). Prints `gpu2d metal: ok`; on a Mac without Metal it says
 # why and fails. A Mac only (the Objective-C runtime and Metal are linked):
 #   pixi run mojo build -I . tests/test_gpu2d_metal.mojo -o build/test_gpu2d_metal \
 #       -Xlinker -lobjc -Xlinker -framework -Xlinker Metal -Xlinker -framework -Xlinker Foundation -Xlinker -framework -Xlinker IOSurface
@@ -12,7 +13,7 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.scene import Scene
 from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu
-from mojoui.gpu2d_metal import Metal2D, read_iosurface
+from mojoui.gpu2d_metal import Metal2D, MetalCanvas2D, read_iosurface
 from mojoui.hosts.apple_canvas import io_surface, cfunc
 from mojoui.objectlayer import import_fabric
 from mojoui.mindmap import MapView
@@ -97,4 +98,44 @@ def main() raises:
     m.paint(ms, font, MapView(700, 450, 0.8))
     gpu_vs_cpu("mindmap (" + String(m.nodes()) + " topics)", mtl, ms, atlas, font)
     print("     ", counts(ms, atlas, font))
+    map_pan(font, atlas)
     print("gpu2d metal: ok")
+
+
+def map_pan(font: Font, atlas: GlyphAtlas) raises:
+    """A 300-topic map panned at pnote's canvas size on a 1.6× screen, drawn as the host draws (MetalCanvas2D's layer
+    cache, D-7538): its text layer is kept through every pan after the first frame (text depends on the zoom only,
+    D-7578), and the last frame read back matches the CPU executor's picture of that Scene built whole."""
+    var m = mindmap_of(300)
+    var g = MetalCanvas2D()
+    assert_true(g.metal.ok, "MetalCanvas2D: " + g.metal.why)
+    var W = 1699
+    var H = 1384
+    var k = 1.6
+    var io = io_surface(W, H)
+    assert_true(io != 0, "map pan: no IOSurface")
+    var rebuilt = 0
+    var ms = List[Float64]()
+    for f in range(30):
+        g.scene.reset(W, H, k)
+        g.scene.is_still = True
+        g.scene.fill(0xFFFFFFFF)
+        m.paint(g.scene, font, MapView((Float64(W) / k / 2 + Float64(f) * 7.3) * k, (Float64(H) / k / 2 - Float64(f) * 4.1) * k, k))
+        assert_true(g.render_scene(1, io, W, H), "map pan frame drawn")
+        if f > 0:
+            rebuilt += g.rebuilt
+            ms.append(g.build_ms)
+        if f < 29:
+            g.end_frame()
+    var want = List[UInt32](length=W * H, fill=0)
+    var s = Surface(Int(want.unsafe_ptr()), W, H, k)
+    execute_cpu(build_batches(g.scene, atlas, font), atlas, s)
+    var got = read_iosurface(io, W, H)
+    g.metal.forget(io)
+    cfunc[NoneType]("CFRelease", io)
+    var d = diff(want, got)
+    sort(ms)
+    print("   mindmap pan (300 topics, 1699x1384 at 1.6x): layers rebuilt in 29 pan frames", rebuilt, "; build per frame p50",
+          round(ms[len(ms) // 2], 3), "ms, max", round(ms[len(ms) - 1], 3), "ms; last frame mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
+    assert_true(rebuilt == 0, "a panned mind map rebuilt its layers on Metal")
+    assert_true(d.mean <= 1.5 and d.far <= 0.5, "the panned mind map differs from the CPU executor (Metal)")
