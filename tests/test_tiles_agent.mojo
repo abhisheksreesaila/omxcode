@@ -10,7 +10,7 @@ from mojoui.genui import sample, schema
 from mojoui.json import Json, json_string
 from mojoui.jsonpatch import JDoc
 from mojoui.canvas import Surface
-from mojoui.livetiles import TILE_S, TILE_L, TILE_XL
+from mojoui.livetiles import TILE_S, TILE_L, TILE_XL, Tile, Face
 from mojoui.tilescard import TILES
 from themes.omxqua import omxqua
 
@@ -178,4 +178,37 @@ def main() raises:
     var said3 = s3.take_log()
     assert_true(said3[len(said3) - 1].find("first=t3 size=l holes=0") >= 0, said3[len(said3) - 1])
     print("resized then promoted: t3 first, l, holes 0")
+    # an app's own tiles card (goal 77 M7f): Screens.keep makes it, keeps it in step, and leaves the agent's changes standing
+    var s4 = Screens(20_000, 2000)
+    var mine = List[Tile]()
+    mine.append(Tile("todo", 0, "To do", "3 to do", "milk · mum"))
+    mine.append(Tile("cal", 0, "Calendar", "Pickup 3:15", "sample"))
+    mine.append(Tile("news", 0, "News", "SpaceX", "6 headlines"))
+    var kinds: List[String] = ["centre", "passive", "centre"]
+    assert_equal(s4.keep("stage", mine, kinds), "")
+    assert_equal(s4.uis[0].card, "stage")
+    draw(s4, 0)
+    assert_equal(order(s4, 0), "todo,news")  # (the passive calendar sits beside the grid)
+    assert_true(s4.tiles('{"op":"promote","id":"news","card":"stage"}').find('"first":"news"') >= 0)
+    assert_true(s4.tiles('{"op":"add","card":"stage","tile":{"id":"weather","head":"Weather","faces":[{"big":"9°"}]}}').find('"done":true') >= 0)
+    mine[0].faces[0] = Face("2 to do", "mum")
+    _ = mine.pop(2)  # (the app's news went)
+    var job = Tile("job", 0, "Thinking", "Graphics cards", "0:12")
+    mine.append(job^)
+    kinds = ["centre", "passive", "centre"]
+    assert_equal(s4.keep("stage", mine, kinds), "")
+    draw(s4, 0)
+    assert_equal(order(s4, 0), "todo,weather,job")  # (news gone, the agent's weather kept, the job added after it)
+    var lt = s4.uis[0].tiles_at(s4.uis[0].tiles_node())
+    assert_equal(lt.tiles[0].faces[0].big, "2 to do")
+    assert_equal(s4.keep("stage", mine, kinds, lead="job"), "")
+    draw(s4, 0)
+    assert_equal(order(s4, 0), "job,todo,weather")  # (the app's lead, once)
+    _ = s4.tiles('{"op":"promote","id":"weather","card":"stage"}')
+    assert_equal(s4.keep("stage", mine, kinds, lead="job"), "")
+    draw(s4, 0)
+    assert_equal(order(s4, 0), "weather,job,todo")  # (the agent's later promote stands: the lead moves only when it changes)
+    assert_true(s4.show("stage", '{"ui":{"component":"LiveTiles","tiles":[{"id":"x","head":"X","faces":[]}]}}') != "")  # (refused: no face)
+    assert_equal(len(s4.uis), 1)
+    print("app card: keep adds, changes, removes its own tiles; the agent's add and promote stand; lead once")
     print("tiles agent: ok")

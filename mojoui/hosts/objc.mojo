@@ -322,6 +322,8 @@ def sf_symbol(name: String) -> String:
     if name == "circle-alert": return "exclamationmark.circle"
     if name == "map-pin": return "mappin"
     if name == "mic": return "mic"  # (the Stage's chat bar, goal 77 M7a)
+    if name == "mic-off": return "mic.slash"  # (omx muted, goal 77 M7f)
+    if name == "keyboard": return "keyboard"
     if name == "pin": return "pin"
     if name == "timer": return "timer"
     if name == "trophy": return "trophy"

@@ -571,6 +571,12 @@ def counter_roles(p: Palette) -> List[Surface]:
     var bar = Surface("stage-bar", p.card, 32, 32, -1, -1, -1, -1, -1, -1, counter_sh2(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
     out.append(bar^)
     var mic = Surface("stage-mic", p.ink, 25, 25, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False, icon_size=22, icon_ink=p.accent_ink)
+    var tool = Surface("stage-tool", p.line, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False,
+                       icon_size=20, icon_ink=p.ink)  # (the chat bar's quiet round buttons beside the mic: keyboard, stop)
+    out.append(tool^)
+    var sub = words("stage-subtitle", 16, 0, p.ink)  # (the chat bar's subtitles: what she is saying, one line)
+    sub.one_line = True
+    out.append(sub^)
     out.append(mic^)
     var t = words("stage-clock-time", 72, 250, p.ink, -3.6)  # (.st-clock .t: 250, clamp(54px, 5.6vw, 88px), line-height .9, -.05em)
     t.line_height = 65
@@ -666,6 +672,8 @@ def counter_gtk(p: Palette, cls: String) -> String:
                + w + ".mui-tag-stage-input entry { background: transparent; box-shadow: none; min-height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
                + w + "button.mui-tag-stage-mic, " + w + "button.image-button.mui-tag-stage-mic, " + w + "button.flat.mui-tag-stage-mic { min-width: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; box-shadow: none; }\n"
                + w + "button.mui-tag-stage-mic image { color: " + card + "; -gtk-icon-size: 22px; }\n"
+               + w + "button.mui-tag-stage-tool, " + w + "button.image-button.mui-tag-stage-tool, " + w + "button.flat.mui-tag-stage-tool { min-width: 40px; min-height: 40px; padding: 0; border-radius: 20px; background: " + css_color(p.line) + "; box-shadow: none; }\n"
+               + w + "button.mui-tag-stage-tool image { color: " + ink + "; -gtk-icon-size: 20px; }\n"
                + w + "button.mui-tag-stage-pill, " + w + "button.flat.mui-tag-stage-pill { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
                + w + "button.flat.mui-tag-stage-pill label, " + w + "button.flat.mui-tag-stage-pill image { color: " + ink + "; }\n")
     var line = css_color(p.line)
@@ -703,6 +711,9 @@ def counter_web(p: Palette, cls: String) -> String:
                + b + "[data-tag=stage-input] .field { flex: 1; }\n"
                + b + "button[data-tag=stage-mic] { width: 50px; height: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; color: " + card + "; box-shadow: none; }\n"
                + b + "button[data-tag=stage-mic] svg { width: 22px; height: 22px; color: " + card + "; }\n"
+               + b + "button[data-tag=stage-tool] { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 20px; background: " + css_color(p.line) + "; color: " + ink + "; box-shadow: none; }\n"
+               + b + "button[data-tag=stage-tool] svg { width: 20px; height: 20px; }\n"
+               + b + "[data-tag=stage-subtitle] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }\n"
                + b + "button[data-tag=stage-pill-compact] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n"
                + b + "button.subtle[data-tag=stage-pill], " + b + "button[data-tag=stage-pill] { height: 38px; min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n")
     var line = css_color(p.line)

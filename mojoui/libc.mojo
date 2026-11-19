@@ -136,6 +136,12 @@ def clock_gettime(clock: Int, ts: Int) -> Int:
     return Int(external_call["clock_gettime", c_int](c_int(clock), Pointer[Int, MutUntrackedOrigin](unsafe_from_address=ts)))
 
 
+def localtime_r(seconds_addr: Int, tm_addr: Int) -> Int:
+    """`seconds_addr`: the address of an Int (seconds since 1970); `tm_addr`: room for a struct tm (9 c_ints, then the zone's
+    offset as an Int and a name pointer: 7 Ints is enough on Linux and the Mac). 0 when it failed."""
+    return external_call["localtime_r", Int](seconds_addr, tm_addr)
+
+
 def strtod(text: Int) -> Float64:
     """`text`: the address of a NUL-terminated number. Looked up, not declared (_sym)."""
     var f = _sym("strtod")

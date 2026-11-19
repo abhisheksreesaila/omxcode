@@ -63,6 +63,52 @@ def wall_seconds() -> Float64:
         return s
 
 
+@fieldwise_init
+struct LocalTime(Copyable, Movable, ImplicitlyCopyable):
+    """The wall clock in this machine's time zone: what a clock on a counter shows."""
+
+    var hour: Int  # 0-23
+    var minute: Int
+    var weekday: Int  # 0 Sunday … 6 Saturday
+    var month: Int  # 1-12
+    var day: Int  # 1-31
+
+
+def local_time() -> LocalTime:
+    """Now in the machine's time zone (libc's localtime_r on wall_seconds, so $MOJOUI_NOW holds it too); UTC when the zone
+    can't be read."""
+    var secs = List[Int](length=1, fill=Int(wall_seconds()))
+    var tm = List[Int](length=8, fill=0)  # (struct tm: 9 c_ints, the offset, the zone's name: 7 Ints, one spare)
+    var ok = libc.localtime_r(Int(secs.unsafe_ptr()), Int(tm.unsafe_ptr()))
+    var p = Pointer[Int32, MutUntrackedOrigin](unsafe_from_address=Int(tm.unsafe_ptr()))
+    var out: LocalTime
+    if ok == 0:
+        var t = secs[0]
+        out = LocalTime((t // 3600) % 24, (t // 60) % 60, ((t // 86400) + 4) % 7, 1, 1)
+    else:
+        out = LocalTime(Int(p.unsafe_offset(2)[]), Int(p.unsafe_offset(1)[]), Int(p.unsafe_offset(6)[]), Int(p.unsafe_offset(4)[]) + 1, Int(p.unsafe_offset(3)[]))
+    _ = len(secs)
+    _ = len(tm)
+    return out
+
+
+def clock_text(t: LocalTime, twelve: Bool = True) -> String:
+    """"7:38" (twelve-hour, as a kitchen clock reads) or "19:38"."""
+    var h = t.hour
+    if twelve:
+        h = h % 12
+        if h == 0:
+            h = 12
+    return String(h) + ":" + ("0" if t.minute < 10 else "") + String(t.minute)
+
+
+def date_text(t: LocalTime) -> String:
+    """"Wednesday, November 18"."""
+    var days: List[String] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    var months: List[String] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return days[t.weekday % 7] + ", " + months[(t.month - 1) % 12] + " " + String(t.day)
+
+
 def trace_on() -> Bool:
     """Tracing for tests and shots: MOJOUI_TRACE or MOJOUI_TEST is set (components print `PLAYER: …`, `CURSOR: …` lines)."""
     return getenv("MOJOUI_TRACE") != "" or getenv("MOJOUI_TEST") != ""

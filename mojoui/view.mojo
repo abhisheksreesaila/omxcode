@@ -576,6 +576,8 @@ def _container(var root: Node, items: List[View]) -> View:
     var nodes = List[Node]()
     nodes.append(root^)
     for item in items:
+        if len(item.nodes) == 0:  # (an empty View is no child: counted, it took the next sibling's first node as its own)
+            continue
         var base = len(nodes)
         nodes[0].children.append(base)
         for k in range(len(item.nodes)):

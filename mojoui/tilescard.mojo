@@ -18,6 +18,8 @@
 #                                    takes the three)
 #   tiles_patch(j, n, at, args)      its arguments as a JSON Patch on the card's render_ui arguments (`at`: the node's pointer);
 #                                    raises with a message the agent can act on
+#   tile_json(tile, kind)            a mojoui.livetiles Tile as one of the card's tiles (an app building its own tiles card:
+#                                    Screens.keep)
 
 from mojoui.json import Json, json_string, J_STRING, J_OBJECT, J_ARRAY, J_BOOL
 from mojoui.livetiles import Tile, Face, TAPPED, ACTION, REORDERED, RESIZED, tint_names
@@ -207,3 +209,29 @@ def result_word(kind: Int) -> String:
     if kind == RESIZED:
         return "resized"
     return "other"
+
+
+def tile_json(t: Tile, kind: String = KIND_CENTRE) -> String:
+    """`t` as one of a LiveTiles card's tiles (JSON), `kind` centre, passive or live: what an app sends when it builds a tiles
+    card of its own (mojoui.agentui.Screens.keep). Empty fields are left out; a tint must be one of tint_names()."""
+    var out = '{"id":' + json_string(t.id) + ',"kind":' + json_string(kind) + ',"head":' + json_string(t.head)
+    if t.tint != "":
+        out += ',"tint":' + json_string(t.tint)
+    if t.icon != "":
+        out += ',"icon":' + json_string(t.icon)
+    out += ',"faces":['
+    for i in range(min(len(t.faces), 4)):
+        out += ("," if i > 0 else "") + '{"big":' + json_string(t.faces[i].big) + ',"sub":' + json_string(t.faces[i].sub) + "}"
+    out += "]"
+    if t.why != "":
+        out += ',"why":' + json_string(t.why)
+    if len(t.actions) > 0:
+        out += ',"actions":['
+        for i in range(min(len(t.actions), 2)):
+            out += ("," if i > 0 else "") + json_string(t.actions[i])
+        out += "]"
+    if t.big:
+        out += ',"big":true'
+    if t.charm != "":
+        out += ',"charm":' + json_string(t.charm)
+    return out + "}"

@@ -185,7 +185,14 @@ def screen_text(view: View) -> String:
 def press[A: App](mut app: A, name: String, args: String) -> String:
     """One call of an app's tool, on the app itself (an app that holds its own agent answers take_calls() with
     `press(self, c.name, c.arguments)`): the control's event goes to update(), the result says what is on screen now."""
-    for t in view_tools(app.view()):
+    return press_with(app, view_tools(app.view()), name, args)
+
+
+def press_with[A: App](mut app: A, tools: List[AppTool], name: String, args: String) -> String:
+    """press() with the tools the app offered (its `tools()` list): for an app whose agent's controls are named apart from
+    how they look (a button wearing a theme role is tagged with the role, so its tool name comes from a plain view of the
+    same controls)."""
+    for t in tools:
         if t.name != name:
             continue
         if t.kind == T_BUTTON:
@@ -205,7 +212,7 @@ def press[A: App](mut app: A, name: String, args: String) -> String:
                 return '{"error":"the arguments aren\'t JSON"}'
         return '{"ok":true,"screen":' + json_string(screen_text(app.view())) + "}"
     var names = String("")
-    for t in view_tools(app.view()):
+    for t in tools:
         names += (t.name if names == "" else ", " + t.name)
     return '{"error":"no such tool: ' + name + '; there are: ' + names + '"}'
 

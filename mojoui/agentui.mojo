@@ -20,10 +20,15 @@
 #     screen: take_tiles(agent) for an AG-UI client (a frontend tool, like render_ui with take()), or tiles(args) for an
 #     in-process LlmAgent (add_deferred(TILES, TILES_ABOUT, TILES_PARAMS); answer its take_calls()).
 # What the person does to the tiles (tapped, an action, reordered, resized) comes back like any screen action (handle()).
+#
+# An app's own cards (goal 77 M7f): show(name, json) shows render_ui's arguments the app built itself under a name ("stage"),
+# or swaps them in for the card of that name; keep(name, tiles, kinds, lead) keeps the app's own live tiles on such a card in step
+# with what it knows (adds, changes, removes its tiles) while the agent's tiles, order and promotes on the same card stay: the
+# tiles tool and ui_patch work on it like on any card.
 
 from mojoui.agui import Agent, Tool
-from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tiles_patch
-from mojoui.livetiles import size_name
+from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tiles_patch, tile_json, tile_ids
+from mojoui.livetiles import size_name, Tile
 from mojoui.json import Json, J_OBJECT
 from mojoui.tripmap import SHOW_MAP, trip_ui
 from mojoui.explain import EXPLAIN
@@ -88,6 +93,9 @@ struct Screens[H: Hub = NoData](Movable):
     var album: Album  # the app's pictures, for screens that name one (mojoui.album)
     var refused: List[String]  # calls adopt() saw refused by an in-process agent (it told its model; nothing is shown)
     var said: List[String]  # what patches and the tiles tool did, for take_log() ("TILES: card=card1 op=promote …")
+    var kept_ids: List[String]  # keep(): the app's own tiles on its card, as last sent …
+    var kept: List[String]  # … and their JSON
+    var kept_lead: String
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi[Self.H]]()
@@ -105,6 +113,9 @@ struct Screens[H: Hub = NoData](Movable):
         self.font = Font()
         self.refused = List[String]()
         self.said = List[String]()
+        self.kept_ids = List[String]()
+        self.kept = List[String]()
+        self.kept_lead = String("")
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -278,6 +289,120 @@ struct Screens[H: Hub = NoData](Movable):
                 self.sizes.append(c.arguments.byte_length())
                 added += 1
         return added
+
+    def show(mut self, name: String, ui_json: String) -> String:
+        """An app's own card: render_ui's arguments ({"ui": …}) built by the app, shown as screen `name` (a word that isn't
+        cardN, so the agent's cards keep their names), or swapped in for the card of that name keeping what it holds (its tiles
+        glide: GenUi.carry). It answers no tool call; its parts' tags start with `name`. "" when shown, else why not."""
+        var k = self.card_index(name)
+        if k < 0:
+            if len(self.uis) >= self.max:
+                return "there are already " + String(self.max) + " screens"
+            k = len(self.uis)
+        var made = GenUi[Self.H](ui_json, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+        if made.problem != "":
+            return made.problem
+        if k < len(self.uis):
+            made.carry(self.uis[k])
+            self.uis[k] = made^
+            self.sizes[k] = ui_json.byte_length()
+            return ""
+        made.card = name
+        self.uis.append(made^)
+        self.calls.append("app:" + name)
+        self.messages.append("")
+        self.live.append(False)
+        self.sizes.append(ui_json.byte_length())
+        return ""
+
+    def keep(mut self, name: String, tiles: List[Tile], kinds: List[String], lead: String = "") -> String:
+        """The app's own live tiles (`kinds[i]`: centre, passive or live) on its card `name`, made on the first call (a LiveTiles
+        screen of them), then kept in step: a tile the app has and the card hasn't is added after the others, one that changed is
+        replaced where it stands, one the app had and no longer has is removed. The agent's tiles on the card, its order and its
+        promotes stay. `lead`: a tile the app wants first now (a job that has just finished); moved there once each time it
+        changes, so a later promote by the agent still wins. "" when done, else the first refusal."""
+        var made = List[String]()
+        for i in range(len(tiles)):
+            made.append(tile_json(tiles[i], kinds[i] if i < len(kinds) else String("centre")))
+        var k = self.card_index(name)
+        if k < 0:
+            var body = String('{"ui":{"component":"LiveTiles","tiles":[')
+            for i in range(len(made)):
+                body += ("," if i > 0 else "") + made[i]
+            var why = self.show(name, body + "]}}")
+            if why == "":
+                self.kept_ids = List[String]()
+                self.kept = List[String]()
+                for i in range(len(tiles)):
+                    self.kept_ids.append(tiles[i].id)
+                    self.kept.append(made[i])
+                self.kept_lead = lead
+            return why
+        var first_why = String("")
+        # gone: the app's tiles it no longer has
+        var j = len(self.kept_ids) - 1
+        while j >= 0:
+            var still = False
+            for t in tiles:
+                if t.id == self.kept_ids[j]:
+                    still = True
+            if not still:
+                var gone = self.kept_ids[j]
+                var why = self._tile_op(k, gone, "remove", "")
+                if why != "" and first_why == "":
+                    first_why = why
+                _ = self.kept_ids.pop(j)
+                _ = self.kept.pop(j)
+            j -= 1
+        # new or changed
+        for i in range(len(tiles)):
+            var at = -1
+            for q in range(len(self.kept_ids)):
+                if self.kept_ids[q] == tiles[i].id:
+                    at = q
+            if at >= 0 and self.kept[at] == made[i]:
+                continue
+            var why = self._tile_op(k, tiles[i].id, "replace" if at >= 0 else "add", made[i])
+            if why != "" and first_why == "":
+                first_why = why
+            if why == "" or at >= 0:
+                if at >= 0:
+                    self.kept[at] = made[i]
+                else:
+                    self.kept_ids.append(tiles[i].id)
+                    self.kept.append(made[i])
+        if lead != self.kept_lead:
+            self.kept_lead = lead
+            if lead != "":
+                var first = lead
+                var why = self._tile_op(k, first, "lead", "")
+                if why != "" and first_why == "":
+                    first_why = why
+        return first_why
+
+    def _tile_op(mut self, k: Int, id: String, op: String, tile: String) -> String:
+        """One change to card k's tiles as a JSON Patch: remove / replace (where it stands) / add (last, or in its place if the
+        agent removed it) / lead (moved first). "" when applied (a remove or lead of a tile that isn't there is nothing to do)."""
+        var n = self.uis[k].tiles_node()
+        if n < 0:
+            return "no live tiles on " + self.uis[k].card
+        var base = self.uis[k].pointer_to(n) + "/tiles/"
+        var ids = tile_ids(self.uis[k].json, n)
+        var i = -1
+        for q in range(len(ids)):
+            if ids[q] == id:
+                i = q
+        var ops: String
+        if op == "remove" or op == "lead":
+            if i < 0 or (op == "lead" and i == 0):
+                return ""
+            ops = ('[{"op":"remove","path":' + json_string(base + String(i)) + "}]" if op == "remove"
+                   else '[{"op":"move","from":' + json_string(base + String(i)) + ',"path":' + json_string(base + "0") + "}]")
+        elif i >= 0:
+            ops = '[{"op":"replace","path":' + json_string(base + String(i)) + ',"value":' + tile + "}]"
+        else:
+            ops = '[{"op":"add","path":' + json_string(base + "-") + ',"value":' + tile + "}]"
+        return self.patch(k, ops)
 
     def was_refused(self, call_id: String) -> Bool:
         for r in self.refused:

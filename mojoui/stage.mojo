@@ -16,7 +16,7 @@
 #   StageLabel(icon, text) · StageCard(icon, head, title, sub, hue, on_unpin) (a pinned or Today card) · StageRow(icon, head,
 #   value, hue) (a Live or Today row) · StageNote(text) (an empty list's line) · StageList(items, compact) ·
 #   StageAvatar(initials, hue, on_tap) · StagePill(icon, label, on_tap, compact) ·
-#   StageChat(orb, text, placeholder, …) (orb, a text box, the mic).
+#   StageChat(orb, text, placeholder, …) (orb, a text box or her subtitles, StageTool(label, msg, icon) buttons, the mic).
 #
 #   Roles: stage (the whole), stage-top, stage-side (a shaded band: its fill is the shade), stage-left, stage-centre,
 #   stage-right, stage-panel, stage-bar, stage-phone-bar (the strip the phone's bar sits in) and the parts' own (below).
@@ -257,10 +257,30 @@ def StagePill(icon: String, label: String, on_tap: Int, compact: Bool = False) -
     return Button(label, on_tap, SUBTLE, icon).tag("stage-pill")
 
 
-def StageChat(orb: View, text: String, placeholder: String, on_change: Int = NO_MSG, on_submit: Int = NO_MSG, on_mic: Int = NO_MSG) -> View:
+def StageTool(label: String, on_tap: Int, icon: String) -> View:
+    """A quiet round button in the chat bar beside the mic (stage-tool: 40 pt, the icon in the ink on a faint disc): the
+    keyboard that opens the text box, a stop. `label` is its name (what a test or an agent taps) and tooltip."""
+    return Button(label, on_tap, ICON_ONLY, icon).width(40).height(40).tag("stage-tool").tooltip(label)
+
+
+def StageChat(orb: View, text: String, placeholder: String, on_change: Int = NO_MSG, on_submit: Int = NO_MSG, on_mic: Int = NO_MSG,
+              subtitle: String = "", field: Bool = True, tools: List[View] = List[View](), mic: String = "Talk", mic_icon: String = "mic") -> View:
     """The chat bar's row: the orb (an OrbView(…, big=False) or any 52 pt view), a text box (stage-input), the round mic
-    button (stage-mic, "Talk"). Stage puts it in the bar's pill; M7d grows the pill into the TV."""
-    var field = HStack(TextField(text, placeholder, on_change, on_submit).grow(), spacing=0).align(CENTER).grow().tag("stage-input")
+    button (stage-mic, `mic`: "Talk"; a mute switch passes "Mute"/"Unmute" and "mic"/"mic-off"). Stage puts it in the bar's
+    pill; M7d grows the pill into the TV.
+    A voice-first bar (`field` False) shows a line of words where the box would be (stage-subtitle, one line): `subtitle`
+    (what she is saying, as she says it) or else `placeholder`, and a keyboard among `tools` opens the box. `tools`: quiet round
+    buttons before the mic (StageTool: the keyboard, a stop)."""
+    var middle: View
+    if field:
+        middle = HStack(TextField(text, placeholder, on_change, on_submit).grow(), spacing=0).align(CENTER).grow().tag("stage-input")
+    else:
+        middle = HStack(Text(subtitle if subtitle != "" else placeholder).grow().tag("stage-subtitle"), spacing=0).align(CENTER).grow().tag("stage-input")
     var orb_box = HStack(orb.copy(), spacing=0).align(CENTER).justify(CENTER).width(52).height(52).tag("stage-orb")
-    return HStack(orb_box, field, Button("Talk", on_mic, ICON_ONLY, "mic").width(50).height(50).tag("stage-mic"),
-                  spacing=10).align(CENTER).fill()
+    var items = List[View]()
+    items.append(orb_box^)
+    items.append(middle^)
+    for t in tools:
+        items.append(t.copy())
+    items.append(Button(mic, on_mic, ICON_ONLY, mic_icon).width(50).height(50).tag("stage-mic"))
+    return HStack(items^, spacing=10).align(CENTER).fill()

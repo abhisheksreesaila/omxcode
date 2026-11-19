@@ -160,20 +160,3 @@ def day_tiles(m: Moment, timer_s: Int) -> List[Tile]:
             t.big = m.big
         out.append(t^)
     return out^
-
-
-def row_hue(tint: String) -> Int:
-    """A tint as the Stage's row colours (stage-kind-1 … 6: the family's data colours violet, blue, teal, orange, red, gold)."""
-    if tint == "purple" or tint == "indigo":
-        return 1
-    if tint == "blue":
-        return 2
-    if tint == "teal" or tint == "green":
-        return 3
-    if tint == "orange":
-        return 4
-    if tint == "red" or tint == "pink":
-        return 5
-    if tint == "amber":
-        return 6
-    return 0

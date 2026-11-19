@@ -17,6 +17,7 @@
 #   feed.place(ranked, tiles.layout().ids)                       # the sides again from what the grid really shows (a size
 #                                                                # the person chose can push a tile off: it goes to its side)
 #   wear_occasion(all, "rain", "weather")                        # the umbrella on the weather tile (occasion_charm())
+#   StageRow(icon, head, value, tint_hue(tile.tint))             # a side row in its tile's colour
 
 from mojoui.livetiles import Tile
 from mojoui.charms import charm_names
@@ -163,3 +164,21 @@ def wear_occasion(mut tiles: List[Tile], occasion: String, about: String):
             tiles[i].charm = ""
         if charm != "" and tiles[i].id == about:
             tiles[i].charm = charm
+
+
+def tint_hue(tint: String) -> Int:
+    """A tile's tint as the Stage's side colours (StageRow / StageCard hue: stage-kind-1 … 6, the family's data colours violet,
+    blue, teal, orange, red, gold; 0 the quiet one), so a tile and its side row wear the same colour."""
+    if tint == "purple" or tint == "indigo":
+        return 1
+    if tint == "blue":
+        return 2
+    if tint == "teal" or tint == "green":
+        return 3
+    if tint == "orange":
+        return 4
+    if tint == "red" or tint == "pink":
+        return 5
+    if tint == "amber":
+        return 6
+    return 0

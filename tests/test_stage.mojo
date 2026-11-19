@@ -3,7 +3,8 @@
 # the Stage and its parts set styled by omxqua's Counter family (light and night).
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.view import View, Text, Canvas, VStack, HStack, SCROLL, NO_MSG
-from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
+from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote, StageTool
+from mojoui.view import Node
 from mojoui.stage import stage_layout, stage_compact, STAGE_PHONE, STAGE_NARROW
 from themes.omxqua import omxqua_counter, counter_ground, counter_shade
 
@@ -127,6 +128,21 @@ def test_counter_styles_every_tag() raises:
         for width in [1280, 900, 390]:
             for t in tags(screen(width)):
                 assert_true(look.surface(t) >= 0, "no Counter role for tag " + t)
+        # a voice-first chat bar (goal 77 M7f): her subtitles where the box would be, a keyboard and a stop beside a mute mic
+        var tools = List[View]()
+        tools.append(StageTool("Type", 7, "keyboard"))
+        tools.append(StageTool("Stop", 8, "square"))
+        var voice = StageChat(Canvas(2, 1), "", "Ask omx", 4, 5, 6, subtitle="Paris is the capital.", field=False, tools=tools^, mic="Mute", mic_icon="mic")
+        for t in tags(voice):
+            assert_true(look.surface(t) >= 0, "no Counter role for tag " + t)
+        assert_equal(len(tagged(voice, "stage-tool")), 2)
+        assert_equal(voice.nodes[tagged(voice, "stage-subtitle")[0]].text, "Paris is the capital.")
+        assert_equal(len(tagged(voice, "stage-mic")), 1)
+        assert_equal(voice.nodes[tagged(voice, "stage-mic")[0]].text, "Mute")
+        # an empty View among a container's children is no child (it took its next sibling's first node before)
+        var mixed = VStack(Text("a"), View(List[Node]()), Text("b"), spacing=0)
+        assert_equal(len(mixed.nodes[0].children), 2)
+        assert_equal(len(mixed.nodes), 3)
         var panel = look.surfaces[look.surface("stage-panel")].copy()
         assert_equal(panel.fill, counter_ground(dark))
         assert_equal(panel.radius_top, 30)

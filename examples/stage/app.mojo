@@ -37,7 +37,7 @@ from mojoui.orb import Orb, OrbView, ORB_LISTEN
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, DROPPED, size_name, tile_icon
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
 from mojoui.stage import stage_compact, stage_layout
-from mojoui.stagefeed import StageFeed, stage_feed, stage_tiles, tile_by_id, wear_occasion
+from mojoui.stagefeed import StageFeed, stage_feed, stage_tiles, tile_by_id, wear_occasion, tint_hue
 from mojoui.stagetv import StageTV, TVContent, StageThread, StageChips, StageMsg, TV_YOU, TV_OMX, TV_QUIET_MS, tv_now
 from mojoui.genui import GenUi, sample
 from mojoui.jsonpatch import JDoc
@@ -45,7 +45,7 @@ from mojoui.clock import now_ns
 from mojoui.png import encode_png
 from mojoui.shared import environment
 from themes.omxqua import omxqua_counter, counter_ground, counter_tv_look
-from days import Moment, moments, ranked, day_tiles, row_hue, clock_text
+from days import Moment, moments, ranked, day_tiles, clock_text
 
 comptime TILES_CANVAS = 1
 comptime ORB_CANVAS = 2
@@ -334,7 +334,7 @@ struct Main(App):
         """A tile as a one-line side row: its icon, its head, its first face's big line (the timer's value ticking)."""
         var t = tile_by_id(self.all, id)
         var value = t.faces[0].big if len(t.faces) > 0 else String("")
-        return StageRow(tile_icon(t.icon), t.head, value, row_hue(t.tint))
+        return StageRow(tile_icon(t.icon), t.head, value, tint_hue(t.tint))
 
     def days(self) -> View:
         var ms = moments()
@@ -366,7 +366,7 @@ struct Main(App):
         for k in range(len(self.feed.pinned)):
             var t = tile_by_id(self.all, self.feed.pinned[k])
             var f = t.faces[0].copy() if len(t.faces) > 0 else Face(t.head, "")
-            pins.append(StageCard(tile_icon(t.icon), t.head, f.big, f.sub, row_hue(t.tint), on_unpin=UNPIN + k))
+            pins.append(StageCard(tile_icon(t.icon), t.head, f.big, f.sub, tint_hue(t.tint), on_unpin=UNPIN + k))
         if len(pins) == 0:
             pins.append(StageNote("Drag a tile here to keep it at your side"))
         var pinned = VStack(VStack(StageLabel("pin", "Pinned"), StageList(pins), spacing=SPACE_S).align(START).fill().tag(

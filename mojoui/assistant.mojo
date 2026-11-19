@@ -10,6 +10,9 @@
 #              var say = assist.notice(person_is_idle)                          # "I've finished thinking about X…" once, when nobody talks
 #   start of a run: assist.flush(agent)                                         # what the job found joins the conversation, never mid-turn
 #   view():    assist.cards()                                                   # the to-do card, the job's card, the news cards (newest first)
+#              assist.todo_card() / job_card() / news_card(k)                   # one of them (a Stage's TV shows one card at a time)
+#   a Stage:   assist.tiles(), assist.tile_kinds()                              # the same as live tiles (to-do, the job, the news) for
+#                                                                               # Screens.keep / mojoui.stagefeed (the job ticks as a live row)
 #   assist.cloud                                                                # the cloud lane as a turn (mojoui.cloudlane.CloudTurn): ask, cancel, step
 #   assist.take_log()                                                           # lines the app prints for its checker ("TODO: …", "NEWS: …", "JOB: …")
 #
@@ -30,7 +33,8 @@ from mojoui.news import Headline, NewsCard, news_url, parse_headlines, news_for_
 from mojoui.shared import environment
 from mojoui.trust import fence, plain_topic
 from mojoui.todo import TodoList, TodoCard, todo_path, todo_functions, MAX_ITEMS
-from mojoui.view import View
+from mojoui.view import View, Node
+from mojoui.livetiles import Tile, Face
 
 comptime NEWS_TOOL = "news"
 comptime THINK_TOOL = "think_it_through"
@@ -273,4 +277,74 @@ struct Assistant(Movable):
             out.append(ThinkCard(self.job.value(), self.tick_base + MAX_ITEMS))
         for k in range(len(self.news) - 1, -1, -1):
             out.append(NewsCard(self.news[k].topic, self.news[k].items))
+        return out^
+
+    def todo_card(self) -> View:
+        return TodoCard(self.todo.items, self.tick_base)
+
+    def job_card(self) -> View:
+        """The job's card (a clock while it thinks, then the answer and Dismiss); an empty view when there is no job."""
+        if not self.job:
+            return View(List[Node]())
+        return ThinkCard(self.job.value(), self.tick_base + MAX_ITEMS)
+
+    def news_card(self, k: Int) -> View:
+        """News card k (0 the oldest); an empty view when there is none."""
+        if k < 0 or k >= len(self.news):
+            return View(List[Node]())
+        return NewsCard(self.news[k].topic, self.news[k].items)
+
+    # --- the same as live tiles (a Stage, goal 77 M7f) -----------------------------------------------------------------
+
+    def tiles(self) -> List[Tile]:
+        """The assistant's own tiles, most important first: the to-do list (always: "Nothing to do" when it is empty), the job (a
+        live row while it thinks, its clock ticking; a tile with the answer when done), the news (one face per topic, newest
+        first). Ids todo, job, news; their kinds in tile_kinds()."""
+        var out = List[Tile]()
+        var open = List[String]()
+        for ref i in self.todo.items:
+            if not i.done:
+                open.append(i.text)
+        var todo: Tile
+        if len(open) > 0:
+            var names = String("")
+            for k in range(min(len(open), 3)):
+                names += (" · " if k > 0 else "") + open[k]
+            todo = Tile("todo", 0, "To do", String(len(open)) + " to do", head(names, 110), icon="list-todo")
+            todo.faces.append(Face(head("Next: " + open[0], 58), String(len(self.todo.items)) + " on the list"))
+        elif len(self.todo.items) > 0:
+            todo = Tile("todo", 0, "To do", "All done", String(len(self.todo.items)) + " ticked off", icon="list-todo")
+        else:
+            todo = Tile("todo", 0, "To do", "Nothing to do", "Say: add milk to my list", icon="list-todo")
+        todo.tint = "orange"
+        if self.job:
+            ref job = self.job.value()
+            var t: Tile
+            if job.state == JOB_RUNNING:
+                t = Tile("job", 0, "Thinking", job.clock(), head(job.title, 110), icon="brain")
+            elif job.state == JOB_DONE:
+                t = Tile("job", 0, "Thought through", head(job.title, 58), head(job.answer.replace("\n", " "), 110), icon="brain")
+                t.why = "it's ready"
+            else:
+                t = Tile("job", 0, "Thinking", "Couldn't finish", head(job.title, 110), icon="brain")
+            t.tint = "purple"
+            out.append(t^)
+        out.append(todo^)
+        if len(self.news) > 0:
+            var last = len(self.news) - 1
+            var n = Tile("news", 0, "News", head(self.news[last].topic, 58), head(self.news[last].items[0].title, 110) if len(self.news[last].items) > 0 else String("no headlines"), icon="scroll-text")
+            for k in range(last - 1, max(last - 4, -1), -1):
+                n.faces.append(Face(head(self.news[k].topic, 58), head(self.news[k].items[0].title, 110) if len(self.news[k].items) > 0 else String("")))
+            n.tint = "blue"
+            out.append(n^)
+        return out^
+
+    def tile_kinds(self) -> List[String]:
+        """tiles()' kinds, in its order: the job is live while it thinks (a ticking row at the side), else centre."""
+        var out = List[String]()
+        if self.job:
+            out.append("live" if self.job.value().state == JOB_RUNNING else "centre")
+        out.append("centre")
+        if len(self.news) > 0:
+            out.append("centre")
         return out^
