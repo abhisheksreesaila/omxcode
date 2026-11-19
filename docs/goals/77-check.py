@@ -5,7 +5,7 @@
 M0 ground, M1 she points (GTK headless, then the web host in headless Chromium), M2 the word card, M3 the map card (two trips on GTK at
 tablet size, then on the web host in headless Chromium: stops within 25 km of hand-entered truth, points that fly the map and put the
 ring on the marker, tiles in the browser), M4 the isometric explainer (three "how does X work?" questions at phone width, the last in
-Liquid dark), M5 visual first, M6 the camera. M7 (polish) is another developer's and reports BLOCKED("not built yet") until it lands.
+Liquid dark), M5 visual first, M6 the camera. M7a–M7f (the Stage, D-7780) live in docs/goals/77-stage-check.py; M7 passes when they all do.
 The language model of
 M1, M2 and M5 runs on GPU $G77_GPU (default 0); M6's (the model, its vision projector and the voice) on GPU $G77_VISION_GPU (default 1),
 PCI order as nvidia-smi counts. The machinery is goal 72's (docs/goals/72-check.py: the app on the headless display, typed turns, the null
@@ -766,8 +766,27 @@ def blocked(what):
     return lambda: ("BLOCKED", f"{what}: not built yet")
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4,
-              "M5": m5, "M6": m6, "M7": blocked("the polish (goal 77 M7)")}
+def stage_check(name):
+    """M7a–M7f (the Stage, D-7780): docs/goals/77-stage-check.py holds their proofs, one function per milestone."""
+    def run():
+        spec = importlib.util.spec_from_file_location("g77stage", ROOT / "docs/goals/77-stage-check.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fn = getattr(mod, name, None)
+        return fn() if fn else ("BLOCKED", f"{name}: not built yet")
+    return run
+
+
+def m7():
+    """M7 passes when M7a–M7f all pass."""
+    res = [(k, MILESTONES[k]()) for k in ("M7A", "M7B", "M7C", "M7D", "M7E", "M7F")]
+    bad = [f"{k}: {st}" for k, (st, _) in res if st != "PASS"]
+    return ("PASS", "M7a–M7f all pass") if not bad else ("BLOCKED" if all("BLOCKED" in b for b in bad) else "FAIL", "; ".join(bad))
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6,
+              "M7A": stage_check("m7a"), "M7B": stage_check("m7b"), "M7C": stage_check("m7c"),
+              "M7D": stage_check("m7d"), "M7E": stage_check("m7e"), "M7F": stage_check("m7f"), "M7": m7}
 
 
 def main():
