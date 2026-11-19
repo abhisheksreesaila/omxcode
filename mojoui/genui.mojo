@@ -1621,7 +1621,7 @@ struct GenUi[H: Hub = NoData](Movable):
                 return p
         return ""
 
-    def carry(mut self, mut old: GenUi[Self.H]):
+    def carry(mut self, old: GenUi[Self.H]):
         """This screen replaces `old` (a patch of it): it keeps old's name, focus, open tabs and its tiles' motion, so the tiles
         that moved glide from where they were to where the patch puts them."""
         self.card = old.card

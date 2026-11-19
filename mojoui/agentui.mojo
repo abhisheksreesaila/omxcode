@@ -11,8 +11,20 @@
 # past `max` screens every call is refused. The first action in a screen is its call's tool result; later ones a user
 # message. Calls the app didn't offer are left alone. After MAX_RETRIES refusals in a row take() stops asking for reruns
 # (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
+#
+# A shown screen changes without being sent again (goal 77 M7c, D-7803): patch(k, json_patch) applies RFC 6902 to the card's
+# render_ui arguments ({"ui": …}), validates the result with the same catalog and swaps it in, keeping what the card itself
+# holds (its live tiles' motion: they glide to their new places); a refused patch leaves the card as it was. It arrives as
+#   - a CUSTOM event `ui_patch` {"card": "card2", "patch": [...]} from any AG-UI agent: custom(agent) after EV_CUSTOM;
+#   - the `tiles` tool (tiles_tool(): promote, add, remove, set_face), answered by the app because only it knows what is on
+#     screen: take_tiles(agent) for an AG-UI client (a frontend tool, like render_ui with take()), or tiles(args) for an
+#     in-process LlmAgent (add_deferred(TILES, TILES_ABOUT, TILES_PARAMS); answer its take_calls()).
+# What the person does to the tiles (tapped, an action, reordered, resized) comes back like any screen action (handle()).
 
-from mojoui.agui import Agent
+from mojoui.agui import Agent, Tool
+from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tiles_patch
+from mojoui.livetiles import size_name
+from mojoui.json import Json, J_OBJECT
 from mojoui.tripmap import SHOW_MAP, trip_ui
 from mojoui.explain import EXPLAIN
 from mojoui.iso import explain_ui
@@ -42,6 +54,18 @@ def tool_card(name: String, args: String) -> String:
     return ""
 
 
+comptime UI_PATCH = "ui_patch"  # the CUSTOM event that patches a shown card: {"card": "card2", "patch": [JSON Patch on its {"ui": …}]}
+
+
+def tiles_tool() -> Tool:
+    """The `tiles` agent tool (mojoui.tilescard): change the live tiles on screen without sending them all again."""
+    return Tool(TILES, TILES_ABOUT, TILES_PARAMS)
+
+
+def _refused(why: String) -> String:
+    return '{"error":' + json_string("refused: " + why) + "}"
+
+
 def _as_is(args: String) -> String:
     return args
 
@@ -63,6 +87,7 @@ struct Screens[H: Hub = NoData](Movable):
     var hub: Self.H  # the app's datasets, for screens that name one (goal 48 M5: mojoui.datahub)
     var album: Album  # the app's pictures, for screens that name one (mojoui.album)
     var refused: List[String]  # calls adopt() saw refused by an in-process agent (it told its model; nothing is shown)
+    var said: List[String]  # what patches and the tiles tool did, for take_log() ("TILES: card=card1 op=promote …")
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi[Self.H]]()
@@ -79,6 +104,7 @@ struct Screens[H: Hub = NoData](Movable):
         self.album = Album()
         self.font = Font()
         self.refused = List[String]()
+        self.said = List[String]()
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -296,9 +322,111 @@ struct Screens[H: Hub = NoData](Movable):
                 return True
         return False
 
+    def card_index(self, card: String) -> Int:
+        """The screen called `card` ("card2"), -1 none."""
+        for k in range(len(self.uis)):
+            if self.uis[k].card == card:
+                return k
+        return -1
+
+    def patch(mut self, k: Int, patch_json: String) -> String:
+        """Screen k changed by a JSON Patch (RFC 6902) on its render_ui arguments ({"ui": …}): applied atomically, validated with
+        the catalog again, swapped in keeping what the card holds itself (GenUi.carry: its tiles glide). "" when it was applied,
+        else why not (the card stays as it was)."""
+        if k < 0 or k >= len(self.uis):
+            return "no such card"
+        if self.uis[k].problem != "" or self.live[k]:
+            return self.uis[k].card + " isn't shown (it was refused, or it is still arriving)"
+        var doc: JDoc
+        try:
+            doc = JDoc.parse(self.uis[k].args())
+            doc.patch(patch_json)
+        except e:
+            return "the patch doesn't apply to " + self.uis[k].card + ": " + String(e)
+        var made = GenUi[Self.H](doc.dump(), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
+        if made.problem != "":
+            return made.problem
+        made.carry(self.uis[k])
+        self.uis[k] = made^
+        return ""
+
+    def custom(mut self, agent: Agent) -> String:
+        """After EV_CUSTOM: a `ui_patch` event ({"card", "patch"}) applied to the card it names. "" applied, else why not (also
+        logged: a CUSTOM event has no answer channel); "not a ui_patch" for other events."""
+        if agent.custom_name != UI_PATCH:
+            return "not a ui_patch"
+        var card = String("")
+        var ops = String("")
+        try:
+            var j = Json.parse(agent.custom_value)
+            card = j.text(j.get(0, "card"))
+            ops = j.dump(j.get(0, "patch"))
+        except:
+            pass
+        var k = self.card_index(card)
+        var why = String("no card ") + json_string(card) if k < 0 else self.patch(k, ops)
+        self.said.append("PATCH: card=" + card + (" ok" if why == "" else " refused=" + why))
+        return why
+
+    def tiles(mut self, args: String) -> String:
+        """The `tiles` tool's answer (JSON): its operation as a patch on the card it names (or the newest one with live tiles),
+        validated again: {"done": true, "card", "order": [the grid's ids], "first", "say"}, or {"error": "refused: …"} with what
+        to fix (an unknown id lists the ids)."""
+        var card = String("")
+        var op = String("")
+        try:
+            var a = Json.parse(args)
+            if a.kind(0) == J_OBJECT:
+                card = a.text(a.get(0, "card"))
+                op = a.text(a.get(0, "op"))
+        except:
+            pass
+        var k = -1
+        if card != "":
+            k = self.card_index(card)
+        else:
+            for i in range(len(self.uis)):
+                if self.uis[i].problem == "" and not self.live[i] and self.uis[i].tiles_node() >= 0:
+                    k = i
+        if k < 0 or self.uis[k].tiles_node() < 0:
+            return _refused("no live tiles on the screen" + ((" called " + card) if card != "" else String("")) + ": show them first with render_ui's LiveTiles")
+        var n = self.uis[k].tiles_node()
+        var ops: String
+        try:
+            ops = tiles_patch(self.uis[k].json, n, self.uis[k].pointer_to(n), args)
+        except e:
+            return _refused(String(e))
+        var why = self.patch(k, ops)
+        if why != "":
+            self.said.append("TILES: card=" + self.uis[k].card + " op=" + op + " refused=" + why)
+            return _refused(why)
+        var lay = self.uis[k].tiles_at(self.uis[k].tiles_node()).layout()
+        var order = String("")
+        var listed = String("[")
+        for i in range(len(lay.ids)):
+            order += ("," if i > 0 else "") + lay.ids[i]
+            listed += ("," if i > 0 else "") + json_string(lay.ids[i])
+        var first = lay.ids[0] if len(lay.ids) > 0 else String("")
+        var size = size_name(lay.sizes[0]) if len(lay.sizes) > 0 else String("")
+        self.said.append("TILES: card=" + self.uis[k].card + " op=" + op + " order=" + order + " first=" + first + " size=" + size + " holes=" + String(lay.holes))
+        return ('{"done":true,"card":' + json_string(self.uis[k].card) + ',"order":' + listed + '],"first":' + json_string(first)
+                + ',"say":' + json_string("The tiles are on the screen in this order: " + order.replace(",", ", ") + ". Say what changed in a few words.") + "}")
+
+    def take_tiles(mut self, mut agent: Agent) -> Bool:
+        """Every finished `tiles` call not yet answered (an AG-UI client that offered tiles_tool()): applied and answered. True when
+        one was (run the agent again: it hears the result)."""
+        var did = False
+        for c in agent.pending():
+            if c.name != TILES:
+                continue
+            agent.answer(c.id, _refused("too big: the arguments are larger than the client keeps") if c.too_big else self.tiles(c.arguments))
+            did = True
+        return did
+
     def take_log(mut self) -> List[String]:
         """What the screens' components did since the last call, one line each, for a checker ("MAP: card=card3 stop=1 …")."""
-        var out = List[String]()
+        var out = self.said.copy()
+        self.said.clear()
         for k in range(len(self.uis)):
             for line in self.uis[k].take_log():
                 out.append(line)
