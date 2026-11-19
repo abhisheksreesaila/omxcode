@@ -81,6 +81,8 @@ def gtk():
             if step in ("s7", "a2"):
                 steps.append(f"shot:{c.OUT}/m2-gtk-{step}-{key.replace('+', '-')}.png")
     steps += ["tapat:grid=300,200", "pause:300", "boards:k0", "key:grid=ArrowDown", "pause:300", "key:grid=ArrowDown", "pause:300", "boards:k1"]
+    steps += ["focusfield:formula-bar", "pause:200", "trykey:Alt+ArrowRight", "trykey:Shift+Alt+ArrowLeft", "trykey:Alt+F", "pause:300", "boards:typing",
+              "tapat:grid=300,200", "pause:300", "trykey:Alt+ArrowRight"]  # (in a field the keys are the field's; back on the grid they arrange again)
     out = c.gtk(steps, "m2-gtk", open_path=d / "fleet.csv")
     b = c.boards(out)
     focus = {}
@@ -105,12 +107,17 @@ def gtk():
     cards = lambda s: b[s]["cards"]
     probs += expect(SUPER, cards("f0"), focus.get("f0"), cards, lambda s: focus.get(s), lambda s: views.get(s), "Super")
     probs += expect(ALT, cards("s10"), focus.get("s10"), cards, lambda s: focus.get(s), lambda s: views.get(s), "Alt")
-    cells = [l for l in out.splitlines() if l.startswith("CELL: ")]
+    cells = [l for l in out[:out.find("KEY: ")].splitlines() if l.startswith("CELL: ")]  # (before the typing steps)
     rows = [int(l.split()[2]) for l in cells[-3:]]
     if len(rows) < 3 or rows[1] != rows[0] + 1 or rows[2] != rows[0] + 2:
         probs.append(f"the arrows alone didn't move the table's selection: {cells[-3:]}")
     if b["k1"]["cards"] != b["k0"]["cards"]:
         probs.append("the arrows alone moved a card")
+    keys = [l for l in out.splitlines() if l.startswith("KEY: ")]
+    if keys != ["KEY: Alt+ArrowRight passed", "KEY: Shift+Alt+ArrowLeft passed", "KEY: Alt+F passed", "KEY: Alt+ArrowRight fired"]:
+        probs.append(f"typing in the formula bar: {keys} (the Arrange keys must pass to the field, then fire again on the grid)")
+    if b["typing"]["cards"] != b["k1"]["cards"]:
+        probs.append("a key typed in the formula bar moved a card")
     if probs:
         return False, "GTK: " + "; ".join(probs)[:1500]
     return True, (f"GTK: click focuses; {len(SUPER)} Super keys and {len(ALT)} Alt keys each did their one thing (focus, 32/8 pt moves, "
@@ -162,6 +169,14 @@ def web():
         page.wait_for_timeout(600)
         status.append(page.evaluate(STATUS_JS))
         seen["k1"] = page.evaluate(c.CARDS_JS)
+        f = page.locator("[data-tag=formula-bar] input").first  # (typing in a field: Alt+arrows are the field's word jumps)
+        f.click()
+        page.wait_for_timeout(300)
+        before = (page.evaluate(FOCUS_JS), page.evaluate(c.CARDS_JS)["cards"])
+        for k in ("Alt+ArrowRight", "Shift+Alt+ArrowLeft", "Alt+ArrowDown"):
+            page.keyboard.press(k)
+            page.wait_for_timeout(400)
+        seen["typing"] = (before, (page.evaluate(FOCUS_JS), page.evaluate(c.CARDS_JS)["cards"]), page.evaluate("() => document.activeElement && document.activeElement.matches('input')"))
         return "WEB: done\n"
 
     steps = ";".join(["wait:Create table", "tap:Create table", "wait:Links", "pause:800", "tap:Insert", "pause:300",
@@ -184,6 +199,9 @@ def web():
         probs.append(f"the arrows alone: the selection's row {status[0]} -> {status[1]} (want two down)")
     if cards("k1") != cards("k0"):
         probs.append("the arrows alone moved a card")
+    (f0, c0), (f1, c1), still = seen["typing"]
+    if f0 != f1 or c0 != c1 or not still:
+        probs.append(f"Alt+arrows typed in the formula bar arranged the canvas (focus {f0} -> {f1}, field kept the keyboard: {still})")
     if probs:
         return False, "web: " + "; ".join(probs)[:1500]
     return True, f"web: the same {len(SUPER) + len(ALT)} keys with the real keyboard (Meta as Super); the arrows alone: row {r0} -> {r1}"

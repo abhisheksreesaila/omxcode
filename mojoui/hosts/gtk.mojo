@@ -6579,6 +6579,45 @@ def run_step[A: App](host_addr: Int, step: String):
         if handled[0] == 0:
             print("TEST: no item with shortcut", rest)
         _ = len(handled)
+    elif verb == "focusfield":  # focusfield:<tag>: the first text field inside the view tagged <tag> takes the keyboard, as a click in it does
+        var target = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].name == rest:
+                target = first_field_in(host[].rt.shown, k)
+                break
+        if target < 0 or host[].widgets[target] == 0:
+            print("TEST: no field in", rest)
+            return
+        _ = external_call["gtk_widget_grab_focus", c_int](host[].widgets[target])
+        pump()
+    elif verb == "trykey":  # trykey:Alt+ArrowRight: as shortcut:, but not firing is an answer ("KEY: name fired|passed"), not a failure
+        var name = rest
+        var state = 0
+        while True:
+            if name.startswith("Super+"):
+                state |= 0x4000000
+                var cut = String(name[byte=6:])
+                name = cut
+            elif name.startswith("Ctrl+"):
+                state |= 4
+                var cut = String(name[byte=5:])
+                name = cut
+            elif name.startswith("Shift+"):
+                state |= 1
+                var cut = String(name[byte=6:])
+                name = cut
+            elif name.startswith("Alt+"):
+                state |= 8
+                var cut = String(name[byte=4:])
+                name = cut
+            else:
+                break
+        var keyval = gdk_keyval(name.lower() if name.byte_length() == 1 else name)
+        var handled = List[c_int](length=1, fill=0)
+        var signal = String("key-pressed")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].shortcut_keys, signal.as_c_string_span(), c_uint(keyval), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
+        print("KEY: " + rest + (" fired" if handled[0] != 0 else " passed"), flush=True)
+        _ = len(handled)
     elif verb == "escape":  # escape: an Escape that reached the window (the last-chance controller's own signal, goal 76)
         var handled = List[c_int](length=1, fill=0)
         var signal = String("key-pressed")
@@ -7308,6 +7347,17 @@ def board_card(host: GtkHost, title: String) -> Int:
     for k in range(len(host.boards)):
         if headline_in(host.rt.shown, host.boards[k].node) == title:
             return k
+    return -1
+
+
+def first_field_in(v: View, i: Int) -> Int:
+    """The first text field inside node i (depth first), else -1."""
+    if v.nodes[i].kind == FIELD:
+        return i
+    for c in v.nodes[i].children:
+        var f = first_field_in(v, c)
+        if f >= 0:
+            return f
     return -1
 
 
