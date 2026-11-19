@@ -282,4 +282,97 @@ def m7e():
 
 
 def m7f():
-    return ("BLOCKED", "omx on the Stage: not built yet")
+    """omx on the Stage (examples/omx composes mojoui.stage, livetiles, stagefeed, stagetv and the pointer). Run here: the unit tests
+    (test_stage, test_tiles_agent: the app card Screens.show/keep, test_assistant), the lints (scripts/components.py --check, the
+    decisions, libc and seek lints, goal 72's app lint on examples/omx), D-7840's probe (scripts/g77_settle_check.py: the web host
+    paints a rebuilt screen laid out at once) and M7A-M7E again. Read from build/g77/m7f/results.json, written by
+    scripts/g77_m7f_run.py with the real model (tens of minutes): goal 72's M3-M6 and goal 77's M1-M6, their checkers' own lines,
+    and omx's pictures at 1280x820 and 390x844, light and dark (home with tiles, the TV with a card, a point landing); each part
+    must carry the fingerprint of the tree as it is now (an edit since the run makes it stale), and every line must be PASS."""
+    import json
+    import importlib.util
+    from pathlib import Path
+    root = _M7A_ROOT
+    probs, said, blocked = [], [], []
+
+    def sh(cmd, timeout=1800):
+        return _m7a_sh(cmd, timeout)
+
+    # (3) the unit tests and the lints
+    for name, flags, want in (("test_stage", ["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_stage.mojo"], "test_stage: 7 tests passed"),):
+        r = sh(flags, 900)
+        (said if r.returncode == 0 and want in r.stdout else probs).append(name + (": ok" if r.returncode == 0 and want in r.stdout else ": " + (r.stdout + r.stderr)[-300:]))
+    for name, extra in (("test_tiles_agent", []), ("test_assistant", ["-I", "vendor"])):
+        b = sh(["scripts/mxbuild.sh", f"tests/{name}.mojo", "-o", f"build/{name}"] if not extra else
+               ["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", *extra, f"tests/{name}.mojo", "-o", f"build/{name}"], 1800)
+        r = sh([f"build/{name}"], 600) if b.returncode == 0 else b
+        ok = b.returncode == 0 and r.returncode == 0 and r.stdout.strip().endswith(": ok")
+        (said if ok else probs).append(name + (": " + r.stdout.strip().splitlines()[-1] if ok else ": " + (r.stdout + r.stderr)[-300:]))
+    for name, cmd in (("components", ["pixi", "run", "python", "scripts/components.py", "--check"]), ("decisions lint", ["pixi", "run", "python", "scripts/decisions_lint.py"]),
+                      ("libc lint", ["pixi", "run", "python", "scripts/libc_lint.py"]), ("seek lint", ["pixi", "run", "python", "scripts/seek_lint.py"])):
+        r = sh(cmd, 1800)
+        (said if r.returncode == 0 else probs).append(name + ": " + ((r.stdout.strip().splitlines() or ["ok"])[-1][:120] if r.returncode == 0 else (r.stdout + r.stderr)[-300:]))
+    spec = importlib.util.spec_from_file_location("g33check", root / "docs/goals/33-check.py")
+    g33 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g33)
+    lint = g33.lint_selftest() + g33.app_lint(["examples/omx"])
+    (probs.append("app lint on examples/omx: " + "; ".join(lint[:3])) if lint else said.append("app lint on examples/omx: clean"))
+    # D-7840: the web host's first paint after a rebuild
+    r = sh(["pixi", "run", "python", "scripts/g77_settle_check.py"], 1800)
+    line = next((l for l in r.stdout.splitlines() if l.startswith("settle: ok")), "")
+    (said.append(line) if line else probs.append("D-7840 settle probe: " + (r.stdout + r.stderr)[-400:]))
+    # (5) M7A-M7E again
+    for k, f in (("M7A", m7a), ("M7B", m7b), ("M7C", m7c), ("M7D", m7d), ("M7E", m7e)):
+        try:
+            state, why = f()
+        except Exception as e:  # noqa: BLE001
+            state, why = "FAIL", f"{type(e).__name__}: {e}"
+        (said if state == "PASS" else probs).append(f"{k} {state}" + ("" if state == "PASS" else ": " + why[:300]))
+    # (1), (2), (4): the real model's runs, read from the file scripts/g77_m7f_run.py wrote
+    spec = importlib.util.spec_from_file_location("g77m7frun", root / "scripts/g77_m7f_run.py")
+    run = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run)
+    now = run.fingerprint()
+    path = root / "build/g77/m7f/results.json"
+    res = json.loads(path.read_text()) if path.exists() else {}
+    for part, label in (("g72", "goal 72"), ("g77", "goal 77")):
+        got = res.get(part)
+        if not got:
+            probs.append(f"{label}: not run (scripts/g77_m7f_run.py {part})")
+            continue
+        if got.get("fingerprint") != now:
+            probs.append(f"{label}: its run is stale (fingerprint {got.get('fingerprint')} ≠ the tree's {now}: rerun scripts/g77_m7f_run.py {part})")
+            continue
+        for m, (state, why) in sorted(got["lines"].items()):
+            if state == "PASS":
+                said.append(f"{label} {m} PASS")
+            elif state == "BLOCKED":
+                blocked.append(f"{label} {m} BLOCKED: {why[:300]}")
+            else:
+                probs.append(f"{label} {m} FAIL: {why[:400]}")
+    sh_ = res.get("shots")
+    if not sh_ or sh_.get("fingerprint") != now:
+        probs.append("omx pictures: " + ("not taken" if not sh_ else f"stale (fingerprint {sh_.get('fingerprint')} ≠ {now})") + ": scripts/g77_m7f_run.py shots")
+    else:
+        from PIL import Image
+        for row in sh_["rows"]:
+            w, h = (int(v) for v in row["window"].split("x"))
+            pics = row["pictures"]
+            missing = [k for k in ("home", "tv", "point") if k not in pics or not (root / pics[k]).exists()]
+            if missing:
+                probs.append(f"omx {row['name']}: no {missing} picture")
+                continue
+            sizes = {k: Image.open(root / pics[k]).size for k in pics}
+            if any(abs(sz[0] - w) > 2 for sz in sizes.values()):
+                probs.append(f"omx {row['name']}: pictures {sizes}, not {w} wide")
+            if not row["cards"]:
+                probs.append(f"omx {row['name']}: no card was shown")
+            if not row["points"] or row["ring_pixels"] < 150:
+                probs.append(f"omx {row['name']}: no point landing ({len(row['points'])} points, {row['ring_pixels']} ring pixels at best)")
+            if not probs or not any(row["name"] in p for p in probs):
+                said.append(f"omx {row['name']}: {', '.join(pics[k] for k in ('home', 'tv', 'point'))} ({row['cards'][0]}, points {row['points'][:4]}, ring {row['ring_pixels']} px)")
+    if probs:
+        return ("FAIL", "; ".join(probs + blocked))
+    if blocked:
+        return ("BLOCKED", "; ".join(blocked) + " | otherwise: " + "; ".join(said))
+    return ("PASS", "; ".join(said))

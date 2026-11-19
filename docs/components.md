@@ -406,7 +406,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)` | `mojoui/telemetrychart.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)` | `mojoui/signal.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)` | `mojoui/stage.mojo` | Text, Button, Icon, TextField, VStack, HStack, Scroll, Canvas, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | stage |
+| `Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)` | `mojoui/stage.mojo` | Text, Button, Icon, TextField, VStack, HStack, Scroll, Canvas, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omx, stage |
 
 ## JavaScript widgets (WebComponent)
 
