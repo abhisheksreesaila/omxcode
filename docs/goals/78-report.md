@@ -33,12 +33,12 @@ model alone.
    M4 ticks the Settings checkbox (no OMX_CANVAS) and reads `canvas=tiled` and the tiled rects, then unticks it (D-7819).
 2. **Web heights**: a card's height resize also resizes what's inside it (a chart's canvas, the grid), which was a whole-screen
    rebuild that dropped the drag. Size-only changes anywhere inside a free card now go to the web as size marks applied as
-   styles. Every drag starts afresh (hosts mark the first frame, FIRST_FRAME; omxplorer ends a drag on any other board event).
+   styles. Every drag starts afresh (hosts mark the first frame, FIRST_FRAME; round 1 also ended a drag on any other board event, which round 2 found wrong: see below).
    M1 drags S and NW of a chart and of the table, then a second drag of each, on GTK and the web, frame by frame (D-7820, D-7821).
 3. **Performance**: live drag frames (and their end) no longer bump omxplorer's version, which every canvas's version adds; a
-   hover redraws only the grid; GTK draws a resized canvas at its new size by itself. Measured with 10 cards: PERF (D-7822).
+   hover redraws only the grid; GTK draws a resized canvas at its new size by itself. Measured with 10 cards on GTK (build/g78/m1-perf.txt, round 2's run): update median 0.4 ms, p95 0.6 ms, max 0.8 ms; to the laid-out frame median 16.9 ms, p95 25.8 ms (one display frame); one canvas drawn per frame (the resized card's); 0 SLOW lines at the 50 ms budget (D-7822).
 4. **The default look**: goal 73 M3's measurements now also run on the free canvas (78 M4 `depth`, cards found from the hosts'
-   own boxes): DEPTH (D-7826). Goal 73 M3 itself, goal 73 M2 and goal 47's directed DROID clip still run tiled
+   own boxes): 16 cards pass 73 M3's step, rim and shadow thresholds (GTK and web, light and dark, tiled and free, an unfocused table and the free canvas's focused chart; build/g78/m4-depth.txt). A tiled bottom row's shadow can't be read: it falls outside the page's scroller (D-7826). Goal 73 M3 itself, goal 73 M2 and goal 47's directed DROID clip still run tiled
    (OMX_CANVAS=tiled): **the directed DROID clip (docs/img/clip-robots*.mp4, goal 47) shows the tiled layout, not the default
    free canvas**; it was not re-recorded.
 5. **Keys in a field**: the web's and GTK's shortcut handlers skip arrows, Home/End/Page and Alt+letter while a field has focus;
@@ -49,6 +49,24 @@ model alone.
    (unit test both ways, D-7824).
 7. **AppKit zoom**: `mojoui.freeboard.HOST_ZOOMS` (GTK and the web): elsewhere the zoom items are disabled, the zoom stays 100,
    a saved zoom reads as 100, and omxplorer's View ▸ Canvas shows only Tidy (D-7825).
+
+## Review round 2 (NEEDS WORK) and what changed
+
+1. **A scroll mid-drag made the card jump** (a bug D-7821 brought in): omxplorer ended the drag on every board event but a drag
+   frame, so the "view" event a scroll sends (GTK 120 ms after it stops, the web 150 ms) rebased the drag on the already-moved rect.
+   Now only a zoom ends a drag; FIRST_FRAME starts each new one. M1 scrolls and sends "view" half way through a chart's E drag and the
+   table's S drag (GTK: `freedrag …,alt+view`; the web: a real scroll and a 400 ms hold, button down): every frame equals resized(start,
+   total offset). With the round-1 line put back the GTK proof fails (the chart 540 → 630 instead of 570) (D-7827).
+2. **Web size marks carry the screen version** (data-v); BOARD_JS drops a mark from another screen. M1 appends a stale and a current
+   mark in the page: the stale one is dropped, the current one applied (D-7828).
+3. **Thicker proofs**: after every web drag the table's grid and the chart's canvas keep the distance to their card's height they had
+   before any drag (67 and 166 pt on the web; the grid's is its 44 pt title band plus the card's padding); unit tests for on_drag's
+   decoding (1108 = move, no snap, first frame), set_zoom's clamping, and FIRST_FRAME rebasing (test_freeboard: 17 groups) (D-7829).
+
+Round 2's runs (consoles saved): `build/g78/r3-m123.txt` (78-check M1, M2, M3: **PASS**) and `build/g78/r3-m4.txt` (M4's own parts
+**PASS**: save/open, an older .omx tiled, the Settings checkbox, depth on both modes, the DROID story; BLOCKED only because the chain
+was skipped with G78_SKIP_76=1). The chain wasn't rerun for round 2: its changes touch only free-canvas drags and the web's size
+marks, which goal 76 M1/M2 and goal 73 M1–M3 (M2, M3 run tiled) don't exercise; they passed on round 1's fixes (above and below).
 
 ## Results (78-check)
 
@@ -120,6 +138,7 @@ Unverified on the owner's desktop (the window class is GTK's application id, `de
 
 ## Not done, unverified, honest notes
 
+- **The directed DROID clip** (docs/img/clip-robots*.mp4, goal 47) still shows the tiled layout (it runs with OMX_CANVAS=tiled), not the default free canvas; not re-recorded.
 - **Audio cells**: drawn with ♪, but mojoui has no audio player: clicking one says "<file> is audio: playing audio isn't built yet".
 - **Mac**: AppKit builds and runs omxplorer on GitHub's macos-26 runner (scripts/mac-ci, runs 44464220133 and 44465494607, green);
   the free canvas there is a clipped Board with the corner grip, no live drags, edge handles, zoom or guides (GTK and web only).
