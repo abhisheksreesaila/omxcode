@@ -227,7 +227,18 @@ def m7b():
 
 
 def m7c():
-    return ("BLOCKED", "agent-driven tiles: not built yet")
+    """Agent-driven tiles (genui's LiveTiles, Screens.patch, the tiles tool): the two unit tests, then examples/agenttiles on GTK
+    (headless) and the web host (headless Chromium), a scripted stand-in agent through the real AG-UI client loop: render_ui shows
+    the tiles, the tiles tool promotes weather (first, large, 0 holes), a CUSTOM point puts the ring on it (its rect inside the tile's,
+    and on GTK the ring's own pixels round that tile only); pictures docs/goals/77/m7c-*.png. scripts/g77_agenttiles_check.py."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts/g77_agenttiles_check.py"
+    spec = importlib.util.spec_from_file_location("g77_agenttiles_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.run()
 
 
 def m7d():

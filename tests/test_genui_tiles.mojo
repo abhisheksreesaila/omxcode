@@ -29,10 +29,12 @@ def refused(args: String, has: String) raises:
 def main() raises:
     # the sample validates; the schema lists the component and its faces as objects
     assert_equal(validate(sample("LiveTiles")), "")
+    print("sample: valid")
     assert_true(schema().find('"LiveTiles"') >= 0)
     assert_true(schema().find('"faces":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object"') >= 0)
     # refusals the agent can act on
     refused(wrap(ONE + "," + ONE), "both have the id \"a\"")
+    print("refused:", validate(wrap(ONE + "," + ONE)))
     refused(wrap('{"id":"Rain Tile","head":"A","faces":[{"big":"x"}]}'), "must be one lower-case word")
     refused(wrap('{"id":"a","head":"A","faces":[]}'), "faces must be a list of 1 to 4 objects")
     refused(wrap('{"id":"a","head":"A","faces":[{"sub":"x"}]}'), "needs \"big\"")

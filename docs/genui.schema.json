@@ -106,6 +106,9 @@
      "$ref": "#/$defs/components/Iso"
     },
     {
+     "$ref": "#/$defs/components/LiveTiles"
+    },
+    {
      "$ref": "#/$defs/components/Icon"
     },
     {
@@ -1298,6 +1301,122 @@
      "component",
      "blocks",
      "steps"
+    ],
+    "additionalProperties": false
+   },
+   "LiveTiles": {
+    "type": "object",
+    "description": "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint, an icon (car, cloud, todo, cal, gift, cam, timer, plane, home), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.",
+    "properties": {
+     "component": {
+      "const": "LiveTiles"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 80
+     },
+     "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "kind": {
+         "enum": [
+          "centre",
+          "passive",
+          "live"
+         ]
+        },
+        "tint": {
+         "enum": [
+          "green",
+          "blue",
+          "orange",
+          "red",
+          "purple",
+          "indigo",
+          "slate",
+          "teal",
+          "amber",
+          "pink"
+         ]
+        },
+        "icon": {
+         "type": "string",
+         "maxLength": 20
+        },
+        "head": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "faces": {
+         "type": "array",
+         "minItems": 1,
+         "maxItems": 4,
+         "items": {
+          "type": "object",
+          "properties": {
+           "big": {
+            "type": "string",
+            "maxLength": 120
+           },
+           "sub": {
+            "type": "string",
+            "maxLength": 120
+           }
+          },
+          "required": [
+           "big"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "why": {
+         "type": "string",
+         "maxLength": 120
+        },
+        "actions": {
+         "type": "array",
+         "minItems": 0,
+         "maxItems": 2,
+         "items": {
+          "type": "string",
+          "maxLength": 60
+         }
+        },
+        "big": {
+         "type": "boolean"
+        },
+        "charm": {
+         "type": "string",
+         "maxLength": 20
+        }
+       },
+       "required": [
+        "id",
+        "head",
+        "faces"
+       ],
+       "additionalProperties": false
+      },
+      "description": "the tiles, most important first"
+     },
+     "height": {
+      "type": "number",
+      "minimum": 240,
+      "maximum": 900,
+      "description": "points: the grid's"
+     }
+    },
+    "required": [
+     "component",
+     "tiles"
     ],
     "additionalProperties": false
    },

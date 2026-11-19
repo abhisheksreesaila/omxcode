@@ -1749,9 +1749,9 @@ struct GenUi[H: Hub = NoData](Movable):
             draw_iso(surface, d, p, font, focus, q, was, q_was, self.stepping[k])
             if (focus >= 0 and q < 1.0) or (was >= 0 and q_was < 1.0):
                 surface.again = True
-        elif kind == CV_TILES:  # the springs step by the wall time since the last frame (at most two frames' worth); frames while anything moves
-            var now = now_ns()
-            var dt = min((now - self.tile_ns[k]) // 1000, 34_000) if self.tile_ns[k] > 0 else 0
+        elif kind == CV_TILES:  # the springs step by the wall time since the last frame (at most 100 ms: a host that draws slowly, as the
+            var now = now_ns()   # web host may, still moves them on time); frames while anything moves
+            var dt = min((now - self.tile_ns[k]) // 1000, 100_000) if self.tile_ns[k] > 0 else 0
             self.tile_ns[k] = now
             _ = self.tiles[k].frame(dt)
             self.tiles[k].spots(self.card, self.tiles_tag(k))
