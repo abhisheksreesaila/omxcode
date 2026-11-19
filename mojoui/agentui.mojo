@@ -381,8 +381,10 @@ struct Screens[H: Hub = NoData](Movable):
         return first_why
 
     def _tile_op(mut self, k: Int, id: String, op: String, tile: String) -> String:
-        """One change to card k's tiles as a JSON Patch: remove / replace (where it stands) / add (last, or in its place if the
-        agent removed it) / lead (moved first). "" when applied (a remove or lead of a tile that isn't there is nothing to do)."""
+        """One change to card k's tiles as a JSON Patch: "remove" (nothing to do when it isn't there), "lead" (moved first;
+        nothing to do when it isn't there or is first already), and otherwise `tile` (its JSON) replaced where the id stands, or
+        added last when the card has no such id (whatever `op` says: an app tile the agent removed comes back when it changes).
+        "" when applied, else the patch's refusal."""
         var n = self.uis[k].tiles_node()
         if n < 0:
             return "no live tiles on " + self.uis[k].card

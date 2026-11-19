@@ -59,7 +59,8 @@ from mojoui.canvas import Surface
 from mojoui.clock import now_ns, local_time, clock_text, date_text
 from mojoui.effects import Every
 from mojoui.geometry import rect_of
-from mojoui.json import Json, json_string
+from mojoui.json import Json, json_string, J_STRING
+from mojoui.jsonpatch import JDoc
 from mojoui.genui import dump
 from mojoui.llm import Llm
 from mojoui.llmagent import LlmAgent, AppTool, press_with, view_tools, render_ui_tool
@@ -116,7 +117,7 @@ comptime LOOK_CANVAS = 15_000  # the camera cards' canvases (mojoui.looker)
 comptime STAGE_CARD = "stage"  # the tiles' card on Screens: the app's tiles, the samples and the agent's
 comptime TILES_TAG = "stage.tiles"  # the tiles' canvas (a dotted tag: every host reports its rect, mojoui.geometry)
 comptime HINT = "Ask omx, or just say “omx”"
-comptime MOST_RECENT = 6
+comptime MOST_RECENT = 5  # the cards Recent keeps: the one in the TV and up to four before it
 
 
 @fieldwise_init
@@ -549,17 +550,23 @@ struct Main(App):
         self.marks.append(PointMark(tag, e.ns, now_ns(), self.pointer.version()))
         self.out("OMX POINT_SENT: turn=" + String(self.turns) + " tag=" + tag + " at_ms=" + String(Int(e.ms)) + " late_ms=" + String(Int(Float64(now_ns() - e.ns) / 1e6)))
 
+    def tv_target(self) -> String:
+        """The card the TV shows, or is swapping to (what she may point at)."""
+        return self.tv.next_card if self.tv.leave_t0 >= 0 and not self.tv.leave_whole else self.tv.card
+
     def known_parts(self) -> List[Part]:
-        """What she may point at now: this turn's cards (not a LiveTiles card: its tiles are on the stage), the camera's boxes,
-        and the stage's tiles while the TV doesn't hide them (pointed_parts)."""
+        """What she may point at now: the card in the TV if this turn made it (the agent's, or the camera's boxes; never a card
+        swapped out of it or one from an earlier turn), and the stage's tiles while the TV doesn't hide them (pointed_parts)."""
         var parts = List[Part]()
-        for k in range(max(self.turn_card, 0), len(self.screens.uis)):
-            if self.screens.uis[k].tiles_node() >= 0 or self.screens.live[k]:
-                continue
+        var shown = self.tv_target() if self.tv.is_open else String("")
+        var k = self.screens.card_index(shown) if shown != "" else -1
+        if k >= self.turn_card and k >= 0 and self.screens.uis[k].tiles_node() < 0 and not self.screens.live[k]:  # (this turn's)
             for pt in self.screens.uis[k].parts():
                 parts.append(pt.copy())
-        for pt in self.looker.parts(self.turn_look):  # (the camera card's boxes, named by their labels)
-            parts.append(pt.copy())
+        if shown.startswith("look"):
+            for pt in self.looker.parts(self.turn_look):  # (this turn's camera card's boxes, named by their labels)
+                if pt.card == shown:
+                    parts.append(pt.copy())
         for pt in self.tiles.parts(STAGE_CARD, TILES_TAG):
             parts.append(pt.copy())
         return pointed_parts(self.tv, parts, TILES_TAG)
@@ -567,7 +574,7 @@ struct Main(App):
     def tell_points(mut self):
         """The ring has been drawn on a point: its lag from the audio that names the part is printed (what the checker reads)."""
         var lay = self.tiles.layout()
-        var key = String(len(self.screens.uis)) + "/" + String(self.looker.serial) + "/" + String(self.tv.hides_tiles()) + "/" + String(self.turn_card)
+        var key = String(len(self.screens.uis)) + "/" + String(self.looker.serial) + "/" + String(self.tv.hides_tiles()) + "/" + String(self.tv.is_open) + "/" + self.tv_target() + "/" + String(self.turn_card)
         for id in lay.ids:
             key += "," + id
         if key != self.parts_key:  # (a card arrived, the TV opened or closed, the tiles moved: what she may point at now)
@@ -693,7 +700,7 @@ struct Main(App):
                     self.looker.call(c.id, c.arguments)
                     continue
                 if c.name == TILES:
-                    self.llm.value().answer(c.id, self.screens.tiles(on_stage(c.arguments)))
+                    self.llm.value().answer(c.id, self.screens.tiles(self.on_stage(c.arguments)))
                     self.place_stage()
                     continue
                 self.by_agent = True
@@ -761,11 +768,19 @@ struct Main(App):
         """The assistant's tiles and the samples on the stage card (Screens.keep: the agent's tiles and promotes stay), then placed."""
         var mine = self.assist.tiles()
         var kinds = self.assist.tile_kinds()
-        if self.samples_on:
-            for t in sample_tiles():
-                mine.append(t.copy())
-            for k in sample_kinds():
-                kinds.append(k)
+        if self.samples_on:  # (a sample whose place an agent's tile has taken (its id without "sample_") leaves the stage)
+            var theirs = self.agent_tile_ids()
+            var made = sample_tiles()
+            var made_kinds = sample_kinds()
+            for i in range(len(made)):
+                var plain = String(made[i].id[byte = 7:])
+                var taken = False
+                for id in theirs:
+                    if id == plain:
+                        taken = True
+                if not taken:
+                    mine.append(made[i].copy())
+                    kinds.append(made_kinds[i])
         var lead = String("")
         if self.assist.job and self.assist.job.value().state != 0:  # (a job that has finished leads once)
             lead = "job"
@@ -773,6 +788,26 @@ struct Main(App):
         if why != "":
             self.out("OMX STAGE: refused " + why)
         self.place_stage()
+
+    def agent_tile_ids(self) -> List[String]:
+        """The ids on the stage card that aren't the app's own (the agent's: render_ui's LiveTiles, the tiles tool's adds)."""
+        var out = List[String]()
+        var k = self.screens.card_index(STAGE_CARD)
+        if k < 0:
+            return out^
+        var n = self.screens.uis[k].tiles_node()
+        if n < 0:
+            return out^
+        var ts = self.screens.uis[k].json.get(n, "tiles")
+        for i in range(self.screens.uis[k].json.size(ts)):
+            var id = self.screens.uis[k].json.text(self.screens.uis[k].json.get(self.screens.uis[k].json.at(ts, i), "id"))
+            var mine = False
+            for m in self.screens.kept_ids:
+                if m == id:
+                    mine = True
+            if not mine:
+                out.append(id)
+        return out^
 
     def place_stage(mut self):
         """The stage card's tiles placed (mojoui.stagefeed): the first is the urgent one, then the centre tiles, then samples that fill;
@@ -803,10 +838,13 @@ struct Main(App):
         self.all = all^
         self.tiles.set_tiles(stage_tiles(self.all, self.feed))
         self.feed.place(ranked, self.tiles.layout().ids)
+        var shown = String("")
+        for id in self.tiles.layout().ids:
+            shown += ("," if shown != "" else "") + id
+        self.out("OMX STAGE: shown=" + shown + " today=" + String(len(self.feed.today)) + " live=" + String(len(self.feed.live)) + " pinned=" + String(len(self.feed.pinned)))
 
     def tiles_to_stage(mut self, k: Int):
         """An agent's LiveTiles card: its tiles join the stage (a tile already there takes the new face), its first one leads."""
-        var lt = self.screens.uis[k].tiles_at(self.screens.uis[k].tiles_node())
         var n = self.screens.uis[k].tiles_node()
         var ts = self.screens.uis[k].json.get(n, "tiles")
         var on = List[String]()
@@ -827,10 +865,25 @@ struct Main(App):
             _ = self.screens.tiles(args)
             if i == 0:
                 _ = self.screens.tiles('{"op":"promote","card":"' + STAGE_CARD + '","id":' + json_string(tile.id) + "}")
-        _ = len(lt.tiles)
-        self.place_stage()
-        if self.tv.is_open and self.tv.card == "":
-            self.tv.close(tv_now(), "app")  # (the conversation alone was open: the tiles she made are the answer)
+        self.keep_stage()  # (a sample the agent's tile now stands for leaves: keep_stage)
+
+    def on_stage(self, args: String) -> String:
+        """A `tiles` call aimed at the stage's card when it names no card (or an empty one), or names a LiveTiles card the agent
+        made (its tiles are on the stage now); any other card name is left as it is (the call is refused with that card's
+        reason). Only the "card" member changes."""
+        try:
+            var doc = JDoc.parse(args)
+            var j = Json.parse(args)
+            var c = j.get(0, "card")
+            var name = j.text(c) if c >= 0 and j.kind(c) == J_STRING else String("")
+            if name != "":
+                var k = self.screens.card_index(name)
+                if k < 0 or self.screens.uis[k].tiles_node() < 0 or name == STAGE_CARD:
+                    return args
+            doc.patch('[{"op":"add","path":"/card","value":' + json_string(STAGE_CARD) + "}]")
+            return doc.dump()
+        except:
+            return args  # (not a JSON object: Screens.tiles refuses it with what to send)
 
     def drop_zones(mut self):
         """Pinned, as a place a dragged tile can be let go (in the tiles canvas's points: it lies outside the canvas)."""
@@ -903,6 +956,8 @@ struct Main(App):
             if js != "":
                 var title = self.assist.job.value().title
                 self.show_card("job", title)
+            elif self.tv.is_open and self.tv_target() == "job":
+                self.tv.close(tv_now(), "app")  # (dismissed: its card is gone)
             self.keep_stage()
         if len(self.assist.news) != self.news_seen:
             self.news_seen = len(self.assist.news)
@@ -916,7 +971,8 @@ struct Main(App):
         if len(self.looker.cards) != self.looks_seen_n:
             self.looks_seen_n = len(self.looker.cards)
             if self.looks_seen_n > 0:
-                self.show_card("look" + String(self.looks_seen_n - 1), self.turn_title())
+                var name = self.looker.cards[self.looks_seen_n - 1].name  # ("look<serial>": its boxes' parts carry the same name)
+                self.show_card(name, self.turn_title())
 
     def card_view(self, key: String) -> View:
         """The view for a TV card key: cardN (the agent's, Screens), todo, job, newsK, makeK (the creator's), lookK (the camera's)."""
@@ -932,11 +988,10 @@ struct Main(App):
                 if k >= 0 and k < len(self.creator.cards):
                     return self.creator.card_view(k)
             if key.startswith("look"):
-                var k = Int(String(key[byte = 4:]))
                 var views = self.looker.views()  # (newest first)
-                var i = len(views) - 1 - k
-                if i >= 0 and i < len(views):
-                    return views[i].copy()
+                for k in range(len(self.looker.cards)):
+                    if self.looker.cards[k].name == key:
+                        return views[len(views) - 1 - k].copy()
         except:
             pass
         var s = self.screens.card_index(key)
@@ -948,7 +1003,7 @@ struct Main(App):
         """The cards shown before this one, one tap each back into the TV."""
         var items = List[View]()
         for k in range(len(self.recent)):
-            if self.recent[k] != self.tv.card and len(items) < 4:
+            if self.recent[k] != self.tv.card and len(items) < MOST_RECENT - 1:
                 var t = self.recent_titles[k] if self.recent_titles[k] != "" else self.recent[k]
                 items.append(StagePill(_icon_of(self.recent[k]), head(t, 34), RECENT + k))
         if len(items) == 0:
@@ -1093,25 +1148,6 @@ struct Main(App):
             self.looker.draw(canvas, surface, p)
         else:
             self.screens.draw(canvas, surface, p, self.client.state)
-
-
-def on_stage(args: String) -> String:
-    """A `tiles` call's arguments aimed at the stage's card when they name no card, or name a LiveTiles card the agent made (its tiles
-    are on the stage now)."""
-    var a = String(args.strip())
-    try:
-        var j = Json.parse(a)
-        var c = j.get(0, "card")
-        if c >= 0 and j.text(c) != "" and not j.text(c).startswith("card"):
-            return a
-        if c >= 0:
-            return a.replace(json_string(j.text(c)), json_string(STAGE_CARD))
-    except:
-        return a
-    if not a.startswith("{"):
-        return a
-    var rest = String(String(a[byte = 1:]).strip())
-    return '{"card":"' + STAGE_CARD + '"' + ("" if rest.startswith("}") else ",") + rest
 
 
 def _icon_of(key: String) -> String:

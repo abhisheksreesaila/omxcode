@@ -365,12 +365,19 @@ def m7f():
             sizes = {k: Image.open(root / pics[k]).size for k in pics}
             if any(abs(sz[0] - w) > 2 for sz in sizes.values()):
                 probs.append(f"omx {row['name']}: pictures {sizes}, not {w} wide")
-            if not row["cards"]:
-                probs.append(f"omx {row['name']}: no card was shown")
-            if not row["points"] or row["ring_pixels"] < 150:
-                probs.append(f"omx {row['name']}: no point landing ({len(row['points'])} points, {row['ring_pixels']} ring pixels at best)")
-            if not probs or not any(row["name"] in p for p in probs):
-                said.append(f"omx {row['name']}: {', '.join(pics[k] for k in ('home', 'tv', 'point'))} ({row['cards'][0]}, points {row['points'][:4]}, ring {row['ring_pixels']} px)")
+            bad = []
+            shown = row.get("home_stage", "").split("shown=")[-1].split(" ")[0] if "shown=" in row.get("home_stage", "") else ""
+            if not shown or "stage-panel" not in row.get("home_regions", []) or "stage-tv" in row.get("home_regions", []) or row.get("home_panel_busy", 0) < 0.2:
+                bad.append(f"home: tiles {shown!r}, regions {row.get('home_regions')}, {row.get('home_panel_busy')} of the panel drawn on (want tiles, the panel, no TV, >= 0.2)")
+            if not row["cards"] or not row.get("tv_card_in_tv") or row.get("tv_card_busy", 0) < 0.05:
+                bad.append(f"TV: cards {row['cards']}, regions {row.get('tv_regions')}, card inside the TV {row.get('tv_card_in_tv')}, {row.get('tv_card_busy')} of it drawn on")
+            if row["ring_pixels"] < 150:
+                bad.append(f"no point landing: {len(row['points'])} points, {row['ring_pixels']} ring pixels at best round a POINT's own ring rect (want >= 150 that aren't teal once it faded)")
+            if bad:
+                probs.append(f"omx {row['name']}: " + "; ".join(bad))
+            else:
+                said.append(f"omx {row['name']}: tiles {shown}, panel {row['home_panel_busy']} drawn; TV with {row['cards'][0]} (card {row['tv_card_busy']} drawn); "
+                            f"ring {row['ring_pixels']} px round {row['ring_on']}; {', '.join(pics[k] for k in ('home', 'tv', 'point'))}")
     if probs:
         return ("FAIL", "; ".join(probs + blocked))
     if blocked:

@@ -1,6 +1,8 @@
 # omx's SAMPLE tiles (goal 77 M7f): placeholders for the sources omx doesn't have yet (a calendar, the weather, photos, the
 # house). They are SAMPLES, not data: every one says "sample" on its face, Settings turns them off, and each goes the day a
 # real source plugs in. The assistant's own tiles (to-do, the job, the news) are real: mojoui.assistant.Assistant.tiles().
+# Their ids start "sample_" (never an id the agent would pick); when the agent puts up a tile of the plain name ("weather"),
+# its sample leaves the stage (the app's keep_stage).
 
 from mojoui.livetiles import Tile, Face
 
@@ -13,12 +15,12 @@ def _sample(id: String, tint: String, icon: String, head: String, big: String, s
 def sample_tiles() -> List[Tile]:
     """SAMPLE tiles, quiet ones (passive: they fill the stage while it has room, else they sit in Today)."""
     var out = List[Tile]()
-    var cal = _sample("cal", "red", "calendar", "Calendar", "Pickup 3:15", "Maya · the side gate")
+    var cal = _sample("sample_cal", "red", "calendar", "Calendar", "Pickup 3:15", "Maya · the side gate")
     cal.faces.append(Face("Then", "Dinner 6:30 · Tennis Sat 10 · sample"))
     out.append(cal^)
-    out.append(_sample("weather", "blue", "cloud-sun", "Weather", "9° · clear", "rain after 4"))
-    out.append(_sample("photos", "pink", "image", "Memories", "A year ago today", "38 photos"))
-    out.append(_sample("home", "teal", "home", "Home", "Door locked", "21° inside"))
+    out.append(_sample("sample_weather", "blue", "cloud-sun", "Weather", "9° · clear", "rain after 4"))
+    out.append(_sample("sample_photos", "pink", "image", "Memories", "A year ago today", "38 photos"))
+    out.append(_sample("sample_home", "teal", "home", "Home", "Door locked", "21° inside"))
     return out^
 
 
@@ -27,7 +29,7 @@ def sample_kinds() -> List[String]:
 
 
 def is_sample(id: String) -> Bool:
-    return id == "cal" or id == "weather" or id == "photos" or id == "home"
+    return id.startswith("sample_")
 
 
 def sample_weather() -> String:
