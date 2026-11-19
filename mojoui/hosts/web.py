@@ -595,6 +595,12 @@ BOARD_JS = r"""
     const obj = document.querySelector(`.board.free > .object[data-tag="${tag}"]`); if (!obj) return null;
     const r = obj.getBoundingClientRect(), w = r.width, h = r.height, z = w / Math.max(obj.offsetWidth, 1), e = EDGE / 2 * z;
     const at = { n: [w / 2, e], s: [w / 2, h - 1 - e], e: [w - 1 - e, h / 2], w: [e, h / 2], ne: [w - 1 - e, e], nw: [e, e], sw: [e, h - 1 - e], se: [w - 8 * z, h - 8 * z], move: [(CORNER + 24) * z, HEADER / 2 * z] }[handle];
+    if (at && handle === 'move') {  // (the title band's blank: its words and buttons are the card's own, a hand grabs beside them)
+      for (let x = (CORNER + 24) * z; x < w - CORNER * z; x += 6 * z) {
+        const el = document.elementFromPoint(r.left + x, r.top + at[1]);
+        if (el && el.closest('.object') === obj && !el.closest('input, textarea, select, button, a, [contenteditable]')) return [r.left + x, r.top + at[1]];
+      }
+    }
     return at ? [r.left + at[0], r.top + at[1]] : null;
   };
   function free(board) {
