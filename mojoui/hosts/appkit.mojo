@@ -179,6 +179,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
             name = cut
         else:
             break
+    if mask & MASK_OPTION != 0 and mask & MASK_COMMAND == 0:  # (⌥ alone types ƒ, † … and moves by words in a field: never a key
+        return (String(""), 0)                                  # equivalent; goal 78's Alt bindings are the Super/Alt scheme's, not the Mac's)
     if name == "↑":
         return (String(chr(0xF700)), mask)  # NSUpArrowFunctionKey
     if name == "↓":
@@ -1077,7 +1079,7 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(placed, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
                     self.objects[c] = placed
                 _ = msg(placed, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
-                if node.text == "clips":  # (a tiled Board: the resize grip in the corner that drags, as GTK's and the web's)
+                if node.text.startswith("clips"):  # (a tiled Board or a free canvas, goal 78: the resize grip in the corner that drags, as GTK's and the web's)
                     _ = msg(placed, "addSubview:", make_grip(cn.w, cn.h, self.pal.ink3, (msg(placed, "isFlipped") & 0xFF) != 0))
                 _ = msg(placed, "setIdentifier:", ns_string(String(tag_for(self_addr, c))))
                 _ = msg(content, "addSubview:", placed)
@@ -4060,7 +4062,7 @@ def tiled_pan[A: App](child: Int, recognizer: Int, state: Int) -> Bool:
         var board = -1
         var index = -1
         for b in range(len(host[].rt.shown.nodes)):
-            if host[].rt.shown.nodes[b].kind == BOARD and host[].rt.shown.nodes[b].text == "clips":
+            if host[].rt.shown.nodes[b].kind == BOARD and host[].rt.shown.nodes[b].text.startswith("clips"):
                 for k in range(len(host[].rt.shown.nodes[b].children)):
                     if host[].rt.shown.nodes[b].children[k] == node:
                         board = b

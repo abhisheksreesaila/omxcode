@@ -19,10 +19,12 @@ from mojoui.view import (
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
+    BOARD_LIVE, BOARD_ZOOM, BOARD_VIEW, BOARD_PICK, HOVER,
 )
 from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES
 from mojoui.boardlook import board_gtk_css
+from mojoui.freeboard import handle_at, handle_cursor, handle_point, handle_of, handle_name, board_zoom, is_free, HANDLE_NONE, HANDLE_MOVE, NO_SNAP, FIRST_FRAME
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
@@ -150,7 +152,33 @@ def add_class(widget: Int, name: String):
     external_call["gtk_widget_add_css_class", NoneType](widget, n.as_c_string_span())
 
 
-comptime TONE_CLASSES: List[String] = ["", "mui-tone-dim", "mui-tone-lift", "mui-tone-source", "mui-tone-target"]
+comptime TONE_CLASSES: List[String] = ["", "mui-tone-dim", "mui-tone-lift", "mui-tone-source", "mui-tone-target", "mui-tone-focus"]
+
+
+def board_clips(n: Node) -> Bool:
+    """A Board whose children are held to their size (Board(clips=True)): a tiled one, or a free canvas (mojoui.freeboard)."""
+    return n.text.startswith("clips")
+
+
+def board_scale(n: Node) -> Float64:
+    """How big a Board draws its page: a free canvas's zoom (mojoui.freeboard), else 1."""
+    return Float64(board_zoom(n.text)) / 100.0 if is_free(n.text) else 1.0
+
+
+def place_board_child(fixed: Int, widget: Int, x: Int, y: Int, scale: Float64):
+    """A Board child at x, y (page points); on a zoomed free canvas, scaled about its top-left (GtkFixed's own child
+    transform: the card's text is drawn at the zoomed size, not stretched as a picture)."""
+    if scale == 1.0:
+        external_call["gtk_fixed_move", NoneType](fixed, widget, Float64(x), Float64(y))
+        return
+    var pt = List[Float32](length=2, fill=0)
+    pt[0] = Float32(Float64(x) * scale)
+    pt[1] = Float32(Float64(y) * scale)
+    var t = external_call["gsk_transform_translate", Int](Int(0), Int(pt.unsafe_ptr()))
+    t = external_call["gsk_transform_scale", Int](t, Float32(scale), Float32(scale))
+    external_call["gtk_fixed_set_child_transform", NoneType](fixed, widget, t)
+    external_call["gsk_transform_unref", NoneType](t)
+    _ = len(pt)
 
 
 def board_tone(board: Node, k: Int) -> Int:
@@ -585,6 +613,13 @@ struct BoardChild(Copyable, Movable):
     var drag: Int  # GtkGestureDrag
     var active: Bool
     var resizing: Bool
+    var handle: Int  # a free canvas's drag: which handle (mojoui.freeboard), HANDLE_NONE: none
+    var live: Bool  # a free canvas's drag has sent a motion frame (it moved)
+    var zscale: Float64  # the zoom the drag's offsets are measured at (the press's, or the last zoom change's)
+    var base_x: Float64  # the gesture's offset the press counts from (0; after a zoom mid-drag, the last frame sent's)
+    var base_y: Float64
+    var sent_x: Float64  # the gesture's offset at the last frame sent
+    var sent_y: Float64
 
     def __init__(out self, board: Int, node: Int, index: Int, widget: Int, fixed: Int, drag: Int):
         self.board = board
@@ -595,6 +630,13 @@ struct BoardChild(Copyable, Movable):
         self.drag = drag
         self.active = False
         self.resizing = False
+        self.handle = HANDLE_NONE
+        self.live = False
+        self.zscale = 1.0
+        self.base_x = 0
+        self.base_y = 0
+        self.sent_x = 0
+        self.sent_y = 0
 
 
 def arrive_on_spring(w: Int):
@@ -635,6 +677,10 @@ struct GtkHost[A: App](Movable):
     var hold_t0: Int  # when the press was (ns)
     var release_hold: Bool  # a release that came mid-update, sent once it's done
     var test_drag: Int  # (tests) the board gesture hold: pressed, for release:
+    var test_alt: Bool  # (tests) freedrag:…,alt: the drag runs as with Alt held (no snap)
+    var view_serial: Int  # a free canvas's scroll: its "view" event goes once the page stops (each change counts up)
+    var zoom_board: Int  # a free canvas whose zoom just changed: its page's scroll follows (by zoom_ratio) once laid out
+    var zoom_ratio: Float64
     var step_no: Int  # (tests) the step running, numbering MOJOUI_SHOTS_EACH's pictures
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
@@ -800,6 +846,10 @@ struct GtkHost[A: App](Movable):
         self.hold_t0 = 0
         self.release_hold = False
         self.test_drag = 0
+        self.test_alt = False
+        self.view_serial = 0
+        self.zoom_board = -1
+        self.zoom_ratio = 1.0
         self.step_no = 0
         self.revealed = 0
         self.reveal_pending = -1
@@ -1039,9 +1089,11 @@ struct GtkHost[A: App](Movable):
             var child = want[k]
             var entry = BoardChild(j, c, k, child, fixed, drag)
             if child == 0:
-                self.clip_node = c if self.rt.shown.nodes[j].text == "clips" else -1
+                self.clip_node = c if board_clips(self.rt.shown.nodes[j]) and self.rt.shown.nodes[c].name != "board-guide" else -1  # (a snap guide is a bare line)
                 child = self.build(c, self_addr)
                 external_call["gtk_fixed_put", NoneType](fixed, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
+                if board_scale(self.rt.shown.nodes[j]) != 1.0:
+                    place_board_child(fixed, child, self.rt.shown.nodes[c].x, self.rt.shown.nodes[c].y, board_scale(self.rt.shown.nodes[j]))
                 # (in node order: what draws on top is what a drag picks)
                 external_call["gtk_widget_insert_after", NoneType](child, fixed, mine[len(mine) - 1].widget if len(mine) > 0 else 0)
                 entry.widget = child
@@ -1053,6 +1105,13 @@ struct GtkHost[A: App](Movable):
                     if b.board == j and b.node == c and dragging:  # (a drag that ended while busy left them set)
                         entry.active = b.active
                         entry.resizing = b.resizing
+                        entry.handle = b.handle
+                        entry.live = b.live
+                        entry.zscale = b.zscale
+                        entry.base_x = b.base_x
+                        entry.base_y = b.base_y
+                        entry.sent_x = b.sent_x
+                        entry.sent_y = b.sent_y
             mine.append(entry^)
         var boards = List[BoardChild]()
         for b in self.boards:
@@ -1590,7 +1649,11 @@ struct GtkHost[A: App](Movable):
             var motion = external_call["gtk_event_controller_motion_new", Int]()
             set_index(motion, ci)
             connect_any(motion, "motion", on_motion[Self.A], self_addr)
+            if node.text == "hover":  # (Canvas(hover=True): the pointer leaving says so too)
+                connect(motion, "leave", on_motion_leave[Self.A], self_addr)
             external_call["gtk_widget_add_controller", NoneType](w, motion)
+            if node.cursor != "":
+                external_call["gtk_widget_set_cursor_from_name", NoneType](w, node.cursor.as_c_string_span())
             var pinch = external_call["gtk_gesture_zoom_new", Int]()
             set_index(pinch, ci)
             connect3(pinch, "begin", on_pinch_begin[Self.A], self_addr)
@@ -2064,7 +2127,8 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_box_append", NoneType](inner, child)
             else:
                 inner = external_call["gtk_fixed_new", Int]()
-                external_call["gtk_widget_set_size_request", NoneType](inner, c_int(node.spacing), c_int(node.size))
+                var scale = board_scale(node)
+                external_call["gtk_widget_set_size_request", NoneType](inner, c_int(Int(Float64(node.spacing) * scale + 0.5)), c_int(Int(Float64(node.size) * scale + 0.5)))
                 external_call["gtk_widget_set_hexpand", NoneType](inner, c_int(1))  # at least the visible page (its dotted
                 external_call["gtk_widget_set_vexpand", NoneType](inner, c_int(1))  # background); positions stay absolute
                 # One drag gesture on the board itself (never on the object it moves: a gesture
@@ -2075,9 +2139,18 @@ struct GtkHost[A: App](Movable):
                 connect_any(drag, "drag-begin", on_board_drag_begin[Self.A], self_addr)
                 connect_any(drag, "drag-update", on_board_drag_update[Self.A], self_addr)
                 connect_any(drag, "drag-end", on_board_drag_end[Self.A], self_addr)
+                if is_free(node.text):  # (a free canvas: its edges are grabbed before the card's own content sees the press)
+                    external_call["gtk_event_controller_set_propagation_phase", NoneType](drag, c_int(1))  # GTK_PHASE_CAPTURE
                 external_call["gtk_widget_add_controller", NoneType](inner, drag)
                 self.board_drags.append((i, drag))
-                if node.text == "clips":  # (a tiled Board: the pointer says what a press does, as the web's cursors)
+                if is_free(node.text):  # (Ctrl+wheel zooms the page; its scrolling tells the app what shows, mojoui.freeboard)
+                    var wheel = external_call["gtk_event_controller_scroll_new", Int](c_int(3))  # BOTH_AXES
+                    external_call["gtk_event_controller_set_propagation_phase", NoneType](wheel, c_int(1))
+                    var wkey = String(BOARD_DRAG_KEY)
+                    external_call["g_object_set_data", NoneType](wheel, wkey.as_c_string_span(), drag)
+                    connect_any(wheel, "scroll", on_board_wheel[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](inner, wheel)
+                if board_clips(node):  # (a tiled Board: the pointer says what a press does, as the web's cursors)
                     var motion = external_call["gtk_event_controller_motion_new", Int]()
                     var key = String(BOARD_DRAG_KEY)
                     external_call["g_object_set_data", NoneType](motion, key.as_c_string_span(), drag)
@@ -2085,9 +2158,11 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_widget_add_controller", NoneType](inner, motion)
                 for k in range(len(node.children)):
                     var c = node.children[k]
-                    self.clip_node = c if node.text == "clips" else -1
+                    self.clip_node = c if board_clips(node) and self.rt.shown.nodes[c].name != "board-guide" else -1  # (a snap guide is a bare line)
                     var child = self.build(c, self_addr)
                     external_call["gtk_fixed_put", NoneType](inner, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
+                    if scale != 1.0:
+                        place_board_child(inner, child, self.rt.shown.nodes[c].x, self.rt.shown.nodes[c].y, scale)
                     self.boards.append(BoardChild(i, c, k, child, inner, drag))
                     set_board_tone(child, board_tone(node, k))
             # The page scrolls when it's bigger than the room it's given (both ways).
@@ -2098,6 +2173,9 @@ struct GtkHost[A: App](Movable):
             add_class(w, "mui-board-scroll")  # (the sheet's frame: a theme can ring it, as the web's .board-scroll)
             self.widgets[i] = inner  # patches move and size the board's own widget
             self.board_scrollers.append((i, w))
+            if is_free(node.text) and not self.board_list:  # (the page scrolled: the app hears what shows once it stops)
+                connect_any(external_call["gtk_scrolled_window_get_hadjustment", Int](w), "value-changed", on_board_scrolled[Self.A], self_addr)
+                connect_any(external_call["gtk_scrolled_window_get_vadjustment", Int](w), "value-changed", on_board_scrolled[Self.A], self_addr)
             if node.value != 0 and node.value != self.revealed:
                 self.reveal_pending = i
         elif node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP:  # one child, in a box that drags, takes drops, or stands in for a page
@@ -2556,16 +2634,17 @@ struct GtkHost[A: App](Movable):
         var hadj = external_call["gtk_scrolled_window_get_hadjustment", Int](sw)
         var page = external_call["gtk_adjustment_get_page_size", Float64](vadj)
         var upper = external_call["gtk_adjustment_get_upper", Float64](vadj)
-        if page <= 0 or (not self.board_list and upper < Float64(b.size)):
+        if page <= 0 or (not self.board_list and upper < Float64(b.size) * board_scale(b) - 1):
             return False
         # where the card really is (on the page, or stacked in the narrow list): its widget's bounds
         var rect = List[Float32](length=4, fill=0)  # graphene_rect_t: x, y, width, height
         var inner = self.widgets[i]
         ref card = self.rt.shown.nodes[b.children[k]]
-        var cx = Float64(card.x)  # (on the page: where the app put it, not where GTK has got to moving it: a card the tiling just
-        var cy = Float64(card.y)  # moved would be scrolled to its old place)
-        var cw = Float64(card.w)
-        var ch = Float64(card.h)
+        var zs = board_scale(b)  # (a zoomed free canvas: the page is drawn that much smaller)
+        var cx = Float64(card.x) * zs  # (on the page: where the app put it, not where GTK has got to moving it: a card the tiling just
+        var cy = Float64(card.y) * zs  # moved would be scrolled to its old place)
+        var cw = Float64(card.w) * zs
+        var ch = Float64(card.h) * zs
         if self.board_list:
             if external_call["gtk_widget_compute_bounds", c_int](self.widgets[b.children[k]], inner, Int(rect.unsafe_ptr())) == 0:
                 return False
@@ -2712,6 +2791,7 @@ struct GtkHost[A: App](Movable):
     def apply_patches(mut self, patches: List[Patch], self_addr: Int, fresh: List[Bool] = List[Bool]()):
         """The patches onto the widgets; then every long list's rows again (fresh: nodes just built, which skip that)."""
         set_busy(True)
+        var sized_any = False
         for p in patches:
             var w = self.widgets[p.node]
             var kind = self.rt.shown.nodes[p.node].kind
@@ -2797,9 +2877,15 @@ struct GtkHost[A: App](Movable):
                 external_call["g_object_unref", NoneType](tex)
             elif p.op == SET_SIZE:
                 self.resize_widget(p.node)
+                sized_any = True
             elif p.op == SET_TIP:  # a canvas's words (its tooltip and accessible name), in place: the picture stays
                 var tip = p.text
                 external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
+                var cursor = self.rt.shown.nodes[p.node].cursor  # (and its pointer shape: a link under it, goal 78)
+                if cursor == "":
+                    external_call["gtk_widget_set_cursor", NoneType](w, Int(0))
+                else:
+                    external_call["gtk_widget_set_cursor_from_name", NoneType](w, cursor.as_c_string_span())
                 set_accessible_label(w, explicit_name(self.rt.shown.nodes[p.node]))
             elif p.op == SET_TONES and kind == BOARD:  # (each child's tone: classes the theme eases between, mojoui.boardlook)
                 for b in self.boards:
@@ -2808,12 +2894,31 @@ struct GtkHost[A: App](Movable):
             elif p.op == SET_PLACE and not self.board_list:  # (a list ignores positions)
                 ref n = self.rt.shown.nodes[p.node]
                 if kind == BOARD:
-                    external_call["gtk_widget_set_size_request", NoneType](w, c_int(n.spacing), c_int(n.size))
+                    var sc = board_scale(n)
+                    external_call["gtk_widget_set_size_request", NoneType](w, c_int(Int(Float64(n.spacing) * sc + 0.5)), c_int(Int(Float64(n.size) * sc + 0.5)))
                 else:
                     for b in self.boards:
                         if b.node == p.node:
-                            external_call["gtk_fixed_move", NoneType](b.fixed, b.widget, Float64(n.x), Float64(n.y))
+                            place_board_child(b.fixed, b.widget, n.x, n.y, board_scale(self.rt.shown.nodes[b.board]))
+            elif p.op == SET_TEXT and kind == BOARD and not self.board_list:  # (a free canvas's zoom changed: every card scaled again)
+                ref n = self.rt.shown.nodes[p.node]
+                var sc = board_scale(n)
+                var was = List[c_int](length=2, fill=0)
+                external_call["gtk_widget_get_size_request", NoneType](w, Int(was.unsafe_ptr()), Int(was.unsafe_ptr()) + 4)
+                var new_w = Int(Float64(n.spacing) * sc + 0.5)
+                external_call["gtk_widget_set_size_request", NoneType](w, c_int(new_w), c_int(Int(Float64(n.size) * sc + 0.5)))
+                for b in self.boards:
+                    if b.board == p.node:
+                        ref cn = self.rt.shown.nodes[b.node]
+                        place_board_child(b.fixed, b.widget, cn.x, cn.y, sc)
+                if Int(was[0]) > 0 and Int(was[0]) != new_w:
+                    self.zoom_board = p.node
+                    self.zoom_ratio = Float64(new_w) / Float64(Int(was[0]))
+                    _ = external_call["g_timeout_add", c_uint](c_uint(40), on_zoom_scroll[Self.A], self_addr)
+                _ = len(was)
             # SET_MSG needs nothing: events look the message up in rt.shown.
+        if sized_any:  # (a view resized in place, a free card's live resize: its canvases draw again at their new size on the next ticks,
+            self.arm_all(self_addr)  # with no new version; the others are idle at once)
         # Ask for the visible rows of every long list again: row text isn't part of the
         # view, so an edit that keeps the row count wouldn't show otherwise. GTK only
         # re-binds rows whose items changed, so the list gets fresh items (scroll is kept).
@@ -4722,6 +4827,26 @@ def on_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int) abi("
     if 0 <= ci < len(host[].canvases):
         host[].canvases[ci].ptr_x = x
         host[].canvases[ci].ptr_y = y
+        canvas_hover[A](host, ci, x, y, host_addr)
+
+
+def canvas_hover[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], ci: Int, x: Float64, y: Float64, host_addr: Int):
+    """Canvas(hover=True): the pointer's place (HOVER; -1, -1 when it left), skipped while an update runs (the next
+    motion carries the place on)."""
+    var node = host[].canvases[ci].node
+    if busy() or node < 0 or node >= len(host[].rt.shown.nodes):
+        return
+    ref n = host[].rt.shown.nodes[node]
+    if n.kind != CANVAS or n.text != "hover":
+        return
+    host[].canvas_send(ci, HOVER, x, y, 0, 0, 1, host_addr)
+
+
+def on_motion_leave[A: App](motion: Int, host_addr: Int) abi("C"):
+    var host = host_at[A](host_addr)
+    var ci = get_index(motion)
+    if 0 <= ci < len(host[].canvases):
+        canvas_hover[A](host, ci, -1, -1, host_addr)
 
 
 def on_pinch_begin[A: App](pinch: Int, sequence: Int, host_addr: Int) abi("C"):
@@ -4919,15 +5044,16 @@ def shortcut_name(keyval: Int, state: Int) -> String:
     var ctrl = state & 4 != 0
     var shift = state & 1 != 0
     var alt = state & 8 != 0
+    var super_ = state & (0x4000000 | 0x10000000) != 0  # GDK_SUPER_MASK, GDK_META_MASK (the Super key; goal 78's canvas keys)
     var name = key_name(keyval)
     var fkey = name.startswith("F") and name.byte_length() <= 3 and name != "F"
-    if not (ctrl or alt or fkey):
+    if not (ctrl or alt or super_ or fkey):
         return ""
     if name.byte_length() == 1:
         name = name.upper()
     elif name == ",":
         name = ","
-    return ("Ctrl+" if ctrl else "") + ("Shift+" if shift else "") + ("Alt+" if alt else "") + name
+    return ("Super+" if super_ else "") + ("Ctrl+" if ctrl else "") + ("Shift+" if shift else "") + ("Alt+" if alt else "") + name
 
 
 def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
@@ -4956,6 +5082,12 @@ def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint
         if focus != 0 and (external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_editable_get_type", Int]()) != 0
                            or external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_text_view_get_type", Int]()) != 0):
             return 0  # a text field's own copy, cut, paste, select all and undo
+    var typed_in = external_call["gtk_root_get_focus", Int](host[].window)
+    if typed_in != 0 and (external_call["g_type_check_instance_is_a", c_int](typed_in, external_call["gtk_editable_get_type", Int]()) != 0
+                          or external_call["g_type_check_instance_is_a", c_int](typed_in, external_call["gtk_text_view_get_type", Int]()) != 0):
+        var key = key_name(Int(keyval))
+        if key.startswith("Arrow") or key == "Home" or key == "End" or key.startswith("Page") or ((Int(state) & 8) != 0 and (Int(state) & 4) == 0 and key.byte_length() == 1):
+            return 0  # (a field's own word jumps and selections: never a canvas's Arrange keys, goal 78)
     for i in range(len(host[].rt.shown.nodes)):
         ref n = host[].rt.shown.nodes[i]
         if n.kind == ITEM and len(n.options) > 0 and n.options[0] == name and n.value & DISABLED == 0 and n.msg != 0:
@@ -5044,6 +5176,14 @@ def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int)
     var first = get_index(drag)
     if first < 0 or first >= len(host[].boards):
         return
+    if is_free(host[].rt.shown.nodes[host[].boards[first].board].text):  # (a free canvas: each edge and corner has its own cursor)
+        var hit = free_hit[A](host, drag, x, y)
+        var name = handle_cursor(hit[1]) if hit[0] >= 0 else String("")
+        if name == "":
+            external_call["gtk_widget_set_cursor", NoneType](host[].boards[first].fixed, Int(0))
+        else:
+            external_call["gtk_widget_set_cursor_from_name", NoneType](host[].boards[first].fixed, name.as_c_string_span())
+        return
     var cursor = String("")
     var bi = first
     while bi < len(host[].boards) and host[].boards[bi].drag == drag:
@@ -5063,10 +5203,93 @@ def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int)
         external_call["gtk_widget_set_cursor_from_name", NoneType](fixed, cursor.as_c_string_span())
 
 
+def free_hit[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: Int, x: Float64, y: Float64) -> Tuple[Int, Int]:
+    """On a free canvas: the card under x, y (the Board's coordinates; what draws on top first: a card dragged last is
+    raised) and the handle there (mojoui.freeboard.handle_at, in the card's own points); (-1, HANDLE_NONE) when none.
+    An in-place editor and the snap guides are never grabbed."""
+    var first = get_index(drag)
+    if first < 0 or first >= len(host[].boards):
+        return (-1, HANDLE_NONE)
+    var fixed = host[].boards[first].fixed
+    var sc = board_scale(host[].rt.shown.nodes[host[].boards[first].board])
+    var cur = external_call["gtk_widget_get_last_child", Int](fixed)
+    while cur != 0:
+        var bi = first
+        while bi < len(host[].boards) and host[].boards[bi].drag == drag:
+            if host[].boards[bi].widget == cur:
+                break
+            bi += 1
+        if bi < len(host[].boards) and host[].boards[bi].drag == drag:
+            ref n = host[].rt.shown.nodes[host[].boards[bi].node]
+            var w = Int(external_call["gtk_widget_get_width", c_int](cur))
+            var h = Int(external_call["gtk_widget_get_height", c_int](cur))
+            var lx = Int((x - Float64(n.x) * sc) / sc)
+            var ly = Int((y - Float64(n.y) * sc) / sc)
+            if n.name != "board-guide" and 0 <= lx < w and 0 <= ly < h:
+                if n.kind == FIELD:
+                    return (-1, HANDLE_NONE)
+                return (bi, handle_at(w, h, lx, ly))
+        cur = external_call["gtk_widget_get_prev_sibling", Int](cur)
+    return (-1, HANDLE_NONE)
+
+
+def free_send[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], bi: Int, kind: Int, off_x: Float64, off_y: Float64, alt: Bool, host_addr: Int, first: Bool = False):
+    """A free canvas's drag to the app: a motion frame (BOARD_LIVE; `first`: the drag's first, it starts afresh) or its end
+    (PAN / ZOOM), in the page's points: the gesture's offset from its base at the zoom it's measured at. A zoom mid-drag
+    restarts the press where the last frame sent was, at the new zoom, as a first frame (review 3; the web does the same)."""
+    var sc = board_scale(host[].rt.shown.nodes[host[].boards[bi].board])
+    var restart = first
+    if sc != host[].boards[bi].zscale:
+        host[].boards[bi].zscale = sc
+        host[].boards[bi].base_x = host[].boards[bi].sent_x
+        host[].boards[bi].base_y = host[].boards[bi].sent_y
+        restart = True
+    var b = host[].boards[bi].copy()
+    var handle = b.handle + (NO_SNAP if alt or host[].test_alt else 0) + (FIRST_FRAME if restart else 0)
+    var d = host[].rt.gesture(b.board, kind, Float64(b.index), Float64(handle), (off_x - b.base_x) / b.zscale, (off_y - b.base_y) / b.zscale, 1)
+    if 0 <= bi < len(host[].boards):
+        host[].boards[bi].sent_x = off_x
+        host[].boards[bi].sent_y = off_y
+    host[].apply(d, host_addr)
+
+
 def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var first = get_index(drag)
     if first < 0 or first >= len(host[].boards):
+        return
+    if is_free(host[].rt.shown.nodes[host[].boards[first].board].text):  # (a free canvas, mojoui.freeboard)
+        var hit = free_hit[A](host, drag, x, y)
+        var holds = host[].rt.shown.nodes[host[].boards[first].board].hint != ""
+        host[].held = False
+        host[].hold_bi = -1
+        if hit[0] >= 0 and not busy():  # (a press on a card that isn't the focused one: it takes the focus, as a window manager's click)
+            var pb = host[].boards[hit[0]].copy()
+            if board_tone(host[].rt.shown.nodes[pb.board], pb.index) != 5:
+                var d = host[].rt.gesture(pb.board, BOARD_PICK, Float64(pb.index), 0, 0, 0, 1)
+                host[].apply(d, host_addr)
+        if hit[0] < 0 or (hit[1] == HANDLE_NONE and not holds):
+            external_call["gtk_gesture_set_state", c_int](drag, c_int(2))  # (the card's own content: it isn't ours)
+            return
+        ref b = host[].boards[hit[0]]
+        b.handle = hit[1]
+        b.live = False
+        b.zscale = board_scale(host[].rt.shown.nodes[b.board])  # (offsets measured at the press's zoom, from the press)
+        b.base_x = 0
+        b.base_y = 0
+        b.sent_x = 0
+        b.sent_y = 0
+        b.active = hit[1] != HANDLE_NONE
+        b.resizing = hit[1] != HANDLE_NONE and hit[1] != HANDLE_MOVE
+        if b.resizing:  # (an edge or a corner: claimed now, so the card's content never sees the press)
+            external_call["gtk_gesture_set_state", c_int](drag, c_int(1))  # GTK_EVENT_SEQUENCE_CLAIMED
+        elif holds:
+            host[].hold_bi = hit[0]
+            host[].hold_serial += 1
+            host[].hold_x = x
+            host[].hold_y = y
+            host[].hold_t0 = Int(perf_counter_ns())
+            _ = external_call["g_timeout_add", c_uint](c_uint(HOLD_MS), on_hold_timer[A], host_addr)
         return
     var last = first
     while last + 1 < len(host[].boards) and host[].boards[last + 1].drag == drag:
@@ -5143,6 +5366,17 @@ def on_board_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host
     var bi = board_object[A](host, drag)
     if bi < 0:
         return
+    if is_free(host[].rt.shown.nodes[host[].boards[bi].board].text):  # (a free canvas: the app places the card on every frame)
+        var first = not host[].boards[bi].live
+        if first:
+            if not host[].boards[bi].resizing and abs(off_x) + abs(off_y) < 4:  # (a press on the title band: a click until it moves)
+                return
+            host[].boards[bi].live = True
+            external_call["gtk_gesture_set_state", c_int](drag, c_int(1))
+            ref lb = host[].boards[bi]  # (the dragged card on top)
+            external_call["gtk_widget_insert_before", NoneType](lb.widget, lb.fixed, Int(0))
+        free_send[A](host, bi, BOARD_LIVE, off_x, off_y, (mods_of(drag) & ALT) != 0, host_addr, first)
+        return
     ref b = host[].boards[bi]
     ref n = host[].rt.shown.nodes[b.node]
     if b.resizing:  # live feedback; the app decides the final size on drag-end
@@ -5166,6 +5400,12 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
     if was_held:  # (a hold on the header: the card stays where it was)
         host[].boards[bi].active = False
         return
+    if is_free(host[].rt.shown.nodes[host[].boards[bi].board].text):  # (a free canvas: the end lands where the last frame was)
+        host[].boards[bi].active = False
+        if host[].boards[bi].live:
+            host[].boards[bi].live = False
+            free_send[A](host, bi, PAN if host[].boards[bi].handle == HANDLE_MOVE else ZOOM, off_x, off_y, (mods_of(drag) & ALT) != 0, host_addr)
+        return
     host[].boards[bi].active = False
     var b = host[].boards[bi].copy()
     var d = host[].rt.gesture(b.board, ZOOM if b.resizing else PAN, Float64(b.index), 0, off_x, off_y, 1)
@@ -5174,11 +5414,80 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
     # when the app changed nothing (a tiled Board snaps a card that wasn't dropped on another back into its tile)
     for k in range(len(host[].boards)):
         if (host[].boards[k].widget == b.widget and 0 <= host[].boards[k].node < len(host[].rt.shown.nodes) and not host[].board_list
-                and 0 <= host[].boards[k].board < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[host[].boards[k].board].text == "clips"):
+                and 0 <= host[].boards[k].board < len(host[].rt.shown.nodes) and board_clips(host[].rt.shown.nodes[host[].boards[k].board])):
             ref n = host[].rt.shown.nodes[host[].boards[k].node]
             external_call["gtk_fixed_move", NoneType](host[].boards[k].fixed, b.widget, Float64(n.x), Float64(n.y))
             host[].resize_widget(host[].boards[k].node)
             break
+
+
+def on_board_wheel[A: App](wheel: Int, dx: Float64, dy: Float64, host_addr: Int) abi("C") -> c_int:
+    """A wheel or two-finger swipe over a free canvas: with Ctrl held, the app hears a zoom (mojoui.freeboard: a notch
+    up 10 % in, down 10 % out) and the page doesn't scroll; otherwise it scrolls as any page (Shift: sideways)."""
+    if (mods_of(wheel) & CTRL) == 0 or dy == 0:
+        return 0
+    if busy():
+        return 1
+    var host = host_at[A](host_addr)
+    var key = String(BOARD_DRAG_KEY)
+    var drag = external_call["g_object_get_data", Int](wheel, key.as_c_string_span())
+    board_wheel_zoom[A](host, drag, dy, host_addr)
+    return 1
+
+
+def board_wheel_zoom[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: Int, dy: Float64, host_addr: Int):
+    var first = get_index(drag)
+    if first < 0 or first >= len(host[].boards):
+        return
+    var factor = 1.0 / 1.1 if dy > 0 else 1.1
+    var d = host[].rt.gesture(host[].boards[first].board, BOARD_ZOOM, 0, 0, 0, 0, factor)
+    host[].apply(d, host_addr)
+
+
+def on_board_scrolled[A: App](adj: Int, host_addr: Int) abi("C"):
+    """A free canvas's page scrolled: its "view" event goes once it has stood still 120 ms."""
+    var host = host_at[A](host_addr)
+    host[].view_serial += 1
+    _ = external_call["g_timeout_add", c_uint](c_uint(120), on_view_timer[A], host_addr)
+
+
+def on_view_timer[A: App](host_addr: Int) abi("C") -> c_int:
+    var host = host_at[A](host_addr)
+    host[].view_serial -= 1
+    if host[].view_serial > 0:  # (a later scroll's own timer comes)
+        return 0
+    host[].view_serial = 0
+    if busy():
+        host[].view_serial = 1
+        _ = external_call["g_timeout_add", c_uint](c_uint(60), on_view_timer[A], host_addr)
+        return 0
+    send_views[A](host, host_addr)
+    return 0
+
+
+def send_views[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], host_addr: Int):
+    """Every free canvas's visible part (BOARD_VIEW, in page points) to the app."""
+    for sc in host[].board_scrollers.copy():
+        if sc[0] >= len(host[].rt.shown.nodes) or not is_free(host[].rt.shown.nodes[sc[0]].text):
+            continue
+        var z = board_scale(host[].rt.shown.nodes[sc[0]])
+        var hadj = external_call["gtk_scrolled_window_get_hadjustment", Int](sc[1])
+        var vadj = external_call["gtk_scrolled_window_get_vadjustment", Int](sc[1])
+        var d = host[].rt.gesture(sc[0], BOARD_VIEW, external_call["gtk_adjustment_get_value", Float64](hadj) / z, external_call["gtk_adjustment_get_value", Float64](vadj) / z,
+                                  external_call["gtk_adjustment_get_page_size", Float64](hadj) / z, external_call["gtk_adjustment_get_page_size", Float64](vadj) / z, 1)
+        host[].apply(d, host_addr)
+
+
+def on_zoom_scroll[A: App](host_addr: Int) abi("C") -> c_int:
+    """After a free canvas's zoom changed and its page was laid out again: the scroll keeps showing the same part."""
+    var host = host_at[A](host_addr)
+    var sw = host[].scroller_of(host[].zoom_board)
+    host[].zoom_board = -1
+    if sw == 0:
+        return 0
+    for adj in [external_call["gtk_scrolled_window_get_hadjustment", Int](sw), external_call["gtk_scrolled_window_get_vadjustment", Int](sw)]:
+        external_call["gtk_adjustment_set_value", NoneType](adj, external_call["gtk_adjustment_get_value", Float64](adj) * host[].zoom_ratio)
+    return 0
 
 
 def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
@@ -6275,7 +6584,11 @@ def run_step[A: App](host_addr: Int, step: String):
         var name = rest
         var state = 0
         while True:
-            if name.startswith("Ctrl+"):
+            if name.startswith("Super+"):
+                state |= 0x4000000
+                var cut = String(name[byte=6:])
+                name = cut
+            elif name.startswith("Ctrl+"):
                 state |= 4
                 var cut = String(name[byte=5:])
                 name = cut
@@ -6295,6 +6608,45 @@ def run_step[A: App](host_addr: Int, step: String):
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].shortcut_keys, signal.as_c_string_span(), c_uint(keyval), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
         if handled[0] == 0:
             print("TEST: no item with shortcut", rest)
+        _ = len(handled)
+    elif verb == "focusfield":  # focusfield:<tag>: the first text field inside the view tagged <tag> takes the keyboard, as a click in it does
+        var target = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].name == rest:
+                target = first_field_in(host[].rt.shown, k)
+                break
+        if target < 0 or host[].widgets[target] == 0:
+            print("TEST: no field in", rest)
+            return
+        _ = external_call["gtk_widget_grab_focus", c_int](host[].widgets[target])
+        pump()
+    elif verb == "trykey":  # trykey:Alt+ArrowRight: as shortcut:, but not firing is an answer ("KEY: name fired|passed"), not a failure
+        var name = rest
+        var state = 0
+        while True:
+            if name.startswith("Super+"):
+                state |= 0x4000000
+                var cut = String(name[byte=6:])
+                name = cut
+            elif name.startswith("Ctrl+"):
+                state |= 4
+                var cut = String(name[byte=5:])
+                name = cut
+            elif name.startswith("Shift+"):
+                state |= 1
+                var cut = String(name[byte=6:])
+                name = cut
+            elif name.startswith("Alt+"):
+                state |= 8
+                var cut = String(name[byte=4:])
+                name = cut
+            else:
+                break
+        var keyval = gdk_keyval(name.lower() if name.byte_length() == 1 else name)
+        var handled = List[c_int](length=1, fill=0)
+        var signal = String("key-pressed")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].shortcut_keys, signal.as_c_string_span(), c_uint(keyval), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
+        print("KEY: " + rest + (" fired" if handled[0] != 0 else " passed"), flush=True)
         _ = len(handled)
     elif verb == "escape":  # escape: an Escape that reached the window (the last-chance controller's own signal, goal 76)
         var handled = List[c_int](length=1, fill=0)
@@ -6454,6 +6806,35 @@ def run_step[A: App](host_addr: Int, step: String):
                         c_uint(gdk_keyval(p)), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
             _ = len(handled)
             settle()
+    elif verb == "tapspot" or verb == "hoverspot":  # tapspot:<canvas>=<name>: a click where App.spot says <name> is drawn ("clip@3": the clip
+        # column's third row on screen); hoverspot: the pointer resting there (Canvas(hover=True): HOVER), then "HOVER: canvas cursor | tip"
+        var kv = split_at(rest, "=")
+        var node = canvas_node(host[], kv[0])
+        var ci = -1
+        for k in range(len(host[].canvases)):
+            if host[].canvases[k].node == node:
+                ci = k
+        if ci < 0:
+            print("TEST: no canvas", kv[0])
+            return
+        wait_allocated(host[].canvases[ci].widget)
+        var at = host[].rt.app.spot(host[].rt.shown.nodes[node].style, kv[1])
+        if at[0] < 0:
+            print("TEST: no spot", kv[1], "on", kv[0])
+            return
+        if verb == "hoverspot":
+            canvas_hover[A](host, ci, at[0], at[1], host_addr)
+            settle()
+            pump()
+            var n2 = canvas_node(host[], kv[0])
+            if n2 >= 0:
+                print("HOVER: " + kv[0] + " " + kv[1] + " cursor=" + host[].rt.shown.nodes[n2].cursor + " | tip=" + host[].rt.shown.nodes[n2].tip, flush=True)
+        else:
+            var released = String("released")
+            var pressed = String("drag-begin")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, pressed.as_c_string_span(), at[0], at[1])
+            host[].canvases[ci].moved = False
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].click, released.as_c_string_span(), c_int(1), at[0], at[1])
     elif verb == "drag" or verb == "dragat" or verb == "doubletap" or verb == "zoom" or verb == "wheel" or verb == "frames" or verb == "tapat" or verb == "stroke" or verb == "render":
         var kv = split_at(rest, "=")
         var node = canvas_node(host[], kv[0])
@@ -6616,10 +6997,23 @@ def run_step[A: App](host_addr: Int, step: String):
                 var scroller = host[].outers[i]
                 if scroller != 0:  # (the room the page gives the Board: its scroller's size; bigger content would scroll)
                     room = " in " + String(Int(external_call["gtk_widget_get_width", c_int](scroller))) + "x" + String(Int(external_call["gtk_widget_get_height", c_int](scroller)))
-                print("BOARDS: " + rest + " " + String(host[].rt.shown.nodes[i].spacing) + "x" + String(host[].rt.shown.nodes[i].size) + room)
+                var zs = board_scale(host[].rt.shown.nodes[i])
+                print("BOARDS: " + rest + " " + String(host[].rt.shown.nodes[i].spacing) + "x" + String(host[].rt.shown.nodes[i].size) + room
+                      + (" zoom " + String(Int(zs * 100 + 0.5)) if zs != 1.0 else ""))
                 for c in host[].rt.shown.nodes[i].children:  # (the widget as GTK allocated it, not the node's wish)
                     ref ch = host[].rt.shown.nodes[c]
                     if ch.name == "":
+                        continue
+                    var kk = 0
+                    for cc in host[].rt.shown.nodes[i].children:
+                        if cc == c:
+                            break
+                        kk += 1
+                    if board_tone(host[].rt.shown.nodes[i], kk) == 5:  # (a free canvas's focused card: "BOARDFOCUS: tag")
+                        print("BOARDFOCUS: " + ch.name)
+                    if ch.name == "board-guide":  # (a free canvas's snap line: "GUIDE: x,y wxh" while one shows)
+                        if ch.x >= 0:
+                            print("GUIDE: " + String(ch.x) + "," + String(ch.y) + " " + String(ch.w) + "x" + String(ch.h))
                         continue
                     var ax = ch.x
                     var ay = ch.y
@@ -6772,6 +7166,130 @@ def run_step[A: App](host_addr: Int, step: String):
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx / 2, dy / 2)
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx, dy)
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, end.as_c_string_span(), dx, dy)
+    elif verb == "freedrag":  # freedrag:<tag>=<handle>,dx,dy[,steps[,alt]]: a free canvas's card grabbed by a handle (n, s, e, w, ne, nw, sw,
+        # se, move) as a hand does (drag-begin where that handle is; `steps` motion frames, each printed as GTK laid it out:
+        # "LIVE: tag k/steps x,y wxh" in page points; the cursor there first: "CURSOR: tag handle name"), then let go
+        var kv = split_at(rest, "=")
+        var parts = List[String]()
+        var spec_text = kv[1]
+        for piece in spec_text.split(","):
+            parts.append(String(piece))
+        var bi = -1
+        for k in range(len(host[].boards)):
+            if host[].rt.shown.nodes[host[].boards[k].node].name == kv[0]:
+                bi = k
+        if bi < 0 or len(parts) < 3:
+            print("TEST: no board object", kv[0])
+            return
+        var handle = handle_of(parts[0])
+        var dx = Float64(to_int(parts[1]))
+        var dy = Float64(to_int(parts[2]))
+        var steps = to_int(parts[3]) if len(parts) > 3 else 6
+        host[].test_alt = len(parts) > 4 and parts[4].startswith("alt")
+        var mid_view = len(parts) > 4 and parts[4].endswith("view")
+        var mid_zoom = len(parts) > 4 and parts[4].endswith("zoom")  # (…,alt+zoom: half way, a Ctrl+wheel notch out through the host's own zoom, the button held)  # (…,alt+view: half way, the page scrolls and the app hears "view", as 120 ms after a real scroll)
+        wait_allocated(host[].boards[bi].widget)
+        var g = host[].boards[bi].drag
+        var board = host[].boards[bi].board
+        var sc = board_scale(host[].rt.shown.nodes[board])
+        var w = Int(external_call["gtk_widget_get_width", c_int](host[].boards[bi].widget))
+        var h = Int(external_call["gtk_widget_get_height", c_int](host[].boards[bi].widget))
+        var pt = handle_point(handle, w, h)
+        ref n0 = host[].rt.shown.nodes[host[].boards[bi].node]
+        var sx = (Float64(n0.x) + Float64(pt[0])) * sc
+        var sy = (Float64(n0.y) + Float64(pt[1])) * sc
+        var hit = free_hit[A](host, g, sx, sy)
+        print("CURSOR: " + kv[0] + " " + handle_name(handle) + " " + (handle_cursor(hit[1]) if hit[0] == bi else String("(another card: " + String(hit[0]) + ")")), flush=True)
+        var begin = String("drag-begin")
+        var update = String("drag-update")
+        var end = String("drag-end")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, begin.as_c_string_span(), sx, sy)
+        var tag = kv[0]
+        for k in range(1, steps + 1):
+            var free_by = perf_counter_ns() + 3_000_000_000
+            while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                pump()
+            var f = Float64(k) / Float64(steps)
+            var draws0 = 0
+            for ref cv in host[].canvases:
+                draws0 += cv.draws
+            var t0 = perf_counter_ns()
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx * f * sc, dy * f * sc)
+            var t1 = perf_counter_ns()  # (the app's update, view, diff and the patches applied)
+            settle()
+            pump()
+            wait_frame(host[].window)  # (laid out: what a person sees on this frame)
+            var t2 = perf_counter_ns()
+            var draws1 = 0
+            for ref cv in host[].canvases:
+                draws1 += cv.draws
+            print("LIVEMS: " + kv[0] + " " + String(k) + " update " + one_decimal(Float32(Float64(t1 - t0) / 1e6)) + " frame "
+                  + one_decimal(Float32(Float64(t2 - t0) / 1e6)) + " draws " + String(draws1 - draws0) + " of " + String(len(host[].canvases)), flush=True)
+            var scn = board_scale(host[].rt.shown.nodes[board]) if 0 <= board < len(host[].rt.shown.nodes) else sc  # (the zoom now)
+            for ref b in host[].boards:  # (the card as GTK laid it out on this frame, in page points)
+                if host[].rt.shown.nodes[b.node].name == tag:
+                    var rect = List[Float32](length=4, fill=0)
+                    if external_call["gtk_widget_compute_bounds", c_int](b.widget, b.fixed, Int(rect.unsafe_ptr())) != 0:
+                        print("LIVE: " + tag + " " + String(k) + "/" + String(steps) + " " + String(Int(Float64(rect[0]) / scn + 0.5)) + "," + String(Int(Float64(rect[1]) / scn + 0.5))
+                              + " " + String(Int(Float64(rect[2]) / scn + 0.5)) + "x" + String(Int(Float64(rect[3]) / scn + 0.5)), flush=True)
+                    _ = len(rect)
+                    break
+            if 0 <= board < len(host[].rt.shown.nodes):  # (the snap guides showing on this frame: "LIVEGUIDE: k x,y wxh")
+                for c in host[].rt.shown.nodes[board].children:
+                    ref gn = host[].rt.shown.nodes[c]
+                    if gn.name == "board-guide" and gn.x >= 0:
+                        print("LIVEGUIDE: " + String(k) + " " + String(gn.x) + "," + String(gn.y) + " " + String(gn.w) + "x" + String(gn.h), flush=True)
+            if k == steps // 2 and mid_zoom:
+                board_wheel_zoom[A](host, g, 1, host_addr)
+                settle()
+                pump()
+                wait_frame(host[].window)
+                print("LIVEZOOM: " + tag + " after frame " + String(k) + " zoom " + String(Int(board_scale(host[].rt.shown.nodes[board]) * 100 + 0.5)), flush=True)
+            if k == steps // 2 and mid_view:
+                for sc2 in host[].board_scrollers:
+                    if sc2[0] == board:
+                        var vadj = external_call["gtk_scrolled_window_get_vadjustment", Int](sc2[1])
+                        external_call["gtk_adjustment_set_value", NoneType](vadj, external_call["gtk_adjustment_get_value", Float64](vadj) + 40)
+                pump()
+                send_views[A](host, host_addr)
+                settle()
+                print("LIVEVIEW: " + tag + " after frame " + String(k), flush=True)
+            if k == steps // 2 and getenv("MOJOUI_SHOTS_EACH") != "":  # (the drag itself, half way)
+                wait_frame(host[].window)
+                save_png(host[].window, getenv("MOJOUI_SHOTS_EACH") + "-" + two_digits(host[].step_no) + "a.png")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, end.as_c_string_span(), dx * sc, dy * sc)
+        host[].test_alt = False
+    elif verb == "boardcursor":  # boardcursor:<tag>=<handle>: the cursor GTK shows over that handle ("CURSOR: tag handle name")
+        var kv = split_at(rest, "=")
+        for k in range(len(host[].boards)):
+            if host[].rt.shown.nodes[host[].boards[k].node].name == kv[0]:
+                var handle = handle_of(kv[1])
+                var sc = board_scale(host[].rt.shown.nodes[host[].boards[k].board])
+                var w = Int(external_call["gtk_widget_get_width", c_int](host[].boards[k].widget))
+                var h = Int(external_call["gtk_widget_get_height", c_int](host[].boards[k].widget))
+                var pt = handle_point(handle, w, h)
+                ref n0 = host[].rt.shown.nodes[host[].boards[k].node]
+                var hit = free_hit[A](host, host[].boards[k].drag, (Float64(n0.x) + Float64(pt[0])) * sc, (Float64(n0.y) + Float64(pt[1])) * sc)
+                print("CURSOR: " + kv[0] + " " + kv[1] + " " + (handle_cursor(hit[1]) if hit[0] == k else String("(another card)")), flush=True)
+                break
+    elif verb == "ctrlwheel":  # ctrlwheel:<dy>: a Ctrl+wheel notch over the free canvas (dy > 0: out), through the host's own zoom
+        for k in range(len(host[].boards)):
+            if is_free(host[].rt.shown.nodes[host[].boards[k].board].text):
+                board_wheel_zoom[A](host, host[].boards[k].drag, Float64(to_int(rest)), host_addr)
+                break
+    elif verb == "boardscrollx":  # boardscrollx:<points|end|now>: the Board's page scrolled sideways ("BOARDSCROLLX: value of upper, page")
+        pump()
+        for sc in host[].board_scrollers:
+            if sc[0] < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[sc[0]].kind == BOARD:
+                var adj = external_call["gtk_scrolled_window_get_hadjustment", Int](sc[1])
+                var upper = external_call["gtk_adjustment_get_upper", Float64](adj)
+                var page = external_call["gtk_adjustment_get_page_size", Float64](adj)
+                if rest != "now":
+                    external_call["gtk_adjustment_set_value", NoneType](adj, upper if rest == "end" else Float64(to_int(rest)))
+                    pump()
+                var value = external_call["gtk_adjustment_get_value", Float64](adj)
+                print("BOARDSCROLLX: " + String(Int(value + 0.5)) + " of " + String(Int(upper + 0.5)) + ", " + String(Int(page + 0.5)))
+                break
     elif verb == "hold":  # hold:<card>=ms: a press on the Board card titled <card>, held still that long (left pressed: release: lets go)
         var kv = split_at(rest, "=")
         var bi = board_card(host[], kv[0])
@@ -6877,6 +7395,17 @@ def board_card(host: GtkHost, title: String) -> Int:
     for k in range(len(host.boards)):
         if headline_in(host.rt.shown, host.boards[k].node) == title:
             return k
+    return -1
+
+
+def first_field_in(v: View, i: Int) -> Int:
+    """The first text field inside node i (depth first), else -1."""
+    if v.nodes[i].kind == FIELD:
+        return i
+    for c in v.nodes[i].children:
+        var f = first_field_in(v, c)
+        if f >= 0:
+            return f
     return -1
 
 

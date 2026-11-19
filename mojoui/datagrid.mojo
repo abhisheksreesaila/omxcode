@@ -12,7 +12,7 @@
 # the data (a GridSource), writing values and sorting (engine operations: the grid only shows them).
 
 from mojoui.app import Event
-from mojoui.view import View, TextField, TAP, PAN, ZOOM, PRESS, RELEASE, DOUBLE, KEY, SHIFT, CTRL, ALT
+from mojoui.view import View, TextField, TAP, PAN, ZOOM, PRESS, RELEASE, DOUBLE, KEY, SHIFT, CTRL, ALT, HOVER
 from mojoui.canvas import Surface
 from mojoui.scene import Painter, SurfacePainter, Scene
 from mojoui.text import Font, MONO, RIGHT, CENTRE, LEFT, REGULAR
@@ -45,6 +45,31 @@ comptime GRID_CANCEL = 10  # Escape: the editor closed without writing
 comptime GRID_COMMIT = 11  # Enter on a value being typed: write grid.typed into the cell (then call committed())
 comptime GRID_HEADER_DRAG = 12  # (drag_headers) a column's header is being dragged: grid.drag_col, the pointer at event.x, y
 comptime GRID_HEADER_DROP = 13  # (drag_headers) it was let go at event.x, y (where it lands is the app's: mojoui.linkdrag)
+
+comptime PLAY_NONE = 0  # a cell that plays nothing (play_kind)
+comptime PLAY_VIDEO = 1  # a video file's path in a column that plays in a card: drawn as a link with ▶
+comptime PLAY_AUDIO = 2  # an audio file's: ♪
+comptime AUDIO_TYPES = ".wav,.mp3,.m4a,.flac,.ogg,.opus,.aac"
+
+
+def play_kind(text: String, card: String) -> Int:
+    """How a cell draws (goal 78 M3): in a column that plays in card `card` (a key link onto that card's file; "" none), a
+    non-empty value is a link: PLAY_AUDIO for an audio file's path, else PLAY_VIDEO; an empty one stays plain (PLAY_NONE)."""
+    var t = String(text.strip())
+    if card == "" or t == "":
+        return PLAY_NONE
+    var dot = t.rfind(".")
+    if dot > 0:
+        var ext = String(t[byte=dot:]).lower()
+        for a in AUDIO_TYPES.split(","):
+            if ext == String(a):
+                return PLAY_AUDIO
+    return PLAY_VIDEO
+
+
+def play_tip(column: String, card: String) -> String:
+    """A playing column's header tooltip."""
+    return column + " plays in " + card + ": click a cell to play it"
 
 
 trait GridSource:
@@ -135,6 +160,9 @@ struct DataGrid(Copyable, Movable):
     var press_y: Float64
     var drag_col: Int  # the header being dragged out, -1 none
     var version: Int  # bumped whenever the grid needs redrawing (add it into the Canvas version)
+    var plays: List[String]  # per column: the card its files play in ("" none: an app sets it from its links, goal 78 M3)
+    var hover_row: Int  # the cell under the pointer (Canvas(hover=True) sends HOVER), -1 none; hover_row -2: its header
+    var hover_col: Int
 
     def __init__(out self):
         self.top = 0
@@ -176,6 +204,9 @@ struct DataGrid(Copyable, Movable):
         self.press_x = 0
         self.press_y = 0
         self.drag_col = -1
+        self.plays = List[String]()
+        self.hover_row = -1
+        self.hover_col = -1
 
     # ---------- geometry ----------
 
@@ -293,12 +324,24 @@ struct DataGrid(Copyable, Movable):
 
     def header_spot[S: GridSource](self, name: String, src: S) -> Tuple[Float64, Float64]:
         """The middle of column `name`'s header, in the canvas's points; (-1, -1) when there's no such column or it's
-        scrolled out of sight (App.spot: a driver or an agent starts a header drag there)."""
+        scrolled out of sight (App.spot: a driver or an agent starts a header drag there). "name@k": the middle of that
+        column's k-th row on screen (1: the first under the header), where a hand clicks a cell."""
+        var col = name
+        var line = 0
+        var at = name.rfind("@")
+        if at > 0:
+            col = String(name[byte=0:at])
+            try:
+                line = Int(String(name[byte = at + 1 :]))
+            except:
+                line = 0
         for c in range(src.grid_columns()):
-            if src.grid_name(c) == name:
+            if src.grid_name(c) == col:
                 var x = self.col_left(c, src) + min(self.col_width(c, src), 120.0) / 2
                 if x < GRID_GUTTER or x > self.size[0] - GRID_BAR_W:
                     return (-1.0, -1.0)
+                if line > 0:
+                    return (self.col_left(c, src) + 24.0, self.header_h() + (Float64(line) - 0.5) * GRID_ROW_H)
                 return (x, self.header_h() / 2)
         return (-1.0, -1.0)
 
@@ -541,10 +584,46 @@ struct DataGrid(Copyable, Movable):
 
     # ---------- events ----------
 
+    def plays_in(self, c: Int) -> String:
+        """The card column c's files play in, "" when none."""
+        return self.plays[c] if 0 <= c < len(self.plays) else String("")
+
+    def hover_link[S: GridSource](self, src: S) -> Bool:
+        """The pointer is on a cell drawn as a link (the app shows a pointer: Canvas(…).cursor("pointer"))."""
+        if self.hover_row < 0 or self.hover_col < 0:
+            return False
+        return play_kind(src.grid_text(self.hover_col, self.hover_row), self.plays_in(self.hover_col)) != PLAY_NONE
+
+    def hover_tip[S: GridSource](self, src: S) -> String:
+        """The tooltip for what's under the pointer: a playing column's header says where it plays ("" otherwise)."""
+        if self.hover_row == -2 and self.plays_in(self.hover_col) != "":
+            return play_tip(src.grid_name(self.hover_col), self.plays_in(self.hover_col))
+        return ""
+
     def handle[S: GridSource](mut self, event: Event, src: S, font: Font, pal: Palette) -> Int:
         """A gesture on the grid's canvas. Returns GRID_*; the grid's own state is already updated."""
         self.prepare(src, font, pal)
         var head = self.header_h()
+        if event.number == HOVER:  # (the pointer moved: the link under it is underlined; nothing else changes)
+            var row = -1
+            var col = -1
+            if event.x >= 0 and event.y >= 0 and self.in_columns(event.x):
+                if event.y < head:
+                    col = self.header_hit(event.x, event.y, src)
+                    row = -2 if col >= 0 else -1
+                else:
+                    var hit = self.cell_hit(event.x, event.y, src)
+                    row = hit[0]
+                    col = hit[1]
+            if row == self.hover_row and col == self.hover_col:
+                return GRID_NONE
+            var was_link = self.hover_row >= 0 and self.hover_col >= 0 and self.plays_in(self.hover_col) != ""
+            self.hover_row = row
+            self.hover_col = col
+            if was_link or (col >= 0 and self.plays_in(col) != ""):
+                self.redraw()
+                return GRID_REDRAW
+            return GRID_NONE
         if event.number == PRESS:
             self.editing = False
             self.typed = ""
@@ -956,6 +1035,10 @@ struct DataGrid(Copyable, Movable):
                     s.rect(bx, 9 * k, bw, 14 * k, p.accent_ink if c == col_pick else p.line, 0)
                     s.rect(bx + 1, 9 * k + 1, bw - 2, 14 * k - 2, p.accent if c == col_pick else p.card, 0)
                     s.text(font, badge, bx + 4 * k, 19.5 * k, 9.5 * k, badge_ink, MONO, LEFT, 0)
+            if self.plays_in(c) != "" and shown_name == name:  # (a column that plays: a small play mark after its name, in the accent)
+                var mx = x + 8 * k + font.measure(name, 12.5 * k, p.medium) + 7 * k + (bw + 6 * k if badge != "" else 0.0)
+                if mx + 10 * k <= x + cw - 16 * k:
+                    _play_mark(s, mx, 15 * k, k, p.accent_ink if c == col_pick else p.accent)
             if c == self.sort_col:  # a small triangle (the font has no arrows): ▼ largest first, ▲ smallest first
                 var ax = x + cw - 14 * k
                 var ay = 15 * k
@@ -1050,6 +1133,22 @@ struct DataGrid(Copyable, Movable):
                     s.rect(px, y + 5 * k, pw, GRID_ROW_H * k - 10 * k, mix(p.card, tone, 0.12 if good else 0.08), (GRID_ROW_H * k - 10 * k) / 2)
                     s.text(font, text, px + 7 * k, base - 0.5 * k, 11.5 * k, tone, p.medium, LEFT, 0)
                     continue
+                var plays = play_kind(full, self.plays_in(c))
+                if plays != PLAY_NONE and st.ink() == 0:  # (a file that plays in a card: a link, ▶ or ♪ before its name, goal 78)
+                    var lx = x + 8 * k
+                    if plays == PLAY_AUDIO:
+                        _note_mark(s, lx, base - 5 * k, k, p.accent)
+                    else:
+                        _play_mark(s, lx, base - 4.5 * k, k, p.accent)
+                    var lroom = room - 14 * k
+                    var ltext = self.clip(full, lroom, 13 * k, weight, font)
+                    s.push_clip(x + 1, y, cw - 2, GRID_ROW_H * k)
+                    s.text(font, ltext, lx + 14 * k, base, 13 * k, p.accent, weight, LEFT, 0)
+                    s.pop_clip()
+                    s.note("cell " + String(c) + " " + String(row) + " link")
+                    if row == self.hover_row and c == self.hover_col:  # (the pointer on it: underlined)
+                        s.rect(lx + 14 * k, base + 2.5 * k, min(font.measure(ltext, 13 * k, weight), lroom), max(1.0, k), p.accent, 0)
+                    continue
                 if text == "" and src.grid_numeric(c):  # an empty number: a faint dash where the figure would be
                     s.text(font, "–", x + cw - 16 * k, base, 13 * k, p.line_strong, p.regular, LEFT, 0)
                     continue
@@ -1127,3 +1226,16 @@ struct DataGrid(Copyable, Movable):
         var t = self.thumb(h / k, src)
         s.rect(right, head, GRID_BAR_W * k, h - head, p.card, 0)
         s.rect(right + 3 * k, t[0] * k + 2 * k, (GRID_BAR_W - 6) * k, t[1] * k - 4 * k, p.ink3 if self.bar_drag else p.line_strong, 0)
+
+
+def _play_mark[P: Painter](mut s: P, x: Float64, cy: Float64, k: Float64, color: UInt32):
+    """▶ drawn (the canvas font has no arrows): a small triangle pointing right, its middle at cy."""
+    var pts: List[Float64] = [x, cy - 4.5 * k, x + 8 * k, cy, x, cy + 4.5 * k]
+    s.polygon(pts, color)
+
+
+def _note_mark[P: Painter](mut s: P, x: Float64, cy: Float64, k: Float64, color: UInt32):
+    """♪ drawn: a note's head and stem."""
+    s.circle(x + 3 * k, cy + 3.5 * k, 3 * k, color)
+    s.rect(x + 5 * k, cy - 5 * k, 1.4 * k, 8.5 * k, color, 0)
+    s.rect(x + 5 * k, cy - 5 * k, 4 * k, 1.6 * k, color, 0)

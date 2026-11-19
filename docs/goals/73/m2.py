@@ -258,6 +258,7 @@ def _web(g, full):
 
 
 def check():
+    os.environ["OMX_CANVAS"] = "tiled"  # (goal 78: this proof measures the tiling, which omxplorer keeps as "Tile the cards"; the free canvas is the default now)
     full = _full()
     if full is None:
         return None, f"no fleet.csv + telemetry.parquet in {DATA} (goal 47's robot data)"

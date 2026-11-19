@@ -30,6 +30,17 @@ def check():
         return False, "decisions lint: " + (r.stdout + r.stderr)[-300:]
     r = run(["scripts/build.sh", "omxplorer", "mac"], 3600)
     (OUT / "mac-build.log").write_text(r.stdout + r.stderr)
-    if r.returncode != 0:  # (review round 1: this goal changed the AppKit host, so a failed build is a FAIL, not a note)
-        return False, "AppKit build failed: " + (r.stdout + r.stderr).strip()[-300:]
-    return True, "73-check M1-M4 PASS; matrix fresh; decisions lint ok; AppKit build ok"
+    mac = "AppKit build ok"
+    if r.returncode != 0:
+        out = r.stdout + r.stderr
+        if "ld64.lld: error: undefined symbol: _" not in out:  # (a compile error is this code's: FAIL)
+            return False, "AppKit build failed: " + out.strip()[-300:]
+        # (this machine's Linux→Mac link misses libSystem symbols on main too (D-7626's report): the Mac build runs on GitHub's
+        # macOS runners instead, as the contract allows; their failure is a FAIL, D-7818)
+        r = run(["scripts/mac-ci", "omxplorer"], 5400)
+        (OUT / "mac-ci.log").write_text(r.stdout + r.stderr)
+        runs = [l for l in r.stdout.splitlines() if l.startswith("run ")]
+        if r.returncode != 0 or any(l.endswith(" failed") for l in r.stdout.splitlines()):  # (mac-ci says "run N failed" and exits 0)
+            return False, "AppKit: the cross link fails here and scripts/mac-ci failed: " + (r.stdout + r.stderr).strip()[-300:]
+        mac = "AppKit on GitHub's macOS runners ok (" + (runs[-1][:80] if runs else "mac-ci exit 0") + "; the local cross link misses libSystem symbols, as on main)"
+    return True, "73-check M1-M4 PASS; matrix fresh; decisions lint ok; " + mac
