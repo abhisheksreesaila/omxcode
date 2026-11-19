@@ -236,6 +236,12 @@ def liquid_css(p: Palette) -> String:
         + w + "button.mui-tool:hover { background: " + hover + "; } " + w + "button.mui-tool:active { transform: scale(0.97); }\n"
         + w + "button.mui-tool-on, " + w + "button.mui-tool-on:hover { background: " + hex_of(p.accent_wash) + "; color: " + accent + "; }\n"
         + w + ".mui-tag-toolbar separator { margin: 10px 8px; background: " + strong + "; min-width: 1px; }\n"
+        # the ribbon (goal 76): its tab names a quiet segmented row (a soft track, the selected tab the white thumb), each
+        # group's caption small and quiet under its tools
+        + w + ".mui-tag-ribbon-tabs { background: " + track + "; border-radius: 999px; padding: 3px; }\n"
+        + w + ".mui-tag-ribbon-tabs button { border-radius: 999px; min-height: 26px; padding: 0 14px; font-weight: 500; color: " + ink2 + "; box-shadow: none; }\n"
+        + w + ".mui-tag-ribbon-tabs button:not(.flat) { " + thumb + ink + "; box-shadow: " + thumb_shadow + "; }\n"
+        + w + "label.mui-tag-ribbon-caption, " + w + ".mui-tag-ribbon-caption { font-size: 11px; color: " + ink2 + "; }\n"
         # every button: pills, springy hover and press
         + w + "button { font-size: 13px; transition: background 150ms " + spring + ", box-shadow 150ms " + spring + ", transform 150ms " + spring + "; }\n"
         + w + "button:active { transform: scale(0.97); }\n"
@@ -334,6 +340,10 @@ body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-ti
 body.liquid .board > .object [data-tag=player-controls] button.icon-only { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
 body.liquid [data-tag=sheet-tabs] button { border-radius: 999px; padding: 2px 14px; }
+body.liquid [data-tag=ribbon-tabs] { background: var(--l-track); border-radius: 999px; padding: 3px; gap: 2px; }  /* (the ribbon's tabs: a quiet segmented row, goal 76) */
+body.liquid [data-tag=ribbon-tabs] button { border-radius: 999px; min-height: 26px; padding: 0 14px; font-weight: 500; border: 0; box-shadow: none; background: transparent; color: var(--o-ink3); }
+body.liquid [data-tag=ribbon-tabs] button:not(.subtle) { background: var(--l-thumb); color: var(--o-ink); box-shadow: var(--l-thumb-shadow); }
+body.liquid [data-tag=ribbon-caption] { font-size: 11px; line-height: 14px; color: var(--o-ink3); }
 body.liquid .segmented, body.liquid .tabs { background: var(--l-track); border: 0; border-radius: 999px; padding: 3px; overflow: visible; }
 body.liquid .segmented span, body.liquid .tabs span { border-radius: 999px; min-height: 24px; padding: 0 12px; font-weight: 500; transition: background 150ms var(--sp-snappy); }
 body.liquid .segmented input:checked + span, body.liquid .tabs input:checked + span { background: var(--l-thumb); color: var(--o-ink); font-weight: 500;

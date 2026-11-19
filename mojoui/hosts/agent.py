@@ -377,6 +377,10 @@ class Host:
         def walk(i, depth):
             n = self.nodes[i]
             k, text = n["kind"], n["text"]
+            if n.get("hidden") and k != MENU:  # (.hidden(): not on screen, its controls still tools: a ribbon's other tabs, D-7601)
+                line(depth, f"[{n['name'] or 'hidden'}] (not shown; its tools work as listed)")
+                walk_children(i, depth + 1)
+                return
             if k in (TEXT, PARAGRAPH):  # (a Paragraph: its plain words; its runs' looks don't reach an agent)
                 line(depth, f'"{text}"')
             elif k == BUTTON:
@@ -461,6 +465,8 @@ class Host:
 
         def walk(i, group):
             n = self.nodes[i]
+            if n.get("hidden"):  # (not on screen: no words to read)
+                return
             if n["kind"] in (TEXT, PARAGRAPH):
                 out.append((group + ": " if group else "") + n["text"])
             for c in n["children"]:

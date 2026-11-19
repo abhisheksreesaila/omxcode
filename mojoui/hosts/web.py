@@ -165,7 +165,7 @@ MENU_JS = r"""
     if (t && document.querySelector('.menubar > .menu.open') && !t.parentElement.classList.contains('open')) { menus.closeAll(); t.parentElement.classList.add('open'); }
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); return; }
+    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); e.preventDefault(); return; }  // (the menu took it: nothing after it does, goal 76)
     if (e.key === 'Escape') { const c = document.querySelector('.menu.context, .popover') || document.querySelector('.dialog-layer');
       if (c) { menus.dismiss(c); e.preventDefault(); e.stopPropagation(); return; } }
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
@@ -178,6 +178,14 @@ MENU_JS = r"""
     const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === name);
     if (item) { e.preventDefault(); e.stopPropagation(); menus.closeAll(); item.click(); }
   }, true);
+  // An Escape nothing took (no open menu, popover or dialog, not typed in a field): the enabled item declaring the
+  // shortcut "Escape" fires (omxplorer: close the docked panel), the GTK host's last-chance controller (goal 76).
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('#mojoui-overlay dialog.alert')) return;  // (an alert answers Esc itself, on keyup)
+    if (e.target.matches && e.target.matches('input, textarea, select, [contenteditable], [contenteditable] *')) return;
+    const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === 'Escape');
+    if (item) { e.preventDefault(); item.click(); }
+  });
   document.addEventListener('htmx:afterSettle', menus.place);
   // Clipboard(text, version): a new version puts the text on the system clipboard (window.mojouiClip keeps it for tests)
   const copyAsked = () => document.querySelectorAll('[data-kind=clipboard]').forEach(c => {
@@ -1408,6 +1416,9 @@ def render(s, i, sid):
         el.attrs["style"] = (old + ";" if old else "") + ";".join(css)
     if n["name"]:
         el.attrs["data-tag"] = n["name"]
+    if n.get("hidden"):  # (.hidden(): in the page, not shown; agents still reach its controls, D-7601)
+        el.attrs["hidden"] = True
+        el.attrs["style"] = (el.attrs.get("style", "") + ";display:none").lstrip(";")
     if n.get("arrive"):  # (.arrive(): a spring the first time it's inserted; mojoui.css .mojoui-arrive)
         el.attrs["class"] = (el.attrs.get("class", "") + " mojoui-arrive").strip()
     if n.get("tip"):

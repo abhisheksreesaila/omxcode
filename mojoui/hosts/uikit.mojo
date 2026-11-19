@@ -766,6 +766,8 @@ struct UIKitHost[A: App](Movable):
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
         ref node = self.rt.shown.nodes[i]
         var outer = shown
+        if node.hidden:  # (.hidden(): in the tree, not drawn; a UIStackView leaves a hidden view out, D-7601)
+            _ = msg(shown, "setHidden:", 1)
         if node.tip != "" and self.widgets[i] != 0:  # a tooltip for the pointer (iPad with a trackpad or mouse)
             var tip = msg(msg(cls("UIToolTipInteraction"), "alloc"), "initWithDefaultToolTip:", ns_string(node.tip))
             _ = msg(self.widgets[i], "addInteraction:", tip)
@@ -789,6 +791,8 @@ struct UIKitHost[A: App](Movable):
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.min_w)), "setActive:", 1)
         if node.max_w != 0:
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintLessThanOrEqualToConstant:", Float64(node.max_w)), "setActive:", 1)
+        if node.hidden and outer != shown:  # (the padded or sized wrapper is what the parent stack holds: it hides too, review round 1)
+            _ = msg(outer, "setHidden:", 1)
         return outer
 
     def show(mut self, self_addr: Int):

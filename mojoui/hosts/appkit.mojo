@@ -162,6 +162,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
     """"Ctrl+Shift+S" → ("s", ⌘⇧): Ctrl means ⌘ on a Mac (D-159). Arrows become their NSMenuItem characters."""
     var name = shortcut
     var mask = 0
+    if name == "Escape":  # (a window-level Escape item, goal 76: no key equivalent on a Mac, where a menu's Esc would beat a field's own)
+        return (String(""), 0)
     while True:
         if name.startswith("Ctrl+"):
             mask |= MASK_COMMAND
@@ -1898,6 +1900,8 @@ struct AppKitHost[A: App](Movable):
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
         var node = self.rt.shown.nodes[i].copy()
         var outer = w
+        if node.hidden:  # (.hidden(): in the tree, not drawn; a stack detaches a hidden view, D-7601)
+            _ = msg(w, "setHidden:", 1)
         if node.tip != "":
             _ = msg(w, "setToolTip:", ns_string(node.tip))
         var spoken = explicit_name(node)  # (mojoui.a11y: what VoiceOver says when the control's own words don't)
@@ -1972,6 +1976,8 @@ struct AppKitHost[A: App](Movable):
             _ = msg(msg(msg(outer, "leadingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "leadingAnchor"), Float64(sf.margin_x)), "setActive:", 1)
             _ = msg(msg(msg(outer, "trailingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "trailingAnchor"), -Float64(sf.margin_x)), "setActive:", 1)
             outer = holder
+        if node.hidden and outer != w:
+            _ = msg(outer, "setHidden:", 1)
         return outer
 
     def show(mut self, self_addr: Int):

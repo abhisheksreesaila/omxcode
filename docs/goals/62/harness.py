@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "build/g62"
 CHROMIUM = "/usr/bin/chromium"
 MODULE = ROOT / "build/omxplorer/web"
-G47 = Path("/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-32644b84/build/g47/full")  # (read-only: another session's)
+G47 = next((p for p in (Path(__import__("os").environ.get("G62_G47", "/nonexistent")), Path(__file__).resolve().parents[3] / "build/g47/full",
+                        Path("/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-32644b84/build/g47/full")) if (p / "fleet.csv").exists()),
+           Path(__file__).resolve().parents[3] / "build/g47/full")  # (goal 47's full set: $G62_G47, this checkout's, else the folder it was first run on (gone since); read-only, goal 76)
 STARTER = ROOT / "build/starter/robot"  # scripts/starter.py makes it from G47
 
 

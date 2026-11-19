@@ -192,6 +192,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
     var tip: String  # a tooltip (.tooltip())
     var label: String  # what a screen reader calls it when nothing on screen says so (.label()); never shown
     var arrives: Bool  # it arrives on a spring the first time it's shown (.arrive()): fades and rises into place
+    var hidden: Bool  # in the tree but not drawn (.hidden()): agents and test steps still reach it (a ribbon's other tabs, D-7601)
 
     def __init__(
         out self,
@@ -238,6 +239,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
         self.tip = ""
         self.label = ""
         self.arrives = False
+        self.hidden = False
 
     def __eq__(self, other: Self) -> Bool:
         return (
@@ -271,6 +273,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
             and self.height_from_parent == other.height_from_parent
             and (place or (self.x == other.x and self.y == other.y)) and (self.tip == other.tip or (self.kind == CANVAS and other.kind == CANVAS))  # (a canvas's tooltip, its words, is a patch: SET_TIP)
             and (self.label == other.label or (self.kind == CANVAS and other.kind == CANVAS))  # (a new label is a new layout; a canvas's is a patch, SET_TIP: its picture stays)
+            and self.hidden == other.hidden  # (shown or hidden: laid out again)
         )
 
     def sized_width(self) -> Bool:
@@ -391,6 +394,14 @@ struct View(Copyable, Movable):
         GTK: libadwaita's AdwSpringAnimation on its opacity and top margin; the web: a spring curve (CSS linear()).
         Hosts skip it when the system asks for less motion."""
         self.nodes[0].arrives = True
+        return self^
+
+    def hidden(var self, yes: Bool = True) -> View:
+        """In the tree but not drawn (and taking no room): a ribbon's tabs that aren't selected, a menu whose items only
+        lend their shortcuts. Agents still list its controls as tools and test steps still reach them (they act as if
+        tapped), keyboard shortcuts of its menu items still fire, and a Mac's system menu bar still shows its menus.
+        GTK: gtk_widget_set_visible(FALSE); the web: the hidden attribute; AppKit: setHidden: (a stack detaches it)."""
+        self.nodes[0].hidden = yes
         return self^
 
     def secret(var self) -> View:
