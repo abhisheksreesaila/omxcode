@@ -138,3 +138,5 @@ Unverified on the owner's desktop (the window class is GTK's application id, `de
   68 M2 ("Run it on all didn't fill the similarity column") and goal 47 M8 (SLOW lines), both while the GPU was busy with other
   work. Rerun alone on the same build with the GPU free: `68-check M2: PASS` (BGE's similarity column filled by the agent) and
   `47-check M8: PASS ... 0 SLOW on GTK`. The full chain was not rerun end to end after that.
+  Their printed verdicts (`M2: PASS … a similarity column (BGE, by the agent)`, `M8: PASS … 0 SLOW on GTK`) are kept in
+  build/g78/solo-reruns-68m2-47m8.txt (the console of that run, copied there; the checks write no file of their own).
