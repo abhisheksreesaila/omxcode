@@ -259,6 +259,13 @@ def _prop_text(p: Prop) -> String:
         var first = True
         for ref f in p.fields:
             t += ("" if first else ",") + f.name
+            if f.kind == P_TEXTS:  # (a nested list: a tile's actions, its faces)
+                t += ":[text]"
+            elif f.kind == P_ITEMS:
+                t += ":[{"
+                for c in range(len(f.choices)):
+                    t += ("," if c > 0 else "") + f.choices[c]
+                t += "}]"
             first = False
         t += "}]"
     return p.name + ("*" if p.required else "") + ":" + t

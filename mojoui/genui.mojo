@@ -52,10 +52,13 @@ from mojoui.pointer import Part, area_part, names_for, part_name
 from mojoui.wordcard import WordCard, word_parts, draw_word
 from mojoui.tripmap import TripMap, Stop
 from mojoui.iso import IsoDiagram, iso_problem, draw_iso, LIFT_MS
+from mojoui.livetiles import LiveTiles, TileLook, Tile
+from mojoui.tilescard import tiles_problem, centre_tiles, side_tiles, tint_names, result_word, KIND_PASSIVE, KIND_LIVE
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
 from mojoui.app import Event
+from mojoui.view import RELEASE, TAP
 from mojoui.partialjson import complete
 from mojoui.clock import now_ns
 
@@ -81,6 +84,8 @@ comptime P_ITEMS = 11  # a list of small objects, each with the prop's fields
 comptime POINTER_PATTERN = "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$"  # (no "-": a bind never appends)
 comptime NUMBER_LIMIT = 1_000_000_000_000_000  # numbers an agent sends: within ±1e15 (finite, drawable)
 comptime WORD_PATTERN = "^[a-z][a-z0-9_]{0,39}$"
+comptime FIELD_TEXT_LIMIT = 60  # a list-of-text field's strings (a tile's actions)
+comptime FIELD_OBJECT_LIMIT = 120  # an object-list field's text (a tile's faces)
 
 
 @fieldwise_init
@@ -147,6 +152,25 @@ def optional_rows(name: String, most_rows: Int, most_cells: Int, about: String) 
 
 def items(name: String, low: Int, high: Int, var fields: List[Field], required: Bool = False, about: String = "") -> Prop:
     return Prop(name, P_ITEMS, required, high, low, List[String](), about, fields^)
+
+
+def field_text(name: String, limit: Int, required: Bool = False) -> Field:
+    return Field(name, P_TEXT, required, limit, 0, List[String]())
+
+
+def field_texts(name: String, low: Int, high: Int, required: Bool = False) -> Field:
+    """A field that is a list of low…high short strings (each at most FIELD_TEXT_LIMIT characters)."""
+    return Field(name, P_TEXTS, required, high, low, List[String]())
+
+
+def field_objects(name: String, low: Int, high: Int, var names: List[String], required: Bool = False) -> Field:
+    """A field that is a list of low…high small objects whose fields are all text (`names`, the first required, each at most
+    FIELD_OBJECT_LIMIT characters): a tile's faces [{big, sub}]."""
+    return Field(name, P_ITEMS, required, high, low, names^)
+
+
+def field_flag(name: String) -> Field:
+    return Field(name, P_BOOL, False, 0, 0, List[String]())
 
 
 def kids() -> Prop:
@@ -250,6 +274,13 @@ def catalog() -> List[Spec]:
         items("steps", 1, 8, [Field("block", P_TEXT, True, 40, 0, List[String]()), Field("text", P_TEXT, True, 140, 0, List[String]())], True,
               "what happens, in order: block names a block by its label, text is one short sentence"),
         number("height", 160, 600, False, "points: the drawing's")]))
+    out.append(Spec("LiveTiles", "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint, an icon (car, cloud, todo, cal, gift, cam, timer, plane, home), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.", [
+        text("title", 80),
+        items("tiles", 1, 12, [field_text("id", 40, True), Field("kind", P_ENUM, False, 0, 0, ["centre", "passive", "live"]),
+                               Field("tint", P_ENUM, False, 0, 0, tint_names()), field_text("icon", 20), field_text("head", 40, True),
+                               field_objects("faces", 1, 4, ["big", "sub"], True), field_text("why", 120), field_texts("actions", 0, 2),
+                               field_flag("big"), field_text("charm", 20)], True, "the tiles, most important first"),
+        number("height", 240, 900, False, "points: the grid's")]))
     out.append(Spec("Icon", "a Lucide icon by name (\"map-pin\", \"calendar\", \"check\")", [text("name", 40, True), number("size", 12, 64)]))
     # inputs
     out.append(Spec("Button", "a button that reports its action", [
@@ -323,6 +354,14 @@ def sample(name: String) -> String:
         n = '{"component":"MapView","route":[[38.70,-9.14],[38.69,-9.20]],"places":[{"lat":38.70,"lon":-9.14,"label":"Baixa"}]}'
     elif name == "TripMap":
         n = '{"component":"TripMap","area":"Lisbon, Portugal","stops":[{"name":"Belém Tower","note":"the river fort","lat":38.6916,"lon":-9.216},{"name":"the Alfama","lat":38.7114,"lon":-9.1301}],"height":300}'
+    elif name == "LiveTiles":
+        n = ('{"component":"LiveTiles","tiles":['
+             + '{"id":"traffic","tint":"green","icon":"car","head":"Traffic","faces":[{"big":"Leave by 8:05","sub":"Bridge is slow · +18 min to school"},{"big":"26 min to school","sub":"via the river road"}],"why":"you leave in 20 minutes","actions":["Directions","Tell school"]},'
+             + '{"id":"todo","tint":"orange","icon":"todo","head":"To do","faces":[{"big":"3 to do","sub":"Call mum · Pick up Maya · Water bill"}]},'
+             + '{"id":"cal","tint":"red","icon":"cal","head":"Calendar","faces":[{"big":"Pickup 3:15","sub":"Maya · the side gate"}]},'
+             + '{"id":"weather","tint":"blue","icon":"cloud","head":"Weather","faces":[{"big":"9° · clear","sub":"rain after 4"}],"why":"rain starts before pickup","actions":["Remind me at 3"]},'
+             + '{"id":"bday","kind":"passive","tint":"purple","icon":"gift","head":"Birthday","faces":[{"big":"Mum · Saturday","sub":"turns 64"}]},'
+             + '{"id":"timer","kind":"live","tint":"amber","icon":"timer","head":"Timer","faces":[{"big":"Pasta 6:40"}]}],"height":420}')
     elif name == "Iso":
         n = '{"component":"Iso","title":"How a heat pump heats a house","blocks":[{"label":"Outdoor coil","kind":"device"},{"label":"Compressor","kind":"process"},{"label":"Indoor coil","kind":"device"},{"label":"Living room","kind":"place"}],"links":[{"from":"Outdoor coil","to":"Compressor","label":"cold gas"},{"from":"Compressor","to":"Indoor coil","label":"hot gas"},{"from":"Indoor coil","to":"Living room","label":"warm air"}],"steps":[{"block":"Outdoor coil","text":"The outdoor coil soaks up heat from the outside air."},{"block":"Compressor","text":"The compressor squeezes the gas so it gets hot."},{"block":"Indoor coil","text":"The indoor coil gives the heat to the air inside."},{"block":"Living room","text":"A fan blows the warm air into the living room."}]}'
     elif name == "WordCard":
@@ -357,6 +396,17 @@ def sample(name: String) -> String:
 # ---------------------------------------------------------------------------------------------------------------------
 
 def field_schema(f: Field) -> String:
+    if f.kind == P_BOOL:
+        return '{"type":"boolean"}'
+    if f.kind == P_TEXTS:
+        return '{"type":"array","minItems":' + String(f.low) + ',"maxItems":' + String(f.limit) + ',"items":{"type":"string","maxLength":' + String(FIELD_TEXT_LIMIT) + "}}"
+    if f.kind == P_ITEMS:
+        var props = String("{")
+        for i in range(len(f.choices)):
+            props += ("," if i > 0 else "") + json_string(f.choices[i]) + ':{"type":"string","maxLength":' + String(FIELD_OBJECT_LIMIT) + "}"
+        var req = ('"required":[' + json_string(f.choices[0]) + "],") if len(f.choices) > 0 else String("")
+        return ('{"type":"array","minItems":' + String(f.low) + ',"maxItems":' + String(f.limit) + ',"items":{"type":"object","properties":' + props + "},"
+                + req + '"additionalProperties":false}}')
     if f.kind == P_TEXT:
         return '{"type":"string","maxLength":' + String(f.limit) + "}"
     if f.kind == P_ENUM:
@@ -491,6 +541,41 @@ def within(j: Json, v: Int, low: Float64, high: Float64) -> Bool:
 
 def check_field(j: Json, v: Int, f: Field, bad: String) raises:
     var k = j.kind(v)
+    if f.kind == P_BOOL:
+        if k != J_BOOL:
+            raise Error(bad + "'s " + f.name + " must be true or false")
+        return
+    if f.kind == P_TEXTS:
+        if k != J_ARRAY or j.size(v) < f.low or j.size(v) > f.limit:
+            raise Error(bad + "'s " + f.name + " must be a list of " + String(f.low) + " to " + String(f.limit) + " strings")
+        for i in range(j.size(v)):
+            if j.kind(j.at(v, i)) != J_STRING or chars(j.text(j.at(v, i))) > FIELD_TEXT_LIMIT:
+                raise Error(bad + "'s " + f.name + " must hold strings of at most " + String(FIELD_TEXT_LIMIT) + " characters")
+        return
+    if f.kind == P_ITEMS:
+        if k != J_ARRAY or j.size(v) < f.low or j.size(v) > f.limit:
+            raise Error(bad + "'s " + f.name + " must be a list of " + String(f.low) + " to " + String(f.limit) + " objects")
+        for i in range(j.size(v)):
+            var it = j.at(v, i)
+            var at = bad + "'s " + f.name + "[" + String(i) + "]"
+            if j.kind(it) != J_OBJECT:
+                raise Error(at + " must be an object")
+            for key in j.keys[it]:
+                var known = False
+                for c in f.choices:
+                    if c == key:
+                        known = True
+                if not known:
+                    raise Error(at + " has no field " + json_string(key))
+            for c in range(len(f.choices)):
+                var fv = j.get(it, f.choices[c])
+                if fv < 0:
+                    if c == 0:
+                        raise Error(at + " needs " + json_string(f.choices[c]))
+                    continue
+                if j.kind(fv) != J_STRING or chars(j.text(fv)) > FIELD_OBJECT_LIMIT:
+                    raise Error(at + "'s " + f.choices[c] + " must be a string of at most " + String(FIELD_OBJECT_LIMIT) + " characters")
+        return
     if f.kind == P_TEXT:
         if k != J_STRING or chars(j.text(v)) > f.limit:
             raise Error(bad + "'s " + f.name + " must be a string of at most " + String(f.limit) + " characters")
@@ -634,6 +719,10 @@ def walk(j: Json, n: Int, depth: Int, where: String, specs: List[Spec], mut coun
     for ref p in spec.props:
         if p.required and j.get(n, p.name) < 0:
             raise Error("bad prop: " + where + ": " + name + " needs " + json_string(p.name))
+    if name == "LiveTiles":  # (rules a schema can't say: ids unique lower-case words, at least one tile on the grid)
+        var why_tiles = tiles_problem(j, n)
+        if why_tiles != "":
+            raise Error("bad prop: " + where + ": " + why_tiles)
     if name == "Iso":  # (a rule a schema can't say: every link and step names one of the blocks)
         var why = iso_problem(j, n)
         if why != "":
@@ -777,6 +866,7 @@ comptime CV_WORD = 6  # a WordCard's big word, typed in letter by letter
 comptime CV_SIGHT = 7  # a Sight card: the camera's still with its labelled boxes
 comptime CV_TRIP = 8  # a TripMap: tiles from the web, numbered stops, a route; flies to a stop when it is pointed at (goal 77 M3)
 comptime CV_ISO = 9  # an isometric diagram (mojoui.iso)
+comptime CV_TILES = 10  # live tiles (mojoui.livetiles): the centre tiles on a 4x3 grid that glide when the agent patches them (goal 77 M7c)
 
 
 @fieldwise_init
@@ -794,7 +884,8 @@ struct UiAction(Copyable, Movable):
 def is_control(comp: String) -> Bool:
     return (comp == "Button" or comp == "TextField" or comp == "TextArea" or comp == "Toggle" or comp == "Checkbox"
             or comp == "Dropdown" or comp == "Slider" or comp == "Segmented" or comp == "Radio" or comp == "DatePicker"
-            or comp == "Tabs" or comp == "CodeBlock" or comp == "Breadcrumbs" or comp == "DataGrid" or comp == "Disclosure")
+            or comp == "Tabs" or comp == "CodeBlock" or comp == "Breadcrumbs" or comp == "DataGrid" or comp == "Disclosure"
+            or comp == "LiveTiles")
 
 
 def canvas_kind(comp: String) -> Int:
@@ -818,6 +909,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_TRIP
     if comp == "Iso":
         return CV_ISO
+    if comp == "LiveTiles":
+        return CV_TILES
     return -1
 
 
@@ -862,6 +955,9 @@ struct GenUi[H: Hub = NoData](Movable):
     var was_ns: Int
     var pointed: Int  # bumps on every point_at() that changes something: part of the pointable canvases' versions
     var stepping: List[Int]  # per canvas: an Iso's step being spoken (-1: none yet)
+    var tiles: List[LiveTiles]  # per canvas (CV_TILES: its tiles and their motion; carried over a patch, so they glide: carry())
+    var tile_ns: List[Int]  # per canvas: now_ns() of its last drawn frame (the tiles' springs step by wall time; 0: start again)
+    var tile_resize: List[String]  # per canvas: a grip resize seen during a drag, reported when the drag ends
 
     def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H(), album: Album = Album()):
         self.problem = validate(args)
@@ -895,6 +991,9 @@ struct GenUi[H: Hub = NoData](Movable):
         self.was_ns = 0
         self.pointed = 0
         self.stepping = List[Int]()
+        self.tiles = List[LiveTiles]()
+        self.tile_ns = List[Int]()
+        self.tile_resize = List[String]()
         if self.problem != "":
             self.json = Json()
             return
@@ -983,6 +1082,12 @@ struct GenUi[H: Hub = NoData](Movable):
             self.born.append(0)
             self.trips.append(self.trip_of(n) if kind == CV_TRIP else TripMap.empty())
             self.stepping.append(-1)
+            var lt = LiveTiles()
+            if kind == CV_TILES:
+                lt.set_tiles(centre_tiles(self.json, n))
+            self.tiles.append(lt^)
+            self.tile_ns.append(0)
+            self.tile_resize.append("")
             self.sources.append(source)
             self.notes.append("")
             if kind == CV_CHART and source >= 0:
@@ -1285,6 +1390,28 @@ struct GenUi[H: Hub = NoData](Movable):
                 var said = Paragraph(runs^)
                 rows.append(HStack(Chip(String(i + 1), 1 if now else 0), said^.grow(), spacing=SPACE_S).align(START).fill())
             return self.framed(n, VStack(rows^, spacing=SPACE_S).align(START).fill(), in_card)
+        if comp == "LiveTiles":  # the centre tiles drawn by mojoui.livetiles (each a part the pointer finds in it), the others named under it
+            var k = self.canvas_of.get(n, 0)
+            var rows = List[View]()
+            rows.append(Canvas(self.canvas(n), v + self.stamp(n) + self.tiles[k].version + self.pointed, on_gesture=self.msg(n))
+                        .fill().height(Int(self.num(n, "height", 420))).tag(self.tiles_tag(k)))
+            var lay = self.tiles[k].layout()
+            var off = List[Tile]()
+            for t in centre_tiles(self.json, n):
+                for o in lay.overflow:
+                    if o == t.id:
+                        off.append(t.copy())
+            var names: List[String] = ["Today", "Live", "Not on the grid"]
+            for g in range(3):
+                var group = side_tiles(self.json, n, KIND_PASSIVE) if g == 0 else (side_tiles(self.json, n, KIND_LIVE) if g == 1 else off.copy())
+                if len(group) == 0:
+                    continue
+                var line = List[View]()
+                line.append(Text(names[g], style=CAPTION))
+                for ref t in group:
+                    line.append(Text(t.head + " · " + t.faces[0].big).tag(self.card + "." + part_name(t.id)))
+                rows.append(HStack(line^, spacing=SPACE_M).align(CENTER))
+            return self.framed(n, VStack(rows^, spacing=SPACE_S).align(START).fill(), in_card)
         if comp == "Picture" or comp == "Sight":
             var parts = List[View]()
             var picture = Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200)))
@@ -1370,6 +1497,22 @@ struct GenUi[H: Hub = NoData](Movable):
                 _ = self.grids[c].handle(e, self.tables[c], font, self.palette.value())
             self.drawn += 1
             return UiAction(ACT_LOCAL, "", "", "")
+        if comp == "LiveTiles":  # press, tap, drag, grip: what the person did goes to the agent ({"did", "id", "text"}); a resize once the drag ends
+            var c = self.canvas_of.get(n, 0)
+            self.tiles[c].gesture(e.number, e.x, e.y)
+            var said = String("")
+            for r in self.tiles[c].take_results():
+                var one = '{"did":' + json_string(result_word(r.kind)) + ',"id":' + json_string(r.id) + ((',"text":' + json_string(r.text)) if r.text != "" else String("")) + "}"
+                if result_word(r.kind) == "resized":
+                    self.tile_resize[c] = one
+                else:
+                    said = one
+            if (e.number == RELEASE or e.number == TAP) and self.tile_resize[c] != "":
+                said = self.tile_resize[c]
+                self.tile_resize[c] = ""
+            if said == "":
+                return UiAction(ACT_LOCAL, "", "", "")
+            return UiAction(ACT_ACTION, "", "tiles", said)
         if comp == "Confirm":
             var yes = self.roles[k] == ROLE_MAIN
             return UiAction(ACT_ACTION, "", "approve" if yes else "reject", "true" if yes else "false")
@@ -1429,7 +1572,71 @@ struct GenUi[H: Hub = NoData](Movable):
             elif self.kinds[k] == CV_ISO:  # each block, named by its label, in the drawing's view
                 for pt in IsoDiagram.parse(self.json, n).parts(self.card, self.iso_tag(k)):
                     out.append(pt.copy())
+            elif self.kinds[k] == CV_TILES:  # each grid tile, named by its head and id, in the canvas (a moving spot while it glides); the others by their line
+                for pt in self.tiles[k].parts(self.card, self.tiles_tag(k)):
+                    out.append(pt.copy())
+                var shown = self.tiles[k].layout().ids.copy()
+                var ts = self.json.get(n, "tiles")
+                for i in range(self.json.size(ts)):
+                    var t = self.json.at(ts, i)
+                    var id = self.str(t, "id")
+                    var on_grid = False
+                    for s_ in shown:
+                        if s_ == id:
+                            on_grid = True
+                    if not on_grid:
+                        out.append(Part(self.card, part_name(id), [self.str(t, "head"), id]))
         return out^
+
+    def tiles_tag(self, k: Int) -> String:
+        """The tag of canvas k's view when it is a LiveTiles ("card2.tiles0"): where the pointer finds its tiles."""
+        return self.card + ".tiles" + String(k)
+
+    def tiles_node(self) -> Int:
+        """The first LiveTiles node of the screen (-1: none)."""
+        for k in range(len(self.canvases)):
+            if self.kinds[k] == CV_TILES:
+                return self.canvases[k]
+        return -1
+
+    def tiles_at(self, n: Int) -> LiveTiles:
+        """The live tiles drawn for node n (their layout, what is shown, where)."""
+        return self.tiles[self.canvas_of.get(n, 0)].copy()
+
+    def args(self) -> String:
+        """The screen as render_ui arguments again ({"ui": …}): what a patch (Screens.patch) applies to."""
+        return '{"ui":' + dump(self.json, self.json.get(0, "ui")) + "}"
+
+    def pointer_to(self, target: Int) -> String:
+        """Node `target`'s JSON pointer in args() ("/ui/children/0"); "" when it isn't in the screen."""
+        return self._path(self.json.get(0, "ui"), target, "/ui")
+
+    def _path(self, n: Int, target: Int, here: String) -> String:
+        if n == target:
+            return here
+        var ch = self.json.get(n, "children")
+        for i in range(self.json.size(ch)):
+            var p = self._path(self.json.at(ch, i), target, here + "/children/" + String(i))
+            if p != "":
+                return p
+        return ""
+
+    def carry(mut self, mut old: GenUi[Self.H]):
+        """This screen replaces `old` (a patch of it): it keeps old's name, focus, open tabs and its tiles' motion, so the tiles
+        that moved glide from where they were to where the patch puts them."""
+        self.card = old.card
+        self.focus = old.focus
+        self.focus_ns = old.focus_ns
+        self.was = old.was
+        self.was_ns = old.was_ns
+        self.pointed = old.pointed + 1
+        self.picks = old.picks.copy()
+        for k in range(min(len(self.canvases), len(old.canvases))):
+            if self.kinds[k] == CV_TILES and old.kinds[k] == CV_TILES:
+                var t = old.tiles[k].copy()
+                t.set_tiles(centre_tiles(self.json, self.canvases[k]))
+                self.tiles[k] = t^
+                self.tile_ns[k] = 0
 
     def iso_tag(self, k: Int) -> String:
         """The tag of canvas k's view when it is an Iso ("card2.iso1"): where the pointer finds its blocks."""
@@ -1446,6 +1653,10 @@ struct GenUi[H: Hub = NoData](Movable):
         self.focus = mine
         self.focus_ns = now_ns()
         self.pointed += 1
+        for k in range(len(self.canvases)):  # (a tile the pointer is on rises a little; the one before sinks back)
+            if self.kinds[k] == CV_TILES:
+                self.tiles[k].focus(String(mine[byte = self.card.byte_length() + 1 :]) if mine != "" else String(""))
+                self.tile_ns[k] = 0
         if mine == "":
             return
         var part = String(mine[byte = self.card.byte_length() + 1 :])
@@ -1537,6 +1748,15 @@ struct GenUi[H: Hub = NoData](Movable):
                 q_was = 1.0
             draw_iso(surface, d, p, font, focus, q, was, q_was, self.stepping[k])
             if (focus >= 0 and q < 1.0) or (was >= 0 and q_was < 1.0):
+                surface.again = True
+        elif kind == CV_TILES:  # the springs step by the wall time since the last frame (at most two frames' worth); frames while anything moves
+            var now = now_ns()
+            var dt = min((now - self.tile_ns[k]) // 1000, 34_000) if self.tile_ns[k] > 0 else 0
+            self.tile_ns[k] = now
+            _ = self.tiles[k].frame(dt)
+            self.tiles[k].spots(self.card, self.tiles_tag(k))
+            self.tiles[k].draw(surface, TileLook.of(p), font)
+            if self.tiles[k].moving() and not surface.still:
                 surface.again = True
         elif kind == CV_PICTURE:
             surface.fill(p.card)

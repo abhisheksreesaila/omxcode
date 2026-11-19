@@ -21,6 +21,7 @@
 #   tiles.charm_anchors()          where each tile's charm hangs now (a charm this module does not draw itself: M7e's)
 #   tiles.record()                 one line per tile as last drawn: its surface and its words' box (a proof's evidence)
 #   tiles.reset()                  forget the user's order and sizes
+#   tiles.focus(id)                the pointer is on this tile ("" none): it rises a little, the one before sinks back
 #
 # The pure layout (preset, pack, cell_box, press_amount) has no Canvas in it: tests/test_livetiles.mojo calls it directly.
 # Presets by tile count keep the grid full: 6 = l w w w s s, 5 = l w w w w, 4 = l l w w, 3 = xl w w, 2 = xl band, 1 = xl;
@@ -63,6 +64,7 @@ comptime DRAG_START = 7.0  # points the pointer moves before a press becomes a d
 comptime SWAP_MS = 160  # a dragged tile passes over another at most this often
 comptime GRIP = 30.0  # the corner grip's square, points
 comptime LIFT = 1.04
+comptime FOCUS_LIFT = 1.025  # a tile the pointer is on rises this much (goal 77 M7c, as an Iso block rises: D-7755)
 comptime FADE_FROM = 0.3  # the words stay clear until this far into the water's time
 
 # results (TileResult.kind)
@@ -349,7 +351,7 @@ def _f1(v: Float64) -> String:
     return ("-" if v < 0 and n > 0 else "") + String(n // 10) + "." + String(n % 10)
 
 
-struct LiveTiles(Movable):
+struct LiveTiles(Copyable, Movable):
     var tiles: List[Tile]
     var version: Int  # put it in the Canvas: it moves on whenever the picture changes
     var width: Float64  # the canvas, points (from the last draw)
@@ -467,6 +469,20 @@ struct LiveTiles(Movable):
         self.user_ids.append(id)
         self.user_sizes.append(size)
         self._retarget(False)
+
+    def focus(mut self, id: String):
+        """The pointer is on tile `id` ("" on none): it rises a little (FOCUS_LIFT on the fast spring), the others go back."""
+        for k in range(len(self.anims)):
+            if self.mode == _DRAGGING and self.anims[k].id == self.active:
+                continue
+            var want = FOCUS_LIFT if self.anims[k].id == id and id != "" else 1.0
+            if abs(self.anims[k].lift.target - want) < 1e-6:
+                continue
+            if self.reduced:
+                self.anims[k].lift.snap(want)
+            else:
+                self.anims[k].lift.to(want)
+            self.version += 1
 
     def take_results(mut self) -> List[TileResult]:
         var out = self.results.copy()
