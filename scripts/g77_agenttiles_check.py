@@ -13,7 +13,8 @@ the real client loop (mojoui.agui.Agent.run_local, mojoui.agentui.Screens).
    card (traffic first); "Rain at pickup" -> the tiles tool promotes weather (it is the first, large tile; the grid stays full: 0 holes);
    the agent then sends a CUSTOM point naming the weather tile and the pointer's ring lands on it: the ring's rect (from the springs
    it is painted with) inside the tile's rect (its canvas's rect plus the layout's cell) within 3 pt, IoU >= 0.9; on GTK also by the
-   ring's own pixels: the centre of what a screenshot while it shows differs from one after it faded lies inside the tile.
+   ring's own pixels: the pointer layer's picture, saved by the app while the ring is settled at full strength, painted >= 1500 pixels,
+   all within the tile plus the ring's reach, centred inside the tile.
 4. Pictures: docs/goals/77/m7c-gtk-morning.png, m7c-gtk-point.png, m7c-web-point.png.
 Returns ("PASS" | "FAIL" | "BLOCKED", why).
 """
@@ -95,12 +96,15 @@ def read_run(host, text, probs):
     return got
 
 
-def ring_pixels(with_ring, without, tile):
-    """The centre of what differs between a picture while the ring shows and one after it faded (window pixels = points here)."""
-    from PIL import Image, ImageChops
-    a = Image.open(with_ring).convert("RGB")
-    b = Image.open(without).convert("RGB")
-    d = ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v > 24 else 0)
+def ring_pixels(layer, scale=1.0):
+    """What the pointer's layer painted (its own pixels, saved by the app while the ring is settled at full strength: a
+    see-through canvas, so every pixel with alpha is the ring, its glow or its tint): the centre, the count and the box, in
+    the layer's points."""
+    from PIL import Image
+    a = Image.open(layer).convert("RGBA").getchannel("A")
+    if scale != 1.0:
+        a = a.resize((round(a.width / scale), round(a.height / scale)))
+    d = a.point(lambda v: 255 if v > 24 else 0)
     box = d.getbbox()
     if not box:
         return None, 0, None
@@ -118,25 +122,32 @@ def ring_pixels(with_ring, without, tile):
 def check_gtk(said, probs):
     import headless
     headless.ensure()
-    for f in ("gtk-morning.png", "gtk-point.png", "gtk-faded.png"):
+    for f in ("gtk-morning.png", "gtk-point.png", "gtk-ring.png"):
         (OUT / f).unlink(missing_ok=True)
+    # the ring is judged from the pointer layer's own pixels, saved by the app once the ring has settled on the tile at full
+    # strength (AGENTTILES_RING_SHOT): the same pixels GTK shows over the page, with no race against a test step's settling
+    # (a window shot right after the tap caught it before or after it showed on two reruns: D-7821). The window picture is
+    # only the record for people.
     steps = (f"wait:900;tap:What matters this morning?;wait:1500;shot:{OUT}/gtk-morning.png;tap:Rain at pickup;"
-             f"shot:{OUT}/gtk-point.png;wait:7500;shot:{OUT}/gtk-faded.png;wait:200")
-    r = sh([str(ROOT / "build/agenttiles/linux/agenttiles")], 240, {"MOJOUI_TEST": steps})
+             f"wait:1600;shot:{OUT}/gtk-point.png;wait:2500")
+    r = sh([str(ROOT / "build/agenttiles/linux/agenttiles")], 240, {"MOJOUI_TEST": steps, "AGENTTILES_RING_SHOT": str(OUT / "gtk-ring.png")})
     (OUT / "gtk.txt").write_text(r.stdout + r.stderr)
     if r.returncode:
         probs.append(f"GTK: exit {r.returncode}: {tail(r)}")
         return
     got = read_run("GTK", r.stdout, probs)
-    if "tile" in got and (OUT / "gtk-point.png").exists() and (OUT / "gtk-faded.png").exists():
-        c, n, box = ring_pixels(OUT / "gtk-point.png", OUT / "gtk-faded.png", rect(got["tile"]))
+    shot = re.search(r"^TILES RING_SHOT: \S+ scale=(\S+) on=(\S+)$", r.stdout, re.M)
+    if "tile" in got and not shot:
+        probs.append("GTK: the app saved no ring picture (TILES RING_SHOT)")
+    if "tile" in got and shot and (OUT / "gtk-ring.png").exists():
+        c, n, box = ring_pixels(OUT / "gtk-ring.png", float(shot.group(1)))
         t = rect(got["tile"])
         reach = 24  # (the ring's gap 5 + glow 9 + its width, and the pointed tile's 2.5 % lift)
         if (c is None or not (t[0] <= c[0] <= t[0] + t[2] and t[1] <= c[1] <= t[1] + t[3]) or n < 1500
                 or not (box[0] >= t[0] - reach and box[1] >= t[1] - reach and box[2] <= t[0] + t[2] + reach and box[3] <= t[1] + t[3] + reach)):
-            probs.append(f"GTK: the ring's pixels ({n} changed, centre {c}, within {box}) are not round the weather tile {got['tile']} only")
+            probs.append(f"GTK: the ring's pixels ({n} painted, centre {c}, within {box}) are not round the weather tile {got['tile']} only")
         else:
-            got["pixels"] = f"{n} px changed, all within {box[0]},{box[1]}..{box[2]},{box[3]}, centre {c[0]:.0f},{c[1]:.0f}"
+            got["pixels"] = f"{n} px painted by the layer (ring at {float(shot.group(2)):.2f}), all within {box[0]},{box[1]}..{box[2]},{box[3]}, centre {c[0]:.0f},{c[1]:.0f}"
         shutil.copy(OUT / "gtk-morning.png", SHOTS / "m7c-gtk-morning.png")
         shutil.copy(OUT / "gtk-point.png", SHOTS / "m7c-gtk-point.png")
     if "iou" in got:

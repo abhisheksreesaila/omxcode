@@ -4,7 +4,7 @@
 # is live (one-line rows: timers, scores). The side columns recede under a soft shade that runs to the window's edges, so
 # the centre reads as in front. Flat: no glass, no blur.
 #
-#   Stage(top, left, centre, right, StageChat(orb, text, "Ask omx…", on_change=T, on_submit=S, on_mic=M), width, height)
+#   Stage(top, left, centre, right, StageChat(orb, text, "Ask omx…", on_change=T, on_submit=S, on_mic=M), width)
 #
 #   Desktop: columns minmax(200, 1fr) | minmax(0, 2.75fr) | minmax(200, 1fr), 18 apart, 18 in from the sides; the top bar
 #   14 from the top and 14 above the columns. Narrower than 1000: the right column goes (left minmax(180, 1fr) | 2.6fr).
@@ -13,8 +13,9 @@
 #   (StageList(compact=True): pins in a row) and a test checks the numbers without a host.
 #
 #   Parts (each a role its theme shapes, themes/omxqua.mojo omxqua_counter): StageClock(time, date, weather) ·
-#   StageLabel(icon, text) · StageCard(icon, head, title, sub, hue) (a pinned or Today card) · StageRow(icon, head, value,
-#   hue) (a Live row) · StageList(items, compact) · StageAvatar(initials, hue, on_tap) · StagePill(icon, label, on_tap, compact) ·
+#   StageLabel(icon, text) · StageCard(icon, head, title, sub, hue, on_unpin) (a pinned or Today card) · StageRow(icon, head,
+#   value, hue) (a Live or Today row) · StageNote(text) (an empty list's line) · StageList(items, compact) ·
+#   StageAvatar(initials, hue, on_tap) · StagePill(icon, label, on_tap, compact) ·
 #   StageChat(orb, text, placeholder, …) (orb, a text box, the mic).
 #
 #   Roles: stage (the whole), stage-top, stage-side (a shaded band: its fill is the shade), stage-left, stage-centre,
@@ -84,6 +85,11 @@ def _gap(points: Int) -> View:
     return VStack(spacing=0).width(points)
 
 
+def _side_scroll(side: View) -> View:
+    """A side column's content in a scroller as tall as its band: a long Today, Pinned or Live list scrolls on its own."""
+    return Scroll(VStack(side.copy().fill(), spacing=0).align(START).fill(), height=0).grow().fill().tag("stage-side-scroll")
+
+
 def _below_gap(var band: View) -> View:
     """A side band with the top bar's 14 above it (when the columns own that gap: a Stage with a TV)."""
     return VStack(_gap(0).height(STAGE_PAD_TOP), band^.grow(), spacing=0).fill().tag("stage-side-wrap")
@@ -105,10 +111,11 @@ def _tv_layers(var base: View, tv: StageTV, content: TVContent, var bar_part: Vi
     return Overlay(base^, box^, band^)
 
 
-def Stage(top: View, left: View, centre: View, right: View, bar: View, width: Int, height: Int,
+def Stage(top: View, left: View, centre: View, right: View, bar: View, width: Int,
           compact_panel: Int = STAGE_COMPACT_PANEL, tv: StageTV = StageTV(), content: TVContent = TVContent()) -> View:
-    """The four regions and the chat bar at a window `width` × `height` (App.resize hands it: pass what it said). `top`
-    spans the window; `left` and `right` sit in shaded bands that run to the window's edges and bottom; `centre` fills
+    """The four regions and the chat bar at a window `width` (App.resize hands it: pass what it said; the height is the
+    hosts' to fill). `top` spans the window; `left` and `right` sit in shaded bands that run to the window's edges and
+    bottom, each scrolling on its own when what it holds is taller than the window (a desktop); `centre` fills
     the raised panel (a Canvas of tiles: give it grow/fill); `bar` (StageChat) sits under the panel in a pill 64 high.
     On a phone the regions stack and scroll, and the bar stays at the bottom.
     `tv` (mojoui.stagetv, M7d): when it has a canvas, the chat bar can grow into the TV over the whole centre column (a
@@ -132,7 +139,7 @@ def Stage(top: View, left: View, centre: View, right: View, bar: View, width: In
         # overshoot pokes up into the gap as the prototype's does rather than being cut flat; D-7812)
         top_row = VStack(_gap(0).height(STAGE_PAD_TOP), top_line^.fill(), spacing=0).fill()
     var half = STAGE_GAP // 2  # (a band's shade stops half a gap short of the centre, as the prototype's st-shade)
-    var left_band = HStack(_gap(STAGE_PAD_X), VStack(left.copy().fill(), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-left"),
+    var left_band = HStack(_gap(STAGE_PAD_X), VStack(_side_scroll(left), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-left"),
                            _gap(half), spacing=0).width(STAGE_PAD_X + lay.side + half).fill().tag("stage-side")
     var panel = VStack(centre.copy().grow().fill(), spacing=0).padding(STAGE_PANEL_PAD).grow().fill().tag("stage-panel")
     var centre_col: View
@@ -147,7 +154,7 @@ def Stage(top: View, left: View, centre: View, right: View, bar: View, width: In
     cols.append(left_band^)
     cols.append(centre_col^)
     if lay.right:
-        var right_band = HStack(_gap(half), VStack(right.copy().fill(), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-right"),
+        var right_band = HStack(_gap(half), VStack(_side_scroll(right), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-right"),
                                 _gap(STAGE_PAD_X), spacing=0).width(half + lay.side + STAGE_PAD_X).fill().tag("stage-side")
         cols.append(_below_gap(right_band^) if tv.on() else right_band^)
     else:
@@ -186,11 +193,18 @@ def _kind(icon: String, hue: Int) -> View:
     return HStack(Icon(icon, 12).tag("stage-glyph"), spacing=0).align(CENTER).justify(CENTER).width(20).height(20).tag(role)
 
 
-def StageCard(icon: String, head: String, title: String, sub: String = "", hue: Int = 0) -> View:
+def StageCard(icon: String, head: String, title: String, sub: String = "", hue: Int = 0, on_unpin: Int = NO_MSG) -> View:
     """A card in a side column (a pinned card, a Today card): the kind's icon and its head in small caps, a title, a quiet
-    line under it (roles stage-card, stage-card-head, stage-card-title, stage-card-sub)."""
+    line under it (roles stage-card, stage-card-head, stage-card-title, stage-card-sub); `on_unpin`: a pinned card's
+    pin-off button at the head's end ("Unpin <head>", role stage-unpin) that puts it back on the stage."""
     var items = List[View]()
-    items.append(HStack(_kind(icon, hue), Text(capitals(head)).tag("stage-card-head"), spacing=8).align(CENTER))
+    var head_row = List[View]()
+    head_row.append(_kind(icon, hue))
+    head_row.append(Text(capitals(head)).tag("stage-card-head"))
+    if on_unpin != NO_MSG:
+        head_row.append(Spacer())
+        head_row.append(Button("Unpin " + head, on_unpin, ICON_ONLY, "pin-off").width(28).height(28).tag("stage-unpin"))
+    items.append(HStack(head_row^, spacing=8).align(CENTER).fill())
     items.append(Text(title).tag("stage-card-title"))
     if sub != "":
         items.append(Text(sub).tag("stage-card-sub"))
@@ -198,10 +212,25 @@ def StageCard(icon: String, head: String, title: String, sub: String = "", hue: 
 
 
 def StageRow(icon: String, head: String, value: String, hue: Int = 0) -> View:
-    """A Live row in the right column: one line that keeps ticking (a timer's 7:20, a score's 2–1): the kind's icon, what
-    it is, its value at the end (roles stage-row, stage-row-head, stage-row-value)."""
-    return HStack(_kind(icon, hue), Text(head).tag("stage-row-head"), Spacer(), Text(value).tag("stage-row-value"),
-                  spacing=10).align(CENTER).fill().tag("stage-row")
+    """A Live or Today row in a side column: one line that keeps ticking (a timer's 7:20, a score's 2–1): the kind's icon,
+    what it is, its value at the end (roles stage-row, stage-row-head, stage-row-value: mono and tabular for a number;
+    stage-row-note for words, quiet, on one line, cut with an ellipsis)."""
+    return HStack(_kind(icon, hue), Text(head).tag("stage-row-head"), Spacer(),
+                  Text(value).tag("stage-row-value" if _numeric(value) else "stage-row-note"), spacing=10).align(CENTER).fill().tag("stage-row")
+
+
+def _numeric(value: String) -> Bool:
+    """A value read as a number (digits and : . , – - + ° % and spaces): a timer, a score, a temperature."""
+    for c in value.codepoints():
+        var s = String(c)
+        if not (s >= "0" and s <= "9") and s != ":" and s != "." and s != "," and s != "–" and s != "-" and s != "+" and s != "°" and s != "%" and s != " ":
+            return False
+    return value != ""
+
+
+def StageNote(text: String) -> View:
+    """A quiet line in a side column where a list is empty ("Drag a tile here to keep it at your side"; role stage-note)."""
+    return Text(text).tag("stage-note")
 
 
 def StageList(items: List[View], compact: Bool = False) -> View:

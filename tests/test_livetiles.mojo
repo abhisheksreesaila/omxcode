@@ -8,8 +8,9 @@
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.canvas import Surface
 from mojoui.livetiles import (
-    LiveTiles, Tile, Face, TileLook, TileResult, preset, pack, cell_box, press_amount, size_name, water_ms, fade_at,
-    TILE_S, TILE_W, TILE_L, TILE_XL, TILE_BAND, TAPPED, ACTION, REORDERED, RESIZED, WATER_K, WATER_C,
+    Box, LiveTiles, Tile, Face, TileLook, TileResult, preset, pack, cell_box, press_amount, size_name, water_ms, fade_at,
+    TILE_S, TILE_W, TILE_L, TILE_XL, TILE_BAND, TILE_FULL, TAPPED, ACTION, REORDERED, RESIZED, DROPPED, WATER_K, WATER_C,
+    preset_compact, pack_grid, compact_rows_height,
 )
 from mojoui.spring import Spring
 from mojoui.text import Font
@@ -67,9 +68,15 @@ def size_of(tiles: LiveTiles, id: String) -> Int:
 
 
 def test_presets() raises:
-    var one = pack(preset(1))  # (one tile: xl, as the prototype; no size covers 4 x 3, so 4 cells stay empty: reported)
-    assert_equal(one.holes, 4)
-    for n in range(2, 7):  # the contract's presets (GOAL.md M7b: 6, 5, 4, 3, 2)
+    assert_equal(preset(1)[0], TILE_FULL)  # (a lone tile fills the grid: "the grid is always full" for 1-6 tiles)
+    var lone = LiveTiles()
+    lone.set_area(W, H)
+    var one_tile = sample(1)
+    one_tile[0].big = True  # (big asks for xl; alone it still fills the grid)
+    lone.set_tiles(one_tile)
+    assert_equal(lone.layout().holes, 0)
+    assert_equal(lone.layout().sizes[0], TILE_FULL)
+    for n in range(1, 7):  # the contract's presets (GOAL.md M7b: 6, 5, 4, 3, 2) and one
         var p = preset(n)
         assert_equal(len(p), n)
         var k = pack(p)
@@ -80,7 +87,7 @@ def test_presets() raises:
         for c in k.cells:
             cells += c.w * c.h
         assert_equal(cells, 12, "preset " + String(n))
-    print("presets 2-6 fill 12 cells: ok")
+    print("presets 1-6 fill 12 cells: ok")
 
 
 def test_dense() raises:
@@ -257,6 +264,7 @@ def test_grip() raises:
     tiles.set_tiles(sample(6))
     var c = tiles.target_of("counter")  # w at (0, 2)
     var cell = cell_box(Rect(0, 0, 1, 1), W, H)
+    select(tiles, c)  # (the grip is drawn, and live, on the selected tile only)
     tiles.gesture(PRESS, c.x + c.w - 6, c.y + c.h - 6)  # the corner grip
     tiles.gesture(PAN, c.x + c.w - 6 - (cell.w + 12) * 0.9, c.y + c.h - 6)  # a cell narrower
     tiles.gesture(RELEASE, c.x + c.w - 6 - (cell.w + 12) * 0.9, c.y + c.h - 6)
@@ -268,6 +276,7 @@ def test_grip() raises:
         _ = tiles.frame(FRAME_US)
     # a small one pulled a cell right snaps to w (and fills the hole again)
     var b = tiles.target_of("bday")  # s at (1, 2)
+    select(tiles, b)
     tiles.gesture(PRESS, b.x + b.w - 5, b.y + b.h - 5)
     tiles.gesture(PAN, b.x + b.w - 5 + cell.w + 12, b.y + b.h - 5)
     tiles.gesture(RELEASE, b.x + b.w - 5 + cell.w + 12, b.y + b.h - 5)
@@ -277,6 +286,7 @@ def test_grip() raises:
         _ = tiles.frame(FRAME_US)
     # a wide one pulled a cell down snaps to l; what no longer fits is reported, not drawn over
     var t = tiles.target_of("todo")  # w at (2, 0)
+    select(tiles, t)
     tiles.gesture(PRESS, t.x + t.w - 5, t.y + t.h - 5)
     tiles.gesture(PAN, t.x + t.w - 5, t.y + t.h - 5 + cell.h + 12)
     tiles.gesture(RELEASE, t.x + t.w - 5, t.y + t.h - 5 + cell.h + 12)
@@ -288,6 +298,143 @@ def test_grip() raises:
     print("  after the grips:", len(lay.ids), "shown,", len(lay.overflow), "overflow,", lay.holes, "holes")
     assert_true(len(lay.overflow) >= 1, "the tile that no longer fits is reported")
     print("grip resizes: ok")
+
+
+def select(mut tiles: LiveTiles, b: Box):
+    """A tap in the middle of a tile (it becomes the selected one); its result taken."""
+    tiles.gesture(PRESS, b.x + b.w / 2, b.y + b.h / 2)
+    tiles.gesture(TAP, b.x + b.w / 2, b.y + b.h / 2)
+    _ = tiles.take_results()
+
+
+def test_grip_rules() raises:
+    """The grip works only on the selected tile (where it is drawn); a press and release on it without moving is a tap; a
+    resize whose tile a patch removed records nothing."""
+    var tiles = LiveTiles()
+    tiles.set_area(W, H)
+    tiles.set_tiles(sample(6))
+    var cell = cell_box(Rect(0, 0, 1, 1), W, H)
+    var c = tiles.target_of("counter")
+    # not selected: its corner is just part of the tile (a tap there is a tap; a drag from it would reorder)
+    tiles.gesture(PRESS, c.x + c.w - 6, c.y + c.h - 6)
+    tiles.gesture(TAP, c.x + c.w - 6, c.y + c.h - 6)
+    var r = tiles.take_results()
+    assert_true(len(r) == 1 and r[0].kind == TAPPED and r[0].id == "counter", "a corner tap on an unselected tile is a tap")
+    assert_equal(tiles.selected, "counter")
+    # selected now: pressing the grip and letting go without moving is still a tap, never a resize
+    tiles.gesture(PRESS, c.x + c.w - 6, c.y + c.h - 6)
+    tiles.gesture(RELEASE, c.x + c.w - 6, c.y + c.h - 6)
+    r = tiles.take_results()
+    assert_true(len(r) == 1 and r[0].kind == TAPPED, "a grip press without a move falls back to a tap")
+    assert_equal(size_of(tiles, "counter"), TILE_W)
+    # a resize under way when a patch takes the tile away: nothing is recorded, nothing reported
+    tiles.gesture(PRESS, c.x + c.w - 6, c.y + c.h - 6)
+    var rest = sample(6)
+    _ = rest.pop(3)  # (counter goes)
+    tiles.set_tiles(rest)
+    tiles.gesture(PAN, c.x + c.w - 6 - (cell.w + 12) * 0.9, c.y + c.h - 6)
+    tiles.gesture(RELEASE, c.x + c.w - 6 - (cell.w + 12) * 0.9, c.y + c.h - 6)
+    assert_equal(len(tiles.take_results()), 0, "no RESIZED for a tile that is gone")
+    assert_equal(tiles.user_size("counter"), -1)
+    print("grip rules: ok")
+
+
+def test_promote_beats_grip() raises:
+    """A size the person chose with the grip gives way when the agent promotes that tile (it leads, large, the grid full);
+    sizes of tiles that went are forgotten, so a tile added again starts fresh."""
+    var tiles = LiveTiles()
+    tiles.set_area(W, H)
+    var six = sample(6)
+    tiles.set_tiles(six)
+    var cell = cell_box(Rect(0, 0, 1, 1), W, H)
+    var d = tiles.target_of("cal")  # w
+    select(tiles, d)
+    tiles.gesture(PRESS, d.x + d.w - 6, d.y + d.h - 6)
+    tiles.gesture(PAN, d.x + d.w - 6 - (cell.w + 12) * 0.9, d.y + d.h - 6)
+    tiles.gesture(RELEASE, d.x + d.w - 6 - (cell.w + 12) * 0.9, d.y + d.h - 6)
+    assert_equal(size_of(tiles, "cal"), TILE_S)
+    tiles.set_tiles(promoted(six, "cal"))
+    var lay = tiles.layout()
+    assert_equal(lay.ids[0], "cal")
+    assert_equal(lay.sizes[0], TILE_L, "the promoted tile is large, not the size the grip gave it")
+    assert_equal(lay.holes, 0)
+    # another tile's chosen size, then that tile removed and added again: it comes back at the preset's size
+    var b = tiles.target_of("bday")
+    for f in range(90):
+        _ = tiles.frame(FRAME_US)
+    b = tiles.target_of("bday")
+    select(tiles, b)
+    tiles.gesture(PRESS, b.x + b.w - 5, b.y + b.h - 5)
+    tiles.gesture(PAN, b.x + b.w - 5 + cell.w + 12, b.y + b.h - 5)
+    tiles.gesture(RELEASE, b.x + b.w - 5 + cell.w + 12, b.y + b.h - 5)
+    assert_true(tiles.user_size("bday") != -1)
+    var without = List[Tile]()
+    for t in promoted(six, "cal"):
+        if t.id != "bday":
+            without.append(t.copy())
+    tiles.set_tiles(without)
+    assert_equal(tiles.user_size("bday"), -1, "a removed tile's size is forgotten")
+    tiles.set_tiles(promoted(six, "cal"))
+    assert_equal(tiles.layout().holes, 0)
+    print("promote beats the grip: ok")
+
+
+def test_compact() raises:
+    """A phone: two columns of 112 pt rows, the first large, the rest a row each (six: l w w w s s), every row full; an
+    xl lead is large there; the canvas height follows the rows."""
+    for n in range(1, 7):
+        var k = pack_grid(preset_compact(n), 2, 64)
+        assert_equal(k.holes, 0, "compact preset " + String(n))
+    var tiles = LiveTiles()
+    tiles.set_area(342, 800)
+    tiles.set_columns(2)
+    tiles.set_tiles(sample(6))
+    var lay = tiles.layout()
+    assert_equal(len(lay.ids), 6)
+    assert_equal(lay.holes, 0)
+    for c in lay.cells:
+        assert_true(c.x + c.w <= 2, "two columns")
+    assert_equal(tiles.compact_height(), compact_rows_height(6))  # (l: 2 rows, three w, one row of two s)
+    var b = tiles.target_of("traffic")
+    assert_true(abs(b.h - 236.0) < 0.01, "a large tile is two 112 pt rows and a gap")
+    var w = tiles.target_of("todo")
+    assert_true(abs(w.w - (342 - 28)) < 0.01 and abs(w.h - 112.0) < 0.01, "a w tile is a whole row")
+    var big = sample(3)
+    big[0].big = True
+    tiles.set_tiles(big)
+    assert_equal(tiles.layout().sizes[0], TILE_L, "xl is large on a phone")
+    tiles.set_columns(4)
+    assert_equal(tiles.layout().sizes[0], TILE_XL)
+    print("a phone's two columns: ok")
+
+
+def test_drop_zone() raises:
+    """A tile dragged out of the grid and let go over a drop zone (outside the canvas) is DROPPED there, not reordered."""
+    var tiles = LiveTiles()
+    tiles.set_area(W, H)
+    tiles.set_tiles(sample(6))
+    tiles.drop_zone("pinned", Box(-300, 0, 260, 400))
+    var t = tiles.target_of("todo")
+    tiles.gesture(PRESS, t.x + 30, t.y + 30)
+    tiles.gesture(PAN, t.x + 50, t.y + 40)
+    tiles.gesture(PAN, -150, 120)
+    assert_equal(tiles.hover_zone, "pinned")
+    tiles.gesture(RELEASE, -150, 120)
+    var r = tiles.take_results()
+    assert_equal(len(r), 1)
+    assert_equal(r[0].kind, DROPPED)
+    assert_equal(r[0].id, "todo")
+    assert_equal(r[0].text, "pinned")
+    assert_equal(tiles.hover_zone, "")
+    # let go anywhere else outside the grid: a plain drop (it glides home)
+    for f in range(90):
+        _ = tiles.frame(FRAME_US)
+    tiles.gesture(PRESS, t.x + 30, t.y + 30)
+    tiles.gesture(PAN, t.x + 50, t.y + 40)
+    tiles.gesture(PAN, -150, 520)
+    tiles.gesture(RELEASE, -150, 520)
+    assert_equal(tiles.take_results()[0].kind, REORDERED)
+    print("drop zones: ok")
 
 
 def test_press() raises:
@@ -391,6 +538,10 @@ def main() raises:
     test_text_at_final()
     test_reorder()
     test_grip()
+    test_grip_rules()
+    test_promote_beats_grip()
+    test_compact()
+    test_drop_zone()
     test_press()
     test_actions_tap()
     test_big_and_overflow()

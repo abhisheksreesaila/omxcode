@@ -31,7 +31,7 @@ def screen(width: Int) -> View:
                       StageList([StageCard("map-pin", "Pinned", "A day in Lisbon", "3 stops", 3)], compact), spacing=10)
     var right = VStack(StageLabel("zap", "Live"), StageList([StageRow("timer", "Pasta", "7:20", 4)]), spacing=10)
     var chat = StageChat(Canvas(2, 1), "", "Ask omx, or just say “omx”", 4, 5, 6)
-    return Stage(top, left, Canvas(1, 1), right, chat, width, 820)
+    return Stage(top, left, Canvas(1, 1), right, chat, width)
 
 
 def test_layout_desktop() raises:

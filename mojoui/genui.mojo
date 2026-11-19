@@ -274,7 +274,7 @@ def catalog() -> List[Spec]:
         items("steps", 1, 8, [Field("block", P_TEXT, True, 40, 0, List[String]()), Field("text", P_TEXT, True, 140, 0, List[String]())], True,
               "what happens, in order: block names a block by its label, text is one short sentence"),
         number("height", 160, 600, False, "points: the drawing's")]))
-    out.append(Spec("LiveTiles", "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint, an icon (car, cloud, todo, cal, gift, cam, timer, plane, home), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.", [
+    out.append(Spec("LiveTiles", "live tiles: what matters now as tiles on a 4x3 grid, most important first (the first is the large tile; big: true makes one extra large). Each tile has an id (one lower-case word), a head, one or more faces ({big, sub}: the tile turns between them), a tint (a name: the theme's palette says what it looks like), an icon (a Lucide name: car, cloud, cloud-rain, list-todo, calendar, gift, camera, timer, plane, home, trophy, utensils, backpack), a charm for an occasion (bag, pennant, hat, umbrella, tag, turkey or pin), and on a large tile a why line and up to 2 actions. kind centre is on the grid; passive (quiet: weather, birthdays) and live (ticking: timers, scores) sit beside it. Each tile is a part the voice can point at by its head. The tiles tool promotes, adds or removes a tile, or changes a face, without sending them all again.", [
         text("title", 80),
         items("tiles", 1, 12, [field_text("id", 40, True), Field("kind", P_ENUM, False, 0, 0, ["centre", "passive", "live"]),
                                Field("tint", P_ENUM, False, 0, 0, tint_names()), field_text("icon", 20), field_text("head", 40, True),
@@ -357,8 +357,8 @@ def sample(name: String) -> String:
     elif name == "LiveTiles":
         n = ('{"component":"LiveTiles","tiles":['
              + '{"id":"traffic","tint":"green","icon":"car","head":"Traffic","faces":[{"big":"Leave by 8:05","sub":"Bridge is slow · +18 min to school"},{"big":"26 min to school","sub":"via the river road"}],"why":"you leave in 20 minutes","actions":["Directions","Tell school"]},'
-             + '{"id":"todo","tint":"orange","icon":"todo","head":"To do","faces":[{"big":"3 to do","sub":"Call mum · Pick up Maya · Water bill"}]},'
-             + '{"id":"cal","tint":"red","icon":"cal","head":"Calendar","faces":[{"big":"Pickup 3:15","sub":"Maya · the side gate"}]},'
+             + '{"id":"todo","tint":"orange","icon":"list-todo","head":"To do","faces":[{"big":"3 to do","sub":"Call mum · Pick up Maya · Water bill"}]},'
+             + '{"id":"cal","tint":"red","icon":"calendar","head":"Calendar","faces":[{"big":"Pickup 3:15","sub":"Maya · the side gate"}]},'
              + '{"id":"weather","tint":"blue","icon":"cloud","head":"Weather","faces":[{"big":"9° · clear","sub":"rain after 4"}],"why":"rain starts before pickup","actions":["Remind me at 3"]},'
              + '{"id":"bday","kind":"passive","tint":"purple","icon":"gift","head":"Birthday","faces":[{"big":"Mum · Saturday","sub":"turns 64"}]},'
              + '{"id":"timer","kind":"live","tint":"amber","icon":"timer","head":"Timer","faces":[{"big":"Pasta 6:40"}]}],"height":420}')

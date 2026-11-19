@@ -5,7 +5,7 @@
 #
 # LIVETILES_TRACE=/path: every draw appends the tiles as drawn (mojoui.livetiles.record: each tile's surface and its words'
 # box, opacity, font size) with the wall clock and the frame clock, plus each button and result: the M7b proof reads it.
-# LIVETILES_SHOT=/path.png@ms: the canvas's own pixels saved once, that far (frame clock) into the next scene change (a
+# LIVETILES_SHOT=/path.png@ms[,/path2.png@ms2…]: the canvas's own pixels saved once each, that far (frame clock) into the next scene change (a
 # mid-motion picture: a host's test steps settle for up to a second after a tap, longer than the motion).
 
 from mojoui import App, Event, View, VStack, HStack, Text, Button, Canvas, Spacer, HEADLINE, CAPTION, PROMINENT, PRESS, PAN, RELEASE, TAP
@@ -51,11 +51,11 @@ def weather(scene: Int) -> Tile:
 
 
 def scene_tiles(scene: Int) -> List[Tile]:
-    var todo = Tile("todo", hx("#F25500"), "To do", "3 to do", "Call mum · Pick up Maya · Water bill", icon="todo")
+    var todo = Tile("todo", hx("#F25500"), "To do", "3 to do", "Call mum · Pick up Maya · Water bill", icon="list-todo")
     todo.faces.append(Face("Next: call mum", "it's her birthday Saturday"))
-    var cal = Tile("cal", hx("#E5484D"), "Calendar", "Pickup 3:15", "Maya · the side gate", icon="cal")
+    var cal = Tile("cal", hx("#E5484D"), "Calendar", "Pickup 3:15", "Maya · the side gate", icon="calendar")
     cal.faces.append(Face("Then", "Dinner 6:30 · Tennis Sat 10"))
-    var counter = Tile("counter", hx("#5C5C66"), "Counter", "Banana nearly ripe", "seen 7:12", icon="cam")
+    var counter = Tile("counter", hx("#5C5C66"), "Counter", "Banana nearly ripe", "seen 7:12", icon="camera")
     counter.charm = "pin"
     var bday = Tile("bday", hx("#8B2FC9"), "Birthday", "Mum · Saturday", "turns 64", icon="gift")
     var out = List[Tile]()
@@ -97,8 +97,8 @@ struct Main(App):
     var status: String
     var trace: String
     var t0: Int
-    var shot: String  # LIVETILES_SHOT's path, "" once taken
-    var shot_ms: Int
+    var shots: List[String]  # LIVETILES_SHOT's paths (each "" once taken) and when, ms into the next scene change
+    var shot_ms: List[Int]
     var mark_us: Int  # the frame clock at the last scene change (-1: none yet)
 
     def __init__(out self):
@@ -109,15 +109,17 @@ struct Main(App):
         self.status = "Press, tap, drag a tile onto another, or pull its corner"
         self.trace = environment("LIVETILES_TRACE")
         self.t0 = now_ns()
-        var want = environment("LIVETILES_SHOT")
-        var at = want.find("@")
-        self.shot = String(want[byte = 0 : at]) if at > 0 else ""
-        self.shot_ms = 0
-        if at > 0:
-            try:
-                self.shot_ms = Int(String(want[byte = at + 1 :]))
-            except:
-                self.shot = ""
+        self.shots = List[String]()
+        self.shot_ms = List[Int]()
+        for one in environment("LIVETILES_SHOT").split(","):  # path@ms[,path@ms…]
+            var want = String(one)
+            var at = want.find("@")
+            if at > 0:
+                try:
+                    self.shot_ms.append(Int(String(want[byte = at + 1 :])))
+                    self.shots.append(String(want[byte = 0 : at]))
+                except:
+                    pass
         self.mark_us = -1
         self.tiles.set_tiles(scene_tiles(MORNING))
         self.tiles.spots("tiles", "tiles")
@@ -163,6 +165,9 @@ struct Main(App):
     def update(mut self, event: Event):
         if event.message == FRAME:
             _ = self.tiles.frame(event.number)
+            for n in range(len(self.shots)):  # (a picture due while nothing moves: draw once more, so it is taken)
+                if self.shots[n] != "" and self.mark_us >= 0 and self.tiles.clock_us - self.mark_us >= self.shot_ms[n] * 1000:
+                    self.tiles.version += 1
         elif event.message == GESTURE:
             self.tiles.gesture(event.number, event.x, event.y)
             for r in self.tiles.take_results():
@@ -203,17 +208,19 @@ struct Main(App):
     def draw(mut self, canvas: Int, mut surface: Surface):
         var look = TileLook.of(self.theme().palette)
         self.tiles.draw(surface, look, self.font)
-        if self.shot != "" and self.mark_us >= 0 and self.tiles.clock_us - self.mark_us >= self.shot_ms * 1000:
+        for n in range(len(self.shots)):
+            if self.shots[n] == "" or self.mark_us < 0 or self.tiles.clock_us - self.mark_us < self.shot_ms[n] * 1000:
+                continue
             var px = List[UInt32](capacity=surface.width * surface.height)
             for i in range(surface.width * surface.height):
                 px.append(surface.pixels().unsafe_offset(i)[])
             try:
-                with open(self.shot, "w") as f:
+                with open(self.shots[n], "w") as f:
                     f.write_bytes(Span(encode_png(px, surface.width, surface.height)))
-                self.log("SHOT " + String((self.tiles.clock_us - self.mark_us) // 1000) + " " + self.shot)
+                self.log("SHOT " + String((self.tiles.clock_us - self.mark_us) // 1000) + " " + self.shots[n])
             except:
                 pass
-            self.shot = ""
+            self.shots[n] = ""
         if self.trace != "":
             try:
                 with open(self.trace, "a") as f:

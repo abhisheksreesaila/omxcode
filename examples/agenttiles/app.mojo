@@ -7,7 +7,9 @@
 # Tapping a tile (or one of its actions) is an action the agent hears as a user message, and it says so.
 #
 # Lines on stdout for the M7c proof (scripts/g77_agenttiles_check.py): TILES SHOWN / TILES: (what a patch did) / TILES LAYOUT (the grid:
-# ids, sizes, holes, each tile's rect in window points) / TILES POINT (the ring as drawn and the tile's rect, from the pointer's layer).
+# ids, sizes, holes, each tile's rect in window points) / TILES POINT (the ring as drawn and the tile's rect, from the pointer's layer) /
+# TILES RING_SHOT (AGENTTILES_RING_SHOT=/path.png: the pointer layer's own pixels, saved at the first draw after TILES POINT while the
+# ring is at full strength).
 
 from mojoui import App, Event, View, VStack, HStack, Text, Button, Spacer, HEADLINE, CAPTION, PROMINENT
 from mojoui.shell import Shell
@@ -22,6 +24,8 @@ from mojoui.json import Json, json_string
 from mojoui.livetiles import size_name
 from mojoui.pointer import Pointer, PointerView, POINTER_TAG, point_event
 from mojoui.theme import Theme
+from mojoui.png import encode_png
+from mojoui.shared import environment
 from mojoui.view import Overlay
 from themes.omxqua import omxqua
 
@@ -35,9 +39,9 @@ comptime CANVAS_BASE = 2000
 comptime TILES_UI = (
     '{"ui":{"component":"Card","title":"This morning","children":[{"component":"LiveTiles","height":560,"tiles":['
     '{"id":"traffic","tint":"green","icon":"car","head":"Traffic","faces":[{"big":"Leave by 8:05","sub":"Bridge is slow · +18 min to school"},{"big":"26 min to school","sub":"via the river road · 2 incidents"}],"why":"you leave in 20 minutes","actions":["Directions","Tell school"]},'
-    '{"id":"todo","tint":"orange","icon":"todo","head":"To do","faces":[{"big":"3 to do","sub":"Call mum · Pick up Maya · Water bill"},{"big":"Next: call mum","sub":"it\'s her birthday Saturday"}]},'
-    '{"id":"cal","tint":"red","icon":"cal","head":"Calendar","faces":[{"big":"Pickup 3:15","sub":"Maya · the side gate"}]},'
-    '{"id":"counter","tint":"slate","icon":"cam","head":"Counter","faces":[{"big":"Banana nearly ripe","sub":"seen 7:12"}],"charm":"pin"},'
+    '{"id":"todo","tint":"orange","icon":"list-todo","head":"To do","faces":[{"big":"3 to do","sub":"Call mum · Pick up Maya · Water bill"},{"big":"Next: call mum","sub":"it\'s her birthday Saturday"}]},'
+    '{"id":"cal","tint":"red","icon":"calendar","head":"Calendar","faces":[{"big":"Pickup 3:15","sub":"Maya · the side gate"}]},'
+    '{"id":"counter","tint":"slate","icon":"camera","head":"Counter","faces":[{"big":"Banana nearly ripe","sub":"seen 7:12"}],"charm":"pin"},'
     '{"id":"weather","tint":"blue","icon":"cloud","head":"Weather","faces":[{"big":"Rain from 4","sub":"Pickup at 3:15 will be wet · take the umbrella"}],"why":"rain starts before pickup","actions":["Remind me at 3","Hourly"]},'
     '{"id":"bday","kind":"passive","tint":"purple","icon":"gift","head":"Birthday","faces":[{"big":"Mum · Saturday","sub":"turns 64"}]},'
     '{"id":"timer","kind":"live","tint":"amber","icon":"timer","head":"Timer","faces":[{"big":"Pasta 6:40"}]}]}]}}'
@@ -108,6 +112,8 @@ struct Main(App):
     var version: Int
     var point_stamp: Int  # the pointer's stamp when the last point was sent (-1: none to report)
     var point_ticks: Int  # ticks since the ring was first drawn there (it is reported once settled)
+    var ring_shot: String  # AGENTTILES_RING_SHOT: the pointer layer's own pixels, saved once the ring is reported (settled, at full strength)
+    var ring_due: Bool
 
     def __init__(out self):
         self.agent = Agent("", 0, 0, "tiles")
@@ -121,6 +127,8 @@ struct Main(App):
         self.version = 1
         self.point_stamp = -1
         self.point_ticks = 0
+        self.ring_shot = environment("AGENTTILES_RING_SHOT")
+        self.ring_due = False
 
     def title(self) -> String:
         return "Agent tiles"
@@ -246,6 +254,8 @@ struct Main(App):
                 ids += ("," if i > 0 else "") + lay.ids[i] + ":" + size_name(lay.sizes[i])
             line += " layout=" + ids + " holes=" + String(lay.holes)
         print(line, flush=True)
+        self.ring_due = self.ring_shot != ""
+        self.version += 1
 
     def view(self) -> View:
         var bar = HStack(
@@ -265,6 +275,17 @@ struct Main(App):
     def draw(mut self, canvas: Int, mut surface: Surface):
         if canvas == POINTER_CANVAS:
             self.pointer.draw(surface, self.theme().palette)
+            if self.ring_due and self.pointer.on.value >= 0.98:  # (the ring as GTK is handed it, at full strength: no timing in the proof)
+                var px = List[UInt32](capacity=surface.width * surface.height)
+                for i in range(surface.width * surface.height):
+                    px.append(surface.pixels().unsafe_offset(i)[])
+                try:
+                    with open(self.ring_shot, "w") as f:
+                        f.write_bytes(Span(encode_png(px, surface.width, surface.height)))
+                    print("TILES RING_SHOT: " + self.ring_shot + " scale=" + String(surface.scale) + " on=" + String(self.pointer.on.value), flush=True)
+                except:
+                    pass
+                self.ring_due = False
         else:
             self.screens.draw(canvas, surface, self.theme().palette, self.agent.state)
 

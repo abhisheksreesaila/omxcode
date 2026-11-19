@@ -544,8 +544,13 @@ def counter_roles(p: Palette) -> List[Surface]:
     side cards and Live rows, the top bar's avatars and pills (values: tokens.css .oq-family-counter, gitaway's .cv3)."""
     var dark = p.dark
     var out = List[Surface]()
-    for r in ["stage", "stage-top", "stage-centre", "stage-orb", "stage-list", "stage-input"]:
+    for r in ["stage", "stage-top", "stage-centre", "stage-orb", "stage-list", "stage-input", "stage-side-scroll", "stage-pins", "stage-today",
+              "stage-live"]:  # (containers: a side's scroller, M7e's sections)
         out.append(box(r, 0, -1, -1, -1))
+    out.append(words("stage-note", 12.5, 0, p.ink2))  # (an empty list's line: quiet, as a card's sub line)
+    var unpin = Surface("stage-unpin", 0, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
+                        icon_size=15, icon_ink=p.ink2)
+    out.append(unpin^)
     var glyph = box("stage-glyph", 0, -1, -1, -1)  # (a kind's icon: the ink on the accent, white by day, near-black at night)
     glyph.icon_ink = p.accent_ink
     out.append(glyph^)
@@ -591,6 +596,9 @@ def counter_roles(p: Palette) -> List[Surface]:
     var value = words("stage-row-value", 15, 650, p.ink)  # (a live number: mono and tabular, updated in place)
     value.font = FONT_MONO
     out.append(value^)
+    var note = words("stage-row-note", 13.5, 0, p.ink2)  # (a row's value in words: quiet, one line, cut with an ellipsis)
+    note.one_line = True
+    out.append(note^)
     var kind = Surface("stage-kind", p.ink2, 6, 6, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, icon_size=12, icon_stroke=2.4, icon_ink=p.accent_ink)
     out.append(kind^)
     for i in range(6):

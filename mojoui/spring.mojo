@@ -16,13 +16,16 @@ struct Spring(Copyable, Movable):
     var target: Float64
     var stiffness: Float64
     var damping: Float64
+    var rest: Float64  # how close to the target counts as arrived (in the value's own units; the speed's limit is 5x it)
 
-    def __init__(out self, value: Float64 = 0.0, stiffness: Float64 = SPRING_STIFFNESS, damping: Float64 = SPRING_DAMPING):
+    def __init__(out self, value: Float64 = 0.0, stiffness: Float64 = SPRING_STIFFNESS, damping: Float64 = SPRING_DAMPING,
+                 rest: Float64 = 0.002):
         self.value = value
         self.velocity = 0.0
         self.target = value
         self.stiffness = stiffness
         self.damping = damping
+        self.rest = rest
 
     def to(mut self, target: Float64):
         self.target = target
@@ -34,7 +37,10 @@ struct Spring(Copyable, Movable):
         self.velocity = 0.0
 
     def moving(self) -> Bool:
-        return abs(self.value - self.target) > 0.002 or abs(self.velocity) > 0.01
+        """Still on its way: further than `rest` from the target, or faster than 5 x rest a second. A spring that runs a 0-1
+        progress over a long distance sets `rest` to (the largest jump allowed) / (the distance), so its last step is small
+        on screen (mojoui.livetiles: 0.5 pt)."""
+        return abs(self.value - self.target) > self.rest or abs(self.velocity) > self.rest * 5.0
 
     def step(mut self, microseconds: Int) -> Bool:
         """One frame of `microseconds` (a long gap is taken in small steps); True while it still moves."""

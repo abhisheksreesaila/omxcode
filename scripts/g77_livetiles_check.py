@@ -10,8 +10,10 @@
    with the wall clock). From that record: the promoted tile's surface moves monotonically to its new rect (each side's
    progress never goes back before it arrives, and never passes the change by more than 3 %), settles within 0.5 pt in
    <= 1.1 s of wall time, and its words are laid out at the final rect, at the final font size, on every frame (clear for
-   the first 30 % of the water's time): never stretched. Then a synthetic drag (todo onto calendar) must report the new
-   order and a corner-grip drag (counter's) must report "counter resized to s".
+   the first 30 % of the water's time): never stretched. On GTK that is also measured in pixels (unstretched(): the canvas's
+   own pictures 250 and 280 ms in against the settled one, the words' ink fitted to the settled ink scaled by s = 0.90-1.10:
+   best at 1.000, and closer than words stretched to the surface). Then a synthetic drag (todo onto calendar) must report
+   the new order and, once counter is selected (a tap: its grip shows), a corner-grip drag must report "counter resized to s".
 4. Pictures: docs/goals/77/m7b-{before,mid,after,drag,dark}.png (GTK; mid = the canvas's own pixels 250 ms into the
    motion, since a GTK test step settles for up to a second) and m7b-web-{before,mid,after,dark}.png (Chromium screenshots
    taken every ~40 ms during the motion).
@@ -59,7 +61,7 @@ def read_trace(path):
             cur = None
         elif line.startswith("D "):
             v = line.split()
-            cur = {"clock": int(v[2]), "w": float(v[3]), "h": float(v[4]), "tiles": {}}
+            cur = {"clock": int(v[2]), "w": float(v[3]), "h": float(v[4]), "scale": float(v[5]) if len(v) > 5 else 1.0, "tiles": {}}
             out.append(("D", int(v[1]), cur))
         elif cur is not None and line.strip():
             v = line.split()
@@ -130,6 +132,112 @@ def motion(trace, event, tile):
     return nums, probs
 
 
+def _ink(img, box):
+    """The ink in `box` (x0, y0, x1, y1 pixels) of a canvas picture: how much darker each pixel is than the lightest in its
+    9 x 9 neighbourhood (the words, the icon, the chip; the tile's smooth wash and its surface are not ink)."""
+    import numpy as np
+    from PIL import ImageFilter
+    g = img.convert("L").crop(box)
+    bg = np.asarray(g.filter(ImageFilter.MaxFilter(9)), dtype=float)
+    return np.clip(bg - np.asarray(g, dtype=float), 0, None)
+
+
+def _scaled(a, sx, sy):
+    """`a` scaled by (sx, sy) about its top-left corner (the words' corner), cut or padded back to its own shape."""
+    import numpy as np
+    from PIL import Image
+    h, w = a.shape
+    im = Image.fromarray(a.astype("float32"), mode="F").resize((max(1, round(w * sx)), max(1, round(h * sy))), Image.BILINEAR)
+    b = np.zeros_like(a)
+    s = np.asarray(im)
+    b[:min(h, s.shape[0]), :min(w, s.shape[1])] = s[:h, :w]
+    return b
+
+
+def _likeness(a, b):
+    import numpy as np
+    d = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    return float((a * b).sum()) / d if d > 0 else 0.0
+
+
+def unstretched(trace, mids, settled, tile="weather"):
+    """'Never stretched', measured in pixels: the promoted tile's words in mid-motion canvas pictures (faded in, its surface
+    still short of its final size) against the settled picture, each cropped from its own words' corner (the record's text
+    box) to inside both surfaces (other tiles passing over it cut away), where words drawn into the moving surface would
+    have shrunk by the surface's own ratio (reported: it must be off by > 3 % in at least
+    one frame, or the frame proves nothing). Measured as a fit: the settled words scaled by s (0.90 - 1.10) must look most
+    like the mid frame's at s = 1 (cosine likeness of the ink, which a faint frame and a full one share), and more than
+    words stretched to the surface would. Returns (lines, problems)."""
+    from PIL import Image
+    shots = {}  # path -> (frame clock ms into the motion, the record line of `tile`, scale)
+    for i, e in enumerate(trace):
+        if e[0] == "EV" and e[2].startswith("SHOT "):
+            _, ms, path = e[2].split(" ", 2)
+            frame = next((f for f in trace[i + 1:] if f[0] == "D"), None)
+            if frame and tile in frame[2]["tiles"]:
+                others = [v for k, v in frame[2]["tiles"].items() if k != tile]
+                shots[path] = (int(ms), frame[2]["tiles"][tile], frame[2].get("scale", 1.0), others)
+    lines, probs = [], []
+    if str(settled) not in shots:
+        return lines, [f"no settled picture of {tile} recorded"]
+    _, rs, ks, _ = shots[str(settled)]
+    fin = Image.open(settled)
+    tw, th = rs[6], rs[7]
+    discriminating = 0
+    for m in mids:
+        if str(m) not in shots:
+            probs.append(f"no mid-motion picture {Path(m).name} recorded")
+            continue
+        ms, rm, km, others = shots[str(m)]
+        sw, sh, op = rm[2], rm[3], rm[8]
+        # the crop: from the words' corner (+4) to 12 pt inside the smaller surface, the same size in both pictures; any other
+        # tile drawn over it mid-motion (and 36 pt of its shadow) is cut away, keeping the larger part
+        cw = min(tw, sw - (rm[4] - rm[0])) - 16
+        chh = min(th, sh - (rm[5] - rm[1])) - 16
+        for o in others:
+            ox0, oy0 = o[0] - rm[4] - 36 - 4, o[1] - rm[5] - 36 - 4
+            ox1, oy1 = ox0 + o[2] + 72, oy0 + o[3] + 72
+            if ox1 <= 0 or oy1 <= 0 or ox0 >= cw or oy0 >= chh:
+                continue
+            cut_h = oy0 * cw if oy0 > 60 else -1  # (keep what is above it)
+            cut_w = ox0 * chh if ox0 > 60 else -1  # (or what is left of it)
+            if cut_h < 0 and cut_w < 0:
+                cw = chh = 0
+                break
+            if cut_h >= cut_w:
+                chh = oy0
+            else:
+                cw = ox0
+        if cw < 60 or chh < 60:
+            probs.append(f"{Path(m).name}: too little of the surface to compare ({cw:.0f} x {chh:.0f} pt)")
+            continue
+        wpx, hpx = int(cw * km), int(chh * km)  # (one size in pixels for both crops)
+        bm = (int(round((rm[4] + 4) * km)), int(round((rm[5] + 4) * km)))
+        bm = bm + (bm[0] + wpx, bm[1] + hpx)
+        bs = (int(round((rs[4] + 4) * ks)), int(round((rs[5] + 4) * ks)))
+        bs = bs + (bs[0] + wpx, bs[1] + hpx)
+        a = _ink(Image.open(m), bm)
+        b = _ink(fin, bs)
+        if a.max() < 4 or b.max() < 4:
+            probs.append(f"{Path(m).name}: no ink to measure (opacity {op:.0f} %)")
+            continue
+        naive_x, naive_y = sw / tw, sh / th
+        disc = abs(naive_x - 1) > 0.03 or abs(naive_y - 1) > 0.03
+        discriminating += disc
+        # the settled words scaled by s about their corner, s from 0.90 to 1.10: the mid frame's words must look most like s = 1
+        fits = [(round(1 + k * 0.005, 3), _likeness(a, _scaled(b, 1 + k * 0.005, 1 + k * 0.005))) for k in range(-20, 21)]
+        best_s, best = max(fits, key=lambda f: f[1])
+        at_one = dict(fits)[1.0]
+        naive = _likeness(a, _scaled(b, naive_x, naive_y))
+        lines.append(f"{ms} ms (opacity {op:.0f} %, surface {naive_x * 100:.1f} % x {naive_y * 100:.1f} % of final): the words look most like the "
+                     f"settled ones at scale {best_s:.3f} (likeness {at_one:.3f} at 1.000; words stretched to the surface: {naive:.3f})")
+        if abs(best_s - 1.0) > 0.0051 or at_one < 0.85 or (disc and naive >= at_one):
+            probs.append(f"{Path(m).name}: the words' pixels are not the settled ones at their own size: best scale {best_s:.3f}, likeness {at_one:.3f}, stretched {naive:.3f}")
+    if mids and not discriminating and not probs:
+        probs.append("no mid-motion picture caught the surface > 3 % short of its final size (nothing a stretch would change)")
+    return lines, probs
+
+
 def gtk_run(steps, trace, shot=None, timeout=180):
     import headless
 
@@ -178,13 +286,16 @@ def check_gtk(said, probs):
     drag = ";".join(f"{tx:.0f},{ty + (cy - ty) * k / 4:.0f},0.5" for k in range(5))
     gx, gy = counter[0] + counter[2] - 6, counter[1] + counter[3] - 6
     grip = ";".join(f"{gx - (counter[2] / 2) * k / 3:.0f},{gy:.0f},0.5" for k in range(4))
+    pick = f"{(counter[0] + counter[2] / 2) / w * 1000:.0f},{(counter[1] + counter[3] / 2) / h * 1000:.0f}"  # (select it: its grip shows)
     trace = OUT / "gtk-trace.txt"
     mid = OUT / "m7b-mid.png"
-    if mid.exists():
-        mid.unlink()
+    mid2 = OUT / "gtk-mid-280.png"
+    settled = OUT / "gtk-settled.png"
+    for f in (mid, mid2, settled):
+        f.unlink(missing_ok=True)
     steps = (f"wait:800;shot:{OUT}/m7b-before.png;tap:Promote weather;wait:1500;shot:{OUT}/m7b-after.png;tap:Reset;wait:1200;"
-             f"stroke:tiles={drag};wait:1200;stroke:tiles={grip};wait:1200;shot:{OUT}/m7b-drag.png;scheme:dark;wait:800;shot:{OUT}/m7b-dark.png")
-    r = gtk_run(steps, trace, shot=f"{mid}@250")
+             f"stroke:tiles={drag};wait:1200;tapat:tiles={pick};wait:400;stroke:tiles={grip};wait:1200;shot:{OUT}/m7b-drag.png;scheme:dark;wait:800;shot:{OUT}/m7b-dark.png")
+    r = gtk_run(steps, trace, shot=f"{mid}@250,{mid2}@280,{settled}@950")
     if not trace.exists():
         probs.append("GTK: no trace: " + (r.stdout + r.stderr)[-400:])
         return
@@ -197,6 +308,9 @@ def check_gtk(said, probs):
                     f"settled {nums['settled_wall_ms']} ms wall / {nums['settled_clock_ms']} ms frame clock, words {nums['text_box']} at {nums['font']} pt every frame")
     if not gestures_ok(t, "GTK"):
         said.append("GTK drag -> order " + ORDER_AFTER_DRAG + ", grip -> counter s")
+    lines, bad = unstretched(t, [mid, mid2], settled)
+    probs += ["GTK pixels: " + b for b in bad]
+    said += ["GTK pixels, never stretched: " + l for l in lines]
     if mid.exists():  # (mojoui.png stores its pixels uncompressed: 3.5 MB; Pillow writes the same picture compressed)
         from PIL import Image
         Image.open(mid).save(mid, optimize=True)
@@ -246,6 +360,8 @@ def check_web(said, probs):
             page.wait_for_timeout(30)
         page.mouse.up()
         page.wait_for_timeout(1300)
+        page.mouse.click(x0 + counter[0] + counter[2] / 2, y0 + counter[1] + counter[3] / 2)  # (select it: its grip shows)
+        page.wait_for_timeout(400)
         gx, gy = x0 + counter[0] + counter[2] - 6, y0 + counter[1] + counter[3] - 6
         page.mouse.move(gx, gy)
         page.mouse.down()

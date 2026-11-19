@@ -68,10 +68,10 @@ def morning(p: Palette) -> List[Tile]:
     traffic.faces.append(Face("26 min to school", "via the river road · 2 incidents"))
     traffic.why = "you leave in 20 minutes"
     traffic.actions = ["Directions to the car", "Tell school"]
-    var todo = Tile("todo", p.series[3], "To do", "3 to do", "Call mum · Pick up Maya · Water bill", icon="todo")
+    var todo = Tile("todo", p.series[3], "To do", "3 to do", "Call mum · Pick up Maya · Water bill", icon="list-todo")
     todo.faces.append(Face("Next: call mum", "it's her birthday Saturday"))
-    var cal = Tile("cal", p.series[4], "Calendar", "Pickup 3:15", "Maya · the side gate", icon="cal")
-    var counter = Tile("counter", p.ink2, "Counter", "Banana nearly ripe", "seen 7:12", icon="cam")
+    var cal = Tile("cal", p.series[4], "Calendar", "Pickup 3:15", "Maya · the side gate", icon="calendar")
+    var counter = Tile("counter", p.ink2, "Counter", "Banana nearly ripe", "seen 7:12", icon="camera")
     var bday = Tile("bday", p.series[0], "Birthday", "Mum · Saturday", "turns 64", icon="gift")
     var weather = Tile("weather", p.series[1], "Weather", "9° · clear", "rain after 4", icon="cloud")
     var out = List[Tile]()
@@ -264,7 +264,7 @@ struct Main(App):
             card = self.iso.view(self.state, self.tv.version)
         var lay = self.tv.layout()
         var content = TVContent(card^, StageThread(self.msgs, lay.thread_w), StageChips([Q_WORD, Q_ISO], CHIP))
-        return Stage(top, left, stage, right, chat, self.width, self.height, tv=self.tv, content=content)
+        return Stage(top, left, stage, right, chat, self.width, tv=self.tv, content=content)
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         var p = omxqua_counter(self.dark).palette.copy()
@@ -283,7 +283,7 @@ struct Main(App):
             self.iso.draw(canvas, surface, p, self.state, self.font)
             return
         # the tiles on the stage's own ground (TileLook.of would take the room's colour, the page)
-        self.tiles.draw(surface, TileLook(p.dark, counter_ground(p.dark), p.card, p.ink, p.ink2, p.line), self.font)
+        self.tiles.draw(surface, TileLook.on(p, counter_ground(p.dark)), self.font)
 
     def record(mut self, mut surface: Surface):
         """STAGE_TRACE: this frame's numbers; STAGE_SHOT: the canvas's pixels once, that far into the morph."""

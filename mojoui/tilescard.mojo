@@ -20,41 +20,12 @@
 #                                    raises with a message the agent can act on
 
 from mojoui.json import Json, json_string, J_STRING, J_OBJECT, J_ARRAY, J_BOOL
-from mojoui.livetiles import Tile, Face, TAPPED, ACTION, REORDERED, RESIZED
-from mojoui.theme import hx
+from mojoui.livetiles import Tile, Face, TAPPED, ACTION, REORDERED, RESIZED, tint_names
 
 comptime TILES = "tiles"
 comptime KIND_CENTRE = "centre"
 comptime KIND_PASSIVE = "passive"
 comptime KIND_LIVE = "live"
-
-
-def tint_names() -> List[String]:
-    return ["green", "blue", "orange", "red", "purple", "indigo", "slate", "teal", "amber", "pink"]
-
-
-def tint_color(name: String) -> UInt32:
-    """A named tint's colour: the hues of the owner-approved Stage prototype's tiles (v14; mojoui.livetiles' example), the same
-    in light and dark (each sits on its own icon square and a 13 % wash of the card). Unknown: slate."""
-    if name == "green":
-        return hx("#15803D")
-    if name == "blue":
-        return hx("#0369A1")
-    if name == "orange":
-        return hx("#F25500")
-    if name == "red":
-        return hx("#E5484D")
-    if name == "purple":
-        return hx("#8B2FC9")
-    if name == "indigo":
-        return hx("#4338CA")
-    if name == "teal":
-        return hx("#0F766E")
-    if name == "amber":
-        return hx("#B45309")
-    if name == "pink":
-        return hx("#C3264B")
-    return hx("#5C5C66")
 
 
 def is_tile_id(s: String) -> Bool:
@@ -101,8 +72,10 @@ def tiles_problem(j: Json, n: Int) -> String:
 def tile_of(j: Json, t: Int) -> Tile:
     var faces = j.get(t, "faces")
     var f0 = j.at(faces, 0)
-    var tile = Tile(j.text(j.get(t, "id")), tint_color(j.text(j.get(t, "tint"))), j.text(j.get(t, "head")),
-                    j.text(j.get(f0, "big")), j.text(j.get(f0, "sub")), icon=j.text(j.get(t, "icon")))
+    var tile = Tile(j.text(j.get(t, "id")), 0, j.text(j.get(t, "head")), j.text(j.get(f0, "big")), j.text(j.get(f0, "sub")),
+                    icon=j.text(j.get(t, "icon")))
+    var tint = j.text(j.get(t, "tint"))
+    tile.tint = tint if tint != "" else String("slate")  # (the palette says what each tint looks like: mojoui.livetiles.tint_colour)
     for i in range(1, j.size(faces)):
         var f = j.at(faces, i)
         tile.faces.append(Face(j.text(j.get(f, "big")), j.text(j.get(f, "sub"))))

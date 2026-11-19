@@ -10,7 +10,7 @@ from mojoui.genui import sample, schema
 from mojoui.json import Json, json_string
 from mojoui.jsonpatch import JDoc
 from mojoui.canvas import Surface
-from mojoui.livetiles import TILE_L, TILE_XL
+from mojoui.livetiles import TILE_S, TILE_L, TILE_XL
 from mojoui.tilescard import TILES
 from themes.omxqua import omxqua
 
@@ -157,4 +157,25 @@ def main() raises:
         assert_equal(l2.holes, 0)
         assert_equal(len(l2.ids), n)
         print("tiles", n, ": promoted t" + String(n - 1), "first,", "xl" if l2.sizes[0] == TILE_XL else "l", ", holes", l2.holes)
+    # a size the person chose with the grip gives way to the agent's promote: large, the grid full (and the tool says so)
+    var s3 = Screens(40_000, 4000)
+    var a3 = Agent("", 0, 0, "v")
+    a3.offer(Tool("render_ui", "Show UI", schema()))
+    a3.offer(tiles_tool())
+    call(a3, "r", "render_ui", tiles_card(4))
+    _ = s3.take(a3)
+    draw(s3, 0)
+    var c3 = s3.uis[0].canvas_of.get(s3.uis[0].tiles_node(), 0)
+    s3.uis[0].tiles[c3].set_user_size("t3", TILE_S)  # (as the corner grip records it)
+    var l3 = s3.uis[0].tiles_at(s3.uis[0].tiles_node()).layout()
+    assert_true(l3.holes > 0, "the shrunk tile leaves a hole")
+    _ = s3.take_log()
+    _ = s3.tiles('{"op":"promote","id":"t3"}')
+    l3 = s3.uis[0].tiles_at(s3.uis[0].tiles_node()).layout()
+    assert_equal(l3.ids[0], "t3")
+    assert_equal(l3.sizes[0], TILE_L)
+    assert_equal(l3.holes, 0)
+    var said3 = s3.take_log()
+    assert_true(said3[len(said3) - 1].find("first=t3 size=l holes=0") >= 0, said3[len(said3) - 1])
+    print("resized then promoted: t3 first, l, holes 0")
     print("tiles agent: ok")
