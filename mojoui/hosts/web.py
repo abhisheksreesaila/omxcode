@@ -575,7 +575,10 @@ BOARD_JS = r"""
     if (x >= w - EDGE) return 3;
     return y < HEADER ? HMOVE : NONE;
   }
-  const zoomOf = board => Number(board.dataset.zoom || 100) / 100;
+  // (the board's zoom now: a drag reads it from the board on the page, not the element it pressed, which a zoom's answer may
+  // have replaced, review 4)
+  const zoomOf = board => { const b = board.isConnected ? board : (document.querySelector(`.board[data-node="${board.dataset.node}"]`) || board);
+    return Number(b.dataset.zoom || 100) / 100; };
   function hit(board, e) {  // (by the cards' boxes, not what the pointer is over: a rounded corner's cut-out still grabs the corner)
     let obj = null, raised = false;
     for (const o of board.children) {
