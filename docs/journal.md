@@ -1459,3 +1459,8 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Web failed once: the ring 6 pt behind the tile at 1.2 s. Cause: the 34 ms cap on a frame's step slowed the glide on the web host, which draws less often. Cap 100 ms and the report waits for the tiles to stop (D-7806).
 - Regenerated genui.schema.json, llms-full.txt and components.md (a row for the agent-driven tiles) in a temporary detached worktree of HEAD plus only my files, because M7d's agent had uncommitted work in examples/stage that the generator would have picked up.
 - Result: 77-check M7C PASS on GTK and the web: weather promoted to the first, large tile with 0 holes (2-6 tiles in the unit test: first, l or xl, 0 holes), the ring on it at IoU 1.0, on GTK its pixels only round that tile.
+
+## 2026-11-19 (goal 77 M7, overnight) review of M7a–M7c (reviewer: NEEDS WORK)
+- Must fix: (1) a grip-chosen size beats the agent's promote (promoted tile stays small, 3 holes): clear the user size/order of a tile that becomes first, prune removed ids; test it. (2) M7c's GTK ring-pixel proof is timing-dependent (two failed reruns): make the shot deterministic. (3) M7d's uncommitted stage changes broke M7a at 900/390 (told the M7d agent).
+- Should fix: grip live on unselected tiles swallows corner taps; preset(1) leaves 4 holes; "never stretched" is true by construction, not measured from pixels (add a pixel check); hard-coded tile hues/charm colour outside the theme; resize after the tile is removed; _fit O(n²) per frame; Spring snap threshold; Stage's unused height.
+- These go to a review-fix pass after M7d lands, before M7e.
