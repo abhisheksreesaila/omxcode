@@ -4,6 +4,23 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 75: silky on the GPU, Linux and Mac (2026-11-18/19)
+- **Setup:** worktree ../mojo-ui-g74, branch `goal-75-gpu-canvas` off goal 74's a2a91071. Owner: "native Linux and Mac running on GPU with super speed", judged by whiteboard, canvas and a Buzan mind map, on the RTX 3090 desktop and the owner's M4 (over scripts/mac-ssh, not CI).
+- **Worked:**
+  - **mojoui.gpu2d:** a Scene → instanced batches, plus a CPU executor as reference. GL and Metal backends; a layer cache per canvas.
+  - **Linux:** draw-ahead for animating canvases; GTK graphics offload (dmabuf subsurfaces with fences).
+  - **Mac:** frames in flight with a completion handler; labels that change without a relayout.
+  - **The map:** a Buzan mind map with springs, and a MapCamera.
+  - **Speed:** worst frames 120–230 ms → under 8.3 ms on Linux; the Mac 15–34 ms a frame on the CPU → 1–2 ms p50.
+- **Broke and fixed:**
+  - The Mac's first timing rule hid a main-thread GPU wait (review round 1's must). The Mac stopped blocking and wall clock is gated.
+  - Linux failures all came from NVIDIA dropping to P8 while GTK waited on our fence behind the compositor; offload removed the wait.
+  - A stroke triangle strip covered 35× its area.
+  - The map rebuilt all its text on every pan frame at 1.6×.
+  - The Mac's first zoom frame re-laid out the window.
+- **Means:** omxcode now has its own GPU 2D renderer on both desktop platforms, with honest per-frame timing that names each spike's cause. It's the base for the GPUI race. Text, which is still baked and blurry at big zooms, is the next gap. Desktop tests now run on a hidden screen (scripts/testscreen). Report: docs/goals/75-report.md.
+---
+
 ## Goal 74: Personal Note's editors, native in Mojo (2026-11-17/18)
 - **Setup:** worktree ../mojo-ui-g74, branch `goal-74-personal-note` off main cc33c9d7. Owner: "can we even build Personal Note?", natively, no JS. M0 and M4/M5 built by delegates in parallel, the rest in the main session.
 - **Worked:** mojoui.history, textedit (a native multi-line editor: 1M characters open in ms), mdedit (Markdown in place, marks hidden off the caret's line), objectlayer (objects, connectors, ink; Personal Note's 645-object note pans in 0.3 ms of app paint), mindmap; examples/pnote composes them with SQLite + FTS5 and a palette; M0–M7 pass, reviewer round 2 PASS.
