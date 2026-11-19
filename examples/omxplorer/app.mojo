@@ -2757,6 +2757,16 @@ struct Main(App):
             self.message = "Couldn't compute that chart: " + String(e)
         self.version += 1
 
+    def any_cell_editing(self) -> Bool:
+        """A cell being edited in the sheet's grid or a table card's, on screen or scrolled out of sight: its Esc cancels the
+        edit and leaves the docked panel alone (review round 3, D-7627)."""
+        if self.grid.editing:
+            return True
+        for k in range(len(self.tables)):
+            if self.tables.cards[k].grid.editing:
+                return True
+        return False
+
     def show_inspector(mut self):
         """The inspector itself in the dock (a chart picked or its word tapped): any other panel there gives way (goal 76)."""
         self.inspector_open = True
@@ -3829,11 +3839,12 @@ struct Main(App):
             self.ribbon_at = m - RIBBON_TAB
             self.version += 1
             return
-        if event.number == KEY and event.text == "Escape" and self.inspector_open and self.grid.editor_place(self.frame)[2] == 0:
+        if event.number == KEY and event.text == "Escape" and self.inspector_open and not self.any_cell_editing():
             # (an Escape a canvas took (a table card's grid, a document, a video, the sheet's own grid) with no cell being
-            # edited: the docked panel closes, as the window's Escape item does where no canvas has the keyboard; the canvas
-            # still gets the key below, review round 2, D-7623)
+            # edited anywhere, shown or scrolled out of sight: the docked panel closes, as the window's Escape item does where
+            # no canvas has the keyboard; the canvas still gets the key below, review rounds 2 and 3, D-7623, D-7627)
             self.close_panels()
+            self.message = "Panel closed"
             self.version += 1
         if self.tracks.update(event, self.font, self.pal):  # (a log's chart tapped or set: its video seeks; a column picked; close)
             if self.tracks.seek_card >= 0:
@@ -4033,10 +4044,6 @@ struct Main(App):
             elif action == GRID_CANCEL:
                 self.select_cell(self.grid.cur_row, self.grid.cur_col)
                 self.message = "Edit cancelled"
-            elif action == GRID_NONE and event.number == KEY and event.text == "Escape" and self.inspector_open:  # (Esc with nothing to cancel: the panel closes, goal 76)
-                self.close_panels()
-                self.message = "Panel closed"
-                action = 1
             elif action == GRID_COMMIT:
                 var typed = String(self.grid.typed)
                 self.write_cell(typed)
@@ -4923,7 +4930,7 @@ struct Main(App):
                           Item("Sheet", SHOW_SHEET, icon="sheet", checked=on_sheet and self.sheet_tab == 0, disabled=not on_sheet),
                           Item("Report", SHOW_REPORT, icon="chart-bar", checked=on_sheet and self.sheet_tab == 1, disabled=not on_sheet), Separator(),
                           Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet), Separator(),
-                          Item("Close panel", DOCK_CLOSE, icon="x", shortcut="Escape", disabled=not on_sheet or not self.inspector_open or self.grid.editor_place(self.frame)[2] > 0)]),
+                          Item("Close panel", DOCK_CLOSE, icon="x", shortcut="Escape", disabled=not on_sheet or not self.inspector_open or self.any_cell_editing())]),
             Menu("Insert", [Item("Chart", INSERT_CHART, icon="chart-bar", shortcut="Ctrl+Shift+C", disabled=not on_sheet),
                             Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet),
                             Item("Video…", INSERT_VIDEO, icon="video", disabled=not on_sheet), Item("Image…", INSERT_IMAGE, icon="image", disabled=not on_sheet),
