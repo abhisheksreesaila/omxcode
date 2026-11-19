@@ -81,6 +81,77 @@ comptime APPKIT_IMAGE_GAP = 2.0
 comptime ICON_GAP_MARK = "\u200a"  # a hair space: the room before a role button's words, kerned to its gap
 
 
+comptime QUIET_KEY = "mojoQuietLabel"  # (an associated object's key, a selector's stable address: set while a label's
+# words change without changing its size, MojoLabel then skips the intrinsic-size invalidation, D-7582)
+
+
+def quiet_label(w: Int) -> Bool:
+    """Label w can take words without invalidating its size: it's a MojoLabel (a plain NSTextField becomes one here:
+    the subclass adds no storage, only the three gated methods). False for any other class (its own setter is used)."""
+    var c = cfunc("object_getClass", w)
+    if c == cls("MojoLabel"):
+        return True
+    if c != cls("NSTextField") or cls("MojoLabel") == 0:
+        return False
+    _ = cfunc("object_setClass", w, cls("MojoLabel"))
+    return True
+
+
+def on_label_invalidate(view: Int, cmd: Int) abi("C"):
+    """MojoLabel's invalidateIntrinsicContentSize: NSTextField's own, unless its words are changing in place."""
+    if cfunc("objc_getAssociatedObject", view, sel(QUIET_KEY)) != 0:
+        return
+    var parent = List[Int](length=2, fill=0)  # struct objc_super { receiver, super_class }
+    parent[0] = view
+    parent[1] = cls("NSTextField")
+    cfunc[NoneType]("objc_msgSendSuper", Int(parent.unsafe_ptr()), cmd)
+    _ = len(parent)
+
+
+def on_label_invalidate_cell(view: Int, cmd: Int, cell: Int) abi("C"):
+    """MojoLabel's invalidateIntrinsicContentSizeForCell: (NSControl calls it when its cell's value changes): the
+    same rule."""
+    if cfunc("objc_getAssociatedObject", view, sel(QUIET_KEY)) != 0:
+        return
+    var parent = List[Int](length=2, fill=0)
+    parent[0] = view
+    parent[1] = cls("NSTextField")
+    cfunc[NoneType]("objc_msgSendSuper", Int(parent.unsafe_ptr()), cmd, cell)
+    _ = len(parent)
+
+
+def on_label_needs_layout(view: Int, cmd: Int, flag: Int8) abi("C"):
+    """MojoLabel's setNeedsLayout: (NSTextField's setter asks for its own layout too; with its size unchanged that
+    layout changes nothing): the same rule."""
+    if flag != 0 and cfunc("objc_getAssociatedObject", view, sel(QUIET_KEY)) != 0:
+        return
+    var parent = List[Int](length=2, fill=0)
+    parent[0] = view
+    parent[1] = cls("NSTextField")
+    cfunc[NoneType]("objc_msgSendSuper", Int(parent.unsafe_ptr()), cmd, flag)
+    _ = len(parent)
+
+
+def same_room(w: Int, had: Int, words: Int) -> Bool:
+    """Label w's new attributed words need exactly the room its old ones had (D-7582): the same one-line size in whole
+    points, and, for a label that wraps, both fit its frame's width on one line (so neither wraps)."""
+    var a = msg[CGPoint](had, "size")  # (an NSSize: width, height)
+    var b = msg[CGPoint](words, "size")
+    if up(a.x) != up(b.x) or up(a.y) != up(b.y):
+        return False
+    var cell = msg(w, "cell")
+    if cell != 0 and (msg(cell, "wraps") & 0xFF) != 0:
+        var room = msg[CGRect](w, "frame").width - 4  # (the cell's own inset, 2 pt a side)
+        return b.x <= room and a.x <= room
+    return True
+
+
+def up(v: Float64) -> Int:
+    """v rounded up to a whole point."""
+    var i = Int(v)
+    return i + 1 if Float64(i) < v else i
+
+
 def cut_with_ellipsis(w: Int):
     """Label w on one line, cut at its end with "…" where it doesn't fit (the web's text-overflow: ellipsis). The cell's
     mode alone isn't enough: a label whose words carry a paragraph style (the look's line height) breaks by that style's
@@ -291,6 +362,9 @@ struct AppKitHost[A: App](Movable):
     var g2d_defer: Bool  # (set by tick and framebench around their draws) a GPU frame is committed, not waited for: see finish_gpu2d
     var g2d_defer_on: Bool  # MOJOUI_GPU2D_DEFER=0: every GPU frame is waited for at once, as before D-7555 (to compare)
     var g2d_keep: Int  # GPU frames left in flight at the end of a frame (MOJOUI_GPU2D_INFLIGHT − 1)
+    var label_inplace: Bool  # a label's new words of the same fitted size don't invalidate its size: no layout (D-7582; MOJOUI_LABEL_INPLACE=0: off)
+    var labels_in_place: Int  # label changes made in place (the report)
+    var labels_relaid: Int  # label changes that changed the label's size (laid out again)
     # committed GPU frames not yet shown, oldest first: canvas, ring slot, IOSurface, and what the CPU fallback needs
     var g2d_pk: List[Int]
     var g2d_pat: List[Int]
@@ -373,6 +447,9 @@ struct AppKitHost[A: App](Movable):
         self.g2d_defer_on = env("MOJOUI_GPU2D_DEFER") != "0"
         var inflight = env("MOJOUI_GPU2D_INFLIGHT")
         self.g2d_keep = 1 if inflight == "" else max(to_int(inflight) - 1, 0)
+        self.label_inplace = env("MOJOUI_LABEL_INPLACE") != "0"
+        self.labels_in_place = 0
+        self.labels_relaid = 0
         self.g2d_pk = List[Int]()
         self.g2d_pat = List[Int]()
         self.g2d_ps = List[Int]()
@@ -2203,7 +2280,7 @@ struct AppKitHost[A: App](Movable):
                     if had != 0 and msg(had, "length") > 0:
                         var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
                         var words = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(self.label_text(p.node, p.text)), attrs)
-                        _ = msg(w, "setAttributedStringValue:", words)
+                        self.set_label(w, had, words)
                         _ = msg(words, "release")  # (the field keeps its own copy: one leaked a string per change, e.g. a zoom label's every frame)
                     else:
                         _ = msg(w, "setStringValue:", ns_string(self.label_text(p.node, p.text)))
@@ -2369,6 +2446,23 @@ struct AppKitHost[A: App](Movable):
             var piece = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(css_breaks(r.text)), attrs)
             _ = msg(out, "appendAttributedString:", piece)
         return out
+
+    def set_label(mut self, w: Int, had: Int, words: Int):
+        """Label w shows `words` (it showed `had`). When the new words take the same room (their one-line size, rounded
+        up to whole points as AppKit's intrinsic size is, the same as the old words'; a wrapping label's also fitting its
+        frame on one line), the label's intrinsic size isn't invalidated: NSControl's setter does that for every change,
+        which marks the label for constraints and layout (a window layout pass, D-7581); the label is drawn again and
+        nothing else is touched. Words that need other room go through the plain setter and lay out (D-7582)."""
+        if self.label_inplace and same_room(w, had, words) and quiet_label(w):
+            # (its own setter, with the intrinsic-size invalidation it makes skipped for this call: the cell takes the
+            # words and the label is marked for drawing; nothing else changes)
+            cfunc[NoneType]("objc_setAssociatedObject", w, sel(QUIET_KEY), w, 0)  # OBJC_ASSOCIATION_ASSIGN
+            _ = msg(w, "setAttributedStringValue:", words)
+            cfunc[NoneType]("objc_setAssociatedObject", w, sel(QUIET_KEY), 0, 0)
+            self.labels_in_place += 1
+            return
+        _ = msg(w, "setAttributedStringValue:", words)
+        self.labels_relaid += 1
 
     def label_text(self, n: Int, text: String) -> String:
         """What TEXT node n's label shows for `text`: its words as the browser lays them out (label_words, D-548, D-549)."""
@@ -4004,6 +4098,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     host[].g2d_done.clear()
     host[].g2d_shown_ms.clear()
     var failed0 = host[].g2d_failed
+    var inplace0 = host[].labels_in_place
+    var trace_dirty = env("MOJOUI_FRAMEBENCH_DIRTY") == "1"  # (diagnosis: which views ask for layout or constraints, frames 0–2)
+    var relaid0 = host[].labels_relaid
     for i in range(count):
         node = canvas_node_at(host[], tag)  # (a rebuild may have renumbered the screen)
         k = host[].canvas_at(node) if node >= 0 else -1
@@ -4013,6 +4110,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         var drawn0 = host[].canvases[k].drawn
         var gpu0 = host[].canvases[k].gpu_frames
         var g2d0 = host[].g2d_frames
+        take_waits(host[].g2d)  # (the waits before this frame aren't its own)
+        var c0 = thread_cpu_ns()
+        var ru0 = usage()
         var t0 = Int(now_ns())
         if what == "pan":
             var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
@@ -4060,13 +4160,24 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             host[].draw_canvas(k, host_addr)
             host[].g2d_defer = False
         var s1 = slept_ms(host[].g2d)
+        if trace_dirty and i < 3:  # (diagnosis only: its time lands in the frame's draw)
+            print("DIRTY " + what + " f" + String(i) + ": " + dirty_views(msg(msg(window, "contentView"), "superview"), 0), flush=True)
         var t2 = Int(now_ns())
+        var c2 = thread_cpu_ns()
+        var need_l = msg(window, "contentView") != 0 and (msg(msg(window, "contentView"), "needsLayout") & 0xFF) != 0
         _ = msg(window, "layoutIfNeeded")  # (displayIfNeeded's first part, timed apart: FRAMES' L)
         var t2l = Int(now_ns())
+        var c2l = thread_cpu_ns()
         _ = msg(window, "displayIfNeeded")
+        var t2d = Int(now_ns())
+        var sf0 = slept_ms(host[].g2d)
         host[].finish_frame()  # (as tick: completed frames shown, at most g2d_keep left in flight)
+        var sf1 = slept_ms(host[].g2d)
+        var t2f = Int(now_ns())
         _ = msg(cls("CATransaction"), "flush")
         var t3 = Int(now_ns())
+        var c3 = thread_cpu_ns()
+        var ru1 = usage()
         var s2 = slept_ms(host[].g2d)
         node = canvas_node_at(host[], tag)
         k = host[].canvas_at(node) if node >= 0 else -1
@@ -4099,7 +4210,23 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             works.append(ev + dm + pm)
             walls.append(Float64(t3 - t0) / 1e6)
             g2d_at.append(on_g2d - 1 if is_g2d else -1)
-            diag.append(" e" + one_decimal(ev) + " p" + one_decimal(pm) + " L" + one_decimal(Float64(t2l - t2) / 1e6) + " s" + one_decimal(s2 - s0) + " W" + one_decimal(Float64(t3 - t0) / 1e6))
+            # (the wall breakdown, D-7584: E event, D our draw (CPU, its sleeps out), L AppKit's layout (* = the content
+            # view asked for one), P AppKit's display, F showing completed GPU frames, C the CATransaction commit; s the
+            # GPU waits, c the main thread's CPU time (cp: in L–C), o off the CPU without our waits (the OS ran something
+            # else, or a call blocked: wall − CPU − s); pf major/minor page faults and cs voluntary/involuntary context
+            # switches in the frame (the process's, when any); then each GPU wait: d(rain) or w(ait for a frame)
+            # slept/commit→start/GPU. The frame with the longest wall prints it on the FRAMEBENCH line as wall_worst)
+            var wall = Float64(t3 - t0) / 1e6
+            var cpu = Float64(c3 - c0) / 1e6
+            var why = String(" e") + one_decimal(ev) + " d" + one_decimal(dm) + " L" + one_decimal(Float64(t2l - t2) / 1e6) + ("*" if need_l else "") + "/" + one_decimal(Float64(c2l - c2) / 1e6)
+            why += " P" + one_decimal(Float64(t2d - t2l) / 1e6) + " F" + one_decimal(Float64(t2f - t2d) / 1e6 - (sf1 - sf0)) + " C" + one_decimal(Float64(t3 - t2f) / 1e6)
+            why += " s" + one_decimal(s2 - s0) + " c" + one_decimal(cpu) + " cp" + one_decimal(Float64(c3 - c2) / 1e6) + " o" + one_decimal(max(wall - cpu - (s2 - s0), 0.0)) + " W" + one_decimal(wall)
+            if ru1[0] != ru0[0] or ru1[1] != ru0[1]:  # (page faults in the frame: major = read from disk, minor)
+                why += " pf" + String(ru1[1] - ru0[1]) + "/" + String(ru1[0] - ru0[0])
+            if ru1[2] != ru0[2] or ru1[3] != ru0[3]:  # (context switches in the frame: voluntary/involuntary (preempted))
+                why += " cs" + String(ru1[2] - ru0[2]) + "/" + String(ru1[3] - ru0[3])
+            why += take_waits(host[].g2d)
+            diag.append(why)
         pump_run_loop(0)  # (the window server's events, untimed)
     node = canvas_node_at(host[], tag)
     if node >= 0 and (what == "pan" or what == "draw"):
@@ -4123,11 +4250,21 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             if i < len(g_scene):
                 line += "(" + one_decimal(g_scene[i]) + "/" + one_decimal(g_batch[i]) + "/" + one_decimal(g_metal[i]) + "/" + one_decimal(g_gpu[i]) + " " + g_layers[i] + diag[i] + ")"
         print(line, flush=True)
+    var worst = 0  # (the frame with the longest wall time: its breakdown on the FRAMEBENCH line, so a spike names its cause)
+    for i in range(len(walls)):
+        if walls[i] > walls[worst]:
+            worst = i
+    var wall_why = String("")
+    if worst < len(diag):
+        wall_why = " wall_worst=f" + String(worst) + ":" + String(diag[worst].strip()).replace(" ", ",")
+        if worst < len(works):
+            wall_why += ",work" + one_decimal(works[worst])
     var renderer = String("AppKit-IOSurface") if on_cpu == 0 and on_gpu > 0 else (String("AppKit-CPU") if on_gpu == 0 else String("AppKit-mixed"))
     if on_g2d > 0:  # (goal 75 M3: our renderer on Metal drew them; each frame's GPU work is in its draw time)
         renderer = String("gpu2d-Metal") if on_g2d == len(works) else String("gpu2d-Metal-mixed")
     var scale = msg[Float64](window, "backingScaleFactor") if window != 0 else 0.0
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=0 renderer=" + renderer
+          + " labels_in_place=" + String(host[].labels_in_place - inplace0) + " labels_relaid=" + String(host[].labels_relaid - relaid0)
           + " p50=" + one_decimal(pct(works, 0.5)) + " p95=" + one_decimal(pct(works, 0.95)) + " max=" + one_decimal(pct(works, 1.0))
           + " event_p95=" + one_decimal(pct(events, 0.95)) + " draw_p95=" + one_decimal(pct(draws, 0.95))
           + " paint_p95=" + one_decimal(pct(paints, 0.95)) + " draw_max=" + one_decimal(pct(draws, 1.0))
@@ -4137,7 +4274,56 @@ def frame_bench[A: App](host_addr: Int, rest: String):
               + " gpu_p50=" + one_decimal(pct(g_gpu, 0.5)) + " gpu_p95=" + one_decimal(pct(g_gpu, 0.95)) + " scene_max=" + one_decimal(pct(g_scene, 1.0))
               + " metal_max=" + one_decimal(pct(g_metal, 1.0)) + " gpu_max=" + one_decimal(pct(g_gpu, 1.0))
               + " shown=" + String(len(host[].g2d_shown_ms)) + " shown_p50=" + one_decimal(pct(host[].g2d_shown_ms, 0.5)) + " shown_p95=" + one_decimal(pct(host[].g2d_shown_ms, 0.95))
-              + " shown_max=" + one_decimal(pct(host[].g2d_shown_ms, 1.0))) if on_g2d > 0 else String("")), flush=True)
+              + " shown_max=" + one_decimal(pct(host[].g2d_shown_ms, 1.0))) if on_g2d > 0 else String("")) + wall_why, flush=True)
+
+
+def dirty_views(v: Int, depth: Int) -> String:
+    """Diagnosis (MOJOUI_FRAMEBENCH_DIRTY=1): the views under v that need layout (L), constraints (U), display (D) or their layer redrawn (Y)."""
+    if v == 0 or depth > 40:
+        return ""
+    var out = String("")
+    var l = (msg(v, "needsLayout") & 0xFF) != 0
+    var u = (msg(v, "needsUpdateConstraints") & 0xFF) != 0
+    var d = (msg(v, "needsDisplay") & 0xFF) != 0
+    var ld = msg(v, "layer") != 0 and (msg(msg(v, "layer"), "needsDisplay") & 0xFF) != 0
+    if l or u or d or ld:
+        out += " " + from_ns(msg(msg(v, "className"), "description")) + "@" + String(depth) + ":" + ("L" if l else "") + ("U" if u else "") + ("D" if d else "") + ("Y" if ld else "")
+        if (msg(v, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
+            out += "'" + from_ns(msg(v, "stringValue")) + "'"
+    var subs = msg(v, "subviews")
+    for j in range(msg(subs, "count")):
+        out += dirty_views(msg(subs, "objectAtIndex:", j), depth + 1)
+    return out
+
+
+def usage() -> List[Int]:
+    """The process's minor and major page faults and voluntary and involuntary context switches so far (getrusage;
+    macOS's struct rusage: two timevals, then longs), for framebench's wall breakdown (D-7584)."""
+    var ru = List[Int](length=18, fill=0)
+    _ = external_call["getrusage", c_int](c_int(0), Int(ru.unsafe_ptr()))  # RUSAGE_SELF
+    return [ru[8], ru[9], ru[16], ru[17]]  # ru_minflt, ru_majflt, ru_nvcsw, ru_nivcsw
+
+
+def thread_cpu_ns() -> Int:
+    """The calling thread's CPU time (CLOCK_THREAD_CPUTIME_ID, 16 on macOS), for framebench's wall breakdown."""
+    return Int(external_call["clock_gettime_nsec_np", UInt64](c_int(16)))
+
+
+def take_waits(g2d: Int) -> String:
+    """gpu2d's GPU waits since the last call, as framebench's breakdown shows them (D-7584), and forgets them."""
+    if g2d == 0:
+        return ""
+    var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=g2d)
+    var out = String("")
+    var i = 0
+    while i + 3 < len(g[].metal.wait_log):
+        ref lg = g[].metal.wait_log
+        out += (" d" if lg[i] == 1.0 else " w") + one_decimal(lg[i + 1])
+        if lg[i + 2] >= 0:
+            out += "/" + one_decimal(lg[i + 2]) + "/" + one_decimal(lg[i + 3])
+        i += 4
+    g[].metal.wait_log.clear()
+    return out
 
 
 def slept_ms(g2d: Int) -> Float64:
@@ -5111,6 +5297,11 @@ def run[A: App]() -> c_int:
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top
     add_method(board, "isFlipped", is_flipped, "B@:")
     register_class(board)
+    var label = new_class("MojoLabel", "NSTextField")  # a label whose words can change without a relayout (D-7582)
+    add_method(label, "invalidateIntrinsicContentSize", on_label_invalidate, "v@:")
+    add_method(label, "invalidateIntrinsicContentSizeForCell:", on_label_invalidate_cell, "v@:@")
+    add_method(label, "setNeedsLayout:", on_label_needs_layout, "v@:B")
+    register_class(label)
     var clip = new_class("MojoTopClipView", "NSClipView")  # a scroll view's clip: short content at the top
     add_method(clip, "isFlipped", is_flipped, "B@:")
     register_class(clip)

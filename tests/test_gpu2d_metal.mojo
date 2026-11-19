@@ -1,13 +1,15 @@
 # The Metal backend of the GPU 2D renderer (goal 75 M3), on a Mac with Metal: every primitive and three scenes like the
 # judged ones are drawn by Metal into an IOSurface, read back and compared with gpu2d's CPU executor (M1's bounds: mean
 # ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 levels off); a 300-topic map panned through the layer cache rebuilds
-# nothing after its first frame (goal 75 review, D-7578). Prints `gpu2d metal: ok`; on a Mac without Metal it says
+# nothing after its first frame (goal 75 review, D-7578); ink drawn with frames still on the GPU (a growing page and a
+# wet stroke, two frames in flight) uploads without waiting and every frame matches (D-7583). Prints `gpu2d metal: ok`; on a Mac without Metal it says
 # why and fails. A Mac only (the Objective-C runtime and Metal are linked):
 #   pixi run mojo build -I . tests/test_gpu2d_metal.mojo -o build/test_gpu2d_metal \
 #       -Xlinker -lobjc -Xlinker -framework -Xlinker Metal -Xlinker -framework -Xlinker Foundation -Xlinker -framework -Xlinker IOSurface
 #   build/test_gpu2d_metal          (from the repo's root: it reads build/g74/bench-note.json when it's there)
 from std.testing import assert_true
 from std.time import perf_counter_ns
+from std.math import sin
 
 from mojoui.canvas import Surface
 from mojoui.text import Font
@@ -17,6 +19,7 @@ from mojoui.gpu2d_metal import Metal2D, MetalCanvas2D, read_iosurface
 from mojoui.hosts.apple_canvas import io_surface, cfunc
 from mojoui.objectlayer import import_fabric
 from mojoui.mindmap import MapView
+from mojoui.ink import Stroke
 from tests.test_gpu2d import paint_case, case_name, gradient, whiteboard, mindmap_of, diff, counts
 from tests.test_objectlayer import seeded_note
 
@@ -99,6 +102,7 @@ def main() raises:
     gpu_vs_cpu("mindmap (" + String(m.nodes()) + " topics)", mtl, ms, atlas, font)
     print("     ", counts(ms, atlas, font))
     map_pan(font, atlas)
+    ink_in_flight(font, atlas)
     print("gpu2d metal: ok")
 
 
@@ -139,3 +143,105 @@ def map_pan(font: Font, atlas: GlyphAtlas) raises:
           round(ms[len(ms) // 2], 3), "ms, max", round(ms[len(ms) - 1], 3), "ms; last frame mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
     assert_true(rebuilt == 0, "a panned mind map rebuilt its layers on Metal")
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the panned mind map differs from the CPU executor (Metal)")
+
+
+def ink_stroke(i: Int, wet: Int) -> Stroke:
+    """Stroke i of the test page (wet ≥ 0: the wet stroke, its end moving with the frame)."""
+    var s = Stroke(2.0 + Float64(i % 5), UInt32(0xFF222222) if i % 3 == 0 else UInt32(0xFF2A60B0))
+    var x = 40.0 + Float64((i * 97) % 700)
+    var y = 30.0 + Float64((i * 61) % 400)
+    var n = 30 + (wet * 3 if wet >= 0 else i % 20)
+    for k in range(n):
+        s.add(x + Float64(k) * 4.0, y + 25.0 * sin(Float64(k) * 0.2 + Float64(i)), 0.3 + 0.6 * abs(sin(Float64(k) * 0.15)))
+    return s^
+
+
+def check_oldest(mut g: MetalCanvas2D, mut fly_io: List[Int], mut fly_want: List[List[UInt32]], W: Int, H: Int) raises -> Float64:
+    """The oldest frame in flight, completed and read back against its CPU picture; its mean difference."""
+    assert_true(g.metal.complete_oldest(), "ink in flight: a frame didn't complete")
+    var got = read_iosurface(fly_io.pop(0), W, H)
+    var want = fly_want.pop(0)
+    var d = diff(want, got)
+    assert_true(d.mean <= 1.5 and d.far <= 0.5, "ink in flight: a frame differs from the CPU executor (mean " + String(d.mean) + ", far " + String(d.far) + ")")
+    return d.mean
+
+
+def ink_scene(mut sc: Scene, f: Int):
+    """Frame f of the pen test: a heavy page that stays (so the GPU is still busy when the next frame uploads), the
+    ink layer with 4 + f strokes, the wet stroke as it is at frame f."""
+    sc.fill(0xFFFFFFFF)
+    sc.begin_layer("page")
+    for i in range(1500):
+        var s = ink_stroke(1000 + i, -1)
+        sc.polygon(s.outline(), s.color)
+    sc.begin_layer("ink")
+    for i in range(4 + f):
+        var s = ink_stroke(i, -1)
+        sc.polygon(s.outline(), s.color)
+    sc.begin_layer("wet")
+    var w = ink_stroke(100, f)
+    sc.polygon(w.outline(), w.color)
+
+
+def ink_in_flight(font: Font, atlas: GlyphAtlas) raises:
+    """The pen as the host draws it (D-7555: committed, not waited for, at most two frames in flight, a ring of three
+    IOSurfaces): each frame the page's ink layer grows by a stroke (a tail upload) and the wet stroke changes (its
+    layer rebuilt). Neither waits for the frame on the GPU that reads the same buffers (D-7583: the tail only appends,
+    the rebuilt layer goes into its spare set), and each frame read back matches the CPU executor's picture of it."""
+    var g = MetalCanvas2D()
+    assert_true(g.metal.ok, "MetalCanvas2D: " + g.metal.why)
+    var W = 1800
+    var H = 1100
+    var F = 16
+    var wants = List[List[UInt32]]()  # (every frame's Scene and CPU picture first: the frames then go to the GPU back
+    var scenes = List[Scene]()  # to back, the CPU's share of each as short as the host's)
+    for f in range(F):
+        var sc = Scene(W, H, 1.0)
+        ink_scene(sc, f)
+        scenes.append(sc.copy())  # (the frames hand theirs over by swap)
+        var want = List[UInt32](length=W * H, fill=0)
+        var sf = Surface(Int(want.unsafe_ptr()), W, H, 1.0)
+        execute_cpu(build_batches(sc, atlas, font), atlas, sf)
+        wants.append(want^)
+    var ios = List[Int]()
+    for _ in range(3):
+        ios.append(io_surface(W, H))
+        assert_true(ios[len(ios) - 1] != 0, "ink in flight: no IOSurface")
+    var fly_io = List[Int]()
+    var fly_want = List[List[UInt32]]()
+    var grown = 0
+    var drained0 = 0
+    var worst = 0.0
+    var checked = 0
+    var busy_rebuilds = 0  # (rebuilds of the wet layer while a frame on the GPU read its buffers: the GPU overlaps frames,
+    for f in range(F):  # so how many depends on its timing; frame 1's always is)
+        swap(g.scene, scenes[f])  # (O(1): the frame's own CPU work is the renderer's)
+        while len(g.metal.pending) >= 2:  # (the host's rule: no more than two in flight)
+            worst = max(worst, check_oldest(g, fly_io, fly_want, W, H))
+            checked += 1
+        if f == 1:  # (from the second frame on: the first builds everything with nothing in flight)
+            drained0 = g.metal.drained
+        var sp = g.spared
+        var bz = g.busy_rebuilds
+        assert_true(g.render_scene(1, ios[f % 3], W, H, 0, False), "ink in flight: frame not committed")
+        if f >= 1:
+            assert_true(g.spared - sp == g.busy_rebuilds - bz, "ink in flight: a layer rebuilt while a frame on the GPU read its buffers didn't use its spare set")
+            busy_rebuilds += g.busy_rebuilds - bz
+        if f >= 1:
+            grown += g.grown
+        fly_io.append(ios[f % 3])
+        fly_want.append(wants[f].copy())
+        g.end_frame()
+    while len(g.metal.pending) > 0:
+        worst = max(worst, check_oldest(g, fly_io, fly_want, W, H))
+        checked += 1
+    var drains = g.metal.drained - drained0
+    for io in ios:
+        g.metal.forget(io)
+        cfunc[NoneType]("CFRelease", io)
+    print("   ink in flight (" + String(F) + " frames, two in flight, GPU", round(g.metal.gpu_ms, 3), "ms a frame): page grown", grown,
+          "; wet layer rebuilt while busy (into its spare)", busy_rebuilds, "; drains", drains, "; frames checked", checked, ", worst mean", round(worst, 4), "levels")
+    assert_true(checked == F, "ink in flight: not every frame was read back")
+    assert_true(grown >= F - 2, "ink in flight: the page's layer wasn't grown in place")
+    assert_true(drains == 0, "ink in flight: an upload waited for the GPU")
+    assert_true(busy_rebuilds >= 1, "ink in flight: no rebuild found a frame on the GPU (the case isn't exercised)")

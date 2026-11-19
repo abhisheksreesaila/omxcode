@@ -428,7 +428,13 @@ struct Metal2D(Movable):
     var blocked_ms: Float64  # the last frame: how long this thread waited for its command buffer (ms)
     var pending: List[Int]  # command buffers committed and not yet completed here (render_layers(wait=False)), oldest
     var pending_at: List[Float64]  # first, retained; and their commit times (on the GPU's clock)
+    var pending_serial: List[Int]  # and their serials (busy(): is a buffer set a pending frame reads still on the GPU)
+    var serial: Int  # command buffers committed so far (the last one's serial)
+    var failures: Int  # command buffers that didn't complete
+    var drained: Int  # drains that found frames in flight (the test's count: an overlapped upload makes none)
+    var overlap: Bool  # uploads that don't touch what a pending frame reads go ahead without draining (D-7583; MOJOUI_GPU2D_OVERLAP=0: off)
     var slept_ms: Float64  # how long this thread has slept waiting for the GPU (drain, complete_oldest) so far
+    var wait_log: List[Float64]  # each sleep over 0.05 ms, 4 numbers: 0 complete / 1 drain, slept, commit → start, GPU ms
     var done_block: Int  # the completed handler each frame committed without waiting gets (notify), 0: none
     var drawn_groups: Int  # polygon groups drawn (on the canvas) since the last pass began
     # classes and selectors of the per-frame calls
@@ -497,7 +503,13 @@ struct Metal2D(Movable):
         self.blocked_ms = 0
         self.pending = List[Int]()
         self.pending_at = List[Float64]()
+        self.pending_serial = List[Int]()
+        self.serial = 0
+        self.overlap = getenv("MOJOUI_GPU2D_OVERLAP") != "0"
+        self.drained = 0
+        self.failures = 0
         self.slept_ms = 0
+        self.wait_log = List[Float64]()
         self.done_block = 0
         self.c_rpd = 0
         self.s_rpd = sel("renderPassDescriptor")
@@ -633,8 +645,12 @@ struct Metal2D(Movable):
 
     def upload(mut self, frame: Frame2D, plan: PolyPlan, mut gb: GpuBuffers, tail: Bool = False):
         """A frame's batches into a set of GPU buffers: the four instance lists, the polygon fans, the images' pixels and
-        where each starts, the polygon groups' lists. tail: only what was added since the last upload (a layer that grew)."""
-        self.drain()  # (a frame in flight may read these buffers)
+        where each starts, the polygon groups' lists. tail: only what was added since the last upload (a layer that grew).
+        A frame still on the GPU may read these buffers: a tail upload that only appends past what they held (or into
+        buffers grown anew: a pending command buffer keeps the old ones) doesn't touch what it reads, so it goes ahead;
+        anything else waits for the GPU first (D-7583; render_scene gives a rebuilt layer its spare set instead)."""
+        if self.busy(gb) and not (self.overlap and tail and appends_only(frame, plan, gb)):
+            self.drain()
         upload_frame(self.device, self.f, self.s_contents, self.memcpy, frame, gb, tail)
         upload_plan(self.device, self.f, self.s_contents, self.memcpy, plan, gb, tail)
 
@@ -857,6 +873,8 @@ struct Metal2D(Movable):
             _ = msg[NoneType](cb, "addCompletedHandler:", self.done_block)
         _send[NoneType](f, cb, self.s_commit)
         self.pending_at.append(self._now())  # (the clock GPUStartTime and GPUEndTime are on)
+        self.serial += 1
+        self.pending_serial.append(self.serial)
         self.idle_ms = Float64(Int(now_ns()) - self.last_commit_ns) / 1e6
         self.last_commit_ns = Int(now_ns())
         _ = msg(cb, "retain")  # (commandBuffer's is autoreleased: kept past the pool)
@@ -877,6 +895,16 @@ struct Metal2D(Movable):
         Pointer[Int, MutUntrackedOrigin](unsafe_from_address=words + 16)[] = _sym(RTLD_DEFAULT, "_dispatch_main_q")
         self.done_block = data_block(_done_invoke, "v16@?0@8", words)
 
+    def busy(self, gb: GpuBuffers) -> Bool:
+        """A frame the GPU hasn't completed reads buffer set gb (the last frame that drew it is still pending and not
+        done; one queue completes its frames in order, so earlier ones are done too)."""
+        if gb.used_by <= 0:
+            return False
+        for i in range(len(self.pending)):
+            if self.pending_serial[i] == gb.used_by:
+                return _send(self.f, self.pending[i], self.s_status) < 4
+        return False
+
     def oldest_done(self) -> Bool:
         """The oldest pending command buffer has completed (or failed): complete_oldest won't sleep."""
         return len(self.pending) > 0 and _send(self.f, self.pending[0], self.s_status) >= 4
@@ -885,10 +913,21 @@ struct Metal2D(Movable):
         """Waits until every pending command buffer completed (they stay pending: complete_oldest reads them)."""
         if len(self.pending) == 0:
             return
+        self.drained += 1
         var t0 = Int(now_ns())
         for cb in self.pending:
             _send[NoneType](self.f, cb, self.s_wait)
-        self.slept_ms += Float64(Int(now_ns()) - t0) / 1e6
+        var slept = Float64(Int(now_ns()) - t0) / 1e6
+        self.slept_ms += slept
+        if slept > 0.05:  # (framebench's per-frame wall breakdown names it)
+            self.log_wait(1.0, slept, -1.0, -1.0)
+
+    def log_wait(mut self, kind: Float64, slept: Float64, before: Float64, gpu: Float64):
+        if len(self.wait_log) < 4096:  # (framebench reads and clears it each frame; nothing else grows it for long)
+            self.wait_log.append(kind)
+            self.wait_log.append(slept)
+            self.wait_log.append(before)
+            self.wait_log.append(gpu)
 
     def complete_oldest(mut self) -> Bool:
         """Waits for the oldest pending command buffer (if any), reads its times: gpu_ms (GPU busy), wait_before_ms
@@ -901,6 +940,7 @@ struct Metal2D(Movable):
             return True
         var cb = self.pending.pop(i)
         var t_commit = self.pending_at.pop(i)
+        _ = self.pending_serial.pop(i)
         var f = self.f
         var t_in = self._now()
         _send[NoneType](f, cb, self.s_wait)
@@ -908,15 +948,23 @@ struct Metal2D(Movable):
         var status = _send(f, cb, self.s_status)
         var g0 = _send[Float64](f, cb, self.s_gpu_start)
         var g1 = _send[Float64](f, cb, self.s_gpu_end)
+        if status != 4:  # (why it didn't complete, from its error, before it's let go: D-7585)
+            self.failures += 1
+            if self.frames == 0 or self.failures <= 5:
+                var err = _send(f, cb, sel("error"))
+                var why = from_ns(msg(err, "localizedDescription")) if err != 0 else String("no error object")
+                var code = msg(err, "code") if err != 0 else 0
+                print("mojoui: gpu2d Metal: frame " + String(self.frames) + "'s command buffer ended with status " + String(status)
+                      + " (error " + String(code) + ": " + why + ")", flush=True)
         _ = msg[NoneType](cb, "release")
         self.gpu_ms = (g1 - g0) * 1000.0
         self.wait_before_ms = (g0 - t_commit) * 1000.0 if t_commit > 0 else 0.0
         self.wait_after_ms = max(t_back - max(g1, t_in), 0.0) * 1000.0 if t_back > 0 else 0.0
         self.blocked_ms = (t_back - t_in) * 1000.0 if t_in > 0 else 0.0
         self.slept_ms += self.blocked_ms
+        if self.blocked_ms > 0.05:
+            self.log_wait(0.0, self.blocked_ms, self.wait_before_ms, self.gpu_ms)
         if status != 4:  # MTLCommandBufferStatusCompleted
-            if self.frames == 0:
-                print("mojoui: gpu2d Metal: the first frame's command buffer ended with status " + String(status), flush=True)
             return False
         self.frames += 1
         return True
@@ -929,17 +977,41 @@ struct GpuBuffers(Movable):
     var caps: List[Int]  # their sizes in bytes
     var used: List[Int]  # bytes holding the last upload (a tail upload copies only past it)
     var offsets: List[UInt32]  # IMAGE: where each image's pixels start in B_PIXELS (in pixels)
+    var used_by: Int  # the serial of the last committed frame that drew from these buffers (0: none)
 
     def __init__(out self):
         self.bufs = List[Int](length=BUFFERS, fill=0)
         self.caps = List[Int](length=BUFFERS, fill=0)
         self.used = List[Int](length=BUFFERS, fill=0)
         self.offsets = List[UInt32]()
+        self.used_by = 0
+
+
+def appends_only(frame: Frame2D, plan: PolyPlan, gb: GpuBuffers) -> Bool:
+    """A tail upload of this frame and plan into gb writes only past what each buffer held, or into a buffer grown
+    anew (_put's tail rule; images and their offsets aren't part of a tail upload) (D-7583)."""
+    var sizes = List[Int](length=BUFFERS, fill=-1)
+    sizes[B_QUADS] = len(frame.quads) * 4
+    sizes[B_GLYPHS] = len(frame.glyphs) * 4
+    sizes[B_IMAGES] = len(frame.images) * 4
+    sizes[B_POLYS] = len(frame.polys) * 4
+    sizes[B_FAN] = len(frame.fan) * 4
+    sizes[B_TRIS] = len(plan.tris) * 4
+    sizes[B_COVERS] = len(plan.covers) * 4
+    for slot in range(BUFFERS):
+        var n = sizes[slot]
+        if n <= 0:  # (not part of a tail upload, or nothing to write)
+            continue
+        var fresh = gb.bufs[slot] == 0 or gb.caps[slot] < n
+        if not fresh and n < gb.used[slot]:  # (shrunk: _put writes from the start)
+            return False
+    return True
 
 
 def _ensure(device: Int, mut gb: GpuBuffers, slot: Int, nbytes: Int) -> Bool:
     """Buffer `slot` holds at least nbytes (grown by half again when it doesn't: a new buffer, the old released — safe:
-    its callers (upload, render) drain() every frame in flight first, D-7555). True: it was replaced (its contents are
+    a pending command buffer retains the buffers it uses (commandBuffer's retained references), and its callers either
+    drain() first or write a buffer no pending frame reads, D-7555, D-7583). True: it was replaced (its contents are
     gone)."""
     if gb.caps[slot] >= nbytes and gb.bufs[slot] != 0:
         return False
@@ -1165,6 +1237,7 @@ struct GpuLayer(Movable):
     var frame: Frame2D
     var plan: PolyPlan
     var gpu: GpuBuffers
+    var spare: GpuBuffers  # (a second set: a layer rebuilt while a frame on the GPU reads `gpu` is uploaded here and swapped, D-7583)
     var valid: Bool
     var built_k: Float64
     var dx: Float64
@@ -1175,6 +1248,7 @@ struct GpuLayer(Movable):
         self.frame = Frame2D()
         self.plan = PolyPlan()
         self.gpu = GpuBuffers()
+        self.spare = GpuBuffers()
         self.valid = False
         self.built_k = 1
         self.dx = 0
@@ -1242,6 +1316,8 @@ struct MetalCanvas2D(Movable):
     var kept: Int
     var grown: Int
     var groups: Int  # polygon groups drawn this frame
+    var spared: Int  # layers rebuilt into their spare set (a frame on the GPU read the other), so far
+    var busy_rebuilds: Int  # layers rebuilt while a frame on the GPU read their buffers, so far
     var build_ms: Float64  # this frame's layer building, planning and uploading (ms)
 
     def __init__(out self):
@@ -1261,6 +1337,8 @@ struct MetalCanvas2D(Movable):
         self.kept = 0
         self.grown = 0
         self.groups = 0
+        self.spared = 0
+        self.busy_rebuilds = 0
         self.build_ms = 0
 
     def render_scene(mut self, owner: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
@@ -1323,6 +1401,11 @@ struct MetalCanvas2D(Movable):
                 else:
                     fill_layers(L.frame, sc, self.atlas, self.font, i, i + 1)
                 plan_polys(L.frame, L.plan)
+                if self.metal.busy(L.gpu):  # (a frame on the GPU reads it: the spare set, no waiting)
+                    self.busy_rebuilds += 1
+                    if self.metal.overlap and not self.metal.busy(L.spare):
+                        swap(L.gpu, L.spare)
+                        self.spared += 1
                 self.metal.upload(L.frame, L.plan, L.gpu)
                 L.valid = True
                 L.built_k = sc.layer_tk[i]
@@ -1335,7 +1418,12 @@ struct MetalCanvas2D(Movable):
             self.layers[i].valid = False
         self.owner = owner
         self.build_ms = Float64(Int(now_ns()) - t0) / 1e6
-        return self.metal.render_layers(self.layers, n, io, w, h, drawable, wait)
+        var ok = self.metal.render_layers(self.layers, n, io, w, h, drawable, wait)
+        if ok:  # (the buffer sets this frame reads: busy until it completes)
+            for i in range(n):
+                if len(self.layers[i].frame.runs) > 0:
+                    self.layers[i].gpu.used_by = self.metal.serial
+        return ok
 
     def end_frame(mut self):
         """This frame's Scene becomes last frame's (its memory: next frame's to paint into)."""
