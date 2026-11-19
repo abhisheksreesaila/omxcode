@@ -12,9 +12,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 |---|---|---|---|---|---|---|---|
 | `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
 | `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck, clips, stage |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, stage |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, stage |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
@@ -34,7 +34,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, jot, keeper |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gpu, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media, sketch |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gpu, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media, sketch, stage |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -379,7 +379,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
-| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, omx, omxplorer |
+| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, livetiles, omx, omxplorer, stage |
 | `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)` | `mojoui/documentset.mojo` | Canvas, Canvas: pan, zoom, tap, Card, TextField, Dropdown, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -388,6 +388,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)` | `mojoui/telemetrychart.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)` | `mojoui/signal.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)` | `mojoui/stage.mojo` | Text, Button, Icon, TextField, VStack, HStack, Scroll, Canvas, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | stage |
 
 ## JavaScript widgets (WebComponent)
 
@@ -403,12 +404,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 190 | 10 | 0 |
-| Web | 174 | 9 | 17 |
-| Android | 19 | 64 | 117 |
-| Mac (AppKit) | 5 | 164 | 31 |
-| iPhone (UIKit) | 0 | 135 | 65 |
-| Agent (MCP) | 66 | 45 | 89 |
+| Linux (GTK) | 191 | 10 | 0 |
+| Web | 175 | 9 | 17 |
+| Android | 19 | 64 | 118 |
+| Mac (AppKit) | 5 | 165 | 31 |
+| iPhone (UIKit) | 0 | 136 | 65 |
+| Agent (MCP) | 66 | 46 | 89 |
 
 ## Inside one app, not components yet (the debt)
 

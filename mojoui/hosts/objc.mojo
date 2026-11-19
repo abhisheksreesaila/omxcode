@@ -321,6 +321,12 @@ def sf_symbol(name: String) -> String:
     if name == "wrench": return "wrench.and.screwdriver"
     if name == "circle-alert": return "exclamationmark.circle"
     if name == "map-pin": return "mappin"
+    if name == "mic": return "mic"  # (the Stage's chat bar, goal 77 M7a)
+    if name == "pin": return "pin"
+    if name == "timer": return "timer"
+    if name == "trophy": return "trophy"
+    if name == "car": return "car"
+    if name == "cloud-sun": return "cloud.sun"
     if name == "calendar-days": return "calendar"
     if name == "sun-medium": return "sun.max"
     if name == "brain": return "brain"

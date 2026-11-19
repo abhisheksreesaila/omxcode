@@ -39,8 +39,8 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips"],  # (clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot", "clips"],  # (clips: goal 71 M2, docs/goals/71/clipgrid_web.py; kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck", "clips", "stage"],  # (stage: goal 77 M7a, docs/goals/77-stage-check.py; clips: goal 71 M2; keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot", "clips", "stage"],  # (stage: goal 77 M7a, headless Chromium; clips: goal 71 M2, docs/goals/71/clipgrid_web.py; kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
@@ -241,6 +241,8 @@ COMPOSITES = [
     ("Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)", "mojoui/telemetrychart.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TelemetryChart("),
     ("Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)", "mojoui/signal.mojo", [], "smooth("),
     ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
+    # the Stage (goal 77 M7)
+    ("Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)", "mojoui/stage.mojo", ["Text", "Button", "Icon", "TextField", "VStack", "HStack", "Scroll", "Canvas", "Themes on top (themes/, or yours)"], "StageChat("),  # (StageChat: mojoui.timeline has a Stage( of its own)
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

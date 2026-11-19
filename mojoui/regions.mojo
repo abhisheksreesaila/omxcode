@@ -3,7 +3,8 @@
 # host answers from the same rule, so no app tags its regions by hand.
 #
 #   The role tags the shells already set (and themes style through Look surfaces): sidebar (mojoui.sidebar, Rail),
-#   toolbar and status-bar (mojoui.sheetchrome), inspector (mojoui.inspector). A Board is the sheet; each Board object
+#   toolbar and status-bar (mojoui.sheetchrome), inspector (mojoui.inspector), mojoui.stage's stage-top, stage-left,
+#   stage-centre, stage-right, stage-panel and stage-bar (named as tagged). A Board is the sheet; each Board object
 #   with a HEADLINE title is a card, named "card:<its title>" (a cell editor floating on the board is no card).
 #
 #   for r in regions(host.rt.shown): …  r.node, r.name, r.board (the Board a card sits on: clip it to that board's view)
@@ -13,7 +14,9 @@
 
 from mojoui.view import View, BOARD, TEXT, HEADLINE
 
-comptime REGION_ROLES: List[String] = ["sidebar", "toolbar", "status-bar", "inspector"]
+comptime REGION_ROLES: List[String] = ["sidebar", "toolbar", "status-bar", "inspector",
+                                      # mojoui.stage's regions (goal 77 M7a): the top bar, the three columns, the stage, the chat bar
+                                      "stage-top", "stage-left", "stage-centre", "stage-right", "stage-panel", "stage-bar"]
 
 
 def region_of(role: String) -> String:

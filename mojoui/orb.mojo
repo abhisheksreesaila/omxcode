@@ -169,11 +169,12 @@ struct Orb(Movable):
         s.again = True  # (it breathes: the host draws it again next frame)
 
 
-def OrbView(canvas: Int, version: Int, big: Bool = True) -> View:
-    """The orb's Canvas: `big` takes the room it is given (Home), else it is a small one beside words (the work screen)."""
+def OrbView(canvas: Int, version: Int, big: Bool = True, side: Int = SMALL_SIDE) -> View:
+    """The orb's Canvas: `big` takes the room it is given (Home), else it is a small one beside words (the work screen),
+    `side` points square (the Stage's chat bar: 52, mojoui.stage)."""
     if big:
         return Canvas(canvas, version).passthrough().grow().fill().tag("orb")
-    return Canvas(canvas, version).passthrough().width(SMALL_SIDE).height(SMALL_SIDE).tag("orb-small")
+    return Canvas(canvas, version).passthrough().width(side).height(side).tag("orb-small")
 
 
 def draw_rim(mut s: Surface, p: Palette, on: Bool):

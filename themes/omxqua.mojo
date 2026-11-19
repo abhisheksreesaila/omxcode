@@ -472,3 +472,201 @@ def omxqua(dark: Bool = False) -> Theme:
     var classes = "skin omxqua" + (" omxqua-dark" if dark else "")
     return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id), String(SKIN_WEB) + omxqua_web(pal, look, id),
                  pal.ink2, pal.accent_ink, True, look^)
+
+
+# ---- the Counter family (goal 77 M7a, D-7784): a kitchen counter or a tablet, touch first, read from across the room ----
+# ~/Projects/omxqua/src/tokens.css .oq-family-counter (LANGUAGE.md, "Counter family"): the owner's gitaway "Stage" look
+# (assets/css/cover.css .cv3) in omxqua's terms: white cards on an Apple-grey stage, #1C1C1E cards on black at night, one
+# soft shadow family (sh1–sh3), ink as the accent, roomy targets and type for reading at a distance. The room behind the
+# stage is a step darker than it (light) or lighter than it (night), and the side columns recede under a soft shade.
+#
+#   def theme(self) -> Theme: return omxqua_counter(self.dark)          (mojoui.stage's roles: stage-*)
+
+comptime COUNTER_TEXT = 15.0  # --oq-text (.oq-family-counter)
+comptime COUNTER_RADIUS_CARD = 22  # --oq-radius-card: tiles; side cards 18, the stage 30, the chat bar a pill
+comptime COUNTER_GROUND_LIGHT = "#f5f5f7"  # --oq-counter-ground: the stage (gitaway's ground)
+comptime COUNTER_GROUND_NIGHT = "#000000"
+
+
+def counter_palette(dark: Bool = False) -> Palette:
+    """The Counter family's colours (.oq-family-counter.oq-light / .oq-night): the room (page) behind the stage, cards
+    #fff / #1c1c1e, inks #1d1d1f and #5c5c61 (gitaway's #6e6e73 two steps darker: omxqua's contrast tests ask 4.5:1 on the
+    room, an off chip and the sky) / #f5f5f7 and #a1a1a6,
+    ink as the accent; the Developer family's states and data colours (bad lifted at night for 4.5:1 on its surfaces)."""
+    var p: Palette
+    if dark:
+        p = Palette(True, hx("#121316"), hx("#1c1c1e"), hx("#242427"), hx("#f5f5f7"), hx("#a1a1a6"), hx("#3a3a3c"),
+                    hx("#2a2a2d"), hx("#333336"), hx("#f5f5f7"), hx("#1c1c1e"), mix(hx("#1c1c1e"), hx("#f5f5f7"), 0.40), mix(hx("#1c1c1e"), hx("#f5f5f7"), 0.08),
+                    hx("#8b7bff"), hx("#3ccf6e"), hx("#ff6b70"), hx("#f5a524"), REGULAR, MEDIUM,
+                    [hx("#8b7bff"), hx("#3aa0ff"), hx("#2bc3ad"), hx("#ff8a3d"), hx("#f2555a"), hx("#e0b400")], hx("#121316"), hx("#f5f5f7"), hx("#2a2a2d"))
+    else:
+        p = Palette(False, hx("#e3e5ea"), hx("#ffffff"), hx("#ffffff"), hx("#1d1d1f"), hx("#5c5c61"), hx("#c7c7cc"),
+                    hx("#ebebed"), hx("#e0e0e3"), hx("#1d1d1f"), hx("#ffffff"), mix(hx("#ffffff"), hx("#1d1d1f"), 0.40), mix(hx("#ffffff"), hx("#1d1d1f"), 0.08),
+                    hx("#6d5cf0"), hx("#137036"), hx("#c01f25"), hx("#8f5400"), REGULAR, MEDIUM,
+                    [hx("#6d5cf0"), hx("#0a7fe0"), hx("#0f9483"), hx("#e0661a"), hx("#d42a2f"), hx("#a88400")], hx("#e3e5ea"), hx("#1d1d1f"), hx("#ebebed"))
+    return p^
+
+
+def counter_ground(dark: Bool) -> UInt32:
+    """--oq-counter-ground: the stage's own tone (the tiles' ground)."""
+    return hx(COUNTER_GROUND_NIGHT) if dark else hx(COUNTER_GROUND_LIGHT)
+
+
+def counter_shade(dark: Bool) -> UInt32:
+    """--oq-counter-shade: what lies over the room behind a side column (rgba(10,12,22,.2) / rgba(0,0,0,.42))."""
+    return rgba(0, 0, 0, alpha(0.42)) if dark else rgba(10, 12, 22, alpha(0.2))
+
+
+def counter_sh1(dark: Bool) -> List[Shadow]:
+    """--oq-counter-sh1 (gitaway's sh1): 0 1px 2px rgb(0 0 0/.05); night: a faint top highlight and a short dark drop."""
+    if dark:
+        return [Shadow(1, 0, 0, rgba(255, 255, 255, alpha(0.05)), True), Shadow(1, 2, 0, rgba(0, 0, 0, alpha(0.5)), False)]
+    return [Shadow(1, 2, 0, rgba(0, 0, 0, alpha(0.05)), False)]
+
+
+def counter_sh2(dark: Bool) -> List[Shadow]:
+    """--oq-counter-sh2: 0 2px 4px rgb(0 0 0/.05), 0 14px 32px -16px rgb(0 0 0/.25); night: inset 0 1px 0 rgb(255 255 255/.05), 0 8px 24px rgb(0 0 0/.55)."""
+    if dark:
+        return [Shadow(1, 0, 0, rgba(255, 255, 255, alpha(0.05)), True), Shadow(8, 24, 0, rgba(0, 0, 0, alpha(0.55)), False)]
+    return [Shadow(2, 4, 0, rgba(0, 0, 0, alpha(0.05)), False), Shadow(14, 32, -16, rgba(0, 0, 0, alpha(0.25)), False)]
+
+
+def counter_sh3(dark: Bool) -> List[Shadow]:
+    """--oq-counter-sh3: 0 2px 4px rgb(0 0 0/.04), 0 30px 60px -28px rgb(0 0 0/.28); night as sh2."""
+    if dark:
+        return counter_sh2(True)
+    return [Shadow(2, 4, 0, rgba(0, 0, 0, alpha(0.04)), False), Shadow(30, 60, -28, rgba(0, 0, 0, alpha(0.28)), False)]
+
+
+def counter_roles(p: Palette) -> List[Surface]:
+    """mojoui.stage's roles in the Counter family: the shaded bands, the raised stage, the chat bar pill, the clock, the
+    side cards and Live rows, the top bar's avatars and pills (values: tokens.css .oq-family-counter, gitaway's .cv3)."""
+    var dark = p.dark
+    var out = List[Surface]()
+    for r in ["stage", "stage-top", "stage-centre", "stage-orb", "stage-list", "stage-input"]:
+        out.append(box(r, 0, -1, -1, -1))
+    var glyph = box("stage-glyph", 0, -1, -1, -1)  # (a kind's icon: the ink on the accent, white by day, near-black at night)
+    glyph.icon_ink = p.accent_ink
+    out.append(glyph^)
+    var row = box("stage-list-row", 0, -1, -1, -1)
+    row.scrolls_x = True
+    out.append(row^)
+    var strip = box("stage-phone-bar", p.page, -1, -1, -1)  # (a phone's bar sits on the room, over what scrolls under it)
+    out.append(strip^)
+    for r in ["stage-left", "stage-right", "stage-clock"]:  # (words straight on the shade: the ink, never ink-2)
+        var s = box(r, 0, -1, -1, -1)
+        s.ink = p.ink
+        out.append(s^)
+    var side = Surface("stage-side", counter_shade(dark), 28, 0, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    out.append(side^)
+    var panel = Surface("stage-panel", counter_ground(dark), 30, 30, -1, -1, -1, -1, -1, -1, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    out.append(panel^)
+    var bar = Surface("stage-bar", p.card, 32, 32, -1, -1, -1, -1, -1, -1, counter_sh2(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    out.append(bar^)
+    var mic = Surface("stage-mic", p.ink, 25, 25, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False, icon_size=22, icon_ink=p.accent_ink)
+    out.append(mic^)
+    var t = words("stage-clock-time", 72, 250, p.ink, -3.6)  # (.st-clock .t: 250, clamp(54px, 5.6vw, 88px), line-height .9, -.05em)
+    t.line_height = 65
+    out.append(t^)
+    var tc = words("stage-clock-time-compact", 54, 250, p.ink, -2.7)
+    tc.line_height = 49
+    out.append(tc^)
+    out.append(words("stage-clock-date", 16, 600, p.ink))
+    out.append(words("stage-clock-weather", 14, 0, p.ink))
+    var label = words("stage-label", 11.5, 650, p.ink, 0.8)  # (.st-lbl: 650 11.5px, .07em, capitals)
+    label.icon_size, label.icon_ink = 14, p.ink
+    out.append(label^)
+    var label_text = words("stage-label-text", 11.5, 650, p.ink, 0.8)
+    label_text.one_line = True  # (a label never wraps: "LIVE · ALSO TODAY" on one line)
+    out.append(label_text^)
+    var card = Surface("stage-card", p.card, 18, 18, -1, -1, -1, 12, 14, 13, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    out.append(card^)
+    out.append(words("stage-card-head", 10.5, 600, p.ink2, 0.5))
+    out.append(words("stage-card-title", 16.5, 650, p.ink, -0.16))
+    out.append(words("stage-card-sub", 12.5, 0, p.ink2))
+    var live = Surface("stage-row", p.card, 16, 16, -1, -1, -1, 10, 12, 10, counter_sh1(dark), 0, 0, 0, 48, "", 0, 0, 0, 0, 0, 0, 0, False)
+    out.append(live^)
+    out.append(words("stage-row-head", 14, 550, p.ink))
+    var value = words("stage-row-value", 15, 650, p.ink)  # (a live number: mono and tabular, updated in place)
+    value.font = FONT_MONO
+    out.append(value^)
+    var kind = Surface("stage-kind", p.ink2, 6, 6, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, icon_size=12, icon_stroke=2.4, icon_ink=p.accent_ink)
+    out.append(kind^)
+    for i in range(6):
+        var k = Surface("stage-kind-" + String(i + 1), p.series[i], 6, 6, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, icon_size=12, icon_stroke=2.4, icon_ink=p.accent_ink)
+        out.append(k^)
+    var everyone = Surface("stage-avatar", p.ink, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 13, p.card, 650, 0, 0, 0, 0, False)
+    out.append(everyone^)
+    for i in range(6):  # (omxqua's avatar: an 18 % tint of the person's colour, initials in it pulled toward the ink, --oq-avatar-mix 55 %)
+        var a = Surface("stage-avatar-" + String(i + 1), mix(p.card, p.series[i], 0.18), RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0,
+                        counter_sh1(dark), 0, 0, 0, -1, "", 13, mix(p.ink, p.series[i], 0.55), 650, 0, 0, 0, 0, False)
+        out.append(a^)
+    var pill = Surface("stage-pill", p.card, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 14, 0, counter_sh1(dark), 0, 0, 0, -1, "", 14, p.ink, 550, 0, 0, 0, 0, False,
+                       height=38, icon_size=16, icon_ink=p.ink)
+    out.append(pill^)
+    var round = Surface("stage-pill-compact", p.card, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
+                        icon_size=18, icon_ink=p.ink)
+    out.append(round^)
+    return out^
+
+
+def counter_gtk(p: Palette, cls: String) -> String:
+    """GTK: where omxqua's own control rules (button, button.flat, button.image-button, entry) would win over a stage
+    role, the role again with a stronger selector."""
+    var w = "window." + cls + " "
+    var ink = hex_of(p.ink)
+    var card = hex_of(p.card)
+    var sh1 = shadow_css(counter_sh1(p.dark))
+    var out = (w + ".mui-tag-stage-side:first-child { border-top-left-radius: 0; } " + w + ".mui-tag-stage-side:last-child { border-top-right-radius: 0; }\n"  # (square where a band meets the window's edge)
+               + w + ".mui-tag-stage-input entry { background: transparent; box-shadow: none; min-height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
+               + w + "button.mui-tag-stage-mic, " + w + "button.image-button.mui-tag-stage-mic, " + w + "button.flat.mui-tag-stage-mic { min-width: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; box-shadow: none; }\n"
+               + w + "button.mui-tag-stage-mic image { color: " + card + "; -gtk-icon-size: 22px; }\n"
+               + w + "button.mui-tag-stage-pill, " + w + "button.flat.mui-tag-stage-pill { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
+               + w + "button.flat.mui-tag-stage-pill label, " + w + "button.flat.mui-tag-stage-pill image { color: " + ink + "; }\n")
+    out += w + "button.mui-tag-stage-pill-compact, " + w + "button.image-button.mui-tag-stage-pill-compact, " + w + "button.flat.mui-tag-stage-pill-compact { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
+    var roles = List[String]()
+    roles.append("stage-avatar")
+    for i in range(6):
+        roles.append("stage-avatar-" + String(i + 1))
+    for r in roles:
+        out += w + "button.mui-tag-" + r + ", " + w + "button.flat.mui-tag-" + r + " { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; }\n"
+    var fills = counter_roles(p)
+    for s in fills:
+        if s.role.startswith("stage-avatar"):
+            out += w + "button.flat.mui-tag-" + s.role + " { background: " + css_color(s.fill) + "; } " + w + "button.flat.mui-tag-" + s.role + " label { color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n"
+    return out
+
+
+def counter_web(p: Palette, cls: String) -> String:
+    """The web: the text box inside the chat bar's pill without a field's own box, the mic's icon in the card's colour,
+    the top bar's pills and avatars over the theme's subtle button."""
+    var b = "body." + cls + " "
+    var ink = hex_of(p.ink)
+    var card = hex_of(p.card)
+    var sh1 = shadow_css(counter_sh1(p.dark))
+    var out = (b + "[data-tag=stage-side]:first-child { border-top-left-radius: 0; } " + b + "[data-tag=stage-side]:last-child { border-top-right-radius: 0; }\n"
+               + b + "[data-tag=stage-input] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
+               + b + "[data-tag=stage-input] input[type=text]:focus { box-shadow: none; outline: none; } " + b + "[data-tag=stage-input] input::placeholder { color: " + hex_of(p.ink2) + "; }\n"
+               + b + "[data-tag=stage-input] .field { flex: 1; }\n"
+               + b + "button[data-tag=stage-mic] { width: 50px; height: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; color: " + card + "; box-shadow: none; }\n"
+               + b + "button[data-tag=stage-mic] svg { width: 22px; height: 22px; color: " + card + "; }\n"
+               + b + "button[data-tag=stage-pill-compact] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n"
+               + b + "button.subtle[data-tag=stage-pill], " + b + "button[data-tag=stage-pill] { height: 38px; min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; color: " + ink + "; box-shadow: " + sh1 + "; }\n")
+    for s in counter_roles(p):
+        if s.role.startswith("stage-avatar"):
+            out += (b + "button.subtle[data-tag=" + s.role + "], " + b + "button[data-tag=" + s.role + "] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: "
+                    + css_color(s.fill) + "; color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n")
+    return out
+
+
+def omxqua_counter(dark: Bool = False) -> Theme:
+    """omxqua's Counter family, light or night: omxqua's look (Geist, the press spring, its controls) over the Counter
+    palette, its type a step up (15 pt body), and mojoui.stage's roles. Ids omxqua-counter / omxqua-counter-dark."""
+    var pal = counter_palette(dark)
+    var look = omxqua_look(pal)
+    look.surfaces += counter_roles(pal)
+    look.type.body = COUNTER_TEXT
+    var id = String("omxqua-counter-dark") if dark else String("omxqua-counter")
+    var classes = "skin omxqua omxqua-counter" + (" omxqua-counter-dark" if dark else "")
+    return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id) + counter_gtk(pal, id),
+                 String(SKIN_WEB) + omxqua_web(pal, look, id) + counter_web(pal, id), pal.ink2, pal.accent_ink, True, look^)

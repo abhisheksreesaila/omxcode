@@ -351,7 +351,30 @@ def install_icons(theme: Theme, logo: String):
             pass
     var display = external_call["gdk_display_get_default", Int]()
     var icon_theme = external_call["gtk_icon_theme_get_for_display", Int](display)
-    external_call["gtk_icon_theme_add_search_path", NoneType](icon_theme, base.as_c_string_span())
+    # This ink's folder goes first in the search path, not last: the icons keep their names in every ink, so after a live
+    # switch (light to night: App.appearance) the folder added last must win, or the night's icons show the day's ink
+    # (a mic glyph white on a white button, goal 77 M7a, D-7787).
+    var old = external_call["gtk_icon_theme_get_search_path", Int](icon_theme)
+    var paths = List[String]()
+    paths.append(base)
+    var k = 0
+    while old != 0:
+        var at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=old + 8 * k)[]
+        if at == 0:
+            break
+        var dir = c_str(at)
+        if dir != base:
+            paths.append(dir)
+        k += 1
+    if old != 0:
+        external_call["g_strfreev", NoneType](old)
+    var ptrs = List[Int]()
+    for i in range(len(paths)):
+        ptrs.append(Int(paths[i].as_c_string_span().unsafe_ptr()))
+    ptrs.append(0)
+    external_call["gtk_icon_theme_set_search_path", NoneType](icon_theme, Int(ptrs.unsafe_ptr()))
+    _ = len(ptrs)
+    _ = len(paths)
 
 
 def mojo_icon(gtk_name: String) -> String:
@@ -704,6 +727,7 @@ struct GtkHost[A: App](Movable):
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
+    var on_accent: UInt32  # the theme's icon ink on the accent (the "-light" icons): a role asking for it gets them (D-7786)
     var fonts: Bool  # the app's own fonts (Inter, JetBrains Mono) were handed to fontconfig
     var css: Int  # one GtkCssProvider for padding classes
     var css_rules: String
@@ -844,6 +868,7 @@ struct GtkHost[A: App](Movable):
         self.hidden = False
         self.tray = TrayItem("", "")
         self.icons_key = ""
+        self.on_accent = 0
         self.fonts = False
         self.css = 0
         self.css_rules = ""
@@ -1096,6 +1121,15 @@ struct GtkHost[A: App](Movable):
         Before D-440 the window always grew; the boxes reported before this are the window's own size's (D-461)."""
         if self.page != 0:
             external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(2))  # NEVER, NEVER
+
+    def light_icons(self, role: String) -> Bool:
+        """A view whose own role asks for the theme's ink on the accent as its icons' ink (Surface.icon_ink: a mic button
+        filled in the ink, a kind's glyph on a coloured square) shows the "-light" icons written in it: GTK's icons are
+        files in two inks, not CSS colours (D-7786; the web takes any icon_ink from CSS)."""
+        if role == "" or self.on_accent == 0:
+            return False
+        var k = self.look.surface(role)
+        return k >= 0 and self.look.surfaces[k].icon_ink == self.on_accent
 
     def fit_shares(self, k: Int):
         """A Grid with column shares (52, 48): each cell asks for its column's share of the grid's width, so the columns
@@ -1435,7 +1469,7 @@ struct GtkHost[A: App](Movable):
         elif node.kind == BUTTON:
             var t = node.text
             if node.hint != "" and (node.style == ICON_ONLY or node.style == ICON_ON):  # just the icon; the title is the tooltip
-                var icon = gtk_icon(node.hint)
+                var icon = gtk_icon(node.hint) + ("-light" if self.light_icons(node.name) else "")
                 w = external_call["gtk_button_new_from_icon_name", Int](icon.as_c_string_span())
                 external_call["gtk_widget_set_tooltip_text", NoneType](w, t.as_c_string_span())
                 if node.style == ICON_ON:
@@ -1707,7 +1741,7 @@ struct GtkHost[A: App](Movable):
             calendar_select(w, node.text)
             connect(w, "day-selected", on_day_selected[Self.A], self_addr)
         elif node.kind == ICON:
-            var name = gtk_icon(node.text)
+            var name = gtk_icon(node.text) + ("-light" if self.light_icons(node.name) else "")
             w = external_call["gtk_image_new_from_icon_name", Int](name.as_c_string_span())
             external_call["gtk_image_set_pixel_size", NoneType](w, c_int(node.size))
         elif node.kind == GRID:
@@ -2667,6 +2701,7 @@ struct GtkHost[A: App](Movable):
             var name = String(c)
             if name != "":
                 add_class(self.window, name)
+        self.on_accent = theme.icon_on_accent
         var ink = theme.id + hex_of(theme.icon_ink) + hex_of(theme.icon_on_accent)
         if ink != self.icons_key:  # (the icons' ink doesn't follow the accent: a tab switch doesn't rewrite them)
             self.icons_key = ink
