@@ -70,7 +70,7 @@ def story():
     steps = ["waitfor:Create table=60000", "tap:Create table", "waitfor:Links=60000", "pause:800",
              f"pick:Table={demo / 'telemetry.parquet'}", "waitfor:close-telemetry=120000", "pause:1500",
              "tap:Links", "pause:500", "type:link=fleet.clip = video.file", "submit:link", "pause:800", "tap:panel-close", "pause:500",
-             "boardscroll:0", "freedrag:table=e,1500,0,6,alt", "pause:500", "tapspot:grid=clip@1", "pause:300"]
+             "boardscroll:0", "freedrag:table=e,2400,0,6,alt", "pause:500", "tapspot:grid=clip@1", "pause:300"]
     steps += ["key:grid=ArrowDown"] * first
     steps += ["pause:3000", "boards:opened", "hoverspot:grid=uuid", "pause:200"]
     out = c.gtk(steps, "m4-story-a", open_path=demo / "fleet.csv")
