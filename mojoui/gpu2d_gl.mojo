@@ -2241,7 +2241,9 @@ struct GPU2D(Movable):
                   + " more " + String(self.more) + " tile_ms " + String(Float64(self.tile_ns) / 1e6) + " (plan " + String(Float64(self.t_plan) / 1e6)
                   + " fill " + String(Float64(self.t_fill) / 1e6) + " merge " + String(Float64(self.t_merge) / 1e6) + " raster " + String(Float64(self.t_raster) / 1e6)
                   + " ops " + String(self.t_ops) + ")" + " batch_ms " + String(Float64(t1 - t0) / 1e6), flush=True)
+        var tq0 = perf_counter_ns()
         self.gl.sync_pages()
+        var tq1 = perf_counter_ns()
         if not self.gl.begin(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0
@@ -2257,11 +2259,14 @@ struct GPU2D(Movable):
                 self._stamp(i + 1)
         if self.layer_times:
             self._stamps(scene, n)
+        var tq2 = perf_counter_ns()
         if not self.gl.end(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0
             return -1
         _ = self.gl.fence(slot)
+        if self.tile_trace:
+            print("G2DPARTS: pages " + String(Float64(tq1 - tq0) / 1e6) + " layers " + String(Float64(tq2 - tq1) / 1e6) + " end " + String(Float64(perf_counter_ns() - tq2) / 1e6), flush=True)
         self.batch_ns = Int(t1 - t0)
         self.render_ns = Int(perf_counter_ns() - t1)
         if self.tile_trace:

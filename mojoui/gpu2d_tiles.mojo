@@ -28,6 +28,7 @@
 from std.math import floor, ceil
 from std.time import perf_counter_ns
 from std.collections import Dict
+from std.os import getenv
 from mojoui.fonttext import shape as ft_shape
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
 
@@ -344,6 +345,7 @@ struct Tiles(Movable):
     var budget_ops: Int
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
+    var trace: Bool  # MOJOUI_TILE_TRACE=1: why each tile is rastered (diagnosis)
 
     def __init__(out self):
         self.sets = List[TileSet]()
@@ -357,6 +359,7 @@ struct Tiles(Movable):
         self.budget_ops = TILE_BUDGET_OPS
         self.settle_ns = TILE_SETTLE_NS
         self.planned_ops = 0
+        self.trace = getenv("MOJOUI_TILE_TRACE") == "1"
 
     def begin_frame(mut self):
         self.stamp += 1
@@ -519,11 +522,15 @@ struct Tiles(Movable):
                 continue
             if ready:
                 continue
+            if key in self.sets[s].tiles and not (key in self.sets[s].dirty) and self._extend(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1):
+                continue  # (kept, good for less than the view now reaches: only the new strips, D-7947)
             var has_fb = len(self.sets[s].fb) > 0 and self._fb_covers(s, ii, jj, tk)
             if has_fb and self.planned_ops >= self.budget_ops:
                 missing.append(key)
                 self.more = True
                 continue
+            if self.trace:
+                print("TILE: visible " + String(ii) + "," + String(jj) + " fb " + String(has_fb) + " kept " + String(key in self.sets[s].tiles) + " k " + String(tk) + " view k " + String(k) + " planned " + String(self.planned_ops), flush=True)
             if not self._raster(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1):
                 if has_fb:
                     missing.append(key)
@@ -604,6 +611,51 @@ struct Tiles(Movable):
             return False
         ref r = self.sets[s].good_r
         return r[4 * g] <= x0 + 1e-6 and r[4 * g + 1] <= y0 + 1e-6 and r[4 * g + 2] >= x1 - 1e-6 and r[4 * g + 3] >= y1 - 1e-6
+
+    def _extend(mut self, mut out: TilePlan, s: Int, layer: Int, ii: Int, jj: Int, tk: Float64, ex0: Float64, ey0: Float64,
+                ex1: Float64, ey1: Float64) -> Bool:
+        """(D-7947) A kept tile good for less than the extent now gives it (it was rastered when the view, and so the
+        layer's ops, covered less: a zoom out, a pan's edge): only the strips between its good part and the new one are
+        rastered (partial rasters of its texture), and it is good for the new part. False when the new part doesn't
+        hold the old one (then the whole tile is rastered as before)."""
+        var g = self.sets[s].good.get(_pack(ii, jj), -1)
+        if g < 0:
+            return False
+        var o0 = self.sets[s].good_r[4 * g]
+        var o1 = self.sets[s].good_r[4 * g + 1]
+        var o2 = self.sets[s].good_r[4 * g + 2]
+        var o3 = self.sets[s].good_r[4 * g + 3]
+        var n0 = max(Float64(ii) * TILE, ex0) / tk
+        var n1 = max(Float64(jj) * TILE, ey0) / tk
+        var n2 = min(Float64(ii + 1) * TILE, ex1) / tk
+        var n3 = min(Float64(jj + 1) * TILE, ey1) / tk
+        if n0 > o0 + 1e-6 or n1 > o1 + 1e-6 or n2 < o2 - 1e-6 or n3 < o3 - 1e-6 or o2 <= o0 or o3 <= o1:
+            return False
+        var strips = List[Float64]()  # (layer units: the left and right strips full height, top and bottom between them)
+        if n0 < o0 - 1e-6:
+            strips += [n0, n1, o0, n3]
+        if n2 > o2 + 1e-6:
+            strips += [o2, n1, n2, n3]
+        if n1 < o1 - 1e-6:
+            strips += [o0, n1, o2, o1]
+        if n3 > o3 + 1e-6:
+            strips += [o0, o3, o2, n3]
+        var bx = Float64(ii * TILE - TILE_BORDER)
+        var by = Float64(jj * TILE - TILE_BORDER)
+        for q in range(len(strips) // 4):
+            var rx0 = max(Int(floor(strips[4 * q] * tk - bx)), 0)
+            var ry0 = max(Int(floor(strips[4 * q + 1] * tk - by)), 0)
+            var rx1 = min(Int(ceil(strips[4 * q + 2] * tk - bx)), TILE_TEX)
+            var ry1 = min(Int(ceil(strips[4 * q + 3] * tk - by)), TILE_TEX)
+            if rx1 <= rx0 or ry1 <= ry0:
+                continue
+            if not self._raster(out, s, layer, ii, jj, tk, ex0, ey0, ex1, ey1, rx0, ry0, rx1, ry1):
+                return False
+        self.sets[s].good_r[4 * g] = n0
+        self.sets[s].good_r[4 * g + 1] = n1
+        self.sets[s].good_r[4 * g + 2] = n2
+        self.sets[s].good_r[4 * g + 3] = n3
+        return True
 
     def _fb_covers(self, s: Int, ii: Int, jj: Int, tk: Float64) -> Bool:
         """Whether the fallback tiling has any tile under current tile (ii, jj)."""

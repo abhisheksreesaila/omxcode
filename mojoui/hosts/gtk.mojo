@@ -11,6 +11,7 @@ from mojoui.look import look_gtk_css
 from mojoui.procstat import proc_age_ms, rss_mb
 from std.ffi import external_call, c_int, c_char, c_uint
 from std.memory import Pointer
+from std.os import setenv as os_setenv
 from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
@@ -3402,6 +3403,8 @@ struct GtkHost[A: App](Movable):
         var slot = self.gpu2d_draw(ci, widget, sc, w, h)
         if slot < 0:
             return False
+        if self.first_hand_age_ms < 0:
+            startup_mark("gpu2d hand")
         self.gpu2d_hand(ci, widget, slot, w, h, self.gpu2d()[].opaque)
         return True
 
@@ -3411,7 +3414,11 @@ struct GtkHost[A: App](Movable):
         var g = self.gpu2d()
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
+        if self.first_hand_age_ms < 0:
+            startup_mark("gpu2d draw")
         var slot = g[].draw(sc, self.canvases[ci].prev, widget if self.canvases[ci].on_gpu else 0, w, h)
+        if self.first_hand_age_ms < 0:
+            startup_mark("gpu2d drawn")
         if self.canvases[ci].snap != 0:  # (the snap box's strip shows the canvas's own background, D-7577)
             self.canvases[ci].bg_want = scene_background(sc)
         var t_wait = perf_counter_ns()
@@ -3497,10 +3504,15 @@ struct GtkHost[A: App](Movable):
             return False
         var prev = external_call["gdk_gl_context_get_current", Int]()
         external_call["gdk_gl_context_make_current", NoneType](self.g2d_ctx)
+        var first = self.first_hand_age_ms < 0
         var ok = g[].gl.dmabuf.export(slot, g[].gl.tex[slot]) and g[].gl.dmabuf.fence(slot)
+        if first:
+            startup_mark("dmabuf exported")
         var risky = not c.last_offloaded
         if ok and risky:  # (GTK's own renderer samples a dmabuf without waiting on its sync file: our fence first)
             g[].gl.wait(slot)
+            if first:
+                startup_mark("fence waited")
             c.offload_fenced += 1
         c.last_fenced = risky
         if prev != 0:
@@ -3527,6 +3539,8 @@ struct GtkHost[A: App](Movable):
         var err = List[Int](length=1, fill=0)
         var tex = external_call["gdk_dmabuf_texture_builder_build", Int](b, on_gl_texture_released, g[].gl.busy_flag(slot), Int(err.unsafe_ptr()))
         external_call["g_object_unref", NoneType](b)
+        if first:
+            startup_mark("dmabuf texture built")
         if tex == 0:
             var msg = c_str(Pointer[Int, MutUntrackedOrigin](unsafe_from_address=err[0] + 8)[]) if err[0] != 0 else String("")
             _ = len(err)
@@ -3535,6 +3549,8 @@ struct GtkHost[A: App](Movable):
         _ = len(err)
         external_call["gtk_picture_set_paintable", NoneType](widget, tex)
         external_call["g_object_unref", NoneType](tex)
+        if first:
+            startup_mark("paintable set")
         c.dmabuf_tex = tex
         c.offload_check = True
         if not self.offload_told:
@@ -3872,7 +3888,11 @@ struct GtkHost[A: App](Movable):
             sc.reset(wpx, hpx, scale)
             sc.is_still = not animations_enabled()
             sc.t_ns = self.frame_ns(frame_us)  # (animations sample the frame's time, as a frame drawn ahead does)
+            if self.first_hand_age_ms < 0:
+                startup_mark("first draw")
             var r = self.rt.draw_scene(node, sc)
+            if self.first_hand_age_ms < 0:
+                startup_mark("app painted")
             if r[0]:
                 drew_scene = True
                 d = r[1].copy()
@@ -5563,9 +5583,23 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
 
 
 def startup_mark(what: String):
-    """MOJOUI_STARTUP_TRACE=1: the process's age at a start-up milestone (goal 79: where a cold start's time goes)."""
+    """MOJOUI_STARTUP_TRACE=1: the process's age at a start-up milestone (goal 79: where a cold start's time goes): the
+    age by /proc (10 ms steps) at the first mark, then that plus the monotonic clock since it (µs steps)."""
     if getenv("MOJOUI_STARTUP_TRACE") != "":
-        print("STARTUP: " + what + " at " + String(round(proc_age_ms(), 1)) + " ms", flush=True)
+        var base = getenv("MOJOUI_STARTUP_BASE")
+        var now = Int(perf_counter_ns())
+        var age = proc_age_ms()
+        if base == "":
+            var b = String(now) + " " + String(age)
+            var k = String("MOJOUI_STARTUP_BASE")
+            _ = external_call["setenv", c_int](k.as_c_string_span(), b.as_c_string_span(), c_int(1))
+        else:
+            try:
+                var parts = base.split(" ")
+                age = Float64(String(parts[1])) + Float64(now - Int(String(parts[0]))) / 1e6
+            except:
+                pass
+        print("STARTUP: " + what + " at " + String(round(age, 1)) + " ms", flush=True)
 
 
 def bench_wait[A: App](host_addr: Int, ci: Int, ns: Int):
@@ -8573,6 +8607,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     var title = host[].rt.app.title()
     external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
     host[].install_fonts()
+    startup_mark("fonts installed")
     host[].apply_design(host_addr)
     host[].shortcut_keys = external_call["gtk_event_controller_key_new", Int]()  # menu shortcuts, before anything else sees the key
     external_call["gtk_event_controller_set_propagation_phase", NoneType](host[].shortcut_keys, c_int(1))  # GTK_PHASE_CAPTURE
@@ -8585,12 +8620,15 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         size = (to_int(wh[0]), to_int(wh[1]))
     external_call["gtk_window_set_default_size", NoneType](host[].window, c_int(size[0]), c_int(size[1]))
     host[].window_w = size[0]
+    startup_mark("window made")
     host[].rt.app.resize(size[0], size[1])  # (its real size follows once the window is laid out: App.resize again)
     var styles = external_call["adw_style_manager_get_default", Int]()
     host[].dark_told = 1 if external_call["adw_style_manager_get_dark", c_int](styles) != 0 else 0
     host[].rt.app.appearance(host[].dark_told == 1)  # (and again when the person switches)
+    startup_mark("app told size and appearance")
     connect3(styles, "notify::dark", on_dark_changed[A], host_addr)
     host[].rt.shown = host[].rt.view()  # (its spacing tokens in the theme's points)
+    startup_mark("first view")
     gpu2d_renderer(host[].rt.shown.nodes, A.GPU_2D)  # (before the window is realized: GTK picks its renderer then)
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
@@ -8623,6 +8661,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if getenv("MOJOUI_LIVE_REPORT") != "":  # (scripts/live.py: SIGUSR1 prints the widgets' state, as a test run's end does)
         _ = external_call["g_unix_signal_add", c_uint](c_int(10), on_live_report[A], host_addr)
     host[].show(host_addr)
+    startup_mark("widgets built")
     host[].schedule_effects(host_addr)  # (what the starting state asked for)
     var steps = getenv("MOJOUI_TEST")
     var testing = is_set("MOJOUI_TEST")  # set, even to "": report the widgets' state
@@ -8643,6 +8682,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if not testing or shoots:
         startup_mark("present")
         external_call["gtk_window_present", NoneType](host[].window)
+        startup_mark("presented")
     if testing and shoots:
         # On X11 (the headless display) the first layout waits for the server's map event, which
         # isn't pending yet: block for it, up to 3 s, so steps and measurements see a laid-out window.
@@ -8683,6 +8723,17 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         save_png(host[].window, shot)
     if testing or shot != "":
         external_call["g_application_quit", NoneType](gapp)
+
+
+def gdk_skip_vulkan(declared: Bool):
+    """(D-7948) An app that declares App.GPU_2D gets GTK's GL renderer (gpu2d_renderer); GDK is then told not to start
+    Vulkan at all (GDK_DISABLE=vulkan, unless GDK_DISABLE, GSK_RENDERER or MOJOUI_GPU2D=0 is set): its first dmabuf
+    texture otherwise probes the formats through a Vulkan device too, 194 ms of a 510 ms cold start (measured on the
+    hidden test screen, GTK 4.24, RTX 3090). GDK reads it when the display opens, so this runs before the application
+    starts. Nothing of ours uses Vulkan: frames go as dmabufs (EGL-exported) or GL textures."""
+    if not declared or getenv("GDK_DISABLE") != "" or getenv("GSK_RENDERER") != "" or getenv("MOJOUI_GPU2D") == "0":
+        return
+    _ = os_setenv("GDK_DISABLE", "vulkan", True)  # (set but empty counts as unset)
 
 
 def gpu2d_renderer(nodes: List[Node], declared: Bool):
@@ -8982,6 +9033,7 @@ def run[A: App]() -> Int:
             if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
                 id += c
         flags = 0
+    gdk_skip_vulkan(A.GPU_2D)
     var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(flags))
     if flags == 0:
         var err = List[Int](length=1, fill=0)
@@ -8994,13 +9046,18 @@ def run[A: App]() -> Int:
             print("mojoui: " + name + " is already running: opening its window", flush=True)
             return Int(external_call["g_application_run", c_int](gapp, c_int(0), 0))  # (sends activate to the running one)
         _ = len(err)
+    startup_mark("application")
     var host = alloc(Layout[GtkHost[A]].single()).unsafe_leak()  # lives as long as the app
     var pres = alloc(Layout[Presenter].single()).unsafe_leak()  # (the GPU canvases' textures: a fixed address too)
     pres.unsafe_write(Presenter())
     var gl_ctx = probe_gpu_canvases[A](Int(pres))  # (before the app makes its GPU objects: they pick the display's GPU)
+    startup_mark("gpu probe")
     A.init_shared()
     _ = wake_pipe()  # (before the app exists: the jobs it starts in __init__ wake the UI too; App.jobs_message)
-    host.unsafe_write(GtkHost[A](A()))
+    var app = A()
+    startup_mark("app made")
+    host.unsafe_write(GtkHost[A](app^))
+    startup_mark("host made")
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
     if getenv("MOJOUI_PRESENT_STATS") == "1":
