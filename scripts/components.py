@@ -193,6 +193,13 @@ COMPOSITES = [
     ("MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)", "mojoui/mindmap.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)"], "MindMap("),
     # goal 75: the Scene on the GPU (GL on Linux, Metal on the Mac; a CPU executor as reference and fallback)
     ("GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)", "mojoui/gpu2d.mojo", ["Canvas", "Canvas frames (animation)"], "backend_name("),  # (apps opt in with Canvas(…).gpu(); backend_name( names the ones that report the renderer, since a bare gpu( matches other APIs)
+    # goal 79: Personal Note's web look, as framework pieces (D-7900)
+    ("Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule; CoreText on the Mac to come)", "mojoui/fonttext.mojo", ["Canvas"], "mojoui.fonttext"),
+    ("Skins as themes (Paper, Night, Crayon tokens, color-mix, shadow scale)", "mojoui/skin.mojo", ["Canvas"], "skin_named("),
+    ("Stroke icons (Lucide geometry rasterized natively at device px)", "mojoui/strokeicon.mojo", ["Canvas"], "draw_icon("),
+    ("Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)", "mojoui/notesshell.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "NotesPanel("),
+    ("Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)", "mojoui/pagesheet.mojo", ["Canvas"], "PageSheet("),
+    ("Buzan map view (the web map's geometry: one-bend ribbons, idea cards, root card, fit, minimap)", "mojoui/buzanmap.mojo", ["Canvas"], "BuzanMap("),
     ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),

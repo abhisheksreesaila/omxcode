@@ -10,6 +10,8 @@ from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
 from mojoui.pagesheet import PageSheet
+from mojoui.buzanmap import BuzanMap, draw_minimap
+from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
 
@@ -92,6 +94,7 @@ struct WebShell(Movable):
     var notes: List[NoteRec]
     var panel: NotesPanel
     var page: PageSheet
+    var map: BuzanMap
     var sk: Skin
     var current: Int  # note id, 0: none
     var sidebar: Bool
@@ -106,6 +109,7 @@ struct WebShell(Movable):
         self.panel = NotesPanel()
         self.panel.skin_name = skin
         self.page = PageSheet()
+        self.map = BuzanMap()
         self.sk = skin_named(skin)
         self.current = 0
         self.sidebar = True
@@ -161,6 +165,25 @@ struct WebShell(Movable):
             except:
                 md = ""
             self.page.set_markdown(md)
+        elif n.kind == "mindmap":
+            self.map = BuzanMap()
+            try:
+                var j = Json.parse(n.content)
+                var nodes = j.get(0, "nodes")
+                var ids = List[String]()
+                for q in range(j.size(nodes)):
+                    ids.append(j.text(j.get(j.at(nodes, q), "id")))
+                for q in range(j.size(nodes)):
+                    var nd = j.at(nodes, q)
+                    var pid = j.text(j.get(nd, "parentId"))
+                    var par = -1
+                    for r in range(len(ids)):
+                        if ids[r] == pid:
+                            par = r
+                    _ = self.map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")))
+                self.map.selected = 0
+            except:
+                pass
 
     def set_skin(mut self, name: String):
         self.sk = skin_named(name)
@@ -186,6 +209,16 @@ struct WebShell(Movable):
             var island_emoji = n.emoji if n.kind != "page" else String("")
             draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
             self.boxes.add("#workspace", left, 0, w - left, h)
+            if n.kind == "mindmap":
+                var mw = w - left - 4 - 12
+                var mh = h - 66 - 12
+                self.map.draw(p, self.boxes, left + 4, 66, mw, mh, 0, self.sk, n.title)
+                var fv = self.map.fit(mw, mh, 80)
+                draw_minimap(self.map, p, self.boxes, left + 4 + mw - 16 - 170, 66 + mh - 72 - 102, mw, mh, self.sk)
+                draw_tool_dock(p, self.boxes, w - 72, (h - 410) / 2, ["Add image", "Import JSON", "Export JSON", "Export PNG", "", "Undo", "Redo", "", "Clean up layout", "Fit map"],
+                               ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
+                draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
+                draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
             if n.kind == "page":
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
 

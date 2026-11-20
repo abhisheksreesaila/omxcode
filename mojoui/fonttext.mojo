@@ -99,6 +99,7 @@ struct TextStyle(ImplicitlyCopyable, Movable):
     var italic: Bool
     var size: Float64
     var letter_spacing: Float64
+    var exact: Bool  # advances unrounded (canvas and SVG text: measureText, <text>), else rounded as HTML text is
 
     def __init__(out self, family: String, weight: Int, italic: Bool, size: Float64):
         self.family = family
@@ -106,6 +107,7 @@ struct TextStyle(ImplicitlyCopyable, Movable):
         self.italic = italic
         self.size = size
         self.letter_spacing = 0
+        self.exact = False
 
 
 @fieldwise_init
@@ -628,6 +630,9 @@ struct FontEngine(Movable):
             var fa = Float64(self.advance_units(inst, gid)) * k
             var adv = Float64(Int(fa + 0.5)) if fa > 0 else 0.0
             var mode = getenv("FONTTEXT_KERN_ROUND", "D")
+            if st.exact:
+                adv = fa
+                mode = "exact"
             if mode == "B":
                 adv = Float64(Int(fa + kern + 0.5)) if fa + kern > 0 else 0.0
                 kern = 0

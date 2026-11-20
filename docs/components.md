@@ -200,6 +200,12 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `ObjectLayer (free objects on a canvas: text, stickies, shapes, pictures, ink, arrows; select, handles, rotate, z, undo)` | `mojoui/objectlayer.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ✅ | ❌ | ❌ | pnote |
 | `MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)` | `mojoui/mindmap.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ✅ | ❌ | ❌ | pnote |
 | `GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)` | `mojoui/gpu2d.mojo` | Canvas, Canvas frames (animation) | ✅ | 🔨 | 🔨 | ✅ | 🔨 | ❌ | pnote |
+| `Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule; CoreText on the Mac to come)` | `mojoui/fonttext.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Skins as themes (Paper, Night, Crayon tokens, color-mix, shadow scale)` | `mojoui/skin.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Stroke icons (Lucide geometry rasterized natively at device px)` | `mojoui/strokeicon.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)` | `mojoui/notesshell.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
+| `Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)` | `mojoui/pagesheet.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Buzan map view (the web map's geometry: one-bend ribbons, idea cards, root card, fit, minimap)` | `mojoui/buzanmap.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)` | `mojoui/tablecard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, dashboard |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -283,12 +289,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 195 | 11 | 0 |
-| Web | 174 | 15 | 17 |
-| Android | 19 | 66 | 121 |
-| Mac (AppKit) | 8 | 171 | 27 |
-| iPhone (UIKit) | 0 | 137 | 69 |
-| Agent (MCP) | 66 | 46 | 94 |
+| Linux (GTK) | 201 | 11 | 0 |
+| Web | 174 | 21 | 17 |
+| Android | 19 | 72 | 121 |
+| Mac (AppKit) | 8 | 177 | 27 |
+| iPhone (UIKit) | 0 | 143 | 69 |
+| Agent (MCP) | 66 | 51 | 95 |
 
 ## Inside one app, not components yet (the debt)
 

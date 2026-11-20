@@ -437,7 +437,7 @@ struct Scene(Painter, Movable, Copyable):
         if text == "":
             return
         self.texts.append(st.family + "\x1f" + text)
-        self._op(OP_RUN, x, baseline, st.size, Float64(st.weight), Float64(align * 2 + (1 if st.italic else 0)), st.letter_spacing, color,
+        self._op(OP_RUN, x, baseline, st.size, Float64(st.weight), Float64(align * 4 + (2 if st.exact else 0) + (1 if st.italic else 0)), st.letter_spacing, color,
                  Int32(len(self.texts) - 1))
 
     def run_style(self, op: Int) -> TextStyle:
@@ -446,6 +446,7 @@ struct Scene(Painter, Movable, Copyable):
         var cut = t.find("\x1f")
         var st = TextStyle(String(t[byte=:cut]), Int(self.num(op, 3)), (Int(self.num(op, 4)) & 1) == 1, self.num(op, 2))
         st.letter_spacing = self.num(op, 5)
+        st.exact = (Int(self.num(op, 4)) & 2) == 2
         return st
 
     def run_text(self, op: Int) -> String:
@@ -453,7 +454,7 @@ struct Scene(Painter, Movable, Copyable):
         return String(t[byte=t.find("\x1f") + 1:])
 
     def run_align(self, op: Int) -> Int:
-        return Int(self.num(op, 4)) // 2
+        return Int(self.num(op, 4)) // 4
 
     def num(self, op: Int, j: Int) -> Float64:
         return Float64(self.nums[op * STRIDE + j])

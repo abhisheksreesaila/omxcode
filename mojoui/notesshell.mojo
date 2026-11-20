@@ -433,3 +433,64 @@ struct NotesPanel(Movable):
         text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
         draw_icon(p, "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(sk.ink_soft, 0.7))
         bx.add(".nav-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
+
+
+def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, labels: List[String], icons: List[String], k: Float64, sk: Skin,
+                              group: String = ""):
+    """A vertical island of 44 px round tool buttons, 2 apart (an empty label: a divider with 8 above and below), padded
+    6 (+1 border), the skin's radius. Returns nothing; its box is [Canvas tools], its buttons [label]."""
+    var inner = 0.0
+    for i in range(len(labels)):
+        if labels[i] == "":
+            inner += 17
+        else:
+            inner += 44 + (2.0 if i + 1 < len(labels) and labels[i + 1] != "" else 0.0)
+    var h = inner + 14
+    draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
+    p.rect(x, y, 56, h, sk.panel, sk.radius)
+    bx.add("[Canvas tools]", x, y, 56, h)
+    if group != "":
+        bx.add(group, x + 6, y + 7, 44, inner)
+    var by = y + 7
+    for i in range(len(labels)):
+        if labels[i] == "":
+            p.rect(x + 14, by + 8, 28, 1, sk.line, 0)
+            bx.add(".dock-divider", x + 14, by + 8, 28, 1)
+            by += 17
+        else:
+            draw_icon(p, icons[i], x + 18, by + 12, 20, k, sk.ink_soft)
+            bx.add("[" + labels[i] + "]", x + 6, by, 44, 44)
+            by += 44 + (2.0 if i + 1 < len(labels) and labels[i + 1] != "" else 0.0)
+
+
+def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
+    """The map's zoom island: minus, the zoom as a label (a press resets it), plus."""
+    p.rect(x, y, 132, 42, sk.line, sk.radius_control)
+    p.rect(x + 1, y + 1, 130, 40, sk.panel, sk.radius_control - 1)
+    bx.add("[Zoom controls]", x, y, 132, 42)
+    draw_icon(p, "minus", x + 4 + 9, y + 4 + 9, 16, k, sk.muted)
+    bx.add("[Zoom out]", x + 4, y + 4, 34, 34)
+    var st = TextStyle(UI, 400, False, 11)
+    text_normal(p, st, String(percent) + "%", x + 40 + 26, y + 4 + (34 - 14) / 2, 0xFF656F74, ALIGN_CENTER)
+    bx.add(".mindmap-zoom-label:" + String(percent) + "%", x + 40, y + 4, 52, 34)
+    draw_icon(p, "plus", x + 94 + 9, y + 4 + 9, 16, k, sk.muted)
+    bx.add("[Zoom in]", x + 94, y + 4, 34, 34)
+
+
+def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, words: String, sk: Skin, ink: UInt32 = 0xFF656F74,
+                         bg: UInt32 = 0xFFFCFFFF):
+    """A quiet hint pill centred on cx (11 px words, padded 7 10, lifted by the skin's first shadow)."""
+    var st = TextStyle(UI, 400, False, 11)
+    var w = measure(st, words) + 20
+    var x = Float64(Int((cx - w / 2) * 2 + 0.5)) / 2
+    draw_shadows(p, x, y, w, 28, 5, sk.shadow1)
+    p.rect(x, y, w, 28, bg, 5)
+    text_normal(p, st, words, x + 10, y + 7, ink)
+    var cut = String("")
+    var n = 0
+    for c in words.codepoints():
+        if n >= 40:
+            break
+        cut += String(c)
+        n += 1
+    bx.add(".mindmap-hint:" + cut, x, y, w, 28)
