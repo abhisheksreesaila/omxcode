@@ -22,7 +22,7 @@ from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
-from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canvas, TEXT, STICKY, CH_MOVE
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE
 from mojoui.pagedesk import BoardTools
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
@@ -302,13 +302,12 @@ struct WebShell(Movable):
             self.cols = 1
             self.rows = 1
             try:
-                var text = n.content.copy()
-                self.board = import_json_canvas(text)
+                var j = Json.parse(n.content)  # (parsed once: the objects and the page grid, D-7941)
+                self.board = import_json_canvas_doc(j)
                 self.board.set_connector_gap(6)
                 self.board.mark_saved()  # (what the file holds: unchanged until edited)
                 self.tools = BoardTools()
                 self.sticky_look()
-                var j = Json.parse(text)
                 var pg = j.get(j.get(0, "pn"), "page")
                 self.cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
                 self.rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))

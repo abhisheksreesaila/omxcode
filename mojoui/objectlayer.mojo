@@ -2011,6 +2011,11 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
     placeholder card, an edge a connector between the nodes it names. Goal 79: the fixture's canvas and PN's 5,000-object
     stress note."""
     var j = Json.parse(json_text)
+    return import_json_canvas_doc(j)
+
+
+def import_json_canvas_doc(j: Json) raises -> ObjectLayer:
+    """import_json_canvas from a document already parsed (an app reading other fields of it parses it once)."""
     var ol = ObjectLayer()
     var nodes = j.get(0, "nodes")
     var ids = Dict[String, Int]()

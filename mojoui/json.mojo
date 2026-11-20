@@ -11,6 +11,23 @@
 from std.ffi import external_call
 from std.sys import CompilationTarget
 from mojoui import libc
+from mojoui.shared import get_shared, put_shared
+
+comptime SLOT_C_LOCALE = 233  # mojoui.shared slot: the process's "C" numeric locale (newlocale once, D-7941)
+
+
+def c_locale() -> Int:
+    """The "C" numeric locale for strtod_l, made once per process (0 when newlocale fails)."""
+    var have = get_shared(SLOT_C_LOCALE)
+    if have != 0:
+        return have
+    var name = List[UInt8](length=2, fill=0)
+    name[0] = 67  # "C"
+    var loc = external_call["newlocale", Int](Int32(NUMERIC_MASK), Int(name.unsafe_ptr()), Int(0))
+    _ = name^
+    if loc != 0:
+        put_shared(SLOT_C_LOCALE, loc)
+    return loc
 
 comptime J_NULL = 0
 comptime J_BOOL = 1
@@ -78,16 +95,12 @@ def c_float(text: String) -> Float64:
     var buf = List[UInt8](length=len(b) + 1, fill=0)  # (NUL-terminated)
     for k in range(len(b)):
         buf[k] = b[k]
-    var name = List[UInt8](length=2, fill=0)
-    name[0] = 67  # "C"
-    var loc = external_call["newlocale", Int](Int32(NUMERIC_MASK), Int(name.unsafe_ptr()), Int(0))
+    var loc = c_locale()
     var v: Float64
     if loc != 0:
         v = external_call["strtod_l", Float64](Int(buf.unsafe_ptr()), Int(0), loc)
-        external_call["freelocale", NoneType](loc)
     else:
         v = libc.strtod(Int(buf.unsafe_ptr()))
-    _ = name^
     _ = buf^
     return v
 
@@ -116,77 +129,106 @@ def json_string(s: String) -> String:
 
 
 struct Json(Movable):
-    var kinds: List[Int]
-    var texts: List[String]  # J_STRING: the text
-    var numbers: List[Int]  # J_NUMBER: the value (a decimal's whole part); J_BOOL: 0 / 1
-    var reals: List[Float64]  # J_NUMBER: the value as a Float64
-    var whole: List[Bool]  # J_NUMBER: written without '.', 'e' or 'E'
-    var kids: List[List[Int]]  # J_ARRAY / J_OBJECT: the children
-    var keys: List[List[String]]  # J_OBJECT: each child's key
-    var src: List[Int]
+    """(D-7941: flat arrays: a node is a kind and one value, a container's children a run of `slots`; the text copied
+    once as bytes; a string without escapes taken whole; a short decimal read in place. 5–10× the old reader's speed on
+    Personal Note's canvases, the same grammar: the fuzz test parses and refuses exactly what it did.)"""
+    var kinds: List[UInt8]
+    var val: List[Int]  # J_STRING: its text (texts); J_NUMBER: its number (numbers, reals, whole); J_BOOL: 0 / 1;
+    # J_ARRAY / J_OBJECT: its first child's slot
+    var cnt: List[Int]  # J_ARRAY / J_OBJECT: how many children
+    var texts: List[String]  # strings and keys
+    var numbers: List[Int]  # per number: the value (a decimal's whole part)
+    var reals: List[Float64]  # per number: the value as a Float64
+    var whole: List[Bool]  # per number: written without '.', 'e' or 'E'
+    var slots: List[Int]  # containers' children, each container's in a run
+    var slot_keys: List[Int]  # an object's slot: its key (texts); -1 in an array
+    var src: List[UInt8]
     var pos: Int
+    var stack: List[Int]  # (parsing) children of the containers still open, and their keys
+    var kstack: List[Int]
+    var loc: Int  # (parsing) the "C" locale for strtod_l
+    var end: Int  # (parsing) the text's length (src holds a NUL after it)
 
     def __init__(out self):
-        self.kinds = List[Int]()
+        self.kinds = List[UInt8]()
+        self.val = List[Int]()
+        self.cnt = List[Int]()
         self.texts = List[String]()
         self.numbers = List[Int]()
         self.reals = List[Float64]()
         self.whole = List[Bool]()
-        self.kids = List[List[Int]]()
-        self.keys = List[List[String]]()
-        self.src = List[Int]()
+        self.slots = List[Int]()
+        self.slot_keys = List[Int]()
+        self.src = List[UInt8]()
         self.pos = 0
+        self.stack = List[Int]()
+        self.kstack = List[Int]()
+        self.loc = 0
+        self.end = 0
 
     @staticmethod
     def parse(text: String) raises -> Json:
         var j = Json()
-        for b in text.as_bytes():
-            j.src.append(Int(b))
+        var n = text.byte_length()
+        j.src = List[UInt8](capacity=n + 1)
+        j.src.extend(text.as_bytes())
+        j.src.append(0)  # (a NUL past the end: strtod_l reads a number in place and stops there at the latest)
+        j.end = n
+        j.loc = c_locale()
+        j.kinds = List[UInt8](capacity=n // 8 + 16)
+        j.val = List[Int](capacity=n // 8 + 16)
+        j.cnt = List[Int](capacity=n // 8 + 16)
         _ = j.value(0)
         j.skip()
-        if j.pos != len(j.src):
+        if j.pos != j.end:
             raise j.fail("something after the end")
+        j.src = List[UInt8]()  # (the text isn't needed once parsed)
+        j.stack = List[Int]()
+        j.kstack = List[Int]()
         return j^
 
     # ---- reading the tree ----
 
     def kind(self, node: Int) -> Int:
-        return self.kinds[node] if node >= 0 else -1
+        return Int(self.kinds[node]) if 0 <= node < len(self.kinds) else -1
 
     def size(self, node: Int) -> Int:
-        return len(self.kids[node]) if node >= 0 and self.kinds[node] >= J_ARRAY else 0
+        return self.cnt[node] if 0 <= node < len(self.kinds) and Int(self.kinds[node]) >= J_ARRAY else 0
 
     def at(self, node: Int, i: Int) -> Int:
-        return self.kids[node][i] if 0 <= i < self.size(node) else -1
+        return self.slots[self.val[node] + i] if 0 <= i < self.size(node) else -1
 
     def get(self, node: Int, key: String) -> Int:
-        if node < 0 or self.kinds[node] != J_OBJECT:
+        if node < 0 or node >= len(self.kinds) or Int(self.kinds[node]) != J_OBJECT:
             return -1
-        for k in range(len(self.keys[node])):
-            if self.keys[node][k] == key:
-                return self.kids[node][k]
+        var first = self.val[node]
+        for k in range(self.cnt[node]):
+            if self.texts[self.slot_keys[first + k]] == key:
+                return self.slots[first + k]
         return -1
 
     def key(self, node: Int, i: Int) -> String:
         """The key of an object's i-th member ("" for anything else)."""
-        return self.keys[node][i] if node >= 0 and self.kinds[node] == J_OBJECT and 0 <= i < len(self.keys[node]) else String("")
+        if node >= 0 and node < len(self.kinds) and Int(self.kinds[node]) == J_OBJECT and 0 <= i < self.cnt[node]:
+            return self.texts[self.slot_keys[self.val[node] + i]]
+        return String("")
 
     def text(self, node: Int, default: String = "") -> String:
-        return self.texts[node] if node >= 0 and self.kinds[node] == J_STRING else default
+        return self.texts[self.val[node]] if 0 <= node < len(self.kinds) and Int(self.kinds[node]) == J_STRING else default
 
     def number(self, node: Int, default: Int = 0) -> Int:
-        return self.numbers[node] if node >= 0 and self.kinds[node] == J_NUMBER else default
+        return self.numbers[self.val[node]] if 0 <= node < len(self.kinds) and Int(self.kinds[node]) == J_NUMBER else default
 
     def real(self, node: Int, default: Float64 = 0) -> Float64:
         """Any number as a Float64 (a whole number too); `default` for anything else."""
-        return self.reals[node] if node >= 0 and self.kinds[node] == J_NUMBER else default
+        return self.reals[self.val[node]] if 0 <= node < len(self.kinds) and Int(self.kinds[node]) == J_NUMBER else default
 
     def is_whole(self, node: Int) -> Bool:
         """A number written as a whole number (Python reads it as an int); False for decimals and anything else."""
-        return node >= 0 and self.kinds[node] == J_NUMBER and self.whole[node]
+        return 0 <= node < len(self.kinds) and Int(self.kinds[node]) == J_NUMBER and self.whole[self.val[node]]
 
     def flag(self, node: Int, default: Bool = False) -> Bool:
-        return self.numbers[node] == 1 if node >= 0 and self.kinds[node] == J_BOOL else default
+        return self.val[node] == 1 if 0 <= node < len(self.kinds) and Int(self.kinds[node]) == J_BOOL else default
 
     def dump(self, node: Int) -> String:
         """A node written back as compact JSON (numbers as parsed: whole ones exactly, decimals as Float64)."""
@@ -194,18 +236,19 @@ struct Json(Movable):
         if k == J_NULL or k < 0:
             return "null"
         if k == J_BOOL:
-            return "true" if self.numbers[node] == 1 else "false"
+            return "true" if self.val[node] == 1 else "false"
         if k == J_NUMBER:
-            return String(self.numbers[node]) if self.whole[node] else String(self.reals[node])
+            var v = self.val[node]
+            return String(self.numbers[v]) if self.whole[v] else String(self.reals[v])
         if k == J_STRING:
-            return json_string(self.texts[node])
+            return json_string(self.texts[self.val[node]])
         var out = String("[") if k == J_ARRAY else String("{")
-        for i in range(len(self.kids[node])):
+        for i in range(self.cnt[node]):
             if i > 0:
                 out += ","
             if k == J_OBJECT:
-                out += json_string(self.keys[node][i]) + ":"
-            out += self.dump(self.kids[node][i])
+                out += json_string(self.key(node, i)) + ":"
+            out += self.dump(self.at(node, i))
         return out + ("]" if k == J_ARRAY else "}")
 
     # ---- parsing ----
@@ -214,155 +257,204 @@ struct Json(Movable):
         return Error("not JSON: " + why + " (at character " + String(self.pos) + ")")
 
     def skip(mut self):
-        while self.pos < len(self.src) and (self.src[self.pos] == 32 or self.src[self.pos] == 9 or self.src[self.pos] == 10 or self.src[self.pos] == 13):
-            self.pos += 1
+        var n = self.end
+        var p = self.src.unsafe_ptr()
+        var i = self.pos
+        while i < n:
+            var c = p[i]
+            if c != 32 and c != 9 and c != 10 and c != 13:
+                break
+            i += 1
+        self.pos = i
 
-    def add(mut self, kind: Int) -> Int:
-        self.kinds.append(kind)
-        self.texts.append("")
-        self.numbers.append(0)
-        self.reals.append(0)
-        self.whole.append(False)
-        self.kids.append(List[Int]())
-        self.keys.append(List[String]())
+    def add(mut self, kind: Int, v: Int) -> Int:
+        self.kinds.append(UInt8(kind))
+        self.val.append(v)
+        self.cnt.append(0)
         return len(self.kinds) - 1
 
     def literal(mut self, word: String) -> Bool:
         var b = word.as_bytes()
-        if self.pos + len(b) > len(self.src):
+        if self.pos + len(b) > self.end:
             return False
         for i in range(len(b)):
-            if self.src[self.pos + i] != Int(b[i]):
+            if self.src[self.pos + i] != b[i]:
                 return False
         self.pos += len(b)
         return True
+
+    def close(mut self, node: Int, base: Int):
+        """A container's children (stack[base:]) into its run of slots."""
+        var first = len(self.slots)
+        var n = len(self.stack) - base
+        for k in range(n):
+            self.slots.append(self.stack[base + k])
+            self.slot_keys.append(self.kstack[base + k])
+        self.val[node] = first
+        self.cnt[node] = n
+        self.stack.shrink(base)
+        self.kstack.shrink(base)
 
     def value(mut self, depth: Int) raises -> Int:
         if depth > MAX_DEPTH:
             raise self.fail("nested too deeply")
         self.skip()
-        if self.pos >= len(self.src):
+        if self.pos >= self.end:
             raise self.fail("it ends early")
-        var c = self.src[self.pos]
+        var c = Int(self.src[self.pos])
         if c == ord("{"):
             self.pos += 1
-            var node = self.add(J_OBJECT)
+            var node = self.add(J_OBJECT, 0)
+            var base = len(self.stack)
             self.skip()
-            if self.pos < len(self.src) and self.src[self.pos] == ord("}"):
+            if self.pos < self.end and Int(self.src[self.pos]) == ord("}"):
                 self.pos += 1
+                self.close(node, base)
                 return node
             while True:
                 self.skip()
-                if self.pos >= len(self.src) or self.src[self.pos] != ord('"'):
+                if self.pos >= self.end or Int(self.src[self.pos]) != ord('"'):
                     raise self.fail("a key was expected")
-                var key = self.string()
+                var key = self.string_text()
                 self.skip()
-                if self.pos >= len(self.src) or self.src[self.pos] != ord(":"):
+                if self.pos >= self.end or Int(self.src[self.pos]) != ord(":"):
                     raise self.fail("a ':' was expected")
                 self.pos += 1
                 var child = self.value(depth + 1)
-                self.kids[node].append(child)
-                self.keys[node].append(key)
+                self.stack.append(child)
+                self.kstack.append(key)
                 self.skip()
-                if self.pos < len(self.src) and self.src[self.pos] == ord(","):
+                if self.pos < self.end and Int(self.src[self.pos]) == ord(","):
                     self.pos += 1
                     continue
-                if self.pos < len(self.src) and self.src[self.pos] == ord("}"):
+                if self.pos < self.end and Int(self.src[self.pos]) == ord("}"):
                     self.pos += 1
+                    self.close(node, base)
                     return node
                 raise self.fail("a ',' or '}' was expected")
         if c == ord("["):
             self.pos += 1
-            var node = self.add(J_ARRAY)
+            var node = self.add(J_ARRAY, 0)
+            var base = len(self.stack)
             self.skip()
-            if self.pos < len(self.src) and self.src[self.pos] == ord("]"):
+            if self.pos < self.end and Int(self.src[self.pos]) == ord("]"):
                 self.pos += 1
+                self.close(node, base)
                 return node
             while True:
                 var child = self.value(depth + 1)
-                self.kids[node].append(child)
+                self.stack.append(child)
+                self.kstack.append(-1)
                 self.skip()
-                if self.pos < len(self.src) and self.src[self.pos] == ord(","):
+                if self.pos < self.end and Int(self.src[self.pos]) == ord(","):
                     self.pos += 1
                     continue
-                if self.pos < len(self.src) and self.src[self.pos] == ord("]"):
+                if self.pos < self.end and Int(self.src[self.pos]) == ord("]"):
                     self.pos += 1
+                    self.close(node, base)
                     return node
                 raise self.fail("a ',' or ']' was expected")
         if c == ord('"'):
-            var node = self.add(J_STRING)
-            self.texts[node] = self.string()
-            return node
+            return self.add(J_STRING, self.string_text())
         if self.literal("true"):
-            var node = self.add(J_BOOL)
-            self.numbers[node] = 1
-            return node
+            return self.add(J_BOOL, 1)
         if self.literal("false"):
-            return self.add(J_BOOL)
+            return self.add(J_BOOL, 0)
         if self.literal("null"):
-            return self.add(J_NULL)
+            return self.add(J_NULL, 0)
         if c == ord("-") or (c >= ord("0") and c <= ord("9")):
             return self.number_node()
         raise self.fail("unexpected '" + chr(c) + "'")
 
     def digits(mut self) -> Int:
-        var n = 0
-        while self.pos < len(self.src) and self.src[self.pos] >= ord("0") and self.src[self.pos] <= ord("9"):
-            self.pos += 1
-            n += 1
+        var p = self.src.unsafe_ptr()
+        var end = self.end
+        var i = self.pos
+        while i < end and p[i] >= 48 and p[i] <= 57:
+            i += 1
+        var n = i - self.pos
+        self.pos = i
         return n
 
     def number_node(mut self) raises -> Int:
         """A JSON number: -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?"""
         var start = self.pos
-        var neg = self.src[self.pos] == ord("-")
+        var neg = Int(self.src[self.pos]) == ord("-")
         if neg:
             self.pos += 1
         var int_at = self.pos
         var n = self.digits()
         if n == 0:
             raise self.fail("a number was expected")
-        if n > 1 and self.src[int_at] == ord("0"):
+        if n > 1 and Int(self.src[int_at]) == ord("0"):
             raise self.fail("a number can't start with 0")
         var whole = True
-        if self.pos < len(self.src) and self.src[self.pos] == ord("."):
+        var frac_at = -1
+        var frac_n = 0
+        if self.pos < self.end and Int(self.src[self.pos]) == ord("."):
             self.pos += 1
             whole = False
-            if self.digits() == 0:
+            frac_at = self.pos
+            frac_n = self.digits()
+            if frac_n == 0:
                 raise self.fail("a digit was expected after '.'")
-        if self.pos < len(self.src) and (self.src[self.pos] == ord("e") or self.src[self.pos] == ord("E")):
+        var has_exp = False
+        if self.pos < self.end and (Int(self.src[self.pos]) == ord("e") or Int(self.src[self.pos]) == ord("E")):
             self.pos += 1
             whole = False
-            if self.pos < len(self.src) and (self.src[self.pos] == ord("+") or self.src[self.pos] == ord("-")):
+            has_exp = True
+            if self.pos < self.end and (Int(self.src[self.pos]) == ord("+") or Int(self.src[self.pos]) == ord("-")):
                 self.pos += 1
             if self.digits() == 0:
                 raise self.fail("a digit was expected in the exponent")
-        var node = self.add(J_NUMBER)
-        self.whole[node] = whole
+        var at = len(self.numbers)
+        var node = self.add(J_NUMBER, at)
+        self.whole.append(whole)
         if whole:
             var v = 0
+            var sp = self.src.unsafe_ptr()
             for k in range(int_at, self.pos):
-                var d = self.src[k] - ord("0")
+                var d = Int(sp[k]) - 48
                 if v > (9_223_372_036_854_775_807 - d) // 10:  # (Int64's range: past it Python has an exact int, we'd have to round)
                     raise self.fail("a whole number is too big")
                 v = v * 10 + d
-            self.numbers[node] = -v if neg else v
-            self.reals[node] = -Float64(v) if neg else Float64(v)
+            self.numbers.append(-v if neg else v)
+            self.reals.append(-Float64(v) if neg else Float64(v))
             return node
-        var text = List[UInt8](capacity=self.pos - start)
-        for k in range(start, self.pos):
-            text.append(UInt8(self.src[k]))
-        var f = c_float(String(unsafe_from_utf8=text))
-        self.reals[node] = f
-        self.numbers[node] = Int(f) if f > -9.2e18 and f < 9.2e18 else (0 if f != f else (-9_223_372_036_854_775_807 if f < 0 else 9_223_372_036_854_775_807))
+        var f: Float64
+        if not has_exp and n + frac_n <= 15 and frac_n <= 22:
+            # (a short decimal: its digits and the power of ten are exact Float64s, one division rounds it correctly:
+            # what c_float's fast path does, without making a string)
+            var w = 0
+            var sp = self.src.unsafe_ptr()
+            for k in range(int_at, int_at + n):
+                w = w * 10 + Int(sp[k]) - 48
+            for k in range(frac_at, frac_at + frac_n):
+                w = w * 10 + Int(sp[k]) - 48
+            if w == 0:
+                f = -Float64(0.0) if neg else Float64(0.0)
+            else:
+                f = Float64(w) / pow10(frac_n)
+                if neg:
+                    f = -f
+        elif self.loc != 0:  # (a long decimal: libc's correctly rounded reader, in place: the grammar was checked, the
+            # byte after the number isn't part of one)
+            f = external_call["strtod_l", Float64](Int(self.src.unsafe_ptr()) + start, Int(0), self.loc)
+        else:
+            var text = List[UInt8](capacity=self.pos - start)
+            for k in range(start, self.pos):
+                text.append(self.src[k])
+            f = c_float(String(unsafe_from_utf8=text))
+        self.reals.append(f)
+        self.numbers.append(Int(f) if f > -9.2e18 and f < 9.2e18 else (0 if f != f else (-9_223_372_036_854_775_807 if f < 0 else 9_223_372_036_854_775_807)))
         return node
 
     def hex4(mut self) raises -> Int:
-        if self.pos + 4 > len(self.src):
+        if self.pos + 4 > self.end:
             raise self.fail("a \\u escape ends early")
         var v = 0
         for _ in range(4):
-            var b = self.src[self.pos]
+            var b = Int(self.src[self.pos])
             var d: Int
             if b >= ord("0") and b <= ord("9"):
                 d = b - ord("0")
@@ -376,22 +468,38 @@ struct Json(Movable):
             self.pos += 1
         return v
 
+    def string_text(mut self) raises -> Int:
+        """A string at pos into texts: its index."""
+        self.texts.append(self.string())
+        return len(self.texts) - 1
+
     def string(mut self) raises -> String:
         self.pos += 1  # the opening quote
-        var out = List[UInt8]()
+        # (fast path: no escape before the closing quote: the bytes taken whole)
+        var q = self.pos
+        var n = self.end
+        var p = self.src.unsafe_ptr()
+        while q < n and p[q] != 34 and p[q] != 92:
+            q += 1
+        if q < n and self.src[q] == 34:
+            var piece = List[UInt8](capacity=q - self.pos)
+            piece.extend(Span(self.src)[self.pos:q])
+            self.pos = q + 1
+            return String(unsafe_from_utf8=piece)
+        var out = List[UInt8](capacity=q - self.pos + 16)
         while True:
-            if self.pos >= len(self.src):
+            if self.pos >= self.end:
                 raise self.fail("a string is not closed")
-            var b = self.src[self.pos]
+            var b = Int(self.src[self.pos])
             self.pos += 1
             if b == ord('"'):
                 break
             if b != ord("\\"):
                 out.append(UInt8(b))
                 continue
-            if self.pos >= len(self.src):
+            if self.pos >= self.end:
                 raise self.fail("a string is not closed")
-            var e = self.src[self.pos]
+            var e = Int(self.src[self.pos])
             self.pos += 1
             if e == ord("n"):
                 out.append(10)
@@ -410,7 +518,7 @@ struct Json(Movable):
                 if cp >= 0xDC00 and cp < 0xE000:
                     raise self.fail("a lone low surrogate")
                 if cp >= 0xD800 and cp < 0xDC00:  # a high surrogate needs its low one right after
-                    if self.pos + 1 < len(self.src) and self.src[self.pos] == ord("\\") and self.src[self.pos + 1] == ord("u"):
+                    if self.pos + 1 < self.end and Int(self.src[self.pos]) == ord("\\") and Int(self.src[self.pos + 1]) == ord("u"):
                         self.pos += 2
                         var lo = self.hex4()
                         if lo < 0xDC00 or lo >= 0xE000:

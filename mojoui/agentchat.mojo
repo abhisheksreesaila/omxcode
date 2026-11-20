@@ -588,10 +588,10 @@ struct AgentChat[H: Hub = NoData](Movable):
         try:
             var j = Json.parse(c.arguments if c.arguments.byte_length() > 0 else String("{}"))
             var facts = List[View]()
-            for i in range(min(len(j.keys[0]), 8)):
-                var v = j.kids[0][i]
+            for i in range(min(j.size(0), 8)):
+                var v = j.at(0, i)
                 var shown = j.text(v) if j.kind(v) == J_STRING else (String(j.number(v)) if j.is_whole(v) else String(j.real(v)))
-                facts.append(HStack(Text(j.keys[0][i], style=CAPTION).width(120), Text(shown).tone(TONE_STRONG), spacing=SPACE_S).align(CENTER))
+                facts.append(HStack(Text(j.key(0, i), style=CAPTION).width(120), Text(shown).tone(TONE_STRONG), spacing=SPACE_S).align(CENTER))
             if len(facts) > 0:
                 rows.append(VStack(facts^, spacing=SPACE_XS).align(START))
         except:
