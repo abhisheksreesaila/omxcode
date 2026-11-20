@@ -200,6 +200,9 @@ COMPOSITES = [
     ("Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)", "mojoui/notesshell.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "NotesPanel("),
     ("Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)", "mojoui/pagesheet.mojo", ["Canvas"], "PageSheet("),
     ("Buzan map view (the web map's geometry: one-bend ribbons, idea cards, root card, fit, minimap)", "mojoui/buzanmap.mojo", ["Canvas"], "BuzanMap("),
+    ("Omnibar (search and jump: field, pills, grouped rows with marks, preview, key hints; the web's time words)", "mojoui/omnibar.mojo", ["Canvas"], "Omnibar("),
+    ("Island card (a title island opened into a card of actions)", "mojoui/islandcard.mojo", ["Canvas"], "IslandCard("),
+    ("Settings window (sectioned nav, search, pane; skin cards)", "mojoui/settingswin.mojo", ["Canvas"], "SettingsWindow("),
     ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),

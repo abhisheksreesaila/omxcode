@@ -4,6 +4,25 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continued: GPU text, the window's own frame, IME, the race (2026-11-19, evening)
+- **Setup:** same worktree. The parent session asked to run on (D-7909). The owner's session was locked, the RTX 3090 was shared with another project's LLM for part of the run, and the M4 was offline throughout.
+- **Worked:**
+  - **GPU text:** gpu2d draws fonttext's runs from GlyphPages in its atlas, plus colour emoji and icons as blended images. GL equals the CPU executor: mean 0.001 levels at 1×, 0 px at 4× (D-7910).
+  - **A stronger checker:** shots are now the GPU frame the window presents (`gpushot:`, D-7911). M2 passes again under it, SSIM 0.972–0.984.
+  - **M3 pieces as mojoui components:** omnibar, island card, settings window, the map's radial gradient. Every box on those screens is within 2 px.
+  - **M5 on Linux:** a real GtkIMContext per canvas and system paste; Japanese, Hindi and Korean saved exactly into Personal Note's schema.
+  - **M6:** native wins all 14 interaction rows and memory (241 vs 805 MB).
+- **Broke, and the fixes:** several checker bugs that made comparisons impossible (D-7915, D-7917–D-7919). The run under the shared GPU read pan at 9.6 ms; that cost was GTK's paint and sync, so the race was re-run with the GPU idle.
+- **Not done:**
+  - Mac: everything, since the M4 was offline.
+  - The canvas screen.
+  - M4.
+  - Race rows: the silky bar on open (native 150 / 51 ms vs the web's 1.2 s) and cold start (420 vs 248 ms).
+  - M3 fills: the dock dividers (D-7914).
+- **Next small step:** with the M4 online, `scripts/check M1`, then test_gpu2d_metal.
+
+---
+
 ## Goal 79: Personal Note, native, the exact look of the web app (2026-11-19)
 - **Setup:** worktree ../mojo-ui-g79, branch `goal-79-pnote-lookalike` off goal 75's 654d9471. Owner: "Rebuild Personal Note the exact way the web version looks with a better performance"; then D-7900: framework first, every trick in mojoui, Linux and Mac. Yardstick: the web app's own dist/ build on a scratch database, shot by docs/goals/79/ref.mjs at 1440×900, 1.6×.
 - **Worked:**
