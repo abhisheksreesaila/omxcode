@@ -1,7 +1,7 @@
 # Goal 79: mojoui.omnibar, mojoui.islandcard, mojoui.settingswin, mojoui.pagesheet's editing and draw_radial_steps on
 # their own, against the web app's computed boxes (docs/goals/79/ref.mjs) and its rules.
-#   pixi run mojo run -I . tests/test_webpieces.mojo        → "webpieces: ok"
-from mojoui.skin import skin_named
+#   pixi run mojo run -I . -I examples/pnote tests/test_webpieces.mojo        → "webpieces: ok"
+from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
 from mojoui.scene import Scene
 from mojoui.notesshell import Boxes, draw_radial_steps
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, utc_epoch, word_match
@@ -40,7 +40,7 @@ def main() raises:
     var rows = List[OmniRow]()
     rows.append(OmniRow("📚", "", sk.c4, "Reading list", "Page", "Inbox", sk.ink, "now"))
     o.groups.append(OmniGroup("Notes", rows^))
-    var bx = Boxes()
+    var bx = pn_boxes()
     o.draw(sc, bx, 1440, 900, 1.6, sk)
     check(near(box(bx, "[Search or jump to]"), [340.0, 96.0, 760.0, 456.39]), "spotlight box")
     check(near(box(bx, "#omni-row-0"), [349.0, 224.0, 492.0, 56.0]), "first row box")
@@ -60,7 +60,7 @@ def main() raises:
     c.wide_key = "Ctrl ."
     for t in range(10):
         c.tiles.append(CardTile("#t" + String(t), "Tile", "printer", t == 9))
-    var bc = Boxes()
+    var bc = pn_boxes()
     c.draw(sc, bc, 16, 1424, 1.6, sk)
     check(near(box(bc, "#island"), [509.0, 16.0, 422.0, 354.0]), "card box")
     check(near(box(bc, "#t1"), [623.5, 152.59, 93.5, 64.0]), "a tile")
@@ -70,11 +70,12 @@ def main() raises:
     g.append(SettingsPage("Appearance", "sun", "How Personal Note looks.", "Paper"))
     g.append(SettingsPage("Writing", "pen-line", "", ""))
     sw.groups.append(g^)
-    var bs = Boxes()
+    var bs = pn_boxes()
     var body = sw.draw(sc, bs, 1440, 900, 1.6, sk)
     check(near(box(bs, "#properties-panel"), [270.0, 140.0, 900.0, 620.0]), "window box")
     check(near(box(bs, ".sw-item:AppearancePaper"), [280.0, 264.0, 244.0, 42.0]), "nav item")
-    skin_cards(sc, bs, body[0], body[1], body[2], 1.6, sk, "paper")
+    var cards = pn_skin_cards()
+    skin_cards(sc, bs, body[0], body[1], body[2], 1.6, sk, "paper", cards[0], cards[1])
     check(near(box(bs, ".sw-skin@2"), [761.33, 244.48, 181.33, 152.0]), "skin card")
     # page editing: caret at the end, typing, an input method's commit, newline, backspace by whole characters
     var p = PageSheet()

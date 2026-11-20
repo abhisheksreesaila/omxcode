@@ -170,6 +170,41 @@ struct GlyphPages(Movable):
         return len(self.sx) - 1
 
 
+@fieldwise_init
+struct LayerTraits(ImplicitlyCopyable, Movable):
+    """What a kept layer's batches depend on (shared by the GL and Metal renderers, D-7930): `fixed`, not on its
+    transform (no clip, fill or image); `zoom_bound`, on its zoom (text drawn from glyphs rasterized at size × zoom:
+    OP_TEXT and fonttext's OP_RUN; a pan reuses it, a zoom rebuilds it); `runs`, it places fonttext glyphs in
+    GlyphPages (a reset of the pages invalidates it); `open`, clips left open after it."""
+    var fixed: Bool
+    var zoom_bound: Bool
+    var runs: Bool
+    var open: Int
+
+
+def layer_traits(scene: Scene, i: Int, open_before: Int) -> LayerTraits:
+    var span = scene.layer_range(i)
+    var open = open_before
+    var t = LayerTraits(open_before == 0, False, False, 0)
+    for op in range(span[0], span[1]):
+        var kind = Int(scene.kinds[op])
+        if kind == OP_TEXT:
+            t.zoom_bound = True
+        elif kind == OP_RUN:
+            t.zoom_bound = True
+            t.runs = True
+        elif kind == OP_FILL or kind == OP_IMAGE:
+            t.fixed = False
+        elif kind == OP_CLIP:
+            t.fixed = False
+            open += 1
+        elif kind == OP_UNCLIP:
+            t.fixed = False
+            open = max(open - 1, 0)
+    t.open = open
+    return t
+
+
 def glyph_pages(width: Int) -> Pointer[GlyphPages, MutUntrackedOrigin]:
     var have = get_shared(SLOT_GLYPH_PAGES)
     if have != 0:
@@ -388,8 +423,16 @@ def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font) -> Frame2D:
 
 
 def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
-    """build_batches into an existing frame, reusing its memory (a host keeps one Frame2D)."""
+    """build_batches into an existing frame, reusing its memory (a host keeps one Frame2D). When GlyphPages fill and
+    start again while it builds, the glyphs placed before that are gone: the frame is built once more (D-7930)."""
+    var pg = glyph_pages(atlas.width)
+    var r0 = pg[].resets
     fill_layers(f, scene, atlas, font, 0, scene.layers())
+    if pg[].resets != r0:
+        var r1 = pg[].resets
+        fill_layers(f, scene, atlas, font, 0, scene.layers())
+        if pg[].resets != r1:
+            print("GLYPHPAGES: one frame needs more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
 
 
 def _clip_op(mut clips: List[Float64], scene: Scene, op: Int, tx: Float64, ty: Float64, tk: Float64):

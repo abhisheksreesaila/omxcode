@@ -5184,7 +5184,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         var d0 = host[].rt.refresh()
         host[].apply(d0, host_addr)
         bench_wait[A](host_addr, ci, 300_000_000)
-    if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open":
+    if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open" or what == "undo" or what == "redo":
         # (goal 79: Personal Note's benchmark steps) the app says where: App.spot(canvas, "bench:<what>") — an object to
         # drag (dragone), the lead of 40 it has selected (drag40), or, for undoredo and open, it prepares the step (App.bench)
         # (a history to walk; open: drops what it keeps of the note so each step opens it again) and answers (-1, -1)
@@ -5264,7 +5264,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             host[].canvas_send(ci, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
             x = tx
             y = ty
-        elif what == "undoredo" or what == "open":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; open: the app reopens)
+        elif what == "undoredo" or what == "open" or what == "undo" or what == "redo":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; undo / redo: one way each frame; open: the app reopens)
             if what == "open":
                 _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
                 var d = host[].rt.refresh()
@@ -5274,7 +5274,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 var sig = String("key-pressed")
                 if host[].canvases[ci].keys != 0:
                     external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].keys, sig.as_c_string_span(),
-                        c_uint(gdk_keyval("z")), c_uint(0), c_uint(4 if i % 2 == 0 else 5), Int(handled.unsafe_ptr()))
+                        c_uint(gdk_keyval("z")), c_uint(0), c_uint(4 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 5), Int(handled.unsafe_ptr()))
                 _ = len(handled)
         elif what == "erase":  # (an eraser dragged to and fro across the page: only moves that hit a stroke redraw)
             x += 4.0 if (i // 60) % 2 == 0 else -4.0
@@ -7435,6 +7435,21 @@ def run_step[A: App](host_addr: Int, step: String):
         print("RSS: " + String(round(rss_mb(), 1)), flush=True)
     elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
         frame_bench[A](host_addr, rest)
+    elif verb == "appbench":  # appbench:K=<name>: the app readies a bench step on canvas K (App.bench "bench:<name>": a zoom, a note), untimed (goal 79, D-7929)
+        var kv = split_at(rest, "=")
+        var node = canvas_node(host[], kv[0])
+        var ci = -1
+        for k in range(len(host[].canvases)):
+            if host[].canvases[k].node == node:
+                ci = k
+        if ci < 0:
+            print("TEST: no canvas", kv[0])
+            return
+        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + kv[1])
+        var d = host[].rt.refresh()
+        host[].apply(d, host_addr)
+        bench_wait[A](host_addr, ci, 500_000_000)
+        print("APPBENCH: " + kv[1], flush=True)
     elif verb == "gpushot":  # gpushot:K=path: the GPU frame canvas K shows now (the picture GTK holds, rendered as GTK composites it), as a PNG (goal 79)
         var kv = split_at(rest, "=")
         gpu_shot[A](host_addr, kv[0], kv[1])

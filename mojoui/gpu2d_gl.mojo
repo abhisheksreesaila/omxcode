@@ -41,8 +41,8 @@ from std.os import getenv
 from std.time import perf_counter_ns
 from mojoui.present import fcall, dl_open, dl_sym, c_text
 from mojoui.text import Font
-from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import (glyph_pages, DYN_ROWS, Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
+from mojoui.scene import Scene, OP_TEXT, OP_RUN, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
+from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
@@ -1613,6 +1613,7 @@ struct LayerCache(Movable):
     var frames: List[Frame2D]
     var built: Int
     var built_k: List[Float64]
+    var built_resets: List[Int]  # GlyphPages.resets when each layer was built (D-7930)
     var fills: List[Int]
     var sets: List[Int]
     var used: Int  # GPU2D.stamp when it last drew
@@ -1622,6 +1623,7 @@ struct LayerCache(Movable):
         self.frames = List[Frame2D]()
         self.built = 0
         self.built_k = List[Float64]()
+        self.built_resets = List[Int]()
         self.fills = List[Int]()
         self.sets = List[Int]()
         self.used = 0
@@ -1657,6 +1659,7 @@ struct GPU2D(Movable):
     var opaque: Bool  # the last frame is opaque everywhere (a layer fills it opaquely, none replaces with translucency):
     # a host may hand it over as an opaque texture (the toolkit then skips its alpha conversion and blending)
     var built_k: List[Float64]  # the zoom each cached layer was built at (merge_runs pads boxes by 4 px at that zoom:
+    var built_resets: List[Int]  # GlyphPages.resets when each layer was built (D-7930)
     # a layer reused more than 4× further out is rebuilt, so its pads stay ≥ 1 px)
     var sets: List[Int]  # the GL buffer set of each of the owner's layers
     var others: List[LayerCache]  # other canvases' caches, kept while they don't draw (D-7561: two .gpu() canvases on one
@@ -1683,6 +1686,7 @@ struct GPU2D(Movable):
         self.runs_built = 0
         self.runs_merged = 0
         self.built_k = List[Float64]()
+        self.built_resets = List[Int]()
         self.fills = List[Int]()
         self.opaque = False
         self.sets = List[Int]()
@@ -1704,6 +1708,7 @@ struct GPU2D(Movable):
         mine.owner = self.owner
         swap(mine.frames, self.frames)
         swap(mine.built_k, self.built_k)
+        swap(mine.built_resets, self.built_resets)
         swap(mine.fills, self.fills)
         swap(mine.sets, self.sets)
         mine.built = self.built
@@ -1719,6 +1724,7 @@ struct GPU2D(Movable):
         theirs.owner = owner
         swap(self.frames, theirs.frames)
         swap(self.built_k, theirs.built_k)
+        swap(self.built_resets, theirs.built_resets)
         swap(self.fills, theirs.fills)
         swap(self.sets, theirs.sets)
         self.built = theirs.built
@@ -1762,6 +1768,7 @@ struct GPU2D(Movable):
         while len(self.frames) < n:
             self.frames.append(Frame2D())
             self.built_k.append(1.0)
+            self.built_resets.append(-1)
             self.fills.append(0)
         while len(self.sets) < n:  # (this canvas's own GL buffers for each layer)
             if len(self.free_sets) > 0:
@@ -1778,24 +1785,18 @@ struct GPU2D(Movable):
         self.grown = 0
         self.runs_built = 0
         self.runs_merged = 0
+        var pg = glyph_pages(self.atlas.width)
+        var resets0 = pg[].resets
         for i in range(n):
             var span = scene.layer_range(i)
-            var fixed = open == 0  # (its batches don't depend on its transform)
-            var zoom_bound = False  # (text: its batches depend on the zoom only, its faces picked at size·k; not on
-            # where the layer sits, so a pan at the zoom it was built at reuses it, D-7578)
-            for op in range(span[0], span[1]):
-                var kind = Int(scene.kinds[op])
-                if kind == OP_TEXT:
-                    zoom_bound = True
-                elif kind == OP_FILL or kind == OP_IMAGE:
-                    fixed = False
-                elif kind == OP_CLIP:
-                    fixed = False
-                    open += 1
-                elif kind == OP_UNCLIP:
-                    fixed = False
-                    open = max(open - 1, 0)
-            var keep = cached and i < self.built and i < prev.layers() and scene.same_layer(i, prev, i)
+            var tr = layer_traits(scene, i, open)  # (D-7930: shared with the Metal renderer)
+            open = tr.open
+            var fixed = tr.fixed
+            var zoom_bound = tr.zoom_bound
+            # a layer whose glyphs were placed before GlyphPages last filled and started again points at slots other glyphs
+            # now hold: it is never kept or grown, it is built again
+            var stale = tr.runs and i < len(self.built_resets) and self.built_resets[i] != pg[].resets
+            var keep = cached and i < self.built and i < prev.layers() and scene.same_layer(i, prev, i) and not stale
             if keep and len(self.frames[i].layers) == 1:
                 var same_place = (scene.layer_tx[i] == prev.layer_tx[i] and scene.layer_ty[i] == prev.layer_ty[i]
                                   and scene.layer_tk[i] == prev.layer_tk[i])
@@ -1807,7 +1808,7 @@ struct GPU2D(Movable):
                     self.frames[i].layers[0].dy = scene.layer_ty[i]
                     self.frames[i].layers[0].k = scene.layer_tk[i]
                     dirty[i] = False
-            if dirty[i] and cached and i < self.built and i < prev.layers() and len(self.frames[i].layers) == 1 and self.gl.multi_draw != 0:
+            if dirty[i] and not stale and cached and i < self.built and i < prev.layers() and len(self.frames[i].layers) == 1 and self.gl.multi_draw != 0:
                 # a layer that only grew (a finished stroke joining the page), in the same place: its new ops alone,
                 # added after what's kept (and uploaded after it), unless the layer has collected many such runs
                 var same_place = (scene.layer_tx[i] == prev.layer_tx[i] and scene.layer_ty[i] == prev.layer_ty[i]
@@ -1836,9 +1837,24 @@ struct GPU2D(Movable):
                     self.runs_built += len(self.frames[i].runs)
                 self.runs_merged += len(self.frames[i].runs)
                 self.built_k[i] = scene.layer_tk[i]
+                self.built_resets[i] = pg[].resets
                 self.rebuilt += 1
             else:
                 self.reused += 1
+        if pg[].resets != resets0:
+            # GlyphPages filled while this frame was being built and started again: every layer with glyphs placed
+            # before that (built earlier this frame, or kept) is built once more on the fresh pages (D-7930)
+            var resets1 = pg[].resets
+            for i in range(n):
+                if self.built_resets[i] != resets1 and layer_traits(scene, i, 0).runs:
+                    fill_layers(self.frames[i], scene, self.atlas, self.font, i, i + 1)
+                    self.built_k[i] = scene.layer_tk[i]
+                    self.built_resets[i] = resets1
+                    dirty[i] = True
+                    grew[i] = -1
+                    self.rebuilt += 1
+            if pg[].resets != resets1:
+                print("GLYPHPAGES: one frame needs more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
         var full = False
         var see_through = False
         for i in range(n):

@@ -1,11 +1,14 @@
 # Goal 79: the web-look components on their own (mojoui.skin, mojoui.strokeicon, mojoui.notesshell, mojoui.pagesheet,
 # fonttext.line_metrics). Expected values are the web app's computed styles (docs/goals/79/ref.mjs's style dump).
-#   pixi run mojo run -I . tests/test_notesshell.mojo        → "notesshell: ok"
-from mojoui.skin import skin_named, hexc
+#   pixi run mojo run -I . -I examples/pnote tests/test_notesshell.mojo        → "notesshell: ok"
+from mojoui.skin import hexc
+from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
 from mojoui.canvas import Surface, rgba
 from mojoui.scene import SurfacePainter, Scene
 from mojoui.strokeicon import icon_pixels, icon_segments
-from mojoui.notesshell import Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_title_island, title_island_width
+from mojoui.notesshell import Boxes, NotesPanel, PanelNote, PanelNotebook, PanelConfig, Shelf, SkinChoice, draw_desk, draw_title_island, title_island_width
+from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
+from mojoui.skin import Skin
 from mojoui.pagesheet import PageSheet
 from mojoui.fonttext import TextStyle, line_metrics, baseline_in
 
@@ -38,7 +41,7 @@ def main() raises:
     check(nseg > 30, "file-text has its outline (multi-line node)")
     _ = icon_pixels("search", 32, rgba(31, 27, 22), 2)
     # boxes: duplicates numbered, taps reach the topmost actionable box
-    var bx = Boxes()
+    var bx = pn_boxes()
     bx.add(".sec-head", 0, 0, 100, 34)
     bx.add(".sec-head", 0, 40, 100, 34)
     bx.add("row:a", 10, 45, 50, 20)
@@ -54,11 +57,11 @@ def main() raises:
     var h = 900
     var px = List[UInt32](length=w * h, fill=0)
     var sp = SurfacePainter(Surface(Int(px.unsafe_ptr()), w, h, 1.0))
-    var panel = NotesPanel()
+    var panel = NotesPanel(pn_panel())
     panel.notes.append(PanelNote(1, "Lighthouse trip", "page", "✈️", 2, 0))
     panel.notebooks.append(PanelNotebook(1, "Travel", hexc("#b86b4b"), "projects", "plane", 0))
     panel.active = 1
-    var boxes = Boxes()
+    var boxes = pn_boxes()
     draw_desk(sp, Float64(w), Float64(h), 1, paper)
     panel.draw(sp, boxes, 1, paper, Float64(h))
     check(boxes.find("#sidebar") >= 0 and boxes.find("row:✈️ Lighthouse trip") >= 0 and boxes.find(".nav-row:Travel 0") >= 0, "panel boxes")
@@ -68,7 +71,45 @@ def main() raises:
     var sc = Scene(w, h, 1.0)
     var page = PageSheet()
     page.set_markdown("# Lighthouse trip\n\nThree days on the coast in **late May**.\n")
-    var pb = Boxes()
+    var pb = pn_boxes()
     page.draw(sc, pb, 300, 66, 1428, 888, 1, "✈️", paper.c2, 14)
     check(pb.find("[Page tools]") >= 0 and pb.find(".page-paper") >= 0, "page boxes")
+    # (D-7928) another app: its own brand, action, shelves, skins and no name table: the panel draws its words and the
+    # framework's generic names, none of Personal Note's
+    var cfg = PanelConfig()
+    cfg.brand = "Field Log"
+    cfg.action_label = "New entry"
+    cfg.action_key = "Ctrl E"
+    cfg.loose_label = "Today"
+    cfg.shelves = [Shelf("trips", "Trips", "map", True, False), Shelf("done", "Done", "check", False, True)]
+    var dawn = Skin("dawn")
+    dawn.desk = hexc("#fff4e6")
+    dawn.panel = hexc("#ffffff")
+    dawn.ink = hexc("#202020")
+    dawn.accent = hexc("#d9480f")
+    dawn.accent_ink = hexc("#ffffff")
+    dawn.derive()
+    cfg.skins = [SkinChoice("dawn", "Dawn", dawn.accent), SkinChoice("dusk", "Dusk", hexc("#364fc7"))]
+    var other = NotesPanel(cfg)
+    other.notes.append(PanelNote(7, "Ridge walk", "page", "🥾", 1, 0))
+    other.notebooks.append(PanelNotebook(3, "Alps 2027", hexc("#2b8a3e"), "trips", "", 2))
+    other.active = 7
+    var ob = Boxes()
+    other.draw(sp, ob, 1, dawn, Float64(h))
+    check(ob.find("panel") >= 0 and ob.find("panel.brand-name:Field Log") >= 0 and ob.find("panel.action-key") >= 0, "another app's panel names")
+    check(ob.find("panel.row:🥾 Ridge walk") >= 0 and ob.find("panel.group-row:Alps 2027 2 A") >= 0, "its rows and groups")
+    check(ob.find("panel.skin:Dawn") >= 0 and ob.find("panel.skin:Dusk") >= 0 and ob.find("panel.skin:Paper skin") < 0, "its own skins only")
+    check(ob.find("panel.shelf-head@3") >= 0 and ob.find("panel.shelf-head@4") < 0, "the loose shelf and its two shelves: three heads")
+    for i in range(len(ob.names)):
+        var nm = ob.names[i]
+        check(not nm.startswith("#") and nm.find("Personal Note") < 0 and nm.find("Inbox") < 0 and nm.find("Projects") < 0, "a Personal Note name leaked: " + nm)
+    other.toggle_shelf(2)
+    check(other.open_shelves[1], "toggle the second shelf")
+    var sw = SettingsWindow("Preferences", "Find a preference")
+    sw.groups.append([SettingsPage("Look", "sun", "How it looks.", "Dawn")])
+    var sb = Boxes()
+    var body = sw.draw(sc, sb, Float64(w), Float64(h), 1, dawn)
+    var choices: List[Skin] = [dawn.copy()]
+    skin_cards(sc, sb, body[0], body[1], body[2], 1, dawn, "dawn", choices, ["Dawn"])
+    check(sb.find("settings.choice") >= 0 and sb.find("settings.choice@2") < 0 and sb.find("settings.title:Look") >= 0, "another app's settings: one skin card")
     print("notesshell: ok")

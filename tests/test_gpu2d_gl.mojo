@@ -12,7 +12,9 @@ from std.os import setenv
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.scene import Scene, Painter
-from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu, PIPE_POLY
+from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu, PIPE_POLY, glyph_pages, DYN_ROWS
+from mojoui.fonttext import TextStyle, GlyphImage
+from mojoui.canvas import rgba
 from mojoui.gpu2d_gl import GL2D, GPU2D, headless_gl33, gl_proc
 from mojoui.present import fcall, dl_open, dl_sym
 from std.ffi import c_uint, c_int
@@ -169,6 +171,108 @@ def grown_page(mut gl: GL2D, atlas: GlyphAtlas, font: Font) raises:
     g.gl.close()
     assert_true(grown == 1, "the ink layer should only have grown")
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the grown page differs from the CPU executor")
+
+
+def words_scene(zoom: Float64, big: Bool = False) -> Scene:
+    """D-7930's scenes: a background layer, a layer of fonttext runs only (a kept layer's case: nothing in it depends on
+    where it sits), and with `big` a second text layer of large, distinct glyphs (enough to overflow nearly full pages)."""
+    var sc = Scene(900, 400, 1.0)
+    sc.begin_layer("bg")
+    sc.fill(rgba(255, 253, 248))
+    sc.begin_layer("words")
+    sc.layer_transform(0, 0, zoom)
+    sc.run(TextStyle("Geist", 400, False, 14), "Kept words, zoomed: re-rasterized", 10, 24, rgba(31, 27, 22), 0)
+    sc.run(TextStyle("Literata", 700, False, 18), "Three days on the coast", 10, 52, rgba(31, 27, 22), 0)
+    if big:
+        sc.begin_layer("more")
+        sc.run(TextStyle("Bricolage Grotesque", 700, False, 64), "QWERTYUIOPASDFGHJKL", 10, 200, rgba(74, 68, 59), 0)
+        sc.run(TextStyle("Source Serif 4", 600, True, 64), "zxcvbnmlkjhgfdsapoiu", 10, 300, rgba(74, 68, 59), 0)
+    return sc^
+
+
+def fresh_pixels(scene: Scene, owner: Int) raises -> List[UInt32]:
+    """The scene drawn by a new GPU2D (nothing kept) after the pages are cleared: the reference picture."""
+    var g = GPU2D()
+    assert_true(g.start(False), "GPU2D.start: " + g.gl.why)
+    var empty = Scene(0, 0, 1.0)
+    var s = g.draw(scene, empty, owner, scene.w, scene.h)
+    var px = List[UInt32](length=scene.w * scene.h, fill=0)
+    assert_true(s >= 0 and g.gl.read(g.gl.tex[s], scene.w, scene.h, Int(px.unsafe_ptr())), "fresh draw")
+    g.gl.close()
+    return px^
+
+
+def fill_pages_to(width: Int, rows_left: Int, mut key: Int):
+    """Packs blank glyphs into GlyphPages until only `rows_left` rows are free (or, with 0, until they start again)."""
+    var pg = glyph_pages(width)
+    var r0 = pg[].resets
+    var blank = GlyphImage()
+    blank.w = pg[].width - 4
+    blank.h = 3
+    blank.cov = List[UInt8](length=blank.w * blank.h, fill=0)
+    while pg[].resets == r0 and pg[].shelf_y + 3 + 1 < DYN_ROWS - rows_left:
+        _ = pg[].place(key, blank)
+        key -= 1
+    if rows_left == 0:
+        while pg[].resets == r0:
+            _ = pg[].place(key, blank)
+            key -= 1
+
+
+def glyph_holes(atlas: GlyphAtlas, font: Font) raises:
+    """D-7930: (1) a kept layer of fonttext runs shown at a new zoom is rasterized again, never its bitmaps scaled;
+    (2) GlyphPages filling between frames: a kept layer whose glyph slots were reused is built again; (3) filling in the
+    middle of a frame: layers built before that are built again on the fresh pages. Each against a fresh draw."""
+    var empty = Scene(0, 0, 1.0)
+    # (1) zoom a kept text layer
+    var g = GPU2D()
+    assert_true(g.start(False), "GPU2D.start: " + g.gl.why)
+    var a = words_scene(1.0)
+    var b = words_scene(2.0)
+    _ = g.draw(a, empty, 1, a.w, a.h)
+    var sb = g.draw(b, a, 1, b.w, b.h)
+    var got = List[UInt32](length=b.w * b.h, fill=0)
+    assert_true(sb >= 0 and g.gl.read(g.gl.tex[sb], b.w, b.h, Int(got.unsafe_ptr())), "zoomed draw")
+    var rebuilt = g.rebuilt
+    var want = fresh_pixels(b, 7)
+    var d = diff(want, got)
+    print("   a kept text layer zoomed 1 → 2: layers rebuilt", rebuilt, "; vs a direct raster: mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
+    assert_true(rebuilt >= 1 and d.mean <= 0.05 and d.far <= 0.01, "a kept fonttext layer was scaled instead of re-rasterized")
+    # (2) the pages fill and start again between frames
+    var key = -1
+    fill_pages_to(atlas.width, 0, key)
+    var sc2 = g.draw(a, a, 1, a.w, a.h)
+    var got2 = List[UInt32](length=a.w * a.h, fill=0)
+    assert_true(sc2 >= 0 and g.gl.read(g.gl.tex[sc2], a.w, a.h, Int(got2.unsafe_ptr())), "draw after a reset")
+    var d2 = diff(fresh_pixels(a, 8), got2)
+    print("   pages reset between frames: kept layers rebuilt", g.rebuilt, "; vs fresh: mean", round(d2.mean, 4), "levels,", round(d2.far, 4), "% far")
+    assert_true(d2.mean <= 0.05 and d2.far <= 0.01, "a kept layer drew from glyph slots the reset gave away")
+    # (3) the pages fill in the middle of a frame (the small words fit, the big ones don't)
+    var c = words_scene(1.0, True)
+    var pg = glyph_pages(atlas.width)
+    var r0 = pg[].resets
+    fill_pages_to(atlas.width, 0, key)  # (empty pages, then nearly full ones)
+    fill_pages_to(atlas.width, 40, key)
+    var g3 = GPU2D()
+    assert_true(g3.start(False), "GPU2D.start: " + g3.gl.why)
+    var s3 = g3.draw(c, empty, 3, c.w, c.h)
+    var got3 = List[UInt32](length=c.w * c.h, fill=0)
+    assert_true(s3 >= 0 and g3.gl.read(g3.gl.tex[s3], c.w, c.h, Int(got3.unsafe_ptr())), "draw across a reset")
+    var mid = pg[].resets - r0
+    g3.gl.close()
+    var d3 = diff(fresh_pixels(c, 9), got3)
+    print("   pages reset mid-frame (resets", mid, "): layers built", g3.rebuilt, "; vs fresh: mean", round(d3.mean, 4), "levels,", round(d3.far, 4), "% far")
+    assert_true(mid >= 2, "the test didn't make the pages fill during the frame")
+    assert_true(d3.mean <= 0.05 and d3.far <= 0.01, "glyphs placed before a mid-frame reset were drawn from reused slots")
+    # the CPU executor's build (fill_batches) across a mid-frame reset
+    fill_pages_to(atlas.width, 0, key)
+    fill_pages_to(atlas.width, 40, key)
+    var cpu = cpu_of(build_batches(c, atlas, font), atlas)
+    var cpu_ref = cpu_of(build_batches(c, atlas, font), atlas)
+    var d4 = diff(cpu_ref, cpu)
+    print("   the CPU executor across a mid-frame reset: mean", round(d4.mean, 4), "levels,", round(d4.far, 4), "% far")
+    assert_true(d4.mean <= 0.05, "fill_batches across a reset")
+    g.gl.close()
 
 
 def signed32(x: Int) -> Int:
@@ -390,6 +494,7 @@ def main() raises:
         var ts = text_scene(480 * big, 240 * big, 1.6, zoom)
         compare("fonttext runs and icons (zoom " + String(zoom) + ")", build_batches(ts, atlas, font), gl, atlas)
 
+    glyph_holes(atlas, font)
     grown_page(gl, atlas, font)
     two_canvases(font, atlas)
     map_pan(font, atlas)

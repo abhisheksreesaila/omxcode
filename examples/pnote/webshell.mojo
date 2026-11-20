@@ -5,7 +5,8 @@
 from mojoui.scene import Painter
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
-from mojoui.skin import Skin, skin_named, mix, with_alpha
+from mojoui.skin import Skin, mix, with_alpha
+from pnlook import pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
@@ -20,11 +21,11 @@ from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
-from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canvas, TEXT, STICKY
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canvas, TEXT, STICKY, CH_MOVE
 from mojoui.pagedesk import BoardTools
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
-from mojoui.notesshell import draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom, draw_locked_cover
+from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.objectlayer import reading_text
 from mojoui.buzanmap import map_text, node_extra
@@ -148,7 +149,7 @@ struct WebShell(Movable):
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
         self.notes = List[NoteRec]()
-        self.panel = NotesPanel()
+        self.panel = NotesPanel(pn_panel())
         self.panel.skin_name = skin
         self.page = PageSheet()
         self.map = BuzanMap()
@@ -156,6 +157,7 @@ struct WebShell(Movable):
         self.current = 0
         self.sidebar = False  # (the web opens with the notes panel closed)
         self.boxes = Boxes()
+        pn_names(self.boxes)  # (the web app's names for the framework's boxes: the checker compares box for box)
         self.problem = ""
         self.px = -1
         self.py = -1
@@ -216,6 +218,23 @@ struct WebShell(Movable):
         for ref n in self.notes:
             self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
 
+    def read_row(mut self, i: Int):
+        """One note's row from the file again (the web fetches a note when it opens it): its content, revision and
+        secure flag, so an edit another app saved is what opens and what the next save builds on."""
+        if len(self.dbs) == 0:
+            return
+        try:
+            var q = self.dbs[0].prepare("SELECT content, revision, secure, title, updated_at FROM notes WHERE id = ?")
+            q.bind(1, self.notes[i].id)
+            if q.step():
+                self.notes[i].secure = q.int(2) != 0
+                self.notes[i].content = "" if self.notes[i].secure else q.text(0)
+                self.notes[i].revision = q.int(1)
+                self.notes[i].title = q.text(3)
+                self.notes[i].updated = q.text(4)
+        except e:
+            print("PNOTE ERROR: read note: " + String(e), flush=True)
+
     def locked(self) -> Bool:
         """The open note is a secure one (shown locked: nothing here reads or writes its words)."""
         var i = self.note_index(self.current)
@@ -233,6 +252,7 @@ struct WebShell(Movable):
             return
         self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote)
         i = self.note_index(id)
+        self.read_row(i)
         self.current = id
         self.panel.active = id
         ref n = self.notes[i]
@@ -409,7 +429,8 @@ struct WebShell(Movable):
             sw.groups.append(g2^)
             sw.groups.append(g3^)
             var body = sw.draw(p, self.boxes, w, h, k, self.sk)
-            skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name)
+            var cards = pn_skin_cards()
+            skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name, cards[0], cards[1])
 
     def now(self) -> Int:
         """The clock (PNOTE_NOW: a fixed UTC time, for comparing with a reference shot then)."""
@@ -676,7 +697,10 @@ struct WebShell(Movable):
         return self.page.caret_rect
 
     def bench(mut self, name: String) -> Tuple[Float64, Float64]:
-        """The race's app steps: switch to the next note, open or close the omnibar, open a note of each kind in turn."""
+        """The race's app steps (the GTK host's framebench and its note steps): switch to the next note, open or close the
+        omnibar, open a note of each kind in turn; on an open canvas, Personal Note's benchmark steps through the same
+        board the person uses (pagedesk.BoardTools): pan with the hand, pen, a text box written in the middle of the
+        window, an object (or 40 selected) to drag, thirty moves to undo and redo, and a fresh open of the note."""
         if name == "bench:switch":
             var i = self.note_index(self.current)
             self.open(self.notes[(i + 1) % len(self.notes)].id)
@@ -690,10 +714,70 @@ struct WebShell(Movable):
             var at = self.bench_kind % 3
             self.bench_kind += 1
             for ref n in self.notes:
-                if n.kind == kinds[at]:
+                if n.kind == kinds[at] and not n.secure:
                     self.open(n.id)
                     break
+        if not self.on_canvas():
+            return (-1.0, -1.0)
+        var w = self.win_w
+        var h = self.win_h
+        if name == "bench:pan" or name == "bench:zoom":
+            self.tools.set_tool("hand", self.board, self.view, w, h, self.cols, self.rows)
+        elif name == "bench:zoom30" or name == "bench:zoom100":  # (benchmark-f034's "zoomed out to 30%" and "at 100%"; the
+            # host presses before it readies a pan, so the hand is picked here)
+            self.tools.set_tool("hand", self.board, self.view, w, h, self.cols, self.rows)
+            self.view = self.view.zoomed_at(0.3 if name == "bench:zoom30" else 1.0, w / 2, h / 2)
+        elif name == "bench:redo":  # (the undos before it made the history)
+            pass
+        elif name == "bench:draw" or name == "bench:finish":
+            self.board.clear_selection()
+            self.tools.set_tool("pen", self.board, self.view, w, h, self.cols, self.rows)
+        elif name == "bench:type":
+            self.tools.set_tool("text", self.board, self.view, w, h, self.cols, self.rows)
+            _ = self.tools.tap(w / 2, h / 2, self.board, self.view, w, h)
+        elif name == "bench:reopen":
+            self.open(self.current)
+        elif name == "bench:dragone" or name == "bench:undoredo" or name == "bench:undo" or name == "bench:drag40":
+            self.tools.set_tool("select", self.board, self.view, w, h, self.cols, self.rows)
+            var vis = self.tools.visible_objects(self.board, self.view, w, h)
+            if len(vis) == 0:
+                return (-1.0, -1.0)
+            self.board.clear_selection()
+            if name == "bench:drag40":
+                for m in range(min(40, len(vis))):
+                    self.board.select(self.board.objs[vis[m]].id, True)
+                var o0 = self.board.objs[vis[0]].copy()
+                var c0 = self.view.to_screen(o0.x + o0.w / 2, o0.y + o0.h / 2)
+                return (c0[0], c0[1])
+            var k = len(vis) // 2
+            if name == "bench:undoredo" or name == "bench:undo":  # (thirty separate moves, each its own undo step, to walk back and forth)
+                for m in range(min(30, len(vis))):
+                    self.board.select(self.board.objs[vis[m]].id, False)
+                    self.board.begin_gesture(CH_MOVE)
+                    self.board.move_by(6, 4)
+                    self.board.end_gesture()
+                self.tools.changed = True
+                self.save_canvas()
+                return (-1.0, -1.0)
+            var o = self.board.objs[vis[k]].copy()
+            self.board.select(o.id, False)
+            var c = self.view.to_screen(o.x + o.w / 2, o.y + o.h / 2)
+            return (c[0], c[1])
         return (-1.0, -1.0)
+
+    def wheel(mut self, x: Float64, y: Float64, dx: Float64, dy: Float64) -> Bool:
+        """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
+        if not self.on_canvas():
+            return False
+        self.view = self.tools.scroll(self.view, dx, dy, self.win_w, self.win_h, self.cols, self.rows)
+        return True
+
+    def zoom(mut self, x: Float64, y: Float64, factor: Float64) -> Bool:
+        """A pinch or Ctrl+wheel: on a canvas the view zooms about the pointer."""
+        if not self.on_canvas():
+            return False
+        self.view = self.tools.zoom_at(self.view, factor, x, y, self.win_w, self.win_h, self.cols, self.rows)
+        return True
 
     # ------------------------------------------------ input
 
@@ -712,7 +796,7 @@ struct WebShell(Movable):
 
     def pan(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
-            return self.tools.pan(x, y, self.board, self.view)
+            return self.tools.pan(x, y, self.board, self.view)  # (the hand tool moves self.view)
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True

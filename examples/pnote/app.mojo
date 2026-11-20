@@ -803,6 +803,12 @@ struct Main(App):
             elif m == GESTURE and event.number == RELEASE:
                 if self.web[0].release(event.x, event.y):
                     self.version += 1
+            elif m == GESTURE and event.number == WHEEL:
+                if self.web[0].wheel(event.x, event.y, event.dx, event.dy):
+                    self.version += 1
+            elif m == GESTURE and event.number == ZOOM:
+                if self.web[0].zoom(event.x, event.y, event.zoom):
+                    self.version += 1
             return
         if m == GESTURE:
             self.gesture(event)

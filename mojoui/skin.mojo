@@ -1,8 +1,9 @@
-# mojoui.skin (goal 79): a skin as a theme: the tokens Personal Note's web skins define (Paper, Night, Crayon), the
-# colours its chrome derives from them (color-mix in sRGB, as CSS does), its faces, radii and shadow scale. Components
-# (mojoui.notesshell, mojoui.pagesheet, mojoui.omnibar…) read only these, so a new skin is one more constructor.
+# mojoui.skin (goal 79): a skin as a theme: a set of tokens (desk, panel, ink, accent, five tints, faces, radii, a
+# shadow scale) and the colours chrome derives from them (color-mix in sRGB, as CSS does). Components
+# (mojoui.notesshell, mojoui.pagesheet, mojoui.omnibar…) read only these. The skins themselves belong to the app (D-7928:
+# Personal Note's Paper, Night and Crayon live in examples/pnote/pnlook.mojo): an app fills a Skin("name") and calls derive().
 #
-#   var sk = skin_named("paper")          # paper (default) | night | crayon
+#   var sk = Skin("mine"); sk.panel = hexc("#ffffff"); …; sk.derive()
 #   p.rect(x, y, w, h, sk.panel, sk.radius)
 
 from mojoui.canvas import rgba
@@ -97,6 +98,7 @@ struct Skin(Copyable, Movable):
     var shelf: UInt32  # an open shelf's wash: ink at 3.5 %
     var toggle_on: UInt32  # the panel toggle while the panel is open
     var scrim: UInt32
+    var accent_flat: Bool  # the accent is used as is for fills and words (a dark skin), else mixed toward the ink
     var locked: UInt32  # a locked (secure) document's colour, its soft wash, its line (0: derived from the accent)
     var locked_soft: UInt32
     var locked_line: UInt32
@@ -143,6 +145,7 @@ struct Skin(Copyable, Movable):
         self.shelf = 0
         self.toggle_on = 0
         self.scrim = 0
+        self.accent_flat = False
         self.locked = 0
         self.locked_soft = 0
         self.locked_line = 0
@@ -155,7 +158,7 @@ struct Skin(Copyable, Movable):
         if self.locked_line == 0:
             self.locked_line = mix(self.locked, 30, self.panel)
         self.ui_muted = mix(self.muted, 70, self.ink)
-        if self.name == "night":
+        if self.accent_flat:
             self.accent_fill = self.accent
             self.accent_text = self.accent
         else:
@@ -179,144 +182,3 @@ struct Skin(Copyable, Movable):
         if n == 4:
             return self.c4
         return self.c5
-
-
-def _shadows(a: Float64, b: Float64, c: Float64, r: Int, g: Int, bl: Int) -> Tuple[List[Shadow], List[Shadow], List[Shadow]]:
-    var s1 = List[Shadow]()
-    s1.append(Shadow(0, 1, 2, 0, rgba(r, g, bl, 15)))
-    s1.append(Shadow(0, 0, 0, 1, rgba(r, g, bl, Int(a * 255 + 0.5))))
-    var s2 = List[Shadow]()
-    s2.append(Shadow(0, 6, 18, 0, rgba(r, g, bl, 26)))
-    s2.append(Shadow(0, 0, 0, 1, rgba(r, g, bl, Int(b * 255 + 0.5))))
-    var s3 = List[Shadow]()
-    s3.append(Shadow(0, 18, 48, 0, rgba(r, g, bl, 46)))
-    s3.append(Shadow(0, 0, 0, 1, rgba(r, g, bl, Int(c * 255 + 0.5))))
-    return (s1^, s2^, s3^)
-
-
-def paper_skin() -> Skin:
-    var s = Skin("paper")
-    s.desk = hexc("#ece7dd")
-    s.desk_dot = rgba(60, 45, 20, 26)  # .10
-    s.panel = hexc("#fffdf8")
-    s.edge = hexc("#e2dbcd")
-    s.ink = hexc("#1f1b16")
-    s.ink_soft = hexc("#4a443b")
-    s.muted = hexc("#6b6357")
-    s.line = hexc("#e2dbcd")
-    s.accent = hexc("#1f1b16")
-    s.accent_ink = hexc("#fffdf8")
-    s.c1 = hexc("#ffd66b")
-    s.c2 = hexc("#9fe0c0")
-    s.c3 = hexc("#a9cfff")
-    s.c4 = hexc("#cdb8ff")
-    s.c5 = hexc("#ff9c85")
-    s.danger = hexc("#b93a27")
-    s.paper = hexc("#fbfaf5")
-    s.page_radius = 4
-    s.display = "Bricolage Grotesque"
-    s.display_weight = 700
-    s.title_track = -0.02
-    s.radius = 14
-    s.radius_control = 8
-    s.state = rgba(31, 27, 22)
-    s.swatch = hexc("#1f1b16")
-    var sh = _shadows(0.05, 0.055, 0.06, 20, 16, 10)
-    s.shadow1 = sh[0].copy()
-    s.shadow2 = sh[1].copy()
-    s.shadow3 = sh[2].copy()
-    s.scrim = rgba(12, 10, 8, 82)
-    s.locked = hexc("#6a46c9")  # (skins.css --sk-secure, -soft, -line)
-    s.locked_soft = hexc("#efe9fb")
-    s.locked_line = hexc("#d9cdf6")
-    s.derive()
-    return s^
-
-
-def crayon_skin() -> Skin:
-    var s = Skin("crayon")
-    s.desk = hexc("#f2f2f7")
-    s.desk_dot = rgba(0, 0, 40, 18)  # .07
-    s.panel = hexc("#ffffff")
-    s.edge = hexc("#e3e3ea")
-    s.ink = hexc("#111114")
-    s.ink_soft = hexc("#3a3a42")
-    s.muted = hexc("#6e6e78")
-    s.line = hexc("#e6e6ec")
-    s.accent = hexc("#2f6fe0")
-    s.accent_ink = hexc("#ffffff")
-    s.c1 = hexc("#ffd60a")
-    s.c2 = hexc("#30d158")
-    s.c3 = hexc("#64b5ff")
-    s.c4 = hexc("#bf5af2")
-    s.c5 = hexc("#ff6b3d")
-    s.danger = hexc("#d6391f")
-    s.paper = hexc("#ffffff")
-    s.page_radius = 10
-    s.display = "Bricolage Grotesque"
-    s.display_weight = 700
-    s.title_track = -0.035
-    s.radius = 18
-    s.radius_control = 10
-    s.state = rgba(17, 17, 20)
-    s.swatch = hexc("#2f6fe0")
-    var sh = _shadows(0.05, 0.055, 0.06, 10, 14, 40)
-    s.shadow1 = sh[0].copy()
-    s.shadow2 = sh[1].copy()
-    s.shadow3 = sh[2].copy()
-    s.scrim = rgba(12, 10, 8, 82)
-    s.locked = hexc("#6a46c9")  # (skins.css --sk-secure, -soft, -line)
-    s.locked_soft = hexc("#efe9fb")
-    s.locked_line = hexc("#d9cdf6")
-    s.derive()
-    return s^
-
-
-def night_skin() -> Skin:
-    var s = Skin("night")
-    s.dark = True
-    s.desk = hexc("#0d1015")
-    s.desk_dot = rgba(160, 190, 255, 18)  # .07
-    s.panel = hexc("#171c24")
-    s.edge = hexc("#232a35")
-    s.ink = hexc("#eceff4")
-    s.ink_soft = hexc("#b9c1cd")
-    s.muted = hexc("#7d8796")
-    s.line = hexc("#262e3a")
-    s.accent = hexc("#7ee7c8")
-    s.accent_ink = hexc("#07261d")
-    s.c1 = hexc("#ffc877")
-    s.c2 = hexc("#7ee7c8")
-    s.c3 = hexc("#9db4ff")
-    s.c4 = hexc("#d3a6ff")
-    s.c5 = hexc("#ff8fb1")
-    s.danger = hexc("#ff8fb1")
-    s.paper = hexc("#fbfaf5")
-    s.page_radius = 6
-    s.display = "Instrument Serif"
-    s.display_weight = 400
-    s.display_italic = True
-    s.title_track = -0.01
-    s.radius = 14
-    s.radius_control = 8
-    s.state = rgba(236, 239, 244)
-    s.swatch = hexc("#1b2130")
-    s.shadow1.append(Shadow(0, 1, 2, 0, rgba(0, 0, 0, 128)))
-    s.shadow2.append(Shadow(0, 6, 18, 0, rgba(0, 0, 0, 115)))
-    s.shadow2.append(Shadow(0, 0, 0, 1, rgba(236, 239, 244, 13)))
-    s.shadow3.append(Shadow(0, 18, 48, 0, rgba(0, 0, 0, 153)))
-    s.shadow3.append(Shadow(0, 0, 0, 1, rgba(236, 239, 244, 15)))
-    s.scrim = rgba(0, 0, 0, 140)
-    s.locked = hexc("#c3a8ff")
-    s.locked_soft = rgba(195, 168, 255, 33)
-    s.locked_line = rgba(195, 168, 255, 82)
-    s.derive()
-    return s^
-
-
-def skin_named(name: String) -> Skin:
-    if name == "night":
-        return night_skin()
-    if name == "crayon":
-        return crayon_skin()
-    return paper_skin()

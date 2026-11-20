@@ -14,7 +14,9 @@ from std.math import sin
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.scene import Scene
-from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu
+from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, fill_batches, execute_cpu, glyph_pages, DYN_ROWS
+from mojoui.fonttext import TextStyle, GlyphImage
+from mojoui.canvas import rgba
 from mojoui.gpu2d_metal import Metal2D, MetalCanvas2D, read_iosurface
 from mojoui.hosts.apple_canvas import io_surface, cfunc
 from mojoui.objectlayer import import_fabric
@@ -107,6 +109,7 @@ def main() raises:
     gpu_vs_cpu("mindmap (" + String(m.nodes()) + " topics)", mtl, ms, atlas, font)
     print("     ", counts(ms, atlas, font))
     map_pan(font, atlas)
+    glyph_holes(font, atlas)
     ink_in_flight(font, atlas)
     print("gpu2d metal: ok")
 
@@ -148,6 +151,90 @@ def map_pan(font: Font, atlas: GlyphAtlas) raises:
           round(ms[len(ms) // 2], 3), "ms, max", round(ms[len(ms) - 1], 3), "ms; last frame mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
     assert_true(rebuilt == 0, "a panned mind map rebuilt its layers on Metal")
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the panned mind map differs from the CPU executor (Metal)")
+
+
+def words_into(mut sc: Scene, zoom: Float64, big: Bool):
+    """test_gpu2d_gl's words_scene into a host's Scene (D-7930)."""
+    sc.begin_layer("bg")
+    sc.fill(rgba(255, 253, 248))
+    sc.begin_layer("words")
+    sc.layer_transform(0, 0, zoom)
+    sc.run(TextStyle("Geist", 400, False, 14), "Kept words, zoomed: re-rasterized", 10, 24, rgba(31, 27, 22), 0)
+    sc.run(TextStyle("Literata", 700, False, 18), "Three days on the coast", 10, 52, rgba(31, 27, 22), 0)
+    if big:
+        sc.begin_layer("more")
+        sc.run(TextStyle("Bricolage Grotesque", 700, False, 64), "QWERTYUIOPASDFGHJKL", 10, 200, rgba(74, 68, 59), 0)
+        sc.run(TextStyle("Source Serif 4", 600, True, 64), "zxcvbnmlkjhgfdsapoiu", 10, 300, rgba(74, 68, 59), 0)
+
+
+def fill_pages_to(width: Int, rows_left: Int, mut key: Int):
+    var pg = glyph_pages(width)
+    var r0 = pg[].resets
+    var blank = GlyphImage()
+    blank.w = pg[].width - 4
+    blank.h = 3
+    blank.cov = List[UInt8](length=blank.w * blank.h, fill=0)
+    while pg[].resets == r0 and pg[].shelf_y + 3 + 1 < DYN_ROWS - rows_left:
+        _ = pg[].place(key, blank)
+        key -= 1
+    if rows_left == 0:
+        while pg[].resets == r0:
+            _ = pg[].place(key, blank)
+            key -= 1
+
+
+def metal_vs_cpu(mut g: MetalCanvas2D, io: Int, W: Int, H: Int, atlas: GlyphAtlas, font: Font) raises -> Float64:
+    var got = read_iosurface(io, W, H)
+    var want = List[UInt32](length=W * H, fill=0)
+    var s = Surface(Int(want.unsafe_ptr()), W, H, 1.0)
+    execute_cpu(build_batches(g.scene, atlas, font), atlas, s)
+    return diff(want, got).mean
+
+
+def glyph_holes(font: Font, atlas: GlyphAtlas) raises:
+    """D-7930 on Metal (MetalCanvas2D's layer cache, sharing gpu2d.layer_traits with GL): a kept text layer zoomed is
+    rasterized again; GlyphPages filling between frames and in the middle of one rebuilds the layers that used them."""
+    var W = 900
+    var H = 400
+    var io = io_surface(W, H)
+    assert_true(io != 0, "glyph holes: no IOSurface")
+    var g = MetalCanvas2D()
+    g.scene.reset(W, H, 1.0)
+    words_into(g.scene, 1.0, False)
+    assert_true(g.render_scene(1, io, W, H), "first frame")
+    g.end_frame()
+    g.scene.reset(W, H, 1.0)
+    words_into(g.scene, 2.0, False)
+    assert_true(g.render_scene(1, io, W, H), "zoomed frame")
+    var d1 = metal_vs_cpu(g, io, W, H, atlas, font)
+    print("   a kept text layer zoomed 1 → 2: rebuilt", g.rebuilt, "; vs the CPU executor mean", round(d1, 4))
+    assert_true(g.rebuilt >= 1 and d1 <= 0.1, "a kept fonttext layer was scaled instead of re-rasterized (Metal)")
+    g.end_frame()
+    var key = -1
+    fill_pages_to(atlas.width, 0, key)
+    g.scene.reset(W, H, 1.0)
+    words_into(g.scene, 2.0, False)
+    assert_true(g.render_scene(1, io, W, H), "frame after a reset")
+    var d2 = metal_vs_cpu(g, io, W, H, atlas, font)
+    print("   pages reset between frames: rebuilt", g.rebuilt, "; vs the CPU executor mean", round(d2, 4))
+    assert_true(g.rebuilt >= 1 and d2 <= 0.1, "a kept layer drew from glyph slots the reset gave away (Metal)")
+    fill_pages_to(atlas.width, 0, key)
+    fill_pages_to(atlas.width, 40, key)
+    var g3 = MetalCanvas2D()
+    g3.scene.reset(W, H, 1.0)
+    words_into(g3.scene, 1.0, True)
+    var r0 = glyph_pages(atlas.width)[].resets
+    assert_true(g3.render_scene(3, io, W, H), "frame across a reset")
+    var mid = glyph_pages(atlas.width)[].resets - r0
+    var got = read_iosurface(io, W, H)
+    var want = List[UInt32](length=W * H, fill=0)
+    var s = Surface(Int(want.unsafe_ptr()), W, H, 1.0)
+    execute_cpu(build_batches(g3.scene, atlas, font), atlas, s)
+    var d3 = diff(want, got).mean
+    print("   pages reset mid-frame (resets", mid, "): vs the CPU executor mean", round(d3, 4))
+    assert_true(mid >= 1 and d3 <= 0.1, "glyphs placed before a mid-frame reset were drawn from reused slots (Metal)")
+    g.metal.forget(io)
+    cfunc[NoneType]("CFRelease", io)
 
 
 def ink_stroke(i: Int, wet: Int) -> Stroke:

@@ -33,7 +33,7 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
+from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
 from mojoui.gpu2d_merge import merge_runs, append_frame
 
 comptime RTLD_DEFAULT = -2
@@ -1266,6 +1266,7 @@ struct GpuLayer(Movable):
     var spare: GpuBuffers  # (a second set: a layer rebuilt while a frame on the GPU reads `gpu` is uploaded here and swapped, D-7583)
     var valid: Bool
     var built_k: Float64
+    var built_resets: Int  # GlyphPages.resets when it was built (D-7930)
     var dx: Float64
     var dy: Float64
     var k: Float64
@@ -1277,6 +1278,7 @@ struct GpuLayer(Movable):
         self.spare = GpuBuffers()
         self.valid = False
         self.built_k = 1
+        self.built_resets = -1
         self.dx = 0
         self.dy = 0
         self.k = 1
@@ -1382,24 +1384,16 @@ struct MetalCanvas2D(Movable):
         while len(self.layers) < n:
             self.layers.append(GpuLayer())
         var open = 0  # (clips left open by earlier layers)
+        var pg = glyph_pages(self.atlas.width)
+        var resets0 = pg[].resets
         for i in range(n):
-            var span = sc.layer_range(i)
-            var fixed = open == 0  # (its batches don't depend on its transform)
-            var zoom_bound = False  # (text: on the zoom only, not on where the layer sits: kept through a pan, D-7578)
-            for op in range(span[0], span[1]):
-                var kind = Int(sc.kinds[op])
-                if kind == OP_TEXT:
-                    zoom_bound = True
-                elif kind == OP_FILL or kind == OP_IMAGE:
-                    fixed = False
-                elif kind == OP_CLIP:
-                    fixed = False
-                    open += 1
-                elif kind == OP_UNCLIP:
-                    fixed = False
-                    open = max(open - 1, 0)
+            var tr = layer_traits(sc, i, open)  # (D-7930: shared with the GL renderer; fonttext's runs are zoom-bound)
+            open = tr.open
+            var fixed = tr.fixed
+            var zoom_bound = tr.zoom_bound
             ref L = self.layers[i]
-            var known = cached and L.valid and i < self.prev.layers()
+            var stale = tr.runs and L.built_resets != pg[].resets  # (its glyphs' slots were reused after the pages filled)
+            var known = cached and L.valid and i < self.prev.layers() and not stale
             var same_place = known and sc.layer_tx[i] == self.prev.layer_tx[i] and sc.layer_ty[i] == self.prev.layer_ty[i] and sc.layer_tk[i] == self.prev.layer_tk[i]
             var done = False
             if known and sc.same_layer(i, self.prev, i):
@@ -1435,11 +1429,27 @@ struct MetalCanvas2D(Movable):
                 self.metal.upload(L.frame, L.plan, L.gpu)
                 L.valid = True
                 L.built_k = sc.layer_tk[i]
+                L.built_resets = pg[].resets
                 self.rebuilt += 1
             L.dx = sc.layer_tx[i]
             L.dy = sc.layer_ty[i]
             L.k = sc.layer_tk[i]
             self.groups += len(L.plan.groups) // 4
+        if pg[].resets != resets0:  # (the pages filled mid-frame: layers with glyphs placed before that, once more)
+            var resets1 = pg[].resets
+            for i in range(n):
+                ref L = self.layers[i]
+                if L.built_resets != resets1 and layer_traits(sc, i, 0).runs:
+                    fill_layers(L.frame, sc, self.atlas, self.font, i, i + 1)
+                    plan_polys(L.frame, L.plan)
+                    if self.metal.busy(L.gpu) and self.metal.overlap and not self.metal.busy(L.spare):
+                        swap(L.gpu, L.spare)
+                    self.metal.upload(L.frame, L.plan, L.gpu)
+                    L.built_k = sc.layer_tk[i]
+                    L.built_resets = resets1
+                    self.rebuilt += 1
+            if pg[].resets != resets1:
+                print("GLYPHPAGES: one frame needs more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
         for i in range(n, len(self.layers)):
             self.layers[i].valid = False
         self.owner = owner

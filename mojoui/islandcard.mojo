@@ -54,7 +54,7 @@ struct IslandCard(Movable):
         3 Escape (leave it). mods: SHIFT 1, CTRL 2, ALT 4."""
         if not self.editing:
             return 0
-        if name == "Enter" or name == "Return":  # (GTK's name for it)
+        if name == "Enter":
             self.editing = False
             self.all_selected = False
             return 2
@@ -67,7 +67,7 @@ struct IslandCard(Movable):
                 self.all_selected = True
                 return 1
             return 0
-        if name == "Backspace" or name == "BackSpace":
+        if name == "Backspace":
             if self.all_selected:
                 self.title = ""
             else:
@@ -96,8 +96,8 @@ struct IslandCard(Movable):
         var y = 16.0
         draw_shadows(p, x, y, w, h, 20, sk.shadow2)
         p.rect(x, y, w, h, sk.panel, 20)
-        bx.add("#island", x, y, w, h)
-        bx.add("#share-menu", x + 1, y + 1, w - 2, inner_h)
+        bx.add("card", x, y, w, h)
+        bx.add("card.menu", x + 1, y + 1, w - 2, inner_h)
         var cx = x + 1 + 14
         var cw = w - 2 - 28
         var cy = y + 1 + 14
@@ -109,20 +109,20 @@ struct IslandCard(Movable):
         text_at(p, tst, self.title, cx + 12, cy + 11.5, 15, sk.ink)
         if self.editing and not self.all_selected:
             p.rect(cx + 12 + measure(tst, self.title), cy + 9, 1.5, 20, sk.ink, 0)
-        bx.add("#note-title", cx, cy, cw, 38)
+        bx.add("card.name", cx, cy, cw, 38)
         cy += 38 + 8
         # the status line
         var mst = TextStyle(UI, 400, False, 12)
         var mx = cx + 2
         var mw = cw - 4
-        bx.add(".isl-meta:" + self.status + self.place, mx, cy, mw, 15.59)
+        bx.add("card.meta:" + self.status + self.place, mx, cy, mw, 15.59)
         p.circle(mx + 3, cy + 4.8 + 3, 3, self.status_dot)
         var sw = measure(mst, self.status)
         text_at(p, mst, self.status, mx + 12, cy, 15.6, sk.ui_muted)
-        bx.add("#save-state", mx, cy, 12 + sw, 15.59)
+        bx.add("card.status", mx, cy, 12 + sw, 15.59)
         var pw = measure(mst, self.place)
         text_at(p, mst, self.place, mx + mw, cy, 15.6, sk.ui_muted, ALIGN_RIGHT)
-        bx.add("#island-notebook", mx + mw - pw, cy, pw, 15.59)
+        bx.add("card.place", mx + mw - pw, cy, pw, 15.59)
         cy += 15.59 + 10
         # the grid: one wide action, then tiles four across
         var cut = String("")
@@ -135,7 +135,7 @@ struct IslandCard(Movable):
                 break
             cut += String(c)
             n += 1
-        bx.add(".isl-grid:" + cut, cx, cy, cw, 44 + Float64(rows) * 70)
+        bx.add("card.grid:" + cut, cx, cy, cw, 44 + Float64(rows) * 70)
         draw_bordered(p, cx, cy, cw, 44, 12, sk.panel, sk.line)
         var wst = TextStyle(UI, 600, False, 13)
         var kst = TextStyle(MONO, 400, False, 11)
@@ -148,7 +148,7 @@ struct IslandCard(Movable):
         var kx = wx + 28 + lw + 10
         draw_bordered(p, kx, cy + 12.3, kw, 19.39, 6, sk.panel, sk.line)
         text_at(p, kst, self.wide_key, kx + 7, cy + 14.3, 15.4, sk.ui_muted)
-        bx.add("#focus-top-kbd", kx, cy + 12.3, kw, 19.39)
+        bx.add("card.wide-key", kx, cy + 12.3, kw, 19.39)
         bx.add(self.wide_id, cx, cy, cw, 44)
         cy += 44 + 6
         var tw = (cw - 18) / 4

@@ -394,12 +394,12 @@ struct PageSheet(Movable):
         var w = x1 - x0
         var h = y1 - y0
         draw_bordered(p, x0, y0, w, h, radius, PAGE_DESK, PAGE_LINE)
-        bx.add("#page-host", x0, y0, w, h)
+        bx.add("page.host", x0, y0, w, h)
         var dx = x0 + 1
         var dy = y0 + 1
         var dw = w - 2
         var dh = h - 2
-        bx.add(".page-desk", dx, dy, dw, dh)
+        bx.add("page.desk", dx, dy, dw, dh)
         p.push_clip(dx, dy, dw, dh)
         var stage_w = min(860.0, dw - 32)
         var sx = dx + 16 + (dw - 32 - stage_w) / 2
@@ -412,10 +412,10 @@ struct PageSheet(Movable):
         paper_shadow.append(Shadow(0, 18, 40, -18, rgba(60, 40, 10, 89)))
         draw_shadows(p, sx, paper_y, stage_w, paper_h, 3, paper_shadow)
         p.rect(sx, paper_y, stage_w, paper_h, PAGE_PAPER, 3)
-        bx.add(".page-paper", sx, paper_y, stage_w, paper_h)
+        bx.add("page.paper", sx, paper_y, stage_w, paper_h)
         if emoji != "":
             draw_emoji_tile(p, emoji, sx + 110, paper_y + 18, 64, 18, 38, mix(tint, 36, PAGE_PAPER))
-            bx.add("[Change icon]", sx + 110, paper_y + 18, 64, 64)
+            bx.add("page.icon", sx + 110, paper_y + 18, 64, 64)
         # the text
         var tx = sx + 110
         var ty = paper_y + 96
@@ -436,7 +436,7 @@ struct PageSheet(Movable):
                 break
             cps += String(c)
             n += 1
-        bx.add(".page-editor:" + cps, tx, ty, tw, self._text_height())
+        bx.add("page.editor:" + cps, tx, ty, tw, self._text_height())
         for li in range(len(self.lines)):
             var shown = self.lines[li]
             var pre_at = -1
@@ -493,7 +493,7 @@ struct PageSheet(Movable):
             var hy = max(top, dy) + 44 + 8
             p.rect(hx, hy, hw, 27, PAGE_INK, 13.5)
             text_normal(p, hst, words, hx + 14, hy + 6, PAGE_PAPER)
-            bx.add(".page-draw-hint", hx, hy, hw, 27)
+            bx.add("page.draw-hint", hx, hy, hw, 27)
         p.pop_clip()
 
     def _text_height(self) -> Float64:
@@ -509,7 +509,7 @@ struct PageSheet(Movable):
         groups.append(["Pen", "Red", "Highlighter", "Eraser"])
         groups.append(["Rectangle", "Ellipse", "Text"])
         var swatch: List[UInt32] = [hexc("#1d3f9e"), hexc("#d23b26"), hexc("#ffd400")]
-        var group_names: List[String] = ["[Mode]", "[Ink]", "[Shapes and text]"]
+        var group_names: List[String] = ["page.group:Mode", "page.group:Ink", "page.group:Shapes and text"]
         # widths first (max-content), then centred
         var widths = List[List[Float64]]()
         var total = 16.0
@@ -524,7 +524,7 @@ struct PageSheet(Movable):
         var x = sx + (stage_w - total) / 2
         draw_shadows(p, x, y, total, 44, 12, _shadow2())
         p.rect(x, y, total, 44, PAGE_PAPER, 12)
-        bx.add("[Page tools]", x, y, total, 44)
+        bx.add("page.tools", x, y, total, 44)
         var bxp = x + 8
         for g in range(3):
             var gx = bxp
@@ -539,7 +539,7 @@ struct PageSheet(Movable):
                     p.circle(lx + 5, y + 6 + 16, 5, swatch[bi])
                     lx += 16
                 text_normal(p, st, groups[g][bi], lx, y + 6 + 8.5, PAGE_PAPER if on else PAGE_INK)
-                bx.add(".page-tool:" + groups[g][bi], bxp, y + 6, bw, 32)
+                bx.add("page.tool:" + groups[g][bi], bxp, y + 6, bw, 32)
                 bxp += bw
             bx.add(group_names[g], gx, y + 6, bxp - gx, 32)
             bxp += 14

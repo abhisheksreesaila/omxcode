@@ -52,6 +52,12 @@ CRISP_MIN = 0.9       # M1: edge sharpness of a 4× zoomed raster vs a direct 4�
 BOX_TOL = 2.0         # M2/M3: every named element's box, logical px
 FILL_TOL = 4          # M2/M3: each element's sampled fill, levels per channel
 SSIM_MIN = 0.95       # M2/M3/M4: the whole frame's SSIM, grey, device px
+# (added 11-20, D-7931, a strengthening) M4 per step: where the web step changed the picture (grey moved > 24 levels, grown
+# 6 device px; at least REGION_MIN_AREA px), native's shot after the step must match the web's there (SSIM over the
+# region ≥ REGION_SSIM) and be nearer it than native's shot from before the step (by ≥ REGION_GAIN)
+REGION_MIN_AREA = 150
+REGION_SSIM = 0.80
+REGION_GAIN = 0.02
 STEPS_MIN = 25        # M4
 P95 = 8.3             # M6: silky
 MAX = 16.7
@@ -71,7 +77,8 @@ M4_COVERS = ["open-page", "open-canvas", "open-map", "fold-shelf", "toggle-panel
              "delete-object", "undo", "redo", "zoom-island", "map-child", "map-sibling", "map-rename", "search-open-keyboard",
              "skin-settings", "quit-reopen"]
 # M6: the steps of PN's own benchmark, and the native app's extra ones
-RACE_STEPS = ["open", "pan", "zoom", "drag one", "drag 40", "undo/redo", "pen", "typing"]
+# (11-20, D-7929) one row per web row, raced like with like: pan at 30 % and at 100 %, undo and redo apart
+RACE_STEPS = ["open", "pan 30%", "zoom from 30%", "pan 100%", "drag one", "drag 40", "undo", "redo", "pen", "typing"]
 RACE_NOTES = ["600", "stress"]
 
 _ref_done = {}
@@ -282,13 +289,63 @@ def ssim(a, b):
     """Mean SSIM of two grey images (Wang et al. 2004: Gaussian window σ 1.5, K1 0.01, K2 0.03, L 255)."""
     if a.shape != b.shape:
         return 0.0
+    return float(ssim_map(a, b).mean())
+
+
+def ssim_map(a, b):
+    """SSIM per pixel (the map ssim() averages)."""
     c1, c2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
     mu_a, mu_b = _blur(a), _blur(b)
     saa = _blur(a * a) - mu_a ** 2
     sbb = _blur(b * b) - mu_b ** 2
     sab = _blur(a * b) - mu_a * mu_b
-    m = ((2 * mu_a * mu_b + c1) * (2 * sab + c2)) / ((mu_a ** 2 + mu_b ** 2 + c1) * (saa + sbb + c2))
-    return float(m.mean())
+    return ((2 * mu_a * mu_b + c1) * (2 * sab + c2)) / ((mu_a ** 2 + mu_b ** 2 + c1) * (saa + sbb + c2))
+
+
+def changed_region(before, after, level=24, grow=6):
+    """Where a step changed a picture: pixels whose grey moved by more than `level`, grown by `grow` device px."""
+    m = np.abs(before - after) > level
+    for axis in (0, 1):
+        g = m.copy()
+        for d in range(1, grow + 1):
+            g |= np.roll(m, d, axis=axis) | np.roll(m, -d, axis=axis)
+        m = g
+    return m
+
+
+def step_region(web_prev, web_cur, nat_prev, nat_cur):
+    """(D-7931) The region the web step changed and how native's shots match the web's there: (area px, SSIM of native's
+    shot after the step, SSIM of native's shot before it), or None when the web step changed nothing visible."""
+    wp, wc, npv, nc = grey(web_prev), grey(web_cur), grey(nat_prev), grey(nat_cur)
+    if not (wp.shape == wc.shape == npv.shape == nc.shape):
+        return (0, 0.0, 0.0)
+    m = changed_region(wp, wc)
+    area = int(m.sum())
+    if area < REGION_MIN_AREA:
+        return None
+    return (area, float(ssim_map(nc, wc)[m].mean()), float(ssim_map(npv, wc)[m].mean()))
+
+
+def region_verdicts(steps, web_dir, nat_dir):
+    """[(i, problem or "", detail)] for every step: a step whose web change has native not matching it there, or
+    native's shot no nearer the web's than before the step (a step native didn't do), is a problem."""
+    out = []
+    for i, st in enumerate(steps):
+        wp = web_dir / ("start.png" if i == 0 else f"{i - 1:02d}.png")
+        npv = nat_dir / ("start.png" if i == 0 else f"{i - 1:02d}.png")
+        wc, nc = web_dir / f"{i:02d}.png", nat_dir / f"{i:02d}.png"
+        if not all(x.exists() for x in (wp, npv, wc, nc)):
+            out.append((i, f"step {i} ({st['name']}): a shot for the region check is missing", ""))
+            continue
+        r = step_region(wp, wc, npv, nc)
+        if r is None:
+            out.append((i, "", "no visible change"))
+            continue
+        area, now, before = r
+        bad = now < REGION_SSIM or now < before + REGION_GAIN
+        out.append((i, f"step {i} ({st['name']}): where the web changed ({area} px) native reads {now:.3f} (before the step {before:.3f})" if bad else "",
+                    f"{area} px {now:.3f}/{before:.3f}"))
+    return out
 
 
 def sampled_fill(img, box, dpr):
@@ -531,15 +588,19 @@ def normalize(content, kind):
         return None
     if kind == "page":
         md = content.get("markdown", "") if isinstance(content, dict) else str(content)
-        return {"markdown": md.strip(), "ink": len((content.get("ink") or {}).get("drawings", [])) if isinstance(content, dict) else 0}
+        ink = (content.get("ink") or {}) if isinstance(content, dict) else {}
+        # (D-7931) page marks too: how many, and the words each is anchored to
+        marks = sorted(((m.get("anchor") or {}).get("text", ""), (m.get("anchor") or {}).get("from", (m.get("anchor") or {}).get("start"))) for m in ink.get("marks", []))
+        return {"markdown": md.strip(), "ink": len(ink.get("drawings", [])), "marks": marks}
     if kind == "mindmap":
         nodes = content.get("nodes", [])
         byid = {n["id"]: n for n in nodes}
         path = lambda n: (path(byid[n["parentId"]]) + "/" if n.get("parentId") in byid else "") + n.get("text", "")
-        return sorted(path(n) for n in nodes)
+        return sorted((path(n), round(float(n.get("x", 0))), round(float(n.get("y", 0)))) for n in nodes)  # (positions to 1 px, D-7931)
     if kind == "canvas":
         objs = content.get("nodes") or content.get("objects") or []
-        kinds = sorted((o.get("type", ""), (o.get("text") or "").strip(), str(o.get("color", ""))) for o in objs)
+        kinds = sorted((o.get("type", ""), (o.get("text") or "").strip(), str(o.get("color", "")), round(float(o.get("x", 0))), round(float(o.get("y", 0))),
+                        round(float(o.get("width", 0))), round(float(o.get("height", 0)))) for o in objs)  # (positions to 1 px, D-7931)
         return {"objects": kinds, "edges": len(content.get("edges", []))}
     return content
 
@@ -574,7 +635,7 @@ def m4():
         return "FAIL", f"steps.mjs exit {r.returncode}: {tail(r.stdout + r.stderr)}"
     # the native app: the same steps through test mode, a render after each; quit-reopen runs the app again
     shutil.copy(REF / "pn.db", out / "native.db")
-    runs, cur = [[]], 0
+    runs, cur = [[f"gpushot:desk={out / 'native' / 'start.png'}"]], 0
     for i, s in enumerate(steps):
         acts = s["native"] if isinstance(s["native"], list) else [s["native"]]
         for a in acts:
@@ -582,7 +643,8 @@ def m4():
                 runs.append([])
             else:
                 runs[-1].append(a)
-        runs[-1].append(f"render:desk={out / 'native' / f'{i:02d}.png'}")
+        # (D-7931) the GPU frame the window shows, not the app's CPU picture
+        runs[-1].append(f"gpushot:desk={out / 'native' / f'{i:02d}.png'}")
     cfg = out / "cfg"
     shutil.rmtree(cfg, ignore_errors=True)
     cfg.mkdir()
@@ -601,6 +663,32 @@ def m4():
         worst.append((sc, i))
         if sc < SSIM_MIN:
             probs.append(f"step {i} ({s['name']}): SSIM {sc:.3f}")
+    for i, prob, detail in region_verdicts(steps, out / "web", out / "native"):
+        if prob:
+            probs.append(prob)
+    regions = [d for _, _, d in region_verdicts(steps, out / "web", out / "native")]
+    (out / "regions.txt").write_text("\n".join(f"{i:02d} {steps[i]['name']}: {d}" for i, d in enumerate(regions)) + "\n")
+    # (D-7931) the self-test: native played again with one step left out must be caught by the region check
+    skip = next((i for i, st in enumerate(steps) if st["name"] == "tick a task"), None)
+    if skip is not None and not probs:
+        sk = out / "skipped"
+        shutil.rmtree(sk, ignore_errors=True)
+        sk.mkdir()
+        shutil.copy(REF / "pn.db", sk / "native.db")
+        acts = [f"gpushot:desk={sk / 'start.png'}"]
+        for i, st in enumerate(steps[:skip + 2]):
+            if i != skip:
+                acts += [a for a in (st["native"] if isinstance(st["native"], list) else [st["native"]]) if a != "relaunch"]
+            acts.append(f"gpushot:desk={sk / f'{i:02d}.png'}")
+        env = dict(os.environ, PNOTE_DB=str(sk / "native.db"), PNOTE_SKIN="paper", OMX_CONFIG=str(cfg), PNOTE_DIR=str(cfg),
+                   MOJOUI_TEST=";".join(["wait:800"] + acts), MOJOUI_SHOT="")
+        run(["scripts/testscreen", str(APP)], 1200, env=env)
+        caught = [p_ for i, p_, _ in region_verdicts(steps[:skip + 1], out / "web", sk) if i == skip and p_]
+        old = ssim(grey(out / "web" / f"{skip:02d}.png"), grey(sk / f"{skip:02d}.png")) if (sk / f"{skip:02d}.png").exists() else 0.0
+        if not caught:
+            probs.append(f"self-test: native without step {skip} ({steps[skip]['name']}) wasn't caught by the region check (whole-frame SSIM {old:.3f})")
+        else:
+            (out / "selftest.txt").write_text(f"skipped step {skip}: whole-frame SSIM {old:.3f} (the old check: {'pass' if old >= SSIM_MIN else 'fail'}); region check: {caught[0]}\n")
     web_notes = normalized_notes(out / "web.db")
     nat_notes = normalized_notes(out / "native.db")
     if web_notes != nat_notes:
@@ -727,20 +815,35 @@ def m6():
     mf = re.search(r"after\s+first screen (\d+)", r2.stdout)
     if mf:
         web["first_screen_ms"] = float(mf.group(1))
-    # the native app: the same notes (dumped from PN's own generators), the same steps
-    r = run(["node", "-e", NOTE_DUMP, str(race)], 600, cwd=PN)
-    if r.returncode:
-        return "FAIL", f"dumping PN's benchmark notes: {tail(r.stderr)}"
-    nat = {}
+    # the native app: the same notes in Personal Note's own schema (D-7929: seedrace.mjs writes PN's generators' notes into
+    # scratch copies of the reference database through the web app's own API), on pnote's web look (PNOTE_DB), the
+    # same steps. Each note is raced twice: as it runs (the canvas offloaded to the compositor: the frame's work) and with
+    # GTK compositing the canvas (MOJOUI_OFFLOAD=0), whose frames report when they reached the screen.
+    r = run(["node", str(ROOT / "docs/goals/79/seedrace.mjs"), str(REF / "pn.db"), str(race)], 900, cwd=PN)
+    (race / "seedrace.log").write_text(r.stdout + r.stderr)
+    if r.returncode or "SEEDED stress" not in r.stdout:
+        return "FAIL", f"seeding the race notes through the web API: {tail(r.stdout + r.stderr)}"
+    nat, shown = {}, {}
     for note in RACE_NOTES:
-        cfg = race / f"cfg-{note}"
-        shutil.rmtree(cfg, ignore_errors=True)
-        cfg.mkdir()
-        env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_SCENE="canvas", PNOTE_IMPORT=str(race / f"note-{note}.json"),
-                   MOJOUI_TEST=";".join(["wait:800", "window:1440x900"] + NATIVE_RACE), MOJOUI_SHOT="")
-        r = run(["scripts/testscreen", str(APP)], 1800, env=env)
-        (race / f"native-{note}.log").write_text(r.stdout + r.stderr)
-        nat[note] = native_race(r.stdout + r.stderr)
+        for visible in (False, True):
+            cfg = race / f"cfg-{note}"
+            shutil.rmtree(cfg, ignore_errors=True)
+            cfg.mkdir()
+            shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
+            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"),
+                       MOJOUI_TEST=";".join(["wait:800", "window:1440x900"] + NATIVE_RACE), MOJOUI_SHOT="")
+            if visible:
+                env["MOJOUI_OFFLOAD"] = "0"
+            r = run(["scripts/testscreen", str(APP)], 1800, env=env)
+            log = r.stdout + r.stderr
+            (race / f"native-{note}{'-composited' if visible else ''}.log").write_text(log)
+            # (a strengthening, D-7929) the race must time the rebuilt app: the web look on the seeded note
+            if not re.search(r"^PNOTE WEB: \d+ notes from ", log, re.M):
+                return "FAIL", f"native race on {note}{' (composited)' if visible else ''} didn't run pnote's web look (no 'PNOTE WEB:' line): {tail(log)}"
+            if visible:
+                shown[note] = native_race(log)
+            else:
+                nat[note] = native_race(log)
     starts = []
     for _ in range(5):
         cfg = race / "cfg-start"
@@ -753,7 +856,7 @@ def m6():
         (race / "native-start.log").write_text(r.stdout + r.stderr)
         starts.append(r.stdout + r.stderr)
     nstart = native_start(starts)
-    rows, ok = race_table(web, nat, nstart)
+    rows, ok = race_table(web, nat, nstart, shown)
     (ROOT / "docs/goals/79").mkdir(parents=True, exist_ok=True)
     (ROOT / "docs/goals/79/race.md").write_text(rows)
     if not ok:
@@ -761,10 +864,11 @@ def m6():
     mac = mac_reachable()
     if mac:
         return "BLOCKED", f"Linux PASS (docs/goals/79/race.md); Mac BLOCKED ({mac})"
-    out_mac, e = mac_run("race", ["wait:800", "window:1440x900"] + NATIVE_RACE, {"PNOTE_SCENE": "canvas", "PNOTE_IMPORT": "{data}/note-600.json"},
-                         [race / "note-600.json"])
+    out_mac, e = mac_run("race", ["wait:800", "window:1440x900"] + NATIVE_RACE, {"PNOTE_DB": "{data}/race-600.db"}, [race / "race-600.db"])
     if e:
         return "FAIL", "Mac: " + e
+    if "PNOTE WEB:" not in out_mac:
+        return "FAIL", "Mac: the race didn't run pnote's web look"
     bad = [f"{k} {v['p95']}/{v['max']}" for k, v in native_race(out_mac).items() if v["p95"] > P95 or v["max"] > MAX or v.get("cpu", 0)]
     if bad:
         return "FAIL", "Mac not silky: " + ", ".join(bad)
@@ -780,15 +884,19 @@ fs.writeFileSync(out + '/note-600.json', JSON.stringify(generateNote()));
 const s = generateStressNote(5400, { columns: 4, rows: 4 });
 fs.writeFileSync(out + '/note-stress.json', JSON.stringify(s.content));
 """.replace("const [out] = process.argv.slice(1);", "const out = process.argv[1];")
-NATIVE_RACE = ["framebench:note=open,20", "framebench:note=pan,120", "framebench:note=zoom,60", "framebench:note=dragone,60",
-               "framebench:note=drag40,60", "framebench:note=undoredo,40", "framebench:note=draw,300", "framebench:note=typing,60"]
-NATIVE_NAMES = {"open": "open", "pan": "pan", "zoom": "zoom", "dragone": "drag one", "drag40": "drag 40", "undoredo": "undo/redo",
+NATIVE_RACE = ["framebench:desk=open,20", "appbench:desk=zoom30", "framebench:desk=pan,120", "framebench:desk=zoom,60", "appbench:desk=zoom100",
+               "framebench:desk=pan,120", "framebench:desk=dragone,60", "framebench:desk=drag40,60", "framebench:desk=undo,25", "framebench:desk=redo,25",
+               "framebench:desk=draw,300", "framebench:desk=typing,80"]
+NATIVE_NAMES = {"open": "open", "zoom": "zoom from 30%", "dragone": "drag one", "drag40": "drag 40", "undo": "undo", "redo": "redo",
                 "draw": "pen", "typing": "typing", "type": "typing"}
 
 
 def native_race(out):
     res = {}
+    zoom = "30%"
     for line in out.splitlines():
+        if line.startswith("APPBENCH: zoom"):
+            zoom = "30%" if "zoom30" in line else "100%"
         if not line.startswith("FRAMEBENCH:"):
             continue
         kv = dict(re.findall(r"(\w+)=([^\s]+)", line))
@@ -797,13 +905,14 @@ def native_race(out):
         what = re.match(r"FRAMEBENCH: (\w+) ", line)
         if not what:
             continue
-        name = NATIVE_NAMES.get(what.group(1), what.group(1))
+        name = "pan " + zoom if what.group(1) == "pan" else NATIVE_NAMES.get(what.group(1), what.group(1))
         try:
             n = int(kv["n"])
             cpu = int(kv["cpu_frames"]) if "cpu_frames" in kv else n - int(kv.get("gpu_frames", "0"))
             if n == 0:
                 continue
-            res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu}
+            res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
+                         "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
         except (KeyError, ValueError):
             pass
     return res
@@ -826,24 +935,26 @@ def web_race(f034, first_screen_text):
                 step = "drag one"
             elif re.match(r"drag \d+ selected", name):
                 step = "drag 40"
-            elif (name.startswith("undo") or name.startswith("redo")) and "frame after" in name:
-                step = "undo/redo"
+            elif name.startswith("undo") and "frame after" in name:
+                step = "undo"
+            elif name.startswith("redo") and "frame after" in name:
+                step = "redo"
             elif name.startswith("pen strokes") and "frame gaps" in name:
                 step = "pen"
             elif name.startswith("typing") and "frame gaps" in name:
                 step = "typing"
-            elif name.startswith("pan"):
-                step = "pan"
-            elif name.startswith("zoom"):
-                step = "zoom"
+            elif name.startswith("pan") and "30%" in name:
+                step = "pan 30%"
+            elif name.startswith("pan") and "100%" in name:
+                step = "pan 100%"
+            elif name.startswith("zoom") and "30%" in name:
+                step = "zoom from 30%"
             if step is None:
                 continue
             p95 = sc.get("p95") if sc.get("p95") is not None else sc.get("p50", 0)
             mx = sc.get("max") if sc.get("max") is not None else sc.get("p50", 0)
-            old = res.setdefault(note, {}).get(step)
-            row = {"p95": float(p95), "max": float(mx)}
-            if old is None or row["p95"] > old["p95"] or row["max"] > old["max"]:  # (the worse of two rows: pan at 30 % and 100 %, undo and redo)
-                res[note][step] = {"p95": max(row["p95"], old["p95"] if old else 0), "max": max(row["max"], old["max"] if old else 0)}
+            # (11-20, D-7929) one web row per step: no more "the worse of two rows" against one native run
+            res.setdefault(note, {})[step] = {"p95": float(p95), "max": float(mx)}
     m = re.search(r"first screen (\d+)", first_screen_text)
     res["first_screen_ms"] = float(m.group(1)) if m else None
     m = re.search(r"rss[^\d]*(\d+)", first_screen_text, re.I)
@@ -863,19 +974,33 @@ def native_start(outs):
     return {k: med(v) for k, v in vals.items()}
 
 
-def race_table(web, nat, start):
+def race_table(web, nat, start, shown=None):
+    shown = shown or {}
     ok = True
     lines = ["# Goal 79 race: native pnote vs the web Personal Note (generated by docs/goals/79-check.py M6)", "",
-             f"Same machine, same notes (PN's own generators), 1440×900 at {LINUX_DPR}×. Web: benchmark-f034.mjs --gpu (Chromium with the GPU). "
-             f"Native: the same steps through test mode on the hidden test screen. Silky = p95 ≤ {P95} ms and max ≤ {MAX} ms, no CPU frame.", "",
-             "| note | step | web p95 / max ms | native p95 / max ms | |", "|---|---|---|---|---|"]
+             f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR}×. "
+             "Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, "
+             f"the same steps through test mode. Silky = native p95 ≤ {P95} ms and max ≤ {MAX} ms, no CPU frame.", "",
+             "**What the numbers are (they are not the same unit):**",
+             "- *web*: requestAnimationFrame gaps (frame to frame) in Chromium, which can't go below one refresh, 16.7 ms at 60 Hz; "
+             "undo and redo are \"to the frame after\"; open is one cold open to the first settled frame (its p50 stands for p95 and max).",
+             "- *native work*: each frame's own work: the event, the app's update, the redraw, the GPU time, GTK's paint and a display "
+             "round trip (the GTK host's framebench). The canvas is handed to the compositor (graphics offload), so GTK never "
+             "composites it and presentation is not in this number.",
+             "- *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, "
+             "the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after "
+             "its work plus its shown time; read the web column against that sum, not against the work alone.", "",
+             "| note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |",
+             "|---|---|---|---|---|---|"]
     for note in RACE_NOTES:
         for step in RACE_STEPS:
             w = web.get(note, {}).get(step)
             n = nat.get(note, {}).get(step)
+            v = shown.get(note, {}).get(step)
             good = bool(w and n and n["p95"] < w["p95"] and n["max"] < w["max"] and n["p95"] <= P95 and n["max"] <= MAX and n.get("cpu", 0) == 0)
             ok = ok and good
-            lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {'✓' if good else '✗'} |")
+            vis = f"{v['p95']} / {v['max']} · {v['shown_p95']} / {v['shown_max']} ({v['shown_n']})" if v else "—"
+            lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {vis} | {'✓' if good else '✗'} |")
     lines += ["", "| | web | native | |", "|---|---|---|---|"]
     for k, wk, unit in [("first", "first_screen_ms", "ms"), ("rss", "rss_mb", "MB")]:
         w, n = web.get(wk), start.get(k)
@@ -887,6 +1012,8 @@ def race_table(web, nat, start):
         good = bool(n is not None and n <= P95)
         ok = ok and good
         lines.append(f"| {'note switch' if k == 'switch' else 'omnibar open'} p95 | — | {n if n is not None else '—'} ms | {'✓' if good else '✗'} |")
+    lines += ["", "Cold start: web = PN's benchmark-first-screen.mjs (from navigation, the browser already running); native = from exec "
+              "to the first frame on screen (FIRSTSCREEN). Note switch and omnibar: native frame work, no web number (PN measures none)."]
     return "\n".join(lines) + "\n", ok
 
 

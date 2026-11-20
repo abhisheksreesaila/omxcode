@@ -33,6 +33,7 @@ comptime CONNECTOR_HEAD = 15.0
 comptime LABEL_FAMILY = "Geist Mono"
 comptime LABEL_SIZE = 10.5
 comptime FOLD: UInt32 = 0x21161B1F  # rgba(31, 27, 22, .13)
+comptime BOARD_TILE = 512.0  # the board layer culls to whole tiles of page px (a pan inside them keeps the layer)
 
 
 @fieldwise_init
@@ -107,14 +108,26 @@ def shadow_bands(blur: Float64, spread: Float64, peak: Float64, steps: Int = 32)
     return out^
 
 
-def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, v: DeskView, view_w: Float64, view_h: Float64, columns: Int, rows: Int,
+def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: Float64, win_h: Float64, columns: Int, rows: Int,
                                  page_w: Float64, page_h: Float64, k: Float64, sk: Skin):
     """The page frame in screen px (chrome.js pageChrome): the skin's shadow layers as bands, the edge one hairline out,
-    the paper, dashed folds between pages, "Page N" under each page of the bottom row (inside the corner above it)."""
-    var w = Float64(columns) * page_w * v.scale
-    var h = Float64(rows) * page_h * v.scale
+    the paper, dashed folds between pages, "Page N" under each page of the bottom row (inside the corner above it).
+    Its own layer, drawn about the frame's origin and moved there by the layer's transform, with a version from what
+    shapes it (zoom, pages, skin, device scale): a pan moves the kept picture and draws nothing (D-7929)."""
+    var w = Float64(columns) * page_w * at.scale
+    var h = Float64(rows) * page_h * at.scale
     if w <= 0 or h <= 0:
         return
+    bx.add("desk.sheet", at.x, at.y, w, h)
+    p.begin_layer("page-frame")
+    p.layer_version((Int(at.scale * 1_000_000) * 1000003 + columns * 7919 + rows * 104729 + Int(k * 1000) * 31 + Int(sk.paper) * 131
+                     + Int(sk.edge) * 17 + Int(page_w * 10) * 13 + Int(page_h * 10) * 7) & 0x3FFFFFFFFFFFFFFF)
+    p.layer_transform(at.x * k, at.y * k, k)
+    var v = DeskView(0, 0, at.scale)
+    _ = win_w
+    _ = win_h
+    var view_w = Float64(1e12)  # (every label is drawn: the picture mustn't depend on where the window is)
+    var view_h = Float64(1e12)
     for s in sk.shadow2:
         var a = Float64(Int((s.color >> 24) & 0xFF)) / 255.0
         for band in shadow_bands(s.blur, s.spread, a):
@@ -124,7 +137,6 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, v: DeskView, view_w: F
     var r = sk.page_radius
     p.rect(v.x - 1, v.y - 1, w + 2, h + 2, sk.edge, r + 1)
     p.rect(v.x, v.y, w, h, sk.paper, r)
-    bx.add("#paper-sheet", v.x, v.y, w, h)
     for c in range(1, columns):
         _dashed(p, v.x + Float64(c) * page_w * v.scale, v.y, v.x + Float64(c) * page_w * v.scale, v.y + h)
     for rw in range(1, rows):
@@ -172,10 +184,12 @@ struct BoardLook(Movable):
     var wrap_rev: Dict[Int, Int]
     var wrap_w: Dict[Int, Float64]
     var wrap_lines: Dict[Int, List[String]]
+    var generation: Int  # bump when the look itself changes (its defaults): part of the board layer's version
 
     def __init__(out self, family: String = "Source Serif 4", line_height: Float64 = 1.16):
         self.family = family
         self.line_height = line_height
+        self.generation = 0
         self.wrap_rev = Dict[Int, Int]()
         self.wrap_w = Dict[Int, Float64]()
         self.wrap_lines = Dict[Int, List[String]]()
@@ -217,11 +231,19 @@ struct BoardLook(Movable):
 
     def paint[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, v: DeskView, view_w: Float64, view_h: Float64, k: Float64):
         """The objects meeting the window, in z order, as one layer in page px shown through the view."""
+        # (D-7929, as ObjectLayer.paint does) culled to the window snapped out to whole tiles, the layer's version from the
+        # document's and the tiles': a pan within the tiles reuses the kept picture without comparing or drawing it
         var tl = v.to_page(0, 0)
         var br = v.to_page(view_w, view_h)
+        var tx0 = floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE
+        var ty0 = floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE
+        var tx1 = ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE
+        var ty1 = ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE
         p.begin_layer("board")
+        p.layer_version((layer.version * 1000003 + Int(tx0 / BOARD_TILE) * 7919 + Int(ty0 / BOARD_TILE) * 104729 + Int(tx1 / BOARD_TILE) * 31
+                         + Int(ty1 / BOARD_TILE) * 131 + self.generation * 17) & 0x3FFFFFFFFFFFFFFF)
         p.layer_transform(v.x * k, v.y * k, v.scale * k)
-        for i in layer.query(tl[0] - 64, tl[1] - 64, br[0] + 64, br[1] + 64):
+        for i in layer.query(tx0, ty0, tx1, ty1):
             self.paint_obj(p, layer, i)
 
     def paint_obj[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, i: Int):
@@ -343,6 +365,7 @@ comptime T_NONE = 0
 comptime T_MOVE = 1
 comptime T_INK = 2
 comptime T_CONNECT = 3
+comptime T_PAN = 4  # the hand tool moving the view
 
 
 def clamp_axis(offset: Float64, view: Float64, content: Float64, before: Float64, after: Float64, previous: Float64) -> Float64:
@@ -498,6 +521,11 @@ struct BoardTools(Movable):
         var pt = view.to_page(sx, sy)
         self.last_x = pt[0]
         self.last_y = pt[1]
+        if self.tool == "hand":  # (the view follows the pointer: the web's hand tool and space-drag)
+            self.drag = T_PAN
+            self.last_x = sx
+            self.last_y = sy
+            return True
         if self.tool == "select":
             var id = layer.hit_test(pt[0], pt[1], 2)
             if id >= 0:
@@ -521,7 +549,12 @@ struct BoardTools(Movable):
                 return True
         return False
 
-    def pan(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, view: DeskView) -> Bool:
+    def pan(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, mut view: DeskView) -> Bool:
+        if self.drag == T_PAN:
+            view = DeskView(view.x + sx - self.last_x, view.y + sy - self.last_y, view.scale)
+            self.last_x = sx
+            self.last_y = sy
+            return True
         var pt = view.to_page(sx, sy)
         if self.drag == T_MOVE:
             layer.move_by(pt[0] - self.last_x, pt[1] - self.last_y)
@@ -537,6 +570,8 @@ struct BoardTools(Movable):
         var pt = view.to_page(sx, sy)
         var kind = self.drag
         self.drag = T_NONE
+        if kind == T_PAN:
+            return True
         if kind == T_MOVE:
             layer.end_gesture()
             self.changed = True
@@ -621,6 +656,39 @@ struct BoardTools(Movable):
         z.x = clamp_axis(z.x, view_w, Float64(columns) * PAGE_W * s, m[0], m[1], view.x)
         z.y = clamp_axis(z.y, view_h, Float64(rows) * PAGE_H * s, m[2], m[3], view.y)
         return z
+
+    def scroll(self, view: DeskView, dx: Float64, dy: Float64, view_w: Float64, view_h: Float64, columns: Int, rows: Int) -> DeskView:
+        """A wheel or two-finger scroll: the view moves by (dx, dy) screen px, kept inside the margins (clampAxis)."""
+        var m = view_margins(view_w)
+        var x = clamp_axis(view.x + dx, view_w, Float64(columns) * PAGE_W * view.scale, m[0], m[1], view.x)
+        var y = clamp_axis(view.y + dy, view_h, Float64(rows) * PAGE_H * view.scale, m[2], m[3], view.y)
+        return DeskView(x, y, view.scale)
+
+    def zoom_at(self, view: DeskView, factor: Float64, sx: Float64, sy: Float64, view_w: Float64, view_h: Float64, columns: Int,
+                rows: Int) -> DeskView:
+        """A pinch or Ctrl+wheel: the zoom times `factor` about (sx, sy), between 25 % and 400 % (main.js CANVAS_ZOOM_MIN/MAX),
+        kept inside the margins."""
+        var s = min(4.0, max(0.25, view.scale * factor))
+        var z = view.zoomed_at(s, sx, sy)
+        var m = view_margins(view_w)
+        z.x = clamp_axis(z.x, view_w, Float64(columns) * PAGE_W * s, m[0], m[1], view.x)
+        z.y = clamp_axis(z.y, view_h, Float64(rows) * PAGE_H * s, m[2], m[3], view.y)
+        return z
+
+    def visible_objects(self, layer: ObjectLayer, view: DeskView, view_w: Float64, view_h: Float64) -> List[Int]:
+        """Objects wholly in the window, away from its edges, big enough to grab (benchmark-f034's visibleObjects rule):
+        their indices, in stacking order. Ink and connectors are left out."""
+        var out = List[Int]()
+        for i in range(len(layer.objs)):
+            ref o = layer.objs[i]
+            if o.kind == INK or o.kind == CONNECTOR or o.locked:
+                continue
+            var a = view.to_screen(o.x, o.y)
+            var sw = o.w * view.scale
+            var sh = o.h * view.scale
+            if a[0] > 40 and a[1] > 40 and a[0] + sw < view_w - 80 and a[1] + sh < view_h - 80 and sw > 12 and sh > 12:
+                out.append(i)
+        return out^
 
     def selection_box(self, mut look: BoardLook, ref o: Obj) -> Tuple[Float64, Float64, Float64, Float64]:
         """The box the editor outlines: a Markdown text hugs its words (its widest line), anything else its box."""

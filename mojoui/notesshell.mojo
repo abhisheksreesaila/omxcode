@@ -9,6 +9,7 @@
 #   draw_round_button(p, bx, "#toggle-sidebar", 16, 16, "panel-left", k, sk, sk.panel)
 #   var panel = NotesPanel(); …; panel.draw(p, bx, k, sk)
 
+from std.collections import Dict
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT
@@ -23,24 +24,55 @@ comptime MONO = "Geist Mono"
 # ------------------------------------------------ named boxes
 
 struct Boxes(Movable):
-    """Named rects in layout px, in drawing order (the last one drawn is on top)."""
+    """Named rects in layout px, in drawing order (the last one drawn is on top). The framework's pieces record generic
+    names ("panel", "panel.row:<words>", "title.button"); an app that wants its own names (a test comparing with its web
+    twin's DOM ids) gives a table with alias(): "panel" → "#sidebar", "panel.row:" → "row:{}" ({} takes the words after
+    the colon). Lookups (find, hit, hit_any) take either name (D-7928)."""
     var names: List[String]
     var r: List[Float64]
+    var aliases: Dict[String, String]
+    var seen: Dict[String, Int]  # how many times each name was recorded this frame (duplicates get @2, @3…)
 
     def __init__(out self):
         self.names = List[String]()
         self.r = List[Float64]()
+        self.aliases = Dict[String, String]()
+        self.seen = Dict[String, Int]()
 
     def clear(mut self):
+        """A new frame: the boxes go, the app's names stay."""
         self.names.clear()
         self.r.clear()
+        self.seen = Dict[String, Int]()
 
-    def add(mut self, name: String, x: Float64, y: Float64, w: Float64, h: Float64):
-        """Records a box; a name drawn again gets @2, @3… (as the reference names duplicates)."""
-        var n = 1
-        for ref have in self.names:
-            if have == name or have.startswith(name + "@"):
-                n += 1
+    def alias(mut self, generic: String, name: String):
+        self.aliases[generic] = name
+
+    def name_of(self, generic: String) -> String:
+        """The app's name for a generic one (itself when the app gave none)."""
+        if len(self.aliases) == 0:
+            return generic
+        try:
+            if generic in self.aliases:
+                return self.aliases[generic].replace("{}", "")
+            var c = generic.find(":")
+            if c >= 0:
+                var pre = String(generic[byte=0:c + 1])
+                if pre in self.aliases:
+                    var d = self.aliases[pre]
+                    var rest = String(generic[byte=c + 1:])
+                    if d.find("{}") >= 0:
+                        return d.replace("{}", rest)
+                    return d + rest
+        except:
+            pass
+        return generic
+
+    def add(mut self, generic: String, x: Float64, y: Float64, w: Float64, h: Float64):
+        """Records a box under the app's name; a name drawn again gets @2, @3… (as the reference names duplicates)."""
+        var name = self.name_of(generic)
+        var n = self.seen.get(name, 0) + 1
+        self.seen[name] = n
         self.names.append(name if n == 1 else name + "@" + String(n))
         self.r.append(x)
         self.r.append(y)
@@ -49,9 +81,10 @@ struct Boxes(Movable):
 
     def hit(self, x: Float64, y: Float64, prefix: String = "") -> String:
         """The topmost box under a point (with this prefix): its name, or ""."""
+        var pf = self.name_of(prefix)
         var i = len(self.names) - 1
         while i >= 0:
-            if self.names[i].startswith(prefix):
+            if self.names[i].startswith(pf):
                 var bx = self.r[i * 4]
                 var by = self.r[i * 4 + 1]
                 if x >= bx and y >= by and x < bx + self.r[i * 4 + 2] and y < by + self.r[i * 4 + 3]:
@@ -62,18 +95,22 @@ struct Boxes(Movable):
     def hit_any(self, x: Float64, y: Float64, prefixes: List[String]) -> String:
         """The topmost box under a point among those whose names start with one of `prefixes` (the things a tap can
         act on; containers recorded after their children don't swallow the tap)."""
+        var pfs = List[String]()
+        for ref q in prefixes:
+            pfs.append(self.name_of(q))
         var i = len(self.names) - 1
         while i >= 0:
             var bx = self.r[i * 4]
             var by = self.r[i * 4 + 1]
             if x >= bx and y >= by and x < bx + self.r[i * 4 + 2] and y < by + self.r[i * 4 + 3]:
-                for ref pf in prefixes:
+                for ref pf in pfs:
                     if self.names[i].startswith(pf):
                         return self.names[i]
             i -= 1
         return ""
 
-    def find(self, name: String) -> Int:
+    def find(self, generic: String) -> Int:
+        var name = self.name_of(generic)
         for i in range(len(self.names)):
             if self.names[i] == name:
                 return i
@@ -207,18 +244,18 @@ def draw_title_island[P: Painter](mut p: P, mut bx: Boxes, slot_x0: Float64, slo
     var y = 16.0
     draw_shadows(p, x, y, w, 44, 22, sk.shadow2)
     p.rect(x, y, w, 44, sk.panel, 22)
-    bx.add("#island", x, y, w, 44)
+    bx.add("title", x, y, w, 44)
     var title_x = x + 1 + 18
-    bx.add(".isl-face:" + face_emoji + title, x + 1, y + 1, w - 2, 42)
+    bx.add("title.face:" + face_emoji + title, x + 1, y + 1, w - 2, 42)
     if has_icon:
         draw_emoji_tile(p, emoji, x + 1 + 10, y + 1 + 9, 24, 7, 14, mix(tint, 36, sk.panel))
-        bx.add("#island-icon", x + 1, y + 1, 44, 42)
+        bx.add("title.icon", x + 1, y + 1, 44, 42)
         title_x = x + 1 + 44
-    bx.add("#share-button", x + 1, y + 1, w - 2, 42)
+    bx.add("title.button", x + 1, y + 1, w - 2, 42)
     var st = TextStyle(UI, 400, False, 16)
     var tw = measure(st, title)
     text_normal(p, st, title, title_x, y + (44 - line_metrics(st).normal_height()) / 2, sk.ink)
-    bx.add("#island-title", title_x, y + (44 - line_metrics(st).normal_height()) / 2, tw, line_metrics(st).normal_height())
+    bx.add("title.words", title_x, y + (44 - line_metrics(st).normal_height()) / 2, tw, line_metrics(st).normal_height())
 
 
 # ------------------------------------------------ the notes panel
@@ -243,28 +280,79 @@ struct PanelNotebook(Copyable, Movable):
     var count: Int
 
 
+@fieldwise_init
+struct Shelf(Copyable, Movable):
+    """A shelf of groups in the notes panel: the groups whose category is `key`, under a head with its label and icon."""
+    var key: String
+    var label: String
+    var icon: String
+    var open: Bool  # open at start
+    var show_count: Bool  # its group count beside the chevron (and, folded, it keeps a drop target)
+
+
+@fieldwise_init
+struct SkinChoice(Copyable, Movable):
+    """A skin the panel's footer offers: its name, the words its dot is called by, the dot's colour."""
+    var name: String
+    var label: String
+    var swatch: UInt32
+
+
+struct PanelConfig(Copyable, Movable):
+    """What an app puts in the notes panel (D-7928): its name, its main action and shortcut, the shelf of loose notes,
+    the shelves of groups, the words for an empty shelf and the skin row. The defaults are neutral."""
+    var brand: String
+    var action_label: String
+    var action_icon: String
+    var action_key: String  # "" : no shortcut shown
+    var loose_label: String
+    var loose_icon: String
+    var loose_open: Bool
+    var shelves: List[Shelf]
+    var empty_text: String
+    var skin_label: String
+    var skins: List[SkinChoice]
+
+    def __init__(out self):
+        self.brand = "Notes"
+        self.action_label = "New note"
+        self.action_icon = "plus"
+        self.action_key = ""
+        self.loose_label = "Loose"
+        self.loose_icon = "inbox"
+        self.loose_open = True
+        self.shelves = List[Shelf]()
+        self.empty_text = "Empty"
+        self.skin_label = "Theme"
+        self.skins = List[SkinChoice]()
+
+
 struct NotesPanel(Movable):
-    """The floating notes panel's state: which shelves are open, which note is active."""
+    """The floating notes panel's state: what it shows (its PanelConfig), which shelves are open, which note is active."""
     var notes: List[PanelNote]
     var notebooks: List[PanelNotebook]
     var active: Int
     var inbox_open: Bool
-    var open_shelves: List[Bool]  # projects, areas, resources, archive
+    var open_shelves: List[Bool]  # one per cfg.shelves
     var skin_name: String
+    var cfg: PanelConfig
 
-    def __init__(out self):
+    def __init__(out self, cfg: PanelConfig = PanelConfig()):
         self.notes = List[PanelNote]()
         self.notebooks = List[PanelNotebook]()
         self.active = 0
-        self.inbox_open = True
-        self.open_shelves = [True, True, True, False]
-        self.skin_name = "paper"
+        self.inbox_open = cfg.loose_open
+        self.open_shelves = List[Bool]()
+        for ref sh in cfg.shelves:
+            self.open_shelves.append(sh.open)
+        self.skin_name = cfg.skins[0].name if len(cfg.skins) > 0 else String("")
+        self.cfg = cfg.copy()
 
     def toggle_shelf(mut self, at: Int):
-        """Folds or opens a shelf: 0 the Inbox, 1–4 Projects, Areas, Resources, Archive (a tap on its head)."""
+        """Folds or opens a shelf: 0 the loose notes, 1… the shelves in order (a tap on its head)."""
         if at == 0:
             self.inbox_open = not self.inbox_open
-        elif at >= 1 and at <= 4:
+        elif at >= 1 and at <= len(self.open_shelves):
             self.open_shelves[at - 1] = not self.open_shelves[at - 1]
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, h: Float64):
@@ -274,42 +362,43 @@ struct NotesPanel(Movable):
         var ph = h - 72 - 16
         draw_shadows(p, x, y, w, ph, sk.radius, sk.shadow2)
         p.rect(x, y, w, ph, sk.panel, sk.radius)
-        bx.add("#sidebar", x, y, w, ph)
+        bx.add("panel", x, y, w, ph)
         var cx = x + 1 + 10  # content box: border 1, padding 14 10
         var cw = w - 2 - 20
         var cy = y + 1 + 14
         # brand
-        bx.add(".brand-row", cx, cy, cw, 44)
+        bx.add("panel.brand", cx, cy, cw, 44)
         var mx = cx + 6
         var my = cy + 2
         p.rect(mx, my, 26, 30, sk.accent, 5)  # (4px 7px 7px 4px: drawn with the mean corner)
         p.rect(mx, my, 3, 30, mix(sk.accent, 62, rgba(0, 0, 0)), 1.5)
         p.rect(mx + 26 - 5 - 3, my, 3, 30, with_alpha(sk.accent_ink, 0.7), 0)
-        bx.add(".brand-mark", mx, my, 26, 30)
+        bx.add("panel.brand-mark", mx, my, 26, 30)
         var bst = TextStyle(sk.display, sk.display_weight, sk.display_italic, 17)
         bst.letter_spacing = sk.title_track * 17
-        text_at(p, bst, "Personal Note", mx + 26 + 9, my + 5, 20, sk.ink)
-        bx.add(".brand-name:Personal Note", mx + 26 + 9, my + 5, cw - 6 - 26 - 9 - 6, 20)
+        text_at(p, bst, self.cfg.brand, mx + 26 + 9, my + 5, 20, sk.ink)
+        bx.add("panel.brand-name:" + self.cfg.brand, mx + 26 + 9, my + 5, cw - 6 - 26 - 9 - 6, 20)
         cy += 44 + 2
         # quick note
         draw_shadows(p, cx, cy, cw, 38, 19, sk.shadow1)
         p.rect(cx, cy, cw, 38, sk.accent_fill, 19)
-        bx.add("#rail-new-note", cx, cy, cw, 38)
-        draw_icon(p, "plus", cx + 12, cy + 11, 16, k, sk.accent_ink)
+        bx.add("panel.action", cx, cy, cw, 38)
+        draw_icon(p, self.cfg.action_icon, cx + 12, cy + 11, 16, k, sk.accent_ink)
         var qst = TextStyle(UI, 500, False, 13)
-        text_normal(p, qst, "Quick note", cx + 12 + 16 + 8, cy + (38 - 17) / 2, sk.accent_ink)
-        var kst = TextStyle(MONO, 400, False, 11)
-        var kw = measure(kst, "Alt N") + 14
-        var kx = cx + cw - 12 - kw
-        var ky = cy + (38 - 20.3) / 2
-        var kc = with_alpha(sk.accent_ink, 0.8)
-        p.rect(kx, ky, kw, 20.3, with_alpha(sk.accent_ink, 0.3 * 0.8), 6)
-        p.rect(kx + 1, ky + 1, kw - 2, 18.3, sk.accent_fill, 5)
-        text_at(p, kst, "Alt N", kx + 7, ky + 3, 14.3, kc)
-        bx.add("#quick-note-kbd", kx, ky, kw, 20.3)
+        text_normal(p, qst, self.cfg.action_label, cx + 12 + 16 + 8, cy + (38 - 17) / 2, sk.accent_ink)
+        if self.cfg.action_key != "":
+            var kst = TextStyle(MONO, 400, False, 11)
+            var kw = measure(kst, self.cfg.action_key) + 14
+            var kx = cx + cw - 12 - kw
+            var ky = cy + (38 - 20.3) / 2
+            var kc = with_alpha(sk.accent_ink, 0.8)
+            p.rect(kx, ky, kw, 20.3, with_alpha(sk.accent_ink, 0.3 * 0.8), 6)
+            p.rect(kx + 1, ky + 1, kw - 2, 18.3, sk.accent_fill, 5)
+            text_at(p, kst, self.cfg.action_key, kx + 7, ky + 3, 14.3, kc)
+            bx.add("panel.action-key", kx, ky, kw, 20.3)
         cy += 38 + 10 + 2  # margin 10, the panel's gap 2
         # the navigator: Inbox and the four shelves
-        bx.add("#notebook-navigator", cx - 4, cy, cw + 8, y + ph - 1 - 14 - (29 + 6 + 2) - cy)
+        bx.add("panel.navigator", cx - 4, cy, cw + 8, y + ph - 1 - 14 - (29 + 6 + 2) - cy)
         var list_top = cy
         var inbox_notes = List[Int]()
         for i in range(len(self.notes)):
@@ -318,13 +407,13 @@ struct NotesPanel(Movable):
         var inbox_h = 2 + 34 + 2 + ((Float64(len(inbox_notes)) * 35 - 1 + 6 + 2) if self.inbox_open else 0.0)
         if self.inbox_open:
             p.rect(cx, cy, cw, inbox_h, sk.shelf, 13)
-        bx.add(".sec", cx, cy, cw, inbox_h)
-        cy = self._shelf(p, bx, k, sk, cx, cy, cw, "Inbox", "inbox", self.inbox_open, String(len(inbox_notes)), True, False)
+        bx.add("panel.shelf", cx, cy, cw, inbox_h)
+        cy = self._shelf(p, bx, k, sk, cx, cy, cw, self.cfg.loose_label, self.cfg.loose_icon, self.inbox_open, String(len(inbox_notes)), True, False)
         if self.inbox_open:
             var rows_y = cy + 2
             var rows_h = Float64(len(inbox_notes)) * 35 - 1
             p.rect(cx + 2 + 13, rows_y, 1.5, rows_h, sk.line, 0)
-            bx.add("[Inbox]", cx + 2 + 13, rows_y, cw - 4 - 13, rows_h)
+            bx.add("panel.loose-rows:" + self.cfg.loose_label, cx + 2 + 13, rows_y, cw - 4 - 13, rows_h)
             var ry = rows_y
             for i in inbox_notes:
                 self._note_row(p, bx, k, sk, cx + 2 + 13 + 1.5 + 7.5, ry, cw - 4 - 13 - 9, self.notes[i])
@@ -332,26 +421,24 @@ struct NotesPanel(Movable):
             cy = rows_y + rows_h + 6 + 2
         else:
             cy += 2
-        var cats: List[String] = ["projects", "areas", "resources", "archive"]
-        var labels: List[String] = ["Projects", "Areas", "Resources", "Archive"]
-        var icons: List[String] = ["target", "compass", "book-open", "archive"]
-        for s in range(4):
+        for s in range(len(self.cfg.shelves)):
+            ref shelf = self.cfg.shelves[s]
             cy += 4
             var books = List[Int]()
             for i in range(len(self.notebooks)):
-                if self.notebooks[i].category == cats[s]:
+                if self.notebooks[i].category == shelf.key:
                     books.append(i)
-            var is_archive = s == 3
+            var is_archive = shelf.show_count
             var open = self.open_shelves[s]
             var sh = 2 + 34 + 2 + ((26.8 if len(books) == 0 else Float64(len(books)) * 31 - 1) if open else 0.0)
             if open:
                 p.rect(cx, cy, cw, sh, sk.shelf, 13)
-            cy = self._shelf(p, bx, k, sk, cx, cy, cw, labels[s], icons[s], open, String(len(books)) if is_archive else "", False, is_archive)
+            cy = self._shelf(p, bx, k, sk, cx, cy, cw, shelf.label, shelf.icon, open, String(len(books)) if is_archive else "", False, is_archive)
             if open:
                 if len(books) == 0:
                     var est = TextStyle(UI, 400, False, 12)
-                    text_at(p, est, "Drop a notebook here", cx + 2 + 8, cy + 5, 16.8, sk.ui_muted)
-                    bx.add(".empty-notebook:Drop a notebook here", cx + 2, cy, cw - 4, 26.8)
+                    text_at(p, est, self.cfg.empty_text, cx + 2 + 8, cy + 5, 16.8, sk.ui_muted)
+                    bx.add("panel.empty:" + self.cfg.empty_text, cx + 2, cy, cw - 4, 26.8)
                     cy += 26.8 + 2
                 else:
                     var ny = cy
@@ -361,29 +448,30 @@ struct NotesPanel(Movable):
                     cy = ny - 1 + 2
             else:
                 if is_archive:
-                    bx.add(".empty-notebook:Drop a notebook here", cx + 2, cy, cw - 4, 10)
+                    bx.add("panel.empty:" + self.cfg.empty_text, cx + 2, cy, cw - 4, 10)
                 cy += 2
-        bx.add("#notebook-list", cx, list_top, cw, cy - list_top)
+        bx.add("panel.list", cx, list_top, cw, cy - list_top)
         # footer
         var fy = y + ph - 1 - 14 - 29
         p.rect(cx - 2, fy, cw + 4, 1, sk.line, 0)
-        bx.add(".sidebar-footer", cx - 2, fy, cw + 4, 29)
+        bx.add("panel.footer", cx - 2, fy, cw + 4, 29)
         var fst = TextStyle(MONO, 400, False, 12)
-        text_normal(p, fst, "Skin", cx - 2 + 8, fy + 1 + 11, sk.ui_muted)
-        bx.add(".skin-label:Skin", cx - 2 + 8, fy + 12, measure(fst, "Skin"), 16)
-        var sx = cx + cw + 2 - 6 - 68
+        text_normal(p, fst, self.cfg.skin_label, cx - 2 + 8, fy + 1 + 11, sk.ui_muted)
+        bx.add("panel.skin-label:" + self.cfg.skin_label, cx - 2 + 8, fy + 12, measure(fst, self.cfg.skin_label), 16)
+        var ns = len(self.cfg.skins)
+        var sw = Float64(ns) * 25 - 7 if ns > 0 else 0.0
+        var sx = cx + cw + 2 - 6 - sw
         var sy = fy + 11
-        bx.add("#skin-switcher", sx, sy, 68, 18)
-        var names: List[String] = ["crayon", "paper", "night"]
-        var labels2: List[String] = ["Crayon skin", "Paper skin", "Night skin"]
-        var swatches: List[UInt32] = [hexc("#2f6fe0"), hexc("#1f1b16"), hexc("#1b2130")]
-        for i in range(3):
+        if ns > 0:
+            bx.add("panel.skins", sx, sy, sw, 18)
+        for i in range(ns):
+            ref c = self.cfg.skins[i]
             var ox = sx + Float64(i) * 25
-            if names[i] == self.skin_name:
+            if c.name == self.skin_name:
                 p.circle(ox + 9, sy + 9, 11, sk.accent)
             p.circle(ox + 9, sy + 9, 9, sk.panel)
-            p.circle(ox + 9, sy + 9, 7, swatches[i])
-            bx.add("[" + labels2[i] + "]", ox, sy, 18, 18)
+            p.circle(ox + 9, sy + 9, 7, c.swatch)
+            bx.add("panel.skin:" + c.label, ox, sy, 18, 18)
 
     def _shelf[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, label: String, icon: String,
                            open: Bool, count: String, badge: Bool, archive: Bool) -> Float64:
@@ -391,9 +479,9 @@ struct NotesPanel(Movable):
         _ = archive
         var hx = x + 2
         var hy = y + 2
-        bx.add(".sec-head", hx, hy, w - 4, 34)
+        bx.add("panel.shelf-head", hx, hy, w - 4, 34)
         draw_icon(p, icon, hx + 8, hy + 9, 16, k, sk.ink_soft, 1.8 if icon == "archive" else 2.0)
-        bx.add(".sec-ic", hx + 8, hy + 9, 16, 16)
+        bx.add("panel.shelf-icon", hx + 8, hy + 9, 16, 16)
         var st = TextStyle(UI, 600, False, 13.5)
         text_at(p, st, label, hx + 8 + 16 + 8, hy + 10.25, 13.5, sk.ink)
         if badge:
@@ -403,7 +491,7 @@ struct NotesPanel(Movable):
             var bxx = hx + w - 4 - 8 - 14 - 8 - bw
             p.rect(bxx, hy + 8, bw, 18, with_alpha(sk.state, 0.10), 4)
             text_at(p, bst, count, bxx + 5, hy + 8, 18, sk.ink)
-            bx.add("#inbox-badge", bxx, hy + 8, bw, 18)
+            bx.add("panel.badge", bxx, hy + 8, bw, 18)
         elif count != "":
             var cst = TextStyle(MONO, 400, False, 11)
             var tw = measure(cst, count)
@@ -421,7 +509,7 @@ struct NotesPanel(Movable):
         text_at(p, st, n.title, x + 8 + 24 + 8, y + 8.875, 16.25, fg)
         var icon = "git-fork" if n.kind == "mindmap" else ("file-pen" if n.kind == "page" else "file-text")
         draw_icon(p, icon, x + w - 8 - 14, y + 10, 14, k, with_alpha(fg, 0.65))
-        bx.add("row:" + n.emoji + " " + n.title, x, y, w, 34)
+        bx.add("panel.row:" + n.emoji + " " + n.title, x, y, w, 34)
 
     def _notebook_row[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, nb: PanelNotebook):
         if nb.icon == "":
@@ -431,7 +519,7 @@ struct NotesPanel(Movable):
             text_at(p, lst, letter, x + 15, y + 6, 18, rgba(255, 255, 255), ALIGN_CENTER)
         else:
             draw_icon(p, nb.icon, x + 7, y + 7, 16, k, nb.color)
-        bx.add("[Icon and colour of " + nb.name + "]", x, y, 30, 30)
+        bx.add("panel.group-icon:" + nb.name, x, y, 30, 30)
         var st = TextStyle(UI, 400, False, 13)
         text_normal(p, st, nb.name, x + 33, y + 6.5, sk.ink_soft)
         var cst = TextStyle(MONO, 400, False, 11)
@@ -439,7 +527,7 @@ struct NotesPanel(Movable):
         var tw = measure(cst, cnt)
         text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
         draw_icon(p, "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(sk.ink_soft, 0.7))
-        bx.add(".nav-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
+        bx.add("panel.group-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
 
 
 def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, labels: List[String], icons: List[String], k: Float64, sk: Skin,
@@ -455,18 +543,18 @@ def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, 
     var h = inner + 14
     draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
     p.rect(x, y, 56, h, sk.panel, sk.radius)
-    bx.add("[Canvas tools]", x, y, 56, h)
+    bx.add("dock", x, y, 56, h)
     if group != "":
         bx.add(group, x + 6, y + 7, 44, inner)
     var by = y + 7
     for i in range(len(labels)):
         if labels[i] == "":
             p.rect(x + 14, by + 8, 28, 1, sk.line, 0)
-            bx.add(".dock-divider", x + 14, by + 8, 28, 1)
+            bx.add("dock.divider", x + 14, by + 8, 28, 1)
             by += 17
         else:
             draw_icon(p, icons[i], x + 18, by + 12, 20, k, sk.ink_soft)
-            bx.add("[" + labels[i] + "]", x + 6, by, 44, 44)
+            bx.add("dock.tool:" + labels[i], x + 6, by, 44, 44)
             by += 44 + (2.0 if i + 1 < len(labels) and labels[i + 1] != "" else 0.0)
 
 
@@ -474,14 +562,14 @@ def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64
     """The map's zoom island: minus, the zoom as a label (a press resets it), plus."""
     p.rect(x, y, 132, 42, sk.line, sk.radius_control)
     p.rect(x + 1, y + 1, 130, 40, sk.panel, sk.radius_control - 1)
-    bx.add("[Zoom controls]", x, y, 132, 42)
+    bx.add("zoom", x, y, 132, 42)
     draw_icon(p, "minus", x + 4 + 9, y + 4 + 9, 16, k, sk.muted)
-    bx.add("[Zoom out]", x + 4, y + 4, 34, 34)
+    bx.add("zoom.out", x + 4, y + 4, 34, 34)
     var st = TextStyle(UI, 400, False, 11)
     text_normal(p, st, String(percent) + "%", x + 40 + 26, y + 4 + (34 - 14) / 2, sk.muted if sk.dark else 0xFF656F74, ALIGN_CENTER)
-    bx.add(".mindmap-zoom-label:" + String(percent) + "%", x + 40, y + 4, 52, 34)
+    bx.add("zoom.label:" + String(percent) + "%", x + 40, y + 4, 52, 34)
     draw_icon(p, "plus", x + 94 + 9, y + 4 + 9, 16, k, sk.muted)
-    bx.add("[Zoom in]", x + 94, y + 4, 34, 34)
+    bx.add("zoom.in", x + 94, y + 4, 34, 34)
 
 
 def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, words: String, sk: Skin, ink: UInt32 = 0xFF656F74,
@@ -505,7 +593,7 @@ def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, word
             break
         cut += String(c)
         n += 1
-    bx.add(".mindmap-hint:" + cut, x, y, w, 28)
+    bx.add("hint:" + cut, x, y, w, 28)
 
 
 def draw_radial_steps[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, at_x: Float64, at_y: Float64, inner: UInt32,
@@ -587,7 +675,7 @@ def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items
     var h = dock_height(items)
     draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
     p.rect(x, y, 56, h, sk.panel, sk.radius)
-    bx.add("[Canvas tools]", x, y, 56, h)
+    bx.add("dock", x, y, 56, h)
     if group != "":
         bx.add(group, x + 6, y + 7, 44, h - 14)
     var by = y + 7
@@ -624,32 +712,15 @@ def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items
             by += 2
 
 
-def canvas_dock_items(ink: UInt32) -> List[DockItem]:
-    """A canvas note's tool island as Personal Note draws it (its own 24 px dock icons, stroke 1.7)."""
-    var out = List[DockItem]()
-    out.append(DockItem("[Select]", "path d=M5 3l6 16 2.2-6.8L20 10 5 3z", DOCK_TOOL, 0))
-    out.append(DockItem("[Text]", "path d=M5 6V4h14v2M12 4v16M9 20h6", DOCK_TOOL, 0))
-    out.append(DockItem("[Pen]", "path d=M4 20l4-1 11-11-3-3L5 16l-1 4z|path d=M14 6l3 3", DOCK_TOOL, 0))
-    out.append(DockItem("[Stroke eraser]", "path d=M8 20h12|path d=M4.5 15.5l9-9a2 2 0 012.8 0l2.2 2.2a2 2 0 010 2.8L12 18H7l-2.5-2.5z", DOCK_TOOL, 0))
-    out.append(DockItem("[Shape]", "rect x=4 y=4 width=16 height=16 rx=3", DOCK_TOOL, 0))
-    out.append(DockItem("[Sticky note]", "path d=M5 4h14v10l-5 6H5z|path d=M14 20v-6h5", DOCK_TOOL, 0))
-    out.append(DockItem(".dock-divider", "", DOCK_DIVIDER, 0))
-    out.append(DockItem("#ink-options-trigger", "", DOCK_DOT, ink))
-    out.append(DockItem("#dock-more", "plus", DOCK_TOOL, 0))
-    out.append(DockItem("#voice-divider", "", DOCK_DIVIDER, 0))
-    out.append(DockItem("#voice-button", "rect x=9 y=3 width=6 height=11 rx=3|path d=M5.5 11a6.5 6.5 0 0013 0M12 17.5V21", DOCK_ACCENT, 0))
-    return out^
-
-
 def draw_history_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, k: Float64, sk: Skin):
     """Undo and redo in a pill (the web's .history-island: 48 tall, padded 0 6, 44 px buttons 2 apart)."""
     draw_shadows(p, x, y, 104, 48, 24, sk.shadow2)
     p.rect(x, y, 104, 48, sk.panel, 24)
-    bx.add("#history-island", x, y, 104, 48)
+    bx.add("history", x, y, 104, 48)
     draw_icon(p, "path d=M9 7L4.5 11.5 9 16|path d=M5 11.5h9a5 5 0 010 10h-2", x + 7 + 12, y + 2 + 12, 20, k, sk.ink_soft, 1.7)
-    bx.add("#undo", x + 7, y + 2, 44, 44)
+    bx.add("history.undo", x + 7, y + 2, 44, 44)
     draw_icon(p, "path d=M15 7l4.5 4.5L15 16|path d=M19 11.5h-9a5 5 0 000 10h2", x + 53 + 12, y + 2 + 12, 20, k, sk.ink_soft, 1.7)
-    bx.add("#redo", x + 53, y + 2, 44, 44)
+    bx.add("history.redo", x + 53, y + 2, 44, 44)
 
 
 def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
@@ -658,17 +729,17 @@ def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float
     var x = right - 185
     draw_shadows(p, x, y, 185, 48, 24, sk.shadow2)
     p.rect(x, y, 185, 48, sk.panel, 24)
-    bx.add("#zoom-control", x, y, 185, 48)
+    bx.add("pagezoom", x, y, 185, 48)
     draw_icon(p, "minus", x + 7 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
-    bx.add("#zoom-out", x + 7, y + 6, 36, 36)
+    bx.add("pagezoom.out", x + 7, y + 6, 36, 36)
     var st = TextStyle(MONO, 400, False, 11.5)
     text_at(p, st, String(percent) + "%", x + 45 + 24, y + 8, 32, sk.ink_soft, ALIGN_CENTER)
-    bx.add("#zoom-value", x + 45, y + 8, 48, 32)
+    bx.add("pagezoom.value", x + 45, y + 8, 48, 32)
     draw_icon(p, "plus", x + 95 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
-    bx.add("#zoom-in", x + 95, y + 6, 36, 36)
+    bx.add("pagezoom.in", x + 95, y + 6, 36, 36)
     p.rect(x + 136, y + 15, 1, 18, sk.line, 0)
     draw_icon(p, "maximize-2", x + 142 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
-    bx.add("#zoom-fit", x + 142, y + 6, 36, 36)
+    bx.add("pagezoom.fit", x + 142, y + 6, 36, 36)
 
 
 def draw_selection_bar[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, labels: List[String], k: Float64, sk: Skin) -> Float64:
@@ -682,12 +753,12 @@ def draw_selection_bar[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Floa
     draw_shadows(p, x, y, w, 34, 10, [Shadow(0, 6, 18, 0, rgba(20, 20, 30, 31))])
     p.rect(x, y, w, 34, sk.line, 10)
     p.rect(x + 1, y + 1, w - 2, 32, mix(sk.paper, 92, sk.desk), 9)
-    bx.add("#selection-bar", x, y, w, 34)
+    bx.add("selbar", x, y, w, 34)
     var bxx = x + 4
     for l in labels:
         var bw = measure(st, l) + 20
         text_at(p, st, l, bxx + 10, y + 4 + 7, 12, sk.ui_muted)
-        bx.add(".selection-bar:" + l, bxx, y + 4, bw, 26)
+        bx.add("selbar.item:" + l, bxx, y + 4, bw, 26)
         bxx += bw + 2
     return w
 

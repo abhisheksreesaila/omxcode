@@ -70,30 +70,30 @@ struct Omnibar(Movable):
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, w: Float64, h: Float64, k: Float64, sk: Skin):
         p.rect(0, 0, w, h, with_alpha(sk.ink, 0.28), 0)
-        bx.add("#search-backdrop", 0, 0, w, h)
+        bx.add("omni.backdrop", 0, 0, w, h)
         var x = (w - 760) / 2
         var y = 96.0
         var ph = 1 + 56 + 42 + 320 + 36.39 + 1
         draw_shadows(p, x, y, 760, ph, 20, sk.shadow3)
         p.rect(x, y, 760, ph, sk.panel, 20)
-        bx.add("[Search or jump to]", x, y, 760, ph)
+        bx.add("omni", x, y, 760, ph)
         var ix = x + 1
         var iw = 758.0
         # the field
-        bx.add(".spotlight-input-row:EscCancel", ix, y + 1, iw, 56)
+        bx.add("omni.input-row:EscCancel", ix, y + 1, iw, 56)
         draw_icon(p, "search", ix + 18, y + 1 + 18, 20, k, sk.ink_soft)
         var qst = TextStyle(UI, 400, False, 17)
         var fx = ix + 18 + 20 + 12
         text_normal(p, qst, self.query, fx, y + 13 + (32 - line_metrics(qst).normal_height()) / 2, sk.ink)
-        bx.add("#search-input", fx, y + 13, iw - 18 - 20 - 12 - 12 - 35 - 16, 32)
+        bx.add("omni.input", fx, y + 13, iw - 18 - 20 - 12 - 12 - 35 - 16, 32)
         var kst = TextStyle(MONO, 400, False, 11)
         var ex = ix + iw - 16 - 35
         text_at(p, kst, "Esc", ex + 7, y + 19.3 + 2, 15.4, sk.ui_muted)
-        bx.add("#search-close", ex, y + 19.3, 35, 19.39)
+        bx.add("omni.close", ex, y + 19.3, 35, 19.39)
         # the pills
         var cy = y + 1 + 56
         p.rect(ix, cy, iw, 1, sk.line, 0)
-        bx.add("#omni-chips", ix, cy, iw, 42)
+        bx.add("omni.chips", ix, cy, iw, 42)
         var px = ix + 14
         var cst = TextStyle(UI, 500, False, 12.5)
         for i in range(len(self.pills)):
@@ -107,13 +107,13 @@ struct Omnibar(Movable):
             text_normal(p, cst, pl.label + (" " if pl.count != "" else ""), px + 11, cy + 13, fg)
             if pl.count != "":
                 text_normal(p, cst, pl.count, px + 11 + lw, cy + 13, with_alpha(fg, 0.6))
-            bx.add(".omni-chip:" + pl.label + (" " + pl.count if pl.count != "" else ""), px, cy + 9, pw, 25)
+            bx.add("omni.chip:" + pl.label + (" " + pl.count if pl.count != "" else ""), px, cy + 9, pw, 25)
             px += pw + 6
         # the body: rows and the preview
         var by = cy + 42
         p.rect(ix, by, iw, 1, sk.line, 0)
-        bx.add(".omni-body", ix, by, iw, 320)
-        bx.add("#search-results", ix, by + 1, iw - 250, 319)
+        bx.add("omni.body", ix, by, iw, 320)
+        bx.add("omni.results", ix, by + 1, iw - 250, 319)
         var ry = by + 1 + 10
         var n = 0
         var sel_row = OmniRow("", "", 0, "", "", "", 0, "")
@@ -132,7 +132,7 @@ struct Omnibar(Movable):
                 self._row(p, bx, k, sk, ix + 8, ry, iw - 250 - 16, r, n == self.selected, n)
                 ry += 56
                 n += 1
-            bx.add("[" + g.title + "]", ix + 8, gtop, iw - 250 - 16, ry - gtop)
+            bx.add("omni.group:" + g.title, ix + 8, gtop, iw - 250 - 16, ry - gtop)
             ry += 10
         self._preview(p, bx, k, sk, ix + iw - 250, by + 1, sel_row)
         # the footer
@@ -152,7 +152,7 @@ struct Omnibar(Movable):
     def _row[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, r: OmniRow, sel: Bool, n: Int):
         if sel:
             p.rect(x, y, w, 56, sk.hover, 12)
-        bx.add("#omni-row-" + String(n), x, y, w, 56)
+        bx.add("omni.row:" + String(n), x, y, w, 56)
         if r.emoji != "":
             draw_emoji_tile(p, r.emoji, x + 10, y + 8, 40, 11, 22, mix(r.tint, 36, sk.panel))
         else:
@@ -194,7 +194,7 @@ struct Omnibar(Movable):
     def _preview[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, r: OmniRow):
         p.rect(x, y, 1, 319, sk.line, 0)
         p.rect(x + 1, y, 249, 319, mix(sk.ink, 3, sk.panel), 0)
-        bx.add("#omni-preview", x, y, 250, 319)
+        bx.add("omni.preview", x, y, 250, 319)
         if r.title == "":
             return
         var px = x + 1 + 18

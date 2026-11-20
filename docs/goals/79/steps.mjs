@@ -50,6 +50,7 @@ const load = async () => {
   await p.waitForTimeout(1500)
 }
 await load()
+await p.screenshot({ path: path.join(OUT, 'start.png') }) // (D-7931: the picture before the first step, for its region check)
 for (let i = 0; i < STEPS.length; i++) {
   const s = STEPS[i]
   for (const a of s.web) {

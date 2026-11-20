@@ -214,9 +214,9 @@ struct BuzanMap(Movable):
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, w: Float64, h: Float64, zoom_in: Float64, sk: Skin, label: String):
         draw_shadows(p, x0, y0, w, h, sk.radius, sk.shadow1)
         draw_radial_steps(p, x0, y0, w, h, 0.48, 0.44, CARD, SHEET, 0.74, sk.radius)  # (.mindmap-stage's background)
-        bx.add("#mindmap-host", x0, y0, w, h)
-        bx.add("[Mind map canvas]", x0, y0, w, h)
-        bx.add("[" + label + " mind map]", x0, y0, w, h)
+        bx.add("map.host", x0, y0, w, h)
+        bx.add("map.canvas", x0, y0, w, h)
+        bx.add("map.named:" + label, x0, y0, w, h)
         p.push_clip(x0, y0, w, h)
         var fv = self.fit(w, h, 80)
         var zoom = fv[0] if zoom_in <= 0 else zoom_in
@@ -268,7 +268,7 @@ struct BuzanMap(Movable):
                 # the group's box reaches the add handles: 18 beyond the card plus a handle's 17 hit circle
                 var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
                 var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
-                bx.add("[" + t.text + "]", cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
+                bx.add("map.idea:" + t.text, cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
             else:
                 var sh = List[Shadow]()
                 sh.append(Shadow(0, 3, 7, 0, rgba(57, 48, 37, 20)))
@@ -281,7 +281,7 @@ struct BuzanMap(Movable):
                     var ww = measure(st, words)
                     p.rect(cx + t.x * zoom - ww / 2, cy + (t.y - 11) * zoom, ww, 22 * zoom, with_alpha(hexc("#3d8fe8"), 0.25), 0)
                 p.run(st, words, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, LABEL, ALIGN_CENTER)
-                bx.add("[" + t.text + "]", lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
+                bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
         # the selection: dashed ring and four add handles
         if self.selected >= 0 and self.selected < len(self.topics):
             ref t = self.topics[self.selected]
@@ -299,7 +299,7 @@ struct BuzanMap(Movable):
                 p.circle(ax, ay, 8.25 * zoom, CARD)  # (r 7, stroked 2.5 in the card colour)
                 p.circle(ax, ay, 5.75 * zoom, t.color)
                 p.circle(ax, ay, 2 * zoom, CARD)
-                bx.add("[Add branch from " + names[k] + "]", ax - 17 * zoom, ay - 17 * zoom, 34 * zoom, 34 * zoom)
+                bx.add("map.add-branch:" + names[k], ax - 17 * zoom, ay - 17 * zoom, 34 * zoom, 34 * zoom)
         p.pop_clip()
 
 
@@ -452,7 +452,7 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     else:
         draw_shadows(p, x, y, 170, 102, 6, sk.shadow1)
         p.rect(x, y, 170, 102, hexc("#fffffc"), 6)
-    bx.add("[Map overview]", x, y, 170, 102)
+    bx.add("map.overview", x, y, 170, 102)
     var vs = min(158.0 / 220, 90.0 / 130)
     var ox = x + 6 + (158 - 220 * vs) / 2
     var oy = y + 6 + (90 - 130 * vs) / 2

@@ -2,10 +2,11 @@
 # mojoui.objectlayer, notesshell's tool island / history island / page zoom island and strokeicon's inline icon specs, on
 # their own, against Personal Note's own functions (values printed by its navigation.js, viewport.js, connectors.js on
 # node) and the web's DOM boxes of the canvas screen (docs/goals/79/ref.mjs at 1440 × 900).
-#   pixi run mojo run -I . tests/test_pagedesk.mojo        → "pagedesk: ok"
-from mojoui.skin import skin_named, hexc
+#   pixi run mojo run -I . -I examples/pnote tests/test_pagedesk.mojo        → "pagedesk: ok"
+from mojoui.skin import hexc
+from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
 from mojoui.scene import Scene
-from mojoui.notesshell import Boxes, draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom
+from mojoui.notesshell import Boxes, draw_dock, dock_height, draw_history_island, draw_page_zoom
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, shadow_bands, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CONNECTOR, STICKY, TEXT
 from mojoui.strokeicon import icon_segments
@@ -81,12 +82,12 @@ def main() raises:
     # the board paints: one run per line, the sticky's words, the arrow
     var sc = Scene(2304, 1440, 1.6)
     var sk = skin_named("paper")
-    var bx = Boxes()
+    var bx = pn_boxes()
     draw_page_chrome(sc, bx, v, 1440, 900, 1, 1, PAGE_W, PAGE_H, 1.6, sk)
     look.paint(sc, layer, v, 1440, 900, 1.6)
     check(near(box(bx, "#paper-sheet"), [v.x, v.y, PAGE_W * v.scale, PAGE_H * v.scale], 1e-9), "sheet box")
     # the canvas islands at the web's boxes (canvas.boxes.json)
-    var d = Boxes()
+    var d = pn_boxes()
     var items = canvas_dock_items(hexc("#20201e"))
     draw_dock(sc, d, 1440 - 72, 72 + (900 - 144 - dock_height(items)) / 2, items, "[Text]", 1.6, sk, "#dock-canvas")
     check(near(box(d, "[Canvas tools]"), [1368.0, 222.0, 56.0, 456.0]), "dock box")
@@ -165,7 +166,7 @@ def main() raises:
     # ---- a page: a tap types only on words (the web's onText), keys move the caret
     var pg = PageSheet()
     pg.set_markdown("- [ ] Binoculars\n\nend")
-    var bxs = Boxes()
+    var bxs = pn_boxes()
     pg.draw(sc, bxs, 4, 66, 1436, 888, 1.6, "", 0, 14)
     check(not pg.tap(900, pg.line_top[0] + 5), "a tap far past the words starts a mark")
     check(pg.tap(pg.text_x + 3, pg.line_top[0] + 5), "a tap on the words places the caret")
