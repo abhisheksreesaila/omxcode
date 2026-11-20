@@ -4,6 +4,29 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, review round: what the race really showed (2026-11-20, night)
+- **Setup:** same worktree, autopilot, a fresh reviewer's NEEDS WORK (3 musts, 5 shoulds, nits). The Mac was offline
+  all round. Late on, other work shared the machine (goal 77's check, another project's tests, the screensaver).
+- **Worked:**
+  - The race now times the rebuilt app: notes stored by the web app's own API, pnote's web look, one row per web row,
+    units and presentation stated. On the 600-object note with a quiet machine every interaction step but zoom is under
+    8.3 ms; memory is 239 MB against 818 MB.
+  - New framework pieces: `mojoui.docstore` (revision-checked saves with conflicts, a save debounce, documents kept by
+    revision), `Boxes.alias` + `PanelConfig` (Personal Note's names, shelves and skins left mojoui), a locked cover,
+    branch controls on the map, versioned board and page-frame layers, one shared `layer_traits` with glyph-page reset
+    handling (each fix proven by a test that fails without it).
+  - Secure notes are locked and never written; a save conflict keeps the newer edit and says so.
+  - M4 can now tell a skipped step (0.177 in its region) and it found real bugs (undo of a delete).
+- **Broke, and what fixed it:**
+  - The previous race timed goal 74's canvas: its "wins every row" claim is withdrawn.
+  - framebench pressed before the app picked its tool: the pen row timed nothing (or pans). The host now readies first.
+  - A probe read a scratch copy next to a stale WAL ("malformed", 0 notes): probes delete WAL/SHM first.
+  - A focus ring drawn outside the island made a step worse: removed.
+- **Still failing:** the 5,296-object note (most interaction steps slower than the web: the GPU redraws every object,
+  drags rebuild the board), zoom on the 600 note (9.8 ms quiet), cold open (148 ms quiet, against the web's 1,247), cold
+  start (470 vs 253 ms), 8 M4 step regions, everything on the Mac.
+- **Next small step:** rerun `scripts/check M6` on an idle machine; then keep unchanged layers as textures for big boards.
+
 ## Goal 79, continued again: the canvas screen, the 28-step script, the open row (2026-11-20)
 - **Setup:** same worktree, autopilot. The M4 Mac was offline the whole time (SSH timed out at the start, between
   milestones and at the end). In the last hour another project's llama-perplexity used the RTX 3090 (22.8 GB, up to 73 %).
