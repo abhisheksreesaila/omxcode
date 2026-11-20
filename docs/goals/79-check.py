@@ -399,7 +399,8 @@ def screen_steps(screen, ref):
     mm = json.loads((ref / "mindmap.boxes.json").read_text())
     ic = json.loads((ref / "island-card.boxes.json").read_text())
     row = lambda t: next(k for k in sb if k.startswith("row:") and k.endswith(t))
-    open_page = [f"tapat:desk={box_center(sb, row('Lighthouse trip'))}", "wait:600"]
+    # (D-7921) both apps start with the notes panel closed; ref.mjs's openNote opens it first (sidebar(true) clicks the toggle)
+    open_page = [f"tapat:desk={box_center(sb, '#toggle-sidebar')}", "wait:600", f"tapat:desk={box_center(sb, row('Lighthouse trip'))}", "wait:600"]
     close_panel = [f"tapat:desk={box_center(sb, '#toggle-sidebar')}", "wait:600"]
     open_panel = [f"tapat:desk={box_center(pg, '#toggle-sidebar')}", "wait:600"]
     open_note = lambda t: open_panel + [f"tapat:desk={box_center(sb, row(t))}", "wait:600"] + close_panel

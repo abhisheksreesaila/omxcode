@@ -260,6 +260,13 @@ struct NotesPanel(Movable):
         self.open_shelves = [True, True, True, False]
         self.skin_name = "paper"
 
+    def toggle_shelf(mut self, at: Int):
+        """Folds or opens a shelf: 0 the Inbox, 1–4 Projects, Areas, Resources, Archive (a tap on its head)."""
+        if at == 0:
+            self.inbox_open = not self.inbox_open
+        elif at >= 1 and at <= 4:
+            self.open_shelves[at - 1] = not self.open_shelves[at - 1]
+
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, h: Float64):
         var x = 16.0
         var y = 72.0

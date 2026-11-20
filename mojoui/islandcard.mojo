@@ -33,6 +33,8 @@ struct IslandCard(Movable):
     var wide_icon: String
     var wide_key: String
     var tiles: List[CardTile]
+    var editing: Bool  # the name field has the keyboard (a tap on it)
+    var all_selected: Bool  # its words are selected (Ctrl+A): typing replaces them
 
     def __init__(out self):
         self.title = ""
@@ -44,6 +46,46 @@ struct IslandCard(Movable):
         self.wide_icon = ""
         self.wide_key = ""
         self.tiles = List[CardTile]()
+        self.editing = False
+        self.all_selected = False
+
+    def title_key(mut self, name: String, mods: Int) -> Int:
+        """A key for the name field while it has the keyboard: 0 not its key, 1 the name changed, 2 Enter (rename to it),
+        3 Escape (leave it). mods: SHIFT 1, CTRL 2, ALT 4."""
+        if not self.editing:
+            return 0
+        if name == "Enter":
+            self.editing = False
+            self.all_selected = False
+            return 2
+        if name == "Escape":
+            self.editing = False
+            self.all_selected = False
+            return 3
+        if (mods & 2) != 0:
+            if name == "a" or name == "A":
+                self.all_selected = True
+                return 1
+            return 0
+        if name == "Backspace":
+            if self.all_selected:
+                self.title = ""
+            else:
+                var b = self.title.as_bytes()
+                var at = len(b) - 1
+                while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
+                    at -= 1
+                var cut = String(self.title[byte=0:max(at, 0)])
+                self.title = cut
+            self.all_selected = False
+            return 1
+        if name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
+            if self.all_selected:
+                self.title = ""
+                self.all_selected = False
+            self.title += name
+            return 1
+        return 0
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, slot_x0: Float64, slot_x1: Float64, k: Float64, sk: Skin):
         var rows = (len(self.tiles) + 3) // 4
@@ -62,7 +104,11 @@ struct IslandCard(Movable):
         # the name
         draw_bordered(p, cx, cy, cw, 38, 10, sk.panel, sk.line)
         var tst = TextStyle(UI, 600, False, 15)
+        if self.editing and self.all_selected:
+            p.rect(cx + 12, cy + 9, measure(tst, self.title), 20, with_alpha(sk.accent, 0.22), 0)
         text_at(p, tst, self.title, cx + 12, cy + 11.5, 15, sk.ink)
+        if self.editing and not self.all_selected:
+            p.rect(cx + 12 + measure(tst, self.title), cy + 9, 1.5, 20, sk.ink, 0)
         bx.add("#note-title", cx, cy, cw, 38)
         cy += 38 + 8
         # the status line

@@ -97,6 +97,7 @@ struct NoteRec(Copyable, Movable):
     var notebook: Int
     var emoji: String
     var tint: Int
+    var icon_set: Bool  # the note has its own icon (else it is guessed from the title, as note_icon.py does)
 
 
 struct WebShell(Movable):
@@ -124,6 +125,7 @@ struct WebShell(Movable):
     var cols: Int
     var rows: Int
     var tool: String
+    var card: IslandCard
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -134,7 +136,7 @@ struct WebShell(Movable):
         self.map = BuzanMap()
         self.sk = skin_named(skin)
         self.current = 0
-        self.sidebar = True
+        self.sidebar = False  # (the web opens with the notes panel closed)
         self.boxes = Boxes()
         self.problem = ""
         self.px = -1
@@ -151,6 +153,7 @@ struct WebShell(Movable):
         self.cols = 1
         self.rows = 1
         self.tool = "[Text]"
+        self.card = IslandCard()
         try:
             self.load()
         except e:
@@ -166,10 +169,11 @@ struct WebShell(Movable):
             var kind = st.text(2)
             var emoji = st.text(5)
             var tint = st.int(6)
+            var own = emoji != ""
             if emoji == "":
                 emoji = guess_emoji(title, kind)
                 tint = tint_of(emoji)
-            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, st.text(3), st.int(4), emoji, tint))
+            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, st.text(3), st.int(4), emoji, tint, own))
         self.panel.notes.clear()
         for ref n in self.notes:
             self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
@@ -292,8 +296,7 @@ struct WebShell(Movable):
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
         if self.card_open and i >= 0:
-            var c = IslandCard()
-            c.title = self.notes[i].title
+            ref c = self.card
             c.status = "Saved on this device"
             c.status_dot = self.sk.c2
             c.place = "Inbox"
@@ -301,6 +304,7 @@ struct WebShell(Movable):
             c.wide_label = "Focus"
             c.wide_icon = "focus"
             c.wide_key = "Ctrl ."
+            c.tiles.clear()
             var ids: List[String] = ["#share-print", "#share-png", "#share-backup", "#share-markdown", "#share-vault", "#share-icon", "#share-link", "#share-props", "#top-properties", "#clear-note"]
             var labels: List[String] = ["Print", "Picture", "Backup", "Markdown", "Obsidian", "Icon", "Link note", "Properties", "Settings", "Clear all"]
             var icons: List[String] = ["printer", "image-down", "archive", "file-down", "folder-down", "wand-sparkles", "link", "file-text", "sliders-horizontal", "eraser"]
@@ -383,6 +387,8 @@ struct WebShell(Movable):
                 ink = j.dump(node)
         except:
             pass
+        if len(self.page.marks) > 0:
+            ink = self.page.ink_json()
         var content = '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}"
         try:
             var db = Database(self.db_path)
@@ -408,6 +414,7 @@ struct WebShell(Movable):
             self.notes[i].content = content
         except e:
             print("PNOTE ERROR: save: " + String(e), flush=True)
+        self.reload()
 
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste into the open page."""
@@ -431,8 +438,29 @@ struct WebShell(Movable):
     def key(mut self, name: String, mods: Int) -> Bool:
         var ni = self.note_index(self.current)
         if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page":
+            if self.page.draw_mode:
+                if name == "Escape":
+                    self.page.draw_mode = False
+                    return True
+                return False
             if name == "End" and (mods & 2) != 0:
                 self.page.caret_end()
+                return True
+            if name == "Home":
+                self.page.caret_home()
+                return True
+            if name == "End":
+                self.page.caret_line_end()
+                return True
+            if name == "ArrowLeft":
+                self.page.caret_left()
+                return True
+            if name == "ArrowRight":
+                self.page.caret_right()
+                return True
+            if name == "Delete":
+                self.page.delete_forward()
+                self.save_page()
                 return True
             if name == "Return" or name == "Enter":
                 self.page.newline()
@@ -447,6 +475,13 @@ struct WebShell(Movable):
                 self.save_page()
                 return True
             return False
+        if self.card_open and self.card.editing:
+            var r = self.card.title_key(name, mods)
+            if r == 2:
+                var t = self.card.title.copy()
+                self.rename(t)
+                self.card_open = False
+            return r != 0
         if (self.card_open or self.settings_open) and name == "Escape":
             self.card_open = False
             self.settings_open = False
@@ -497,6 +532,66 @@ struct WebShell(Movable):
 
     # ------------------------------------------------ input
 
+    def press(mut self, x: Float64, y: Float64) -> Bool:
+        """The pointer went down (a drag may follow)."""
+        var ni = self.note_index(self.current)
+        if ni >= 0 and self.notes[ni].kind == "page" and self.page.draw_mode and not self.searching and not self.card_open:
+            if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
+                self.page.mark_press(x, y)
+                return True
+        return False
+
+    def pan(mut self, x: Float64, y: Float64) -> Bool:
+        if len(self.page.wet) > 0:
+            self.page.mark_move(x, y)
+            return True
+        return False
+
+    def release(mut self, x: Float64, y: Float64) -> Bool:
+        if len(self.page.wet) > 0:
+            if self.page.mark_release():
+                self.save_page()
+            return True
+        return False
+
+    def rename(mut self, title: String):
+        """The open note's new name, saved as the web's API saves one (title, revision, change log, search index); its
+        guessed icon follows the new name."""
+        var i = self.note_index(self.current)
+        var t = String(title.strip())
+        if i < 0 or t == "" or t == self.notes[i].title:
+            return
+        try:
+            var db = Database(self.db_path)
+            db.exec("BEGIN")
+            var up = db.prepare("UPDATE notes SET title = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            up.bind(1, t)
+            up.bind(2, self.notes[i].id)
+            _ = up.step()
+            self._log_change(db, self.notes[i].id)
+            var fts = db.prepare("UPDATE note_search SET title = ? WHERE note_id = ?")
+            fts.bind(1, t)
+            fts.bind(2, self.notes[i].id)
+            _ = fts.step()
+            db.exec("COMMIT")
+        except e:
+            print("PNOTE ERROR: rename: " + String(e), flush=True)
+        self.reload()
+
+    def _log_change(self, mut db: Database, id: Int) raises:
+        var seq = db.prepare("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+        _ = seq.step()
+        var ch = db.prepare("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?")
+        ch.bind(1, id)
+        _ = ch.step()
+
+    def reload(mut self):
+        """The notes again from the database (newest first, as the panel lists them), the open note kept."""
+        try:
+            self.load()
+        except e:
+            print("PNOTE ERROR: reload: " + String(e), flush=True)
+
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
         var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button"])
@@ -517,13 +612,20 @@ struct WebShell(Movable):
                 self.set_skin(names[at])
             return True
         if self.card_open:
-            var ch = self.boxes.hit_any(x, y, ["#top-properties"])
+            var ch = self.boxes.hit_any(x, y, ["#top-properties", "#note-title"])
+            if ch == "#note-title":
+                self.card.editing = True
+                self.card.all_selected = False
+                return True
             self.card_open = False
+            self.card.editing = False
             if ch == "#top-properties":
                 self.settings_open = True
             return True
         if hit == "#share-button":
             self.card_open = True
+            self.card.title = self.notes[self.note_index(self.current)].title if self.note_index(self.current) >= 0 else String("")
+            self.card.editing = False
             return True
         if hit == "#search-button":
             self.searching = True
@@ -538,6 +640,26 @@ struct WebShell(Movable):
                 if hit == "row:" + n.emoji + " " + n.title:
                     self.open(n.id)
                     return True
+        if hit.startswith(".sec-head"):
+            var at = 0
+            if hit != ".sec-head":
+                try:
+                    at = Int(String(hit[byte=10:])) - 1
+                except:
+                    at = -1
+            self.panel.toggle_shelf(at)
+            return True
+        var ni = self.note_index(self.current)
+        if ni >= 0 and self.notes[ni].kind == "page" and not self.searching:
+            var tool = self.boxes.hit_any(x, y, [".page-tool:"])
+            if tool == ".page-tool:Draw" or tool == ".page-tool:Pen":
+                self.page.draw_mode = True
+                return True
+            if tool == ".page-tool:Write":
+                self.page.draw_mode = False
+                return True
+            if tool == "" and not self.page.draw_mode and self.page.tap(x, y):
+                return True
         if hit == "[Crayon skin]":
             self.set_skin("crayon")
             return True

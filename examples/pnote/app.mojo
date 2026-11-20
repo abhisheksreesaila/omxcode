@@ -774,6 +774,15 @@ struct Main(App):
             if m == GESTURE and event.number == TAP:
                 if self.web[0].tap(event.x, event.y):
                     self.version += 1
+            elif m == GESTURE and event.number == PRESS:
+                if self.web[0].press(event.x, event.y):
+                    self.version += 1
+            elif m == GESTURE and event.number == PAN:
+                if self.web[0].pan(event.x, event.y):
+                    self.version += 1
+            elif m == GESTURE and event.number == RELEASE:
+                if self.web[0].release(event.x, event.y):
+                    self.version += 1
             return
         if m == GESTURE:
             self.gesture(event)
