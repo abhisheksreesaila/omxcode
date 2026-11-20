@@ -835,6 +835,10 @@ def _registry() -> List[List[String]]:
     r.append(["Instrument Serif", "normal", "instrumentserif/InstrumentSerif-Regular.ttf", "400"])
     r.append(["Instrument Serif", "italic", "instrumentserif/InstrumentSerif-Italic.ttf", "400"])
     r.append(["Caveat", "normal", "caveat/Caveat[wght].ttf", "0"])
+    r.append(["Literata", "normal", "literata/Literata[opsz,wght].ttf", "0"])
+    r.append(["Literata", "italic", "literata/Literata-Italic[opsz,wght].ttf", "0"])
+    r.append(["Figtree", "normal", "figtree/Figtree[wght].ttf", "0"])
+    r.append(["Figtree", "italic", "figtree/Figtree-Italic[wght].ttf", "0"])
     return r^
 
 

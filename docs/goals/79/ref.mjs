@@ -43,13 +43,17 @@ const FACES = {
   'Source Serif 4': [['normal', 'sourceserif4/SourceSerif4[opsz,wght].ttf'], ['italic', 'sourceserif4/SourceSerif4-Italic[opsz,wght].ttf']],
   'Instrument Serif': [['normal', 'instrumentserif/InstrumentSerif-Regular.ttf', 400], ['italic', 'instrumentserif/InstrumentSerif-Italic.ttf', 400]],
   'Caveat': [['normal', 'caveat/Caveat[wght].ttf']],
+  'Literata': [['normal', 'literata/Literata[opsz,wght].ttf'], ['italic', 'literata/Literata-Italic[opsz,wght].ttf']],
+  'Figtree': [['normal', 'figtree/Figtree[wght].ttf'], ['italic', 'figtree/Figtree-Italic[wght].ttf']],
 }
+const unknownFamilies = new Set()
 const fontCss = (families) => families.map((fam) => (FACES[fam] ?? []).map(([style, file, weight]) =>
   `@font-face { font-family: "${fam}"; font-style: ${style}; font-weight: ${weight ?? '100 900'}; font-display: block; src: url("https://pn-fonts.local/${encodeURI(file)}") format("truetype"); }`).join('\n')).join('\n')
 async function routeFonts(ctx) {
   await ctx.route('https://fonts.googleapis.com/**', (route) => {
     const u = new URL(route.request().url())
     const fams = u.searchParams.getAll('family').map((f) => f.split(':')[0].replace(/\+/g, ' '))
+    for (const f of fams) if (!FACES[f]) unknownFamilies.add(f)
     route.fulfill({ contentType: 'text/css', body: fontCss(fams) })
   })
   await ctx.route('https://fonts.gstatic.com/**', (route) => route.abort())
@@ -181,5 +185,6 @@ fs.writeFileSync(path.join(OUT, 'textwidths.json'), JSON.stringify({ dpr: DPR, w
 fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ dpr: DPR, viewport: [W, H], chromium: browser.version(), ids, when: new Date().toISOString() }, null, 1))
 await browser.close()
 stop()
+if (unknownFamilies.size) { console.error(`ref: the web asked for fonts not in fonts/: ${[...unknownFamilies].join(', ')}`); process.exit(3) }
 console.log('ref: done', OUT)
 process.exit(0)

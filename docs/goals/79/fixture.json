@@ -1,50 +1,363 @@
 {
-  "about": "Goal 79's fixture: the same notes in both apps. ref.mjs seeds the web app's scratch database through its own API from this file (in this order); the native app seeds an empty database from it with PNOTE_FIXTURE.",
-  "notebooks": [{"name": "Travel"}],
-  "notes": [
-    {"title": "Lighthouse trip", "noteType": "page", "content": {"version": 1, "markdown": "# Lighthouse trip\n\nThree days on the coast in **late May**, when the ferry runs twice a day.\n\n## Pack\n\n- [x] Rain jacket\n- [ ] Binoculars\n- [ ] *Field guide* to sea birds\n\n## Route\n\n1. Train to the harbour\n2. Morning ferry\n3. Walk the cliff path to the light\n\n> The keeper lets visitors climb the stairs on Sundays.\n\nBudget: `£240` for the cottage.\n", "ink": {"marks": [], "drawings": []}}},
-    {"title": "Garden plan", "noteType": "canvas", "content": {"nodes": [
-      {"id": "a", "type": "text", "x": 80, "y": 80, "width": 320, "height": 120, "text": "# Garden plan\nBeds by the south wall, herbs near the door."},
-      {"id": "b", "type": "text", "x": 460, "y": 90, "width": 200, "height": 160, "text": "Tomatoes\nBasil\nMarigolds", "color": "3"},
-      {"id": "c", "type": "text", "x": 120, "y": 300, "width": 220, "height": 140, "text": "Water every\nother evening", "color": "1"}
-    ], "edges": [{"id": "e1", "fromNode": "a", "toNode": "b"}]}},
-    {"title": "Book mind map", "noteType": "mindmap", "content": {"version": 1, "title": "Book mind map", "rootId": "root", "nodes": [
-      {"id": "root", "parentId": null, "text": "The book", "x": 0, "y": 0, "color": "#ef684b"},
-      {"id": "k0", "parentId": "root", "text": "Characters", "x": 280, "y": -130, "color": "#efad28"},
-      {"id": "k0-0", "parentId": "k0", "text": "Mara", "x": 500, "y": -190, "color": "#efad28"},
-      {"id": "k0-1", "parentId": "k0", "text": "The keeper", "x": 500, "y": -130, "color": "#efad28"},
-      {"id": "k0-2", "parentId": "k0", "text": "Old Tom", "x": 500, "y": -70, "color": "#efad28"},
-      {"id": "k1", "parentId": "root", "text": "Places", "x": -280, "y": -130, "color": "#65ae4f"},
-      {"id": "k1-0", "parentId": "k1", "text": "Harbour", "x": -500, "y": -160, "color": "#65ae4f"},
-      {"id": "k1-1", "parentId": "k1", "text": "Cliff path", "x": -500, "y": -100, "color": "#65ae4f"},
-      {"id": "k2", "parentId": "root", "text": "Themes", "x": 280, "y": 130, "color": "#2d9c91"},
-      {"id": "k2-0", "parentId": "k2", "text": "Isolation", "x": 500, "y": 100, "color": "#2d9c91"},
-      {"id": "k2-1", "parentId": "k2", "text": "Light", "x": 500, "y": 160, "color": "#2d9c91"},
-      {"id": "k3", "parentId": "root", "text": "Plot", "x": -280, "y": 130, "color": "#3d8fe8"},
-      {"id": "k3-0", "parentId": "k3", "text": "Storm night", "x": -500, "y": 70, "color": "#3d8fe8"},
-      {"id": "k3-1", "parentId": "k3", "text": "The letter", "x": -500, "y": 130, "color": "#3d8fe8"},
-      {"id": "k3-2", "parentId": "k3", "text": "Return", "x": -500, "y": 190, "color": "#3d8fe8"}
-    ]}},
-    {"title": "Grocery ideas", "noteType": "page"},
-    {"title": "Reading list", "noteType": "page"},
-    {"title": "Weekly review", "noteType": "page"}
-  ],
-  "textlines": [
-    {"id": "geist", "family": "Geist", "weight": 400, "style": "normal", "size": 14, "text": "Quick note, Inbox and the shelves"},
-    {"id": "geist-600", "family": "Geist", "weight": 600, "style": "normal", "size": 14, "text": "Projects, Areas, Resources"},
-    {"id": "geistmono", "family": "Geist Mono", "weight": 400, "style": "normal", "size": 11, "text": "Alt N · Ctrl . · 102%"},
-    {"id": "bricolage", "family": "Bricolage Grotesque", "weight": 700, "style": "normal", "size": 32, "text": "Lighthouse trip"},
-    {"id": "plexsans", "family": "IBM Plex Sans", "weight": 400, "style": "normal", "size": 15, "text": "Water every other evening"},
-    {"id": "plexmono", "family": "IBM Plex Mono", "weight": 400, "style": "normal", "size": 13, "text": "Budget: £240 → fi fl"},
-    {"id": "serif", "family": "Source Serif 4", "weight": 400, "style": "normal", "size": 19, "text": "Three days on the coast in late May, office affinity"},
-    {"id": "serif-italic", "family": "Source Serif 4", "weight": 400, "style": "italic", "size": 19, "text": "The keeper lets visitors climb the stairs"},
-    {"id": "instrument", "family": "Instrument Serif", "weight": 400, "style": "italic", "size": 30, "text": "Personal Note at night"},
-    {"id": "hindi", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "नमस्ते दुनिया, क्षत्रिय"},
-    {"id": "tamil", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "வணக்கம் உலகம்"},
-    {"id": "arabic", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "مرحبا بالعالم"},
-    {"id": "japanese", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "こんにちは世界、漢字かな"},
-    {"id": "chinese", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "你好，世界"},
-    {"id": "korean", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "안녕하세요 세계"},
-    {"id": "emoji", "family": "Geist", "weight": 400, "style": "normal", "size": 18, "text": "Trip ✈️ 📚 🏠 🛒 👍🏽"}
-  ]
+ "about": "Goal 79's fixture: the same notes in both apps. ref.mjs seeds the web app's scratch database through its own API from this file (in this order); the native app seeds an empty database from it with PNOTE_FIXTURE.",
+ "notebooks": [
+  {
+   "name": "Travel"
+  }
+ ],
+ "notes": [
+  {
+   "title": "Lighthouse trip",
+   "noteType": "page",
+   "content": {
+    "version": 1,
+    "markdown": "# Lighthouse trip\n\nThree days on the coast in **late May**, when the ferry runs twice a day.\n\n## Pack\n\n- [x] Rain jacket\n- [ ] Binoculars\n- [ ] *Field guide* to sea birds\n\n## Route\n\n1. Train to the harbour\n2. Morning ferry\n3. Walk the cliff path to the light\n\n> The keeper lets visitors climb the stairs on Sundays.\n\nBudget: `£240` for the cottage.\n",
+    "ink": {
+     "marks": [],
+     "drawings": []
+    }
+   }
+  },
+  {
+   "title": "Garden plan",
+   "noteType": "canvas",
+   "content": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "text",
+      "x": 80,
+      "y": 80,
+      "width": 320,
+      "height": 120,
+      "text": "# Garden plan\nBeds by the south wall, herbs near the door."
+     },
+     {
+      "id": "b",
+      "type": "text",
+      "x": 460,
+      "y": 90,
+      "width": 200,
+      "height": 160,
+      "text": "Tomatoes\nBasil\nMarigolds",
+      "color": "3"
+     },
+     {
+      "id": "c",
+      "type": "text",
+      "x": 120,
+      "y": 300,
+      "width": 220,
+      "height": 140,
+      "text": "Water every\nother evening",
+      "color": "1"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "fromNode": "a",
+      "toNode": "b"
+     }
+    ]
+   }
+  },
+  {
+   "title": "Book mind map",
+   "noteType": "mindmap",
+   "content": {
+    "version": 1,
+    "title": "Book mind map",
+    "rootId": "root",
+    "nodes": [
+     {
+      "id": "root",
+      "parentId": null,
+      "text": "The book",
+      "x": 0,
+      "y": 0,
+      "color": "#ef684b"
+     },
+     {
+      "id": "k0",
+      "parentId": "root",
+      "text": "Characters",
+      "x": 280,
+      "y": -130,
+      "color": "#efad28"
+     },
+     {
+      "id": "k0-0",
+      "parentId": "k0",
+      "text": "Mara",
+      "x": 500,
+      "y": -190,
+      "color": "#efad28"
+     },
+     {
+      "id": "k0-1",
+      "parentId": "k0",
+      "text": "The keeper",
+      "x": 500,
+      "y": -130,
+      "color": "#efad28"
+     },
+     {
+      "id": "k0-2",
+      "parentId": "k0",
+      "text": "Old Tom",
+      "x": 500,
+      "y": -70,
+      "color": "#efad28"
+     },
+     {
+      "id": "k1",
+      "parentId": "root",
+      "text": "Places",
+      "x": -280,
+      "y": -130,
+      "color": "#65ae4f"
+     },
+     {
+      "id": "k1-0",
+      "parentId": "k1",
+      "text": "Harbour",
+      "x": -500,
+      "y": -160,
+      "color": "#65ae4f"
+     },
+     {
+      "id": "k1-1",
+      "parentId": "k1",
+      "text": "Cliff path",
+      "x": -500,
+      "y": -100,
+      "color": "#65ae4f"
+     },
+     {
+      "id": "k2",
+      "parentId": "root",
+      "text": "Themes",
+      "x": 280,
+      "y": 130,
+      "color": "#2d9c91"
+     },
+     {
+      "id": "k2-0",
+      "parentId": "k2",
+      "text": "Isolation",
+      "x": 500,
+      "y": 100,
+      "color": "#2d9c91"
+     },
+     {
+      "id": "k2-1",
+      "parentId": "k2",
+      "text": "Light",
+      "x": 500,
+      "y": 160,
+      "color": "#2d9c91"
+     },
+     {
+      "id": "k3",
+      "parentId": "root",
+      "text": "Plot",
+      "x": -280,
+      "y": 130,
+      "color": "#3d8fe8"
+     },
+     {
+      "id": "k3-0",
+      "parentId": "k3",
+      "text": "Storm night",
+      "x": -500,
+      "y": 70,
+      "color": "#3d8fe8"
+     },
+     {
+      "id": "k3-1",
+      "parentId": "k3",
+      "text": "The letter",
+      "x": -500,
+      "y": 130,
+      "color": "#3d8fe8"
+     },
+     {
+      "id": "k3-2",
+      "parentId": "k3",
+      "text": "Return",
+      "x": -500,
+      "y": 190,
+      "color": "#3d8fe8"
+     }
+    ]
+   }
+  },
+  {
+   "title": "Grocery ideas",
+   "noteType": "page"
+  },
+  {
+   "title": "Reading list",
+   "noteType": "page"
+  },
+  {
+   "title": "Weekly review",
+   "noteType": "page"
+  }
+ ],
+ "textlines": [
+  {
+   "id": "geist",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 14,
+   "text": "Quick note, Inbox and the shelves"
+  },
+  {
+   "id": "geist-600",
+   "family": "Geist",
+   "weight": 600,
+   "style": "normal",
+   "size": 14,
+   "text": "Projects, Areas, Resources"
+  },
+  {
+   "id": "geistmono",
+   "family": "Geist Mono",
+   "weight": 400,
+   "style": "normal",
+   "size": 11,
+   "text": "Alt N · Ctrl . · 102%"
+  },
+  {
+   "id": "bricolage",
+   "family": "Bricolage Grotesque",
+   "weight": 700,
+   "style": "normal",
+   "size": 32,
+   "text": "Lighthouse trip"
+  },
+  {
+   "id": "plexsans",
+   "family": "IBM Plex Sans",
+   "weight": 400,
+   "style": "normal",
+   "size": 15,
+   "text": "Water every other evening"
+  },
+  {
+   "id": "plexmono",
+   "family": "IBM Plex Mono",
+   "weight": 400,
+   "style": "normal",
+   "size": 13,
+   "text": "Budget: £240 → fi fl"
+  },
+  {
+   "id": "serif",
+   "family": "Source Serif 4",
+   "weight": 400,
+   "style": "normal",
+   "size": 19,
+   "text": "Three days on the coast in late May, office affinity"
+  },
+  {
+   "id": "serif-italic",
+   "family": "Source Serif 4",
+   "weight": 400,
+   "style": "italic",
+   "size": 19,
+   "text": "The keeper lets visitors climb the stairs"
+  },
+  {
+   "id": "instrument",
+   "family": "Instrument Serif",
+   "weight": 400,
+   "style": "italic",
+   "size": 30,
+   "text": "Personal Note at night"
+  },
+  {
+   "id": "literata",
+   "family": "Literata",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "Three days on the coast in late May, twice a day"
+  },
+  {
+   "id": "literata-700",
+   "family": "Literata",
+   "weight": 700,
+   "style": "normal",
+   "size": 18,
+   "text": "late May"
+  },
+  {
+   "id": "figtree",
+   "family": "Figtree",
+   "weight": 500,
+   "style": "normal",
+   "size": 13,
+   "text": "Write Draw Pen Red Highlighter Eraser Rectangle"
+  },
+  {
+   "id": "hindi",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "नमस्ते दुनिया, क्षत्रिय"
+  },
+  {
+   "id": "tamil",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "வணக்கம் உலகம்"
+  },
+  {
+   "id": "arabic",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "مرحبا بالعالم"
+  },
+  {
+   "id": "japanese",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "こんにちは世界、漢字かな"
+  },
+  {
+   "id": "chinese",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "你好，世界"
+  },
+  {
+   "id": "korean",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "안녕하세요 세계"
+  },
+  {
+   "id": "emoji",
+   "family": "Geist",
+   "weight": 400,
+   "style": "normal",
+   "size": 18,
+   "text": "Trip ✈️ 📚 🏠 🛒 👍🏽"
+  }
+ ]
 }
