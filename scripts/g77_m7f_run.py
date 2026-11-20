@@ -127,6 +127,7 @@ def shots():
             # (the TV's quiet at 60 s for these pictures only: sixteen point frames at desktop size outlast the 12 s quiet, and the
             # "tv" picture and the ring-free reference must show the TV still open)
             (OUT / f"shot-{name}.log").write_text(r.stdout[-30000:] + f"\n--- exit {r.returncode}; stderr ---\n" + r.stderr[-20000:])
+            (OUT / f"shot-{name}.err").write_text(r.stderr)  # (whole: a crash's stack frames are long; the log's tail cuts its top off)
             cards = [e for e in ev if e["kind"] == "CARD"]
             points = [e for e in ev if e["kind"] == "POINT"]
             stage = [e for e in ev if e["kind"] == "STAGE"]
