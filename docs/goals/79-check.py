@@ -618,7 +618,8 @@ def m5():
         probs.append("Linux: no 'PNOTE IME: preedit=\"かんじ\" underline=1 caret=… cursor_location=…' from the app's GtkIMContext")
     elif abs(float(pre.group(1)) - float(pre.group(3))) > 2 or abs(float(pre.group(2)) - float(pre.group(4))) > 24:
         probs.append(f"Linux: the candidate window ({pre.group(3)},{pre.group(4)}) isn't at the caret ({pre.group(1)},{pre.group(2)})")
-    if "PNOTE IME: context=GtkIMMulticontext" not in log and "PNOTE IME: context=" not in log:
+    # (fixed 11-19, D-7918) the IM context is the framework's, made by the GTK host for the app's canvas: "IME: context=…"
+    if not re.search(r"^(PNOTE )?IME: context=Gtk\w*IM\w*", log, re.M):
         probs.append("Linux: the app didn't report the IM context it created")
     md = page_markdown(out / "ime.db", "Weekly review")
     want = "漢字\nनमस्ते\n한국어\n漢字 नमस्ते 한국어"
@@ -751,7 +752,7 @@ fs.writeFileSync(out + '/note-stress.json', JSON.stringify(s.content));
 NATIVE_RACE = ["framebench:note=open,20", "framebench:note=pan,120", "framebench:note=zoom,60", "framebench:note=dragone,60",
                "framebench:note=drag40,60", "framebench:note=undoredo,40", "framebench:note=draw,300", "framebench:note=typing,60"]
 NATIVE_NAMES = {"open": "open", "pan": "pan", "zoom": "zoom", "dragone": "drag one", "drag40": "drag 40", "undoredo": "undo/redo",
-                "draw": "pen", "typing": "typing"}
+                "draw": "pen", "typing": "typing", "type": "typing"}
 
 
 def native_race(out):
@@ -760,12 +761,18 @@ def native_race(out):
         if not line.startswith("FRAMEBENCH:"):
             continue
         kv = dict(re.findall(r"(\w+)=([^\s]+)", line))
-        what = re.search(r"FRAMEBENCH: \S+=(\w+)", line)
+        # (fixed 11-19, D-7919) the host prints `FRAMEBENCH: <what> n=… p95=… gpu_frames=…`; frames not drawn by the GPU
+        # renderer are CPU frames (n − gpu_frames)
+        what = re.match(r"FRAMEBENCH: (\w+) ", line)
         if not what:
             continue
         name = NATIVE_NAMES.get(what.group(1), what.group(1))
         try:
-            res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": int(kv.get("cpu_frames", "0"))}
+            n = int(kv["n"])
+            cpu = int(kv["cpu_frames"]) if "cpu_frames" in kv else n - int(kv.get("gpu_frames", "0"))
+            if n == 0:
+                continue
+            res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu}
         except (KeyError, ValueError):
             pass
     return res

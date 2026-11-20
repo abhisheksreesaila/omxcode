@@ -4,7 +4,7 @@
 
 from mojoui.scene import Painter
 from mojoui.sqlite import Database
-from mojoui.json import Json
+from mojoui.json import Json, json_string
 from mojoui.skin import Skin, skin_named, mix, with_alpha
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
@@ -320,7 +320,85 @@ struct WebShell(Movable):
             self.omni.preview_edited = relative_time(n.updated, self.now())
             self.omni.preview_created = short_date(n.created)
 
+    def save_page(mut self):
+        """The open page's Markdown into Personal Note's own schema, as its API saves a note: the content JSON (ink kept),
+        a new revision, updated_at, the workspace change log, and the search index."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "page":
+            return
+        var md = self.page.markdown()
+        var ink = String('{"marks":[],"drawings":[]}')
+        try:
+            var j = Json.parse(self.notes[i].content)
+            var node = j.get(0, "ink")
+            if node >= 0:
+                ink = j.dump(node)
+        except:
+            pass
+        var content = '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}"
+        try:
+            var db = Database(self.db_path)
+            db.exec("BEGIN")
+            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            up.bind(1, content)
+            up.bind(2, self.notes[i].id)
+            _ = up.step()
+            var seq = db.prepare("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+            _ = seq.step()
+            var ch = db.prepare("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?")
+            ch.bind(1, self.notes[i].id)
+            _ = ch.step()
+            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
+            del_.bind(1, self.notes[i].id)
+            _ = del_.step()
+            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
+            ins.bind(1, self.notes[i].id)
+            ins.bind(2, self.notes[i].title)
+            ins.bind(3, md)
+            _ = ins.step()
+            db.exec("COMMIT")
+            self.notes[i].content = content
+        except e:
+            print("PNOTE ERROR: save: " + String(e), flush=True)
+
+    def text_in(mut self, kind: String, text: String) -> Bool:
+        """An input method's commit or a paste into the open page."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "page" or self.searching or self.card_open or self.settings_open:
+            return False
+        self.page.insert(text)
+        self.save_page()
+        return True
+
+    def preedit(mut self, text: String, cx: Float64, cy: Float64, cw: Float64, ch: Float64) -> Bool:
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "page":
+            return False
+        self.page.preedit = text
+        if text != "":
+            var r = self.page.caret_rect
+            print("PNOTE IME: preedit=\"" + text + "\" underline=1 caret=" + String(r[0]) + "," + String(r[1]) + " cursor_location=" + String(cx) + "," + String(cy) + "," + String(cw) + "," + String(ch), flush=True)
+        return True
+
     def key(mut self, name: String, mods: Int) -> Bool:
+        var ni = self.note_index(self.current)
+        if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page":
+            if name == "End" and (mods & 2) != 0:
+                self.page.caret_end()
+                return True
+            if name == "Return" or name == "Enter":
+                self.page.newline()
+                self.save_page()
+                return True
+            if name == "BackSpace" or name == "Backspace":
+                self.page.backspace()
+                self.save_page()
+                return True
+            if (mods & 2) == 0 and name.byte_length() >= 1 and (name.byte_length() == 1 or Int(name.as_bytes()[0]) >= 0x80) and name != "Escape":
+                self.page.insert(name)
+                self.save_page()
+                return True
+            return False
         if (self.card_open or self.settings_open) and name == "Escape":
             self.card_open = False
             self.settings_open = False
@@ -342,6 +420,12 @@ struct WebShell(Movable):
         else:
             return False
         return True
+
+    def caret(self) -> Tuple[Float64, Float64, Float64, Float64]:
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "page":
+            return (-1.0, 0.0, 0.0, 0.0)
+        return self.page.caret_rect
 
     def bench(mut self, name: String) -> Tuple[Float64, Float64]:
         """The race's app steps: switch to the next note, open or close the omnibar, open a note of each kind in turn."""

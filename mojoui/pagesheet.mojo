@@ -41,11 +41,17 @@ struct Seg(Copyable, Movable):
 struct PageSheet(Movable):
     var lines: List[String]
     var caret_line: Int  # -1: no caret drawn
+    var caret_col: Int  # byte column in its line
+    var preedit: String  # an input method's composition, shown at the caret, underlined (not in the text)
+    var caret_rect: Tuple[Float64, Float64, Float64, Float64]  # where the caret was last drawn (layout px)
     var scroll: Float64
 
     def __init__(out self):
         self.lines = List[String]()
         self.caret_line = -1
+        self.caret_col = 0
+        self.preedit = ""
+        self.caret_rect = (-1.0, 0.0, 0.0, 0.0)
         self.scroll = 0
 
     def set_markdown(mut self, md: String):
@@ -54,6 +60,55 @@ struct PageSheet(Movable):
             self.lines.append(String(l))
         # CodeMirror keeps the text's last newline as an empty last line
         self.caret_line = len(self.lines) - 1
+        self.caret_col = self.lines[self.caret_line].byte_length()
+        self.preedit = ""
+
+    def markdown(self) -> String:
+        return "\n".join(self.lines)
+
+    # ------------------------------------------------ editing (goal 79 M5: typed keys, input-method commits, pastes)
+
+    def caret_end(mut self):
+        self.caret_line = len(self.lines) - 1
+        self.caret_col = self.lines[self.caret_line].byte_length()
+
+    def insert(mut self, text: String):
+        """Text at the caret (a newline in it splits the line); the caret ends after it."""
+        var parts = text.split("\n")
+        for i in range(len(parts)):
+            if i > 0:
+                self.newline()
+            var part = String(parts[i])
+            ref l = self.lines[self.caret_line]
+            var before = String(l[byte=0:self.caret_col])
+            var after = String(l[byte=self.caret_col:])
+            self.lines[self.caret_line] = before + part + after
+            self.caret_col += part.byte_length()
+
+    def newline(mut self):
+        ref l = self.lines[self.caret_line]
+        var before = String(l[byte=0:self.caret_col])
+        var after = String(l[byte=self.caret_col:])
+        self.lines[self.caret_line] = before
+        self.lines.insert(self.caret_line + 1, after)
+        self.caret_line += 1
+        self.caret_col = 0
+
+    def backspace(mut self):
+        if self.caret_col > 0:
+            ref l = self.lines[self.caret_line]
+            var b = l.as_bytes()
+            var at = self.caret_col - 1
+            while at > 0 and (Int(b[at]) & 0xC0) == 0x80:  # (a whole UTF-8 character)
+                at -= 1
+            self.lines[self.caret_line] = String(l[byte=0:at]) + String(l[byte=self.caret_col:])
+            self.caret_col = at
+        elif self.caret_line > 0:
+            var col = self.lines[self.caret_line - 1].byte_length()
+            self.lines[self.caret_line - 1] = self.lines[self.caret_line - 1] + self.lines[self.caret_line]
+            _ = self.lines.pop(self.caret_line)
+            self.caret_line -= 1
+            self.caret_col = col
 
     def segments(self, line: String) -> List[Seg]:
         """A Markdown line as styled pieces (headings, list and quote marks, bold, italic, inline code)."""
@@ -146,7 +201,7 @@ struct PageSheet(Movable):
             below = max(below, lu(s.lh) - a)
         return (lu(above + below), above)
 
-    def draw[P: Painter](self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, x1: Float64, y1: Float64, k: Float64, emoji: String,
+    def draw[P: Painter](mut self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, x1: Float64, y1: Float64, k: Float64, emoji: String,
                          tint: UInt32, radius: Float64, mode_draw: Bool = False):
         """The page host filling (x0, y0)–(x1, y1) (its border inside), the desk, toolbar, sheet and text."""
         var w = x1 - x0
@@ -191,15 +246,39 @@ struct PageSheet(Movable):
             n += 1
         bx.add(".page-editor:" + cps, tx, ty, tw, self._text_height())
         for li in range(len(self.lines)):
-            var segs = self.segments(self.lines[li])
+            var shown = self.lines[li]
+            var pre_at = -1
+            if li == self.caret_line and self.preedit != "":
+                shown = String(shown[byte=0:self.caret_col]) + self.preedit + String(shown[byte=self.caret_col:])
+                pre_at = self.caret_col
+            var segs = self.segments(shown)
             var lb = self.line_box(segs)
             var base = ty + lb[1]
             var x = tx
+            var off = 0
+            var caret_x = tx
+            var pre_x0 = -1.0
+            var pre_x1 = -1.0
+            var caret_col = self.caret_col + self.preedit.byte_length() if li == self.caret_line else -1
             for ref s in segs:
+                var n = s.text.byte_length()
+                if caret_col >= off and caret_col <= off + n:
+                    caret_x = x + measure(s.style, String(s.text[byte=0:caret_col - off]))
+                if pre_at >= 0:
+                    var e = pre_at + self.preedit.byte_length()
+                    if pre_at >= off and pre_at <= off + n and pre_x0 < 0:
+                        pre_x0 = x + measure(s.style, String(s.text[byte=0:pre_at - off]))
+                    if e >= off and e <= off + n:
+                        pre_x1 = x + measure(s.style, String(s.text[byte=0:e - off]))
                 p.run(s.style, s.text, x, base, s.color, ALIGN_LEFT)
                 x += measure(s.style, s.text)
+                off += n
+            if pre_x0 >= 0 and pre_x1 > pre_x0:  # (the composition, underlined as input methods show it)
+                p.rect(pre_x0, base + 2, pre_x1 - pre_x0, 1.5, PAGE_INK, 0)
             if li == self.caret_line:
-                p.rect(tx - 0.59, ty + 4, 2, 20, PAGE_INK, 0)
+                var cx = (caret_x - 0.59) if caret_x > tx else tx - 0.59
+                p.rect(cx, ty + 4, 2, 20, PAGE_INK, 0)
+                self.caret_rect = (cx, ty + 4, 2.0, 20.0)
             ty += lb[0]
         # the toolbar, sticky at the desk's top
         self._toolbar(p, bx, sx, max(top, dy), stage_w, mode_draw)

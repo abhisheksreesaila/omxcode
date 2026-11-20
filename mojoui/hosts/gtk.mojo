@@ -16,7 +16,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
     CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
-    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL, HOVER,
+    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL, HOVER, IME_COMMIT, IME_PREEDIT, PASTE,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
@@ -486,6 +486,13 @@ struct GtkCanvas(Copyable, Movable):
     var click: Int  # GtkGestureClick
     var secondary: Int  # GtkGestureClick for the right button (SECONDARY: a context menu)
     var keys: Int  # GtkEventControllerKey (the canvas takes focus when pressed)
+    var im: Int  # its GtkIMMulticontext (keys go through the input method first; goal 79)
+    var test_preedit: String  # (tests: imepreedit:) the preedit the next preedit-changed reports
+    var test_preedit_on: Bool
+    var im_x: Int  # the candidate window's rect last given to the input method (points)
+    var im_y: Int
+    var im_w: Int
+    var im_h: Int
     var motion_ctl: Int  # GtkEventControllerMotion
     var pinch_ctl: Int  # GtkGestureZoom
     var pixels: List[UInt32]
@@ -585,6 +592,13 @@ struct GtkCanvas(Copyable, Movable):
         self.click = 0
         self.secondary = 0
         self.keys = 0
+        self.im = 0
+        self.test_preedit = ""
+        self.test_preedit_on = False
+        self.im_x = -1
+        self.im_y = 0
+        self.im_w = 0
+        self.im_h = 0
         self.motion_ctl = 0
         self.pinch_ctl = 0
         self.pixels = List[UInt32]()
@@ -1755,6 +1769,15 @@ struct GtkHost[A: App](Movable):
                 set_index(keys, ci)
                 connect_any(keys, "key-pressed", on_key_pressed[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](w, keys)
+                # (goal 79) keys go through the system's input method first: commits and preedits come back as text
+                var im = external_call["gtk_im_multicontext_new", Int]()
+                set_index(im, ci)
+                external_call["gtk_im_context_set_client_widget", NoneType](im, w)
+                external_call["gtk_event_controller_key_set_im_context", NoneType](keys, im)
+                connect_any(im, "commit", on_im_commit[Self.A], self_addr)
+                connect_any(im, "preedit-changed", on_im_preedit[Self.A], self_addr)
+                c.im = im
+                print("IME: context=" + String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](im))), flush=True)
             if node.size == 2:  # .passthrough(): it only shows; presses go to what's under it
                 external_call["gtk_widget_set_can_target", NoneType](w, c_int(0))
                 if snap != 0:
@@ -5073,7 +5096,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var host = host_at[A](host_addr)
     var kv = split_at(rest, "=")
     var spec = split_at(kv[1], ",")
-    var what = spec[0]
+    var what = spec[0] if spec[0] != "typing" else String("type")
     var count = max(to_int(spec[1]), 1)
     var node = canvas_node(host[], kv[0])
     var ci = -1
@@ -5156,6 +5179,11 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         bench_wait[A](host_addr, ci, 200_000_000)
     var drag_x0 = x
     var drag_y0 = y
+    if what == "pan" or what == "zoom" or what == "draw" or what == "type" or what == "finish":  # (the app readies the step: a tool, a text box…)
+        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        var d0 = host[].rt.refresh()
+        host[].apply(d0, host_addr)
+        bench_wait[A](host_addr, ci, 300_000_000)
     if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open":
         # (goal 79: Personal Note's benchmark steps) the app says where: App.spot(canvas, "bench:<what>") — an object to
         # drag (dragone), the lead of 40 it has selected (drag40), or, for undoredo and open, it prepares the step (App.bench)
@@ -5947,8 +5975,90 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     var mods = (SHIFT if (s & 1) != 0 else 0) + (CTRL if (s & 4) != 0 else 0) + (ALT if (s & 8) != 0 else 0)
     var name = key_name(Int(keyval))
     host[].canvas_key(ci, name, mods, host_addr)
+    if (mods & CTRL) != 0 and (name == "v" or name == "V"):  # (goal 79) a paste: the system clipboard's text, read for the canvas
+        var display = external_call["gdk_display_get_default", Int]()
+        external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], (host_addr << 10) | ci)
+    im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
     return c_int(0 if (mods & (CTRL | ALT)) != 0 and name != "Home" and name != "End" else 1)
+
+
+def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
+    """The input method committed text: IME_COMMIT to the canvas (and the composition, if any, is over)."""
+    var host = host_at[A](host_addr)
+    var ci = get_index(im)
+    if ci < 0 or ci >= len(host[].canvases):
+        return
+    var t = c_str(text)
+    host[].canvases[ci].test_preedit_on = False
+    var d = host[].rt.text_event(host[].canvases[ci].node, IME_COMMIT, t)
+    host[].apply(d, host_addr)
+    var d2 = host[].rt.text_event(host[].canvases[ci].node, IME_PREEDIT, "")
+    host[].apply(d2, host_addr)
+
+
+def on_im_preedit[A: App](im: Int, host_addr: Int) abi("C"):
+    """The input method's composition changed: IME_PREEDIT with its text and cursor, and where the candidate window is."""
+    var host = host_at[A](host_addr)
+    var ci = get_index(im)
+    if ci < 0 or ci >= len(host[].canvases):
+        return
+    var text = String("")
+    var cursor = 0
+    if host[].canvases[ci].test_preedit_on:
+        text = host[].canvases[ci].test_preedit
+        cursor = text.byte_length()
+    else:
+        var sp = List[Int](length=1, fill=0)
+        var at = List[Int](length=1, fill=0)
+        var cur = List[c_int](length=1, fill=0)
+        external_call["gtk_im_context_get_preedit_string", NoneType](im, Int(sp.unsafe_ptr()), Int(at.unsafe_ptr()), Int(cur.unsafe_ptr()))
+        text = c_str(sp[0])
+        cursor = Int(cur[0])
+        if sp[0] != 0:
+            external_call["g_free", NoneType](sp[0])
+        if at[0] != 0:
+            external_call["pango_attr_list_unref", NoneType](at[0])
+        _ = cur
+    ref c = host[].canvases[ci]
+    var d = host[].rt.text_event(c.node, IME_PREEDIT, text, Float64(c.im_x), Float64(c.im_y), Float64(c.im_w), Float64(c.im_h), Float64(cursor))
+    host[].apply(d, host_addr)
+
+
+def on_paste_read[A: App](clipboard: Int, result: Int, data: Int) abi("C"):
+    """The system clipboard's text, read for a paste: PASTE to the canvas (data: host address · 1024 + canvas)."""
+    var host_addr = data >> 10
+    var ci = data & 1023
+    var host = host_at[A](host_addr)
+    var t = external_call["gdk_clipboard_read_text_finish", Int](clipboard, result, 0)
+    if t == 0 or ci < 0 or ci >= len(host[].canvases):
+        return
+    var text = c_str(t)
+    external_call["g_free", NoneType](t)
+    var d = host[].rt.text_event(host[].canvases[ci].node, PASTE, text)
+    host[].apply(d, host_addr)
+
+
+def im_place[A: App](host_addr: Int, ci: Int):
+    """Tells canvas ci's input method where the app's caret is (App.caret), so its candidate window opens there."""
+    var host = host_at[A](host_addr)
+    ref c = host[].canvases[ci]
+    if c.im == 0:
+        return
+    var r = host[].rt.app.caret(host[].rt.shown.nodes[c.node].style)
+    if r[0] < 0:
+        return
+    var rect = List[c_int](length=4, fill=0)
+    rect[0] = c_int(Int(r[0]))
+    rect[1] = c_int(Int(r[1]))
+    rect[2] = c_int(max(1, Int(r[2])))
+    rect[3] = c_int(max(1, Int(r[3])))
+    external_call["gtk_im_context_set_cursor_location", NoneType](c.im, Int(rect.unsafe_ptr()))
+    c.im_x = Int(rect[0])
+    c.im_y = Int(rect[1])
+    c.im_w = Int(rect[2])
+    c.im_h = Int(rect[3])
+    _ = rect
 
 
 def on_field_key[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
@@ -7290,6 +7400,29 @@ def run_step[A: App](host_addr: Int, step: String):
               + " within-9.5ms " + one_decimal(Float32(share_within(intervals(host[].frame_times), 9.5))) + "%"
               + " cells built " + String(host[].cells_built) + " uploads " + String(host[].uploads)
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
+    elif verb == "imepreedit" or verb == "imecommit":  # imepreedit:K=text / imecommit:K=text: the canvas's own GtkIMContext emits preedit-changed (reporting text) / commit
+        var kv = split_at(rest, "=")
+        var node = canvas_node(host[], kv[0])
+        for k in range(len(host[].canvases)):
+            if host[].canvases[k].node == node and host[].canvases[k].im != 0:
+                im_place[A](host_addr, k)
+                if verb == "imepreedit":
+                    host[].canvases[k].test_preedit = kv[1]
+                    host[].canvases[k].test_preedit_on = True
+                    var sig = String("preedit-changed")
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[k].im, sig.as_c_string_span())
+                else:
+                    var sig = String("commit")
+                    var t = kv[1]
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[k].im, sig.as_c_string_span(), t.as_c_string_span())
+                    _ = t
+    elif verb == "clipboard":  # clipboard:text: the system clipboard holds text (as another app's copy would)
+        var display = external_call["gdk_display_get_default", Int]()
+        var t = rest
+        external_call["gdk_clipboard_set_text", NoneType](external_call["gdk_display_get_clipboard", Int](display), t.as_c_string_span())
+        _ = t
+        for _ in range(10):
+            settle()
     elif verb == "firstscreen":  # firstscreen: how long after the process started its first canvas picture was handed to GTK (goal 79's race)
         print("FIRSTSCREEN: " + String(round(host[].first_hand_age_ms, 1)), flush=True)
     elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its painted frame

@@ -138,6 +138,11 @@ trait App(Movable, Deinitable):
         pixels. Returns False (the default) when the canvas only paints pixels (draw())."""
         return False
 
+    def caret(self, canvas: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """Where the text caret is on Canvas `canvas` (x, y, w, h in points; x < 0: none): the host places the input
+        method's candidate window there (goal 79). The default: none."""
+        return (-1.0, 0.0, 0.0, 0.0)
+
     def hovers(self) -> Bool:
         """True: the app's Canvases get HOVER gestures as the pointer moves over them with no button held (it draws hover
         states itself; goal 79). The default: no, so apps that redraw on every gesture don't redraw on every motion."""
@@ -649,6 +654,17 @@ struct Runtime[A: App](Movable):
         if n.kind != CANVAS or n.msg == 0:
             return Diff(False, [])
         return self.dispatch(Event(n.msg, name, KEY, 0, 0, Float64(modifiers), 0, 1))
+
+    def text_event(mut self, node: Int, kind: Int, text: String, x: Float64 = 0, y: Float64 = 0, dx: Float64 = 0, dy: Float64 = 0,
+                   zoom: Float64 = 0) -> Diff:
+        """Text reaching canvas node `node` from outside the keys: an input method's commit or preedit, a paste
+        (IME_COMMIT, IME_PREEDIT, PASTE: its gesture message with that number and event.text)."""
+        if node < 0 or node >= len(self.shown.nodes):
+            return Diff(False, [])
+        ref n = self.shown.nodes[node]
+        if n.kind != CANVAS or n.msg == 0:
+            return Diff(False, [])
+        return self.dispatch(Event(n.msg, text, kind, x, y, dx, dy, zoom))
 
     def cancel(mut self, node: Int, text: String) -> Diff:
         """Escape in field node `node`: its on_cancel message (event.text = the field's text)."""

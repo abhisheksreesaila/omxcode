@@ -65,6 +65,10 @@ comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the pla
 comptime WHEEL = 9  # a plain scroll (wheel, two-finger swipe) on a Canvas(scroll_pans=True): event.dx, dy = how far the
 #   content moves, in points (a swipe up moves it up); ctrl+scroll and pinch on that canvas still send ZOOM
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
+comptime IME_COMMIT = 12  # an input method committed text (event.text) into the focused canvas (CJK conversion, an Indic or Hangul composition…)
+comptime IME_PREEDIT = 13  # an input method's text being composed (event.text, "" when it ends): draw it underlined at the caret;
+#   event.zoom = its cursor (bytes); event.x, y, dx, dy = where the host put the candidate window (App.caret's rect)
+comptime PASTE = 14  # the system clipboard's text pasted into the focused canvas (Ctrl+V / Cmd+V): event.text
 comptime HOVER = 11  # the pointer moved over the canvas (no button held) to event.x, y; x = y = -1 when it left (goal 79: hover states drawn by the app)
 comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)

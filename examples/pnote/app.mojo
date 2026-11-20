@@ -11,7 +11,7 @@
 
 from mojoui import (
     App, Event, View, Surface, VStack, HStack, Text, Button, Canvas, Spacer, Divider, TextField, Overlay,
-    CAPTION, HEADLINE, CENTER, START, END, PAN, ZOOM, TAP, HOVER, WHEEL, PRESS, RELEASE, DOUBLE, KEY, CTRL, SHIFT, PLAIN,
+    CAPTION, HEADLINE, CENTER, START, END, PAN, ZOOM, TAP, HOVER, IME_COMMIT, IME_PREEDIT, PASTE, WHEEL, PRESS, RELEASE, DOUBLE, KEY, CTRL, SHIFT, PLAIN,
     PROMINENT, SUBTLE, TOOL, TOOL_ON, NO_MSG,
 )
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
@@ -333,6 +333,11 @@ struct Main(App):
 
     def hovers(self) -> Bool:
         return len(self.web) > 0
+
+    def caret(self, canvas: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        if len(self.web) > 0:
+            return self.web[0].caret()
+        return (-1.0, 0.0, 0.0, 0.0)
 
     def window_size(self) -> Tuple[Int, Int]:
         if len(self.web) > 0:
@@ -758,6 +763,14 @@ struct Main(App):
                 if self.web[0].key(event.text, Int(event.dx)):
                     self.version += 1
                 return
+            if m == GESTURE and (event.number == IME_COMMIT or event.number == PASTE):
+                if self.web[0].text_in("paste" if event.number == PASTE else "ime", event.text):
+                    self.version += 1
+                return
+            if m == GESTURE and event.number == IME_PREEDIT:
+                if self.web[0].preedit(event.text, event.x, event.y, event.dx, event.dy):
+                    self.version += 1
+                return
             if m == GESTURE and event.number == TAP:
                 if self.web[0].tap(event.x, event.y):
                     self.version += 1
@@ -807,6 +820,17 @@ struct Main(App):
             self.version += 1
             return self.web[0].bench(name)
         if self.open_kind != CANVAS:
+            return (-1.0, -1.0)
+        if name == "bench:pan" or name == "bench:zoom":
+            self.tool = T_HAND
+            return (-1.0, -1.0)
+        if name == "bench:draw" or name == "bench:finish":
+            self.layer.clear_selection()
+            self.tool = T_PEN
+            return (-1.0, -1.0)
+        if name == "bench:type":  # (a text box being edited in the middle of the view, as the web's typing step types into one)
+            self.tool = T_TEXT
+            self.make_at(self.box_w / 2, self.box_h / 2)
             return (-1.0, -1.0)
         if name == "bench:reopen":
             var id = self.open_id
