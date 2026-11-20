@@ -15,7 +15,7 @@ from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT
 from mojoui.strokeicon import draw_icon
 from mojoui.canvas import rgba
-from std.math import sqrt, exp
+from std.math import sqrt, exp, cos, sin
 
 comptime UI = "Geist"
 comptime MONO = "Geist Mono"
@@ -784,3 +784,26 @@ def draw_locked_cover[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float6
     bx.add("locked-heading:" + heading, x + w / 2 - measure(hst, heading) / 2, cy, measure(hst, heading), 22)
     var sst = TextStyle(UI, 400, False, 13)
     text_at(p, sst, sub, x + w / 2, cy + 22 + 10, 18, sk.muted, ALIGN_CENTER)
+
+
+def draw_focus_ring[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, sk: Skin, offset: Float64 = 2,
+                                width: Float64 = 2):
+    """A control holding the keyboard: the browser's `outline: 2px solid accent; outline-offset: 2px` (D-7936): a ring
+    `width` wide whose inner edge is `offset` outside the box, following its corners (stroked along its middle)."""
+    var m = offset + width / 2
+    var rx = x - m
+    var ry = y - m
+    var rw = w + 2 * m
+    var rh = h + 2 * m
+    var r = min(radius + m, min(rw, rh) / 2)
+    var pts = List[Float64]()
+    var corners: List[Float64] = [rx + rw - r, ry + r, -1.5707963, rx + rw - r, ry + rh - r, 0.0, rx + r, ry + rh - r, 1.5707963, rx + r, ry + r, 3.1415927]
+    for c in range(4):
+        for k in range(9):
+            var t = corners[c * 3 + 2] + 1.5707963 * Float64(k) / 8
+            pts.append(corners[c * 3] + r * cos(t))
+            pts.append(corners[c * 3 + 1] + r * sin(t))
+    var n = len(pts) // 2
+    for i in range(n):
+        var j = (i + 1) % n
+        p.line(pts[2 * i], pts[2 * i + 1], pts[2 * j], pts[2 * j + 1], width, sk.accent)

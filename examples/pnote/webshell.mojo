@@ -26,7 +26,7 @@ from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canv
 from mojoui.pagedesk import BoardTools
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
-from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
+from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover, draw_focus_ring
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.objectlayer import reading_text
 from mojoui.buzanmap import map_text, node_extra
@@ -149,6 +149,7 @@ struct WebShell(Movable):
     var kept: KeptDocs[ObjectLayer]  # canvases already parsed, by (note, revision) (D-7934)
     var kept_pages: Dict[Int, Int]  # a kept canvas's page grid (columns × 1000 + rows), by note
     var cold_opens: Bool  # (the race's cold-open row: nothing kept is reused)
+    var title_focus: Bool  # the island's button holds the keyboard (after a rename by Enter, as in the web: D-7936)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -191,6 +192,7 @@ struct WebShell(Movable):
         self.kept = KeptDocs[ObjectLayer](4)
         self.kept_pages = Dict[Int, Int]()
         self.cold_opens = False
+        self.title_focus = False
         try:
             self.dbs.append(Database(db_path))
             self.load()
@@ -390,6 +392,9 @@ struct WebShell(Movable):
             var island_emoji = n.emoji if n.kind != "page" else String("")
             if not self.card_open:
                 draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
+                var fb = self.boxes.find("#share-button")
+                if self.title_focus and fb >= 0:
+                    draw_focus_ring(p, self.boxes.r[fb * 4], self.boxes.r[fb * 4 + 1], self.boxes.r[fb * 4 + 2], self.boxes.r[fb * 4 + 3], 21, self.sk)
             self.boxes.add("#workspace", left, 0, w - left, h)
             if n.kind == "mindmap" and not n.secure:
                 var mw = w - left - 4 - 12
@@ -687,6 +692,7 @@ struct WebShell(Movable):
                 var t = self.card.title.copy()
                 self.rename(t)
                 self.card_open = False
+                self.title_focus = True  # (Enter leaves the keyboard on the island's button: its focus ring shows)
             return r != 0
         if (self.card_open or self.settings_open) and name == "Escape":
             self.card_open = False
@@ -938,6 +944,7 @@ struct WebShell(Movable):
 
     def tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
+        self.title_focus = False  # (a click moves the keyboard away; the browser shows no ring for a mouse focus)
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button"])
         if self.settings_open:
             var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])

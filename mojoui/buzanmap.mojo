@@ -246,6 +246,46 @@ struct BuzanMap(Movable):
                 pts[2 * j] = cx + pts[2 * j] * zoom
                 pts[2 * j + 1] = cy + pts[2 * j + 1] * zoom
             p.polygon(pts, self.topics[i].color)
+        # the selected idea's branch controls (renderer.js renderBranchControls, D-7936): a dotted guide along the branch's
+        # centre line (#fffefa, 2 wide, dashes 2 and 5, .8) and its curve's two anchors at t 1/3 and 2/3 (r 6 in its colour,
+        # a 2.5 #fffefa ring, the node shadow: 0 5 blur 7 #382f28 at .15)
+        var sel = self.selected
+        if sel >= 0 and sel < len(self.topics) and self.topics[sel].parent >= 0:
+            var g = branch_geometry(self.frame(self.topics[sel].parent), self.frame(sel))
+            var guide = with_alpha(hexc("#fffefa"), 0.8)
+            var px0 = g.sx
+            var py0 = g.sy
+            var walked = 0.0  # along the curve, map units
+            var on = True
+            var mark_x = px0
+            var mark_y = py0
+            for q in range(1, 241):
+                var t = Float64(q) / 240
+                var qx = _axis(g.sx, g.ax, g.bx, g.ex, t, 0)
+                var qy = _axis(g.sy, g.ay, g.by, g.ey, t, 0)
+                walked += sqrt((qx - px0) * (qx - px0) + (qy - py0) * (qy - py0))
+                if on and walked >= 2:
+                    p.line(cx + mark_x * zoom, cy + mark_y * zoom, cx + qx * zoom, cy + qy * zoom, 2 * zoom, guide)
+                    on = False
+                    walked = 0
+                elif not on and walked >= 5:
+                    on = True
+                    walked = 0
+                    mark_x = qx
+                    mark_y = qy
+                px0 = qx
+                py0 = qy
+            for k in range(2):
+                var t = 1.0 / 3.0 if k == 0 else 2.0 / 3.0
+                var hx = cx + _axis(g.sx, g.ax, g.bx, g.ex, t, 0) * zoom
+                var hy = cy + _axis(g.sy, g.ay, g.by, g.ey, t, 0) * zoom
+                var r = 6 * zoom
+                var sh = List[Shadow]()
+                sh.append(Shadow(0, 5 * zoom, 14 * zoom, 0, rgba(56, 47, 40, 38)))
+                draw_shadows(p, hx - r - 1.25 * zoom, hy - r - 1.25 * zoom, 2 * r + 2.5 * zoom, 2 * r + 2.5 * zoom, r + 1.25 * zoom, sh)
+                p.circle(hx, hy, r + 1.25 * zoom, hexc("#fffefa"))
+                p.circle(hx, hy, r - 1.25 * zoom, self.topics[sel].color)
+                bx.add("map.anchor:" + self.topics[sel].text, hx - 18 * zoom, hy - 18 * zoom, 36 * zoom, 36 * zoom)
         # cards and words
         for i in range(len(self.topics)):
             ref t = self.topics[i]
