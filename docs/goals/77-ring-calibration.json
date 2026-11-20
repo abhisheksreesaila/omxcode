@@ -2,13 +2,38 @@
  "measure": "scripts/ring_measure.py: share of the band 2..9 pt outside the app's own ring rect (OMX POINT / OMX RING ring=), rounded as mojoui.pointer rounds it (radius min(w/2, h/2, 14)), that is ring-teal in the frame and not in the same screen once the ring has faded; control = the faded frame's own teal share in that band",
  "approved": "owner, 2026-11-20 (replaces goal 77 M3's fixed 14 px square band share > 0.05 and M4's whole-page 150 teal-pixel count)",
  "stored_passing_frames": {
-  "m7f GTK omx, ring round a Word card's parts (build/g77/m7f: POINT ring rects, tv.png as the faded frame; passing run of 2026-11-19)": {"desktop-light": 0.279, "desktop-dark": 0.275, "phone-light": 0.28, "phone-dark": 0.274, "control": 0.0, "faded frame vs itself": 0.0}
+  "m7f GTK omx, ring round a Word card's parts (build/g77/m7f: POINT ring rects, tv.png as the faded frame; passing run of 2026-11-19)": {
+   "desktop-light": 0.279,
+   "desktop-dark": 0.275,
+   "phone-light": 0.28,
+   "phone-dark": 0.274,
+   "control": 0.0
+  }
  },
  "cross_check": {
-  "M3 web map, ring round a 28 pt stop marker (this measure's first run, 2026-11-20: OMX RING rect, its faded frame)": {"trip 1": [0.264, 0.29], "trip 2": [0.269, 0.285], "control": 0.0},
+  "M3 web map, ring round a 28 pt stop marker (this measure's first run, 2026-11-20: OMX RING rect, its faded frame)": {
+   "trip 1": [
+    0.264,
+    0.29
+   ],
+   "trip 2": [
+    0.269,
+    0.285
+   ],
+   "control": 0.0
+  },
   "a square band (first try) read the round marker's ring at 0.15: its corners lie outside a circle; the rounded band reads round and square rings alike": true
  },
  "floor": 0.13,
  "floor_rule": "about half the lowest stored passing share (0.274)",
- "control_max": 0.04
+ "control_max": 0.04,
+ "negative_controls": {
+  "faded frame (the ring gone, same screen): its own teal in the band": "0.0 in every stored and judged frame; > 0.04 fails the check (the measure can't see the ring there)",
+  "wrong part (m7f stored frames: every frame x the other parts' POINT rects)": {
+   "desktop-light": 0.004,
+   "phone-dark": 0.027
+  },
+  "wrong part in M4 (checked every run since review: the best frame's bands round blocks clear of the ring's own band must read < floor)": "see build/g77/m4.json ring_other_parts"
+ },
+ "limits": "the floor rests on one stored GTK run (four sizes and schemes of a Word card); the M3 numbers are this measure's own first run, a cross-check, not an independent calibration"
 }

@@ -681,7 +681,16 @@ def m4():
                         score[f] = (share, control, t)
             best = max(shots_, key=lambda f: score.get(f, (0.0,))[0])
             share, control, on = score.get(best, (0.0, 1.0, ""))
-            row.update(ring_share=share, ring_control=control, ring_on=on)
+            # the wrong-part control: in that frame, the bands of the blocks the ring isn't on (those clear of its own band) read
+            # low, so teal that isn't the ring (a step highlight, a link accent) can't pass for it
+            on_rect = next((r for t, r in rects if t == on), None)
+            clear = [(t, r) for t, r in rects if on_rect and t != on and (r[0] > on_rect[0] + on_rect[2] + 2 * rm.OUTER or on_rect[0] > r[0] + r[2] + 2 * rm.OUTER
+                                                                      or r[1] > on_rect[1] + on_rect[3] + 2 * rm.OUTER or on_rect[1] > r[1] + r[3] + 2 * rm.OUTER)]
+            others = max((rm.ring_share(best, after, r, dark)[0] for _, r in clear), default=None)
+            row.update(ring_share=share, ring_control=control, ring_on=on, ring_other_parts=others, ring_other_count=len(clear),
+                       ring_rects={t: list(r) for t, r in rects})
+            if others is not None and others >= rm.FLOOR:
+                probs.append(f"{q!r}: blocks the ring isn't on read {others} in the best frame (floor {rm.FLOOR}): teal that isn't the ring")
             if control > rm.CONTROL_MAX:
                 probs.append(f"{q!r}: the faded frame is already {control} teal round the ring's rect on {on}: the measure can't see the ring")
             elif share < rm.FLOOR:
@@ -694,7 +703,7 @@ def m4():
     bench(m4=rows, m4_lags_ms=all_lags)
     (OUT / "m4.json").write_text(json.dumps(rows, indent=1))
     said.append("; ".join(f"{x['asked']!r}: {len(x.get('blocks', []))} blocks, {x.get('links', 0)} links, {x.get('steps', 0)} steps, points {x.get('points')} "
-                          f"({x.get('in_step_order')} in step order), ring share {x.get('ring_share')} on {x.get('ring_on')} (faded {x.get('ring_control')}), lags {x.get('lags')} ms, reply {x['sentences']} sentences" for x in rows))
+                          f"({x.get('in_step_order')} in step order), ring share {x.get('ring_share')} on {x.get('ring_on')} (faded {x.get('ring_control')}, {x.get('ring_other_count')} other blocks {x.get('ring_other_parts')}), lags {x.get('lags')} ms, reply {x['sentences']} sentences" for x in rows))
     said.append("phone screenshots (light, light, dark): " + ", ".join(x.get("shot", "-") for x in rows))
     return ("FAIL", "; ".join(probs) + " | " + " | ".join(said)) if probs else ("PASS", " | ".join(said))
 
