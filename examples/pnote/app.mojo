@@ -26,7 +26,7 @@ from mojoui.geometry import rect_of
 from mojoui.theme import Theme
 from mojoui.mdedit import MdEdit
 from mojoui.textedit import now_ms
-from mojoui.objectlayer import ObjectLayer, import_fabric, TEXT, STICKY, RECT, INK, CONNECTOR, H_ROTATE
+from mojoui.objectlayer import ObjectLayer, import_fabric, import_json_canvas, TEXT, STICKY, RECT, INK, CONNECTOR, H_ROTATE
 from mojoui.mindmap import MindMap, MapCamera
 from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
@@ -303,7 +303,7 @@ struct Main(App):
                 var f = open(imp, "r")
                 var json = f.read()
                 f.close()
-                var l = import_fabric(json, self.font)
+                var l = import_json_canvas(json) if json.find('"nodes"') >= 0 and json.find('"objects"') < 0 else import_fabric(json, self.font)
                 self.new_note(CANVAS, l.save_text())
                 self.tool = T_HAND
             elif imp != "":
@@ -798,6 +798,57 @@ struct Main(App):
         self.report()
 
     # ------------------------------------------------ view
+
+    def bench(mut self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+        """Benchmark hooks (goal 79's race, the GTK framebench): where to drag one object or 40 (selected here), a history
+        for undoredo, and a fresh open of the note for open. Points on the note's canvas. The web look: switch (the
+        next note), omnibar (open/close), openall (a note of each kind in turn)."""
+        if len(self.web) > 0:
+            self.version += 1
+            return self.web[0].bench(name)
+        if self.open_kind != CANVAS:
+            return (-1.0, -1.0)
+        if name == "bench:reopen":
+            var id = self.open_id
+            self.save()
+            self.open(id)
+            self.version += 1
+            return (-1.0, -1.0)
+        self.tool = T_SELECT
+        # objects inside the view, away from its edges (benchmark-f034's visibleObjects rule)
+        var w = self.box_w
+        var h = self.box_h
+        var ids = List[Int]()
+        var cx = List[Float64]()
+        var cy = List[Float64]()
+        for ref o in self.layer.objs:
+            if o.kind == INK or o.kind == CONNECTOR or o.locked:
+                continue
+            var sx = (o.x - self.cam_x) * self.zoom
+            var sy = (o.y - self.cam_y) * self.zoom
+            var sw = o.w * self.zoom
+            var sh = o.h * self.zoom
+            if sx > 40 and sy > 40 and sx + sw < w - 80 and sy + sh < h - 80 and sw > 12 and sh > 12:
+                ids.append(o.id)
+                cx.append(sx + sw / 2)
+                cy.append(sy + sh / 2)
+        if len(ids) == 0:
+            return (-1.0, -1.0)
+        if name == "bench:dragone" or name == "bench:undoredo":
+            var k = len(ids) // 2
+            self.layer.select(ids[k], False)
+            if name == "bench:undoredo":  # (thirty separate moves to walk back and forth)
+                for m in range(min(30, len(ids))):
+                    self.layer.select(ids[m], False)
+                    self.layer.move_by(6, 4)
+                return (-1.0, -1.0)
+            return (cx[k], cy[k])
+        if name == "bench:drag40":
+            self.layer.clear_selection()
+            for m in range(min(40, len(ids))):
+                self.layer.select(ids[m], True)
+            return (cx[0], cy[0])
+        return (-1.0, -1.0)
 
     def view(self) -> View:
         if len(self.web) > 0:

@@ -305,6 +305,7 @@ struct FontEngine(Movable):
     var fallback: Dict[Int, Int]  # codepoint → face (-1: none has it)
     var emoji_face: Int
     var images: List[GlyphImage]
+    var runs: Dict[String, Run]  # shaped runs by (style, text): text redrawn each frame is shaped once (D-7916)
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
     # the Mac: CoreText, CoreGraphics, CoreFoundation (by address, dlopen'd as on Linux)
@@ -364,6 +365,7 @@ struct FontEngine(Movable):
         self.fallback = Dict[Int, Int]()
         self.emoji_face = -2
         self.images = List[GlyphImage]()
+        self.runs = Dict[String, Run]()
         self.image_of = Dict[Int, Int]()
         var h = getenv("FONTTEXT_HINT", "light")
         self.hint = FT_LOAD_NO_HINTING if h == "none" else (0 if h == "full" else FT_LOAD_TARGET_LIGHT)
@@ -1317,7 +1319,18 @@ def engine() -> Pointer[FontEngine, MutUntrackedOrigin]:
 
 
 def shape(st: TextStyle, text: String) -> Run:
-    return engine()[].shape(st, text)
+    """The shaped run, from the process's cache when this style and text were shaped before (bounded: cleared at 8,192
+    entries)."""
+    var e = engine()
+    var key = st.family + "|" + String(st.weight) + ("i" if st.italic else "") + "|" + String(st.size) + "|" + String(st.letter_spacing) + ("x" if st.exact else "") + "|" + text
+    var hit = e[].runs.get(key)
+    if hit:
+        return hit.value().copy()
+    var r = e[].shape(st, text)
+    if len(e[].runs) >= 8192:
+        e[].runs = Dict[String, Run]()
+    e[].runs[key] = r.copy()
+    return r^
 
 
 def measure(st: TextStyle, text: String) -> Float64:

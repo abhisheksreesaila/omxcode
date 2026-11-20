@@ -1638,6 +1638,7 @@ struct GPU2D(Movable):
     var gl: GL2D
     var font: Font
     var atlas: GlyphAtlas
+    var traced: Int
     var frames: List[Frame2D]  # layer i's batches, as built for the canvas `owner` last drew
     var built: Int  # how many of `frames` hold the owner's last frame's layers
     var owner: Int  # the canvas the cache is for (another canvas drawing rebuilds every layer)
@@ -1668,6 +1669,7 @@ struct GPU2D(Movable):
         self.gl = GL2D()
         self.font = Font()
         self.atlas = GlyphAtlas(self.font)
+        self.traced = 0
         self.frames = List[Frame2D]()
         self.built = 0
         self.owner = 0
@@ -1862,6 +1864,9 @@ struct GPU2D(Movable):
         _ = self.gl.fence(slot)
         self.batch_ns = Int(t1 - t0)
         self.render_ns = Int(perf_counter_ns() - t1)
+        if getenv("MOJOUI_STARTUP_TRACE") != "" and self.traced < 3:
+            self.traced += 1
+            print("STARTUP: gpu2d frame: batches " + String(Float64(self.batch_ns) / 1e6) + " ms, render " + String(Float64(self.render_ns) / 1e6) + " ms", flush=True)
         return slot
 
 

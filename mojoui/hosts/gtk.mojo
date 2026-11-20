@@ -8,6 +8,7 @@
 # (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by; else an Image(on_tap) tagged X.)
 
 from mojoui.look import look_gtk_css
+from mojoui.procstat import proc_age_ms, rss_mb
 from std.ffi import external_call, c_int, c_char, c_uint
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
@@ -54,7 +55,7 @@ from mojoui.hosts.web import view_to_json, control_event
 from mojoui.json import Json
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
-from std.math import log2, floor, ceil
+from std.math import log2, floor, ceil, sin
 from std.time import perf_counter_ns, sleep
 
 comptime G_APPLICATION_NON_UNIQUE = 32
@@ -726,6 +727,7 @@ struct GtkHost[A: App](Movable):
     var release_hold: Bool  # a release that came mid-update, sent once it's done
     var test_drag: Int  # (tests) the board gesture hold: pressed, for release:
     var step_no: Int  # (tests) the step running, numbering MOJOUI_SHOTS_EACH's pictures
+    var first_hand_age_ms: Float64  # the process's age when its first canvas picture went to GTK (firstscreen:)
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
     var embed_version: Int  # the WebFrame's version last opened in the browser
@@ -929,6 +931,7 @@ struct GtkHost[A: App](Movable):
         self.release_hold = False
         self.test_drag = 0
         self.step_no = 0
+        self.first_hand_age_ms = -1
         self.revealed = 0
         self.reveal_pending = -1
         self.clip_version = 0
@@ -3308,6 +3311,7 @@ struct GtkHost[A: App](Movable):
             set_backend_name("cpu (" + why + ")")
             print("mojoui: .gpu() canvases: GSK nodes (" + why + ")", flush=True)
             return False
+        startup_mark("gpu2d start")
         var display = external_call["gdk_display_get_default", Int]()
         var err = List[Int](length=1, fill=0)
         var ctx = external_call["gdk_display_create_gl_context", Int](display, Int(err.unsafe_ptr())) if display != 0 else 0
@@ -3322,9 +3326,12 @@ struct GtkHost[A: App](Movable):
             var prev = external_call["gdk_gl_context_get_current", Int]()
             external_call["gdk_gl_context_make_current", NoneType](ctx)
             var es = external_call["gdk_gl_context_get_use_es", c_int](ctx) != 0
+            startup_mark("gl context")
             var g = alloc(Layout[GPU2D].single()).unsafe_leak()
             g.unsafe_write(GPU2D())
-            if g[].start(es):
+            var started = g[].start(es)
+            startup_mark("gpu2d backend")
+            if started:
                 self.g2d = Int(g)
                 self.g2d_ctx = ctx
                 self.g2d_state = 1
@@ -3776,6 +3783,8 @@ struct GtkHost[A: App](Movable):
         c.aheads += 1
         c.hands += 1
         c.gpu_hands += 1
+        if self.first_hand_age_ms < 0:
+            self.first_hand_age_ms = proc_age_ms()
         c.shown_frame = frame
         c.shown_gpu = True
 
@@ -3883,6 +3892,9 @@ struct GtkHost[A: App](Movable):
         self.canvases[ci].drawn = version if not again else -1  # mid-animation: draw again next frame
         self.canvases[ci].draws += 1
         self.canvases[ci].hands += 1
+        if self.first_hand_age_ms < 0:
+            self.first_hand_age_ms = proc_age_ms()
+            startup_mark("first picture")
         if via_gpu2d:
             self.canvases[ci].gpu_hands += 1
         else:
@@ -5142,6 +5154,25 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
         settle()
         bench_wait[A](host_addr, ci, 200_000_000)
+    var drag_x0 = x
+    var drag_y0 = y
+    if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open":
+        # (goal 79: Personal Note's benchmark steps) the app says where: App.spot(canvas, "bench:<what>") — an object to
+        # drag (dragone), the lead of 40 it has selected (drag40), or, for undoredo and open, it prepares the step (App.bench)
+        # (a history to walk; open: drops what it keeps of the note so each step opens it again) and answers (-1, -1)
+        var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        bench_wait[A](host_addr, ci, 500_000_000)
+        if what == "dragone" or what == "drag40":
+            if sp[0] < 0:
+                print("FRAMEBENCH: " + kv[0] + "=" + what + " the app gave no spot", flush=True)
+                return
+            x = sp[0]
+            y = sp[1]
+            drag_x0 = x
+            drag_y0 = y
+            host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
+            settle()
+            bench_wait[A](host_addr, ci, 200_000_000)
     var syncs = List[Float64]()
     var rasters = List[Float64]()
     var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
@@ -5198,6 +5229,25 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].keys, sig.as_c_string_span(),
                     c_uint(gdk_keyval(ch)), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
             _ = len(handled)
+        elif what == "dragone" or what == "drag40":  # (benchmark-f034's dragPath: to +160,+90 (40: +120,+70), a sine of 40 across it)
+            var t = Float64(i + 1) / Float64(count)
+            var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
+            var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
+            host[].canvas_send(ci, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
+            x = tx
+            y = ty
+        elif what == "undoredo" or what == "open":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; open: the app reopens)
+            if what == "open":
+                _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
+                var d = host[].rt.refresh()
+                host[].apply(d, host_addr)
+            else:
+                var handled = List[c_int](length=1, fill=0)
+                var sig = String("key-pressed")
+                if host[].canvases[ci].keys != 0:
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].keys, sig.as_c_string_span(),
+                        c_uint(gdk_keyval("z")), c_uint(0), c_uint(4 if i % 2 == 0 else 5), Int(handled.unsafe_ptr()))
+                _ = len(handled)
         elif what == "erase":  # (an eraser dragged to and fro across the page: only moves that hit a stroke redraw)
             x += 4.0 if (i // 60) % 2 == 0 else -4.0
             y += 1.5 if (i // 30) % 2 == 0 else -1.5
@@ -5280,7 +5330,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             releases.append(works[len(works) - 1])
         elif prev_kind == RELEASE:
             afters.append(works[len(works) - 1])
-    if what == "pan" or what == "erase":
+    if what == "pan" or what == "erase" or what == "dragone" or what == "drag40":
         host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
         settle()
     if what == "draw":
@@ -5360,6 +5410,51 @@ def raster_once(widget: Int, renderer: Int):
         if tex != 0:
             external_call["g_object_unref", NoneType](tex)
         external_call["gsk_render_node_unref", NoneType](root)
+
+
+def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
+    """noteswitch:N / omnibar:N / openall: (goal 79's race): App.bench(first canvas, "bench:<what>") changes the app's
+    state N times; each is timed from the call to the frame that shows it, painted. Prints `<LABEL>: n= p50= p95= max=`
+    (ms)."""
+    var host = host_at[A](host_addr)
+    if len(host[].canvases) == 0:
+        print(label + ": no canvas", flush=True)
+        return
+    var ci = 0
+    var style = host[].rt.shown.nodes[host[].canvases[ci].node].style
+    bench_wait[A](host_addr, ci, 500_000_000)
+    var times = List[Float64]()  # the work: the app's step and view, plus the canvas's draw of the frame that shows it
+    var walls = List[Float64]()  # to that frame's hand-off (includes waiting for the frame clock)
+    for _ in range(n):
+        var hands0 = host[].canvases[ci].hands
+        var t0 = perf_counter_ns()
+        _ = host[].rt.app.bench(style, "bench:" + what)
+        var d = host[].rt.refresh()  # (the app's state changed outside update(): its view again, as after an event)
+        host[].apply(d, host_addr)
+        var ev = Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6
+        var by = perf_counter_ns() + 3_000_000_000
+        while host[].canvases[ci].hands == hands0 and perf_counter_ns() < by:
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        if host[].canvases[ci].hands != hands0:
+            walls.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
+            times.append(ev + host[].canvases[ci].draw_ms)
+        settle()
+    sort(walls)
+    var srt = times.copy()
+    sort(srt)
+    var k = len(srt)
+    var p50 = srt[k // 2] if k > 0 else 0.0
+    var p95 = srt[min(k - 1, Int(Float64(k) * 0.95))] if k > 0 else 0.0
+    var mx = srt[k - 1] if k > 0 else 0.0
+    var wall95 = walls[min(len(walls) - 1, Int(Float64(len(walls)) * 0.95))] if len(walls) > 0 else 0.0
+    print(label + ": n=" + String(k) + " wall_p95=" + String(round(wall95, 2)) + " p50=" + String(round(p50, 2)) + " p95=" + String(round(p95, 2))
+          + " max=" + String(round(mx, 2)), flush=True)
+
+
+def startup_mark(what: String):
+    """MOJOUI_STARTUP_TRACE=1: the process's age at a start-up milestone (goal 79: where a cold start's time goes)."""
+    if getenv("MOJOUI_STARTUP_TRACE") != "":
+        print("STARTUP: " + what + " at " + String(round(proc_age_ms(), 1)) + " ms", flush=True)
 
 
 def bench_wait[A: App](host_addr: Int, ci: Int, ns: Int):
@@ -7195,6 +7290,16 @@ def run_step[A: App](host_addr: Int, step: String):
               + " within-9.5ms " + one_decimal(Float32(share_within(intervals(host[].frame_times), 9.5))) + "%"
               + " cells built " + String(host[].cells_built) + " uploads " + String(host[].uploads)
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
+    elif verb == "firstscreen":  # firstscreen: how long after the process started its first canvas picture was handed to GTK (goal 79's race)
+        print("FIRSTSCREEN: " + String(round(host[].first_hand_age_ms, 1)), flush=True)
+    elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its painted frame
+        app_step_bench[A](host_addr, "NOTESWITCH", "switch", max(to_int(rest), 1))
+    elif verb == "omnibar":  # omnibar:N: App.bench("bench:omnibar") (open, close, …) N times, each to its painted frame
+        app_step_bench[A](host_addr, "OMNIBAR", "omnibar", max(to_int(rest), 1))
+    elif verb == "openall":  # openall: App.bench("bench:openall") (a note of each kind opened in turn), to the frame
+        app_step_bench[A](host_addr, "OPENALL", "openall", 3)
+    elif verb == "rss":  # rss: this process's resident memory (MB), as /proc says
+        print("RSS: " + String(round(rss_mb(), 1)), flush=True)
     elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
         frame_bench[A](host_addr, rest)
     elif verb == "gpushot":  # gpushot:K=path: the GPU frame canvas K shows now (the picture GTK holds, rendered as GTK composites it), as a PNG (goal 79)
@@ -8232,6 +8337,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if host[].window != 0:  # (activated again: a background app launched a second time hands over here; its window opens)
         on_tray_activate[A](host_addr)
         return
+    startup_mark("activate")
     host[].window = external_call["gtk_application_window_new", Int](gapp)
     var title = host[].rt.app.title()
     external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
@@ -8302,8 +8408,9 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["gtk_window_set_resizable", NoneType](host[].window, c_int(0))
         var title = String("mojoui test window (closes by itself)")
         external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
-    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0 or getenv("MOJOUI_TEST").find("render:") >= 0 or getenv("MOJOUI_TEST").find("gpushot:") >= 0  # (render:/gpushot: a canvas draws only once shown, goal 79) (a picture mid-run, or frames to time (D-7425), need a shown window)
+    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0 or getenv("MOJOUI_TEST").find("render:") >= 0 or getenv("MOJOUI_TEST").find("gpushot:") >= 0 or getenv("MOJOUI_TEST").find("firstscreen:") >= 0 or getenv("MOJOUI_TEST").find("noteswitch:") >= 0 or getenv("MOJOUI_TEST").find("omnibar:") >= 0  # (render:/gpushot:/the race's steps: a canvas draws only once shown, goal 79) (a picture mid-run, or frames to time (D-7425), need a shown window)
     if not testing or shoots:
+        startup_mark("present")
         external_call["gtk_window_present", NoneType](host[].window)
     if testing and shoots:
         # On X11 (the headless display) the first layout waits for the server's map event, which

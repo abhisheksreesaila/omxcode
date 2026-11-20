@@ -682,6 +682,19 @@ def m6():
     r2 = run(["node", "scripts/benchmark-first-screen.mjs"], 1800, cwd=PN)
     (race / "web-first-screen.log").write_text(r2.stdout + r2.stderr)
     web = web_race(json.loads((race / "web-f034.json").read_text()), r2.stdout)
+    # (added 11-19, D-7917) the web's memory: PN's scripts measure none, so docs/goals/79/webmem.mjs opens a note of each
+    # kind in Chromium (with the GPU, as the race) on the reference's database and sums Chromium's processes and the API
+    err = make_ref()
+    if err:
+        return "FAIL", err
+    r3 = run(["node", str(ROOT / "docs/goals/79/webmem.mjs"), str(REF / "pn.db"), "--gpu"], 600, cwd=PN)
+    (race / "web-mem.log").write_text(r3.stdout + r3.stderr)
+    mm = re.search(r"WEB RSS MB: ([\d.]+)", r3.stdout)
+    web["rss_mb"] = float(mm.group(1)) if mm else None
+    # the web's first screen: the "after" build of PN's benchmark (both are this checkout)
+    mf = re.search(r"after\s+first screen (\d+)", r2.stdout)
+    if mf:
+        web["first_screen_ms"] = float(mf.group(1))
     # the native app: the same notes (dumped from PN's own generators), the same steps
     r = run(["node", "-e", NOTE_DUMP, str(race)], 600, cwd=PN)
     if r.returncode:
@@ -731,9 +744,9 @@ const [out] = process.argv.slice(1);
 const { generateNote, COLUMNS, ROWS } = await import('./scripts/benchmark-note.mjs');
 const { generateStressNote } = await import('./src/modules/speedtest/stress-note.js');
 const fs = await import('node:fs');
-fs.writeFileSync(out + '/note-600.json', JSON.stringify({ content: generateNote(), pageState: { columns: COLUMNS, rows: ROWS } }));
+fs.writeFileSync(out + '/note-600.json', JSON.stringify(generateNote()));
 const s = generateStressNote(5400, { columns: 4, rows: 4 });
-fs.writeFileSync(out + '/note-stress.json', JSON.stringify({ content: s.content, pageState: s.pageState }));
+fs.writeFileSync(out + '/note-stress.json', JSON.stringify(s.content));
 """.replace("const [out] = process.argv.slice(1);", "const out = process.argv[1];")
 NATIVE_RACE = ["framebench:note=open,20", "framebench:note=pan,120", "framebench:note=zoom,60", "framebench:note=dragone,60",
                "framebench:note=drag40,60", "framebench:note=undoredo,40", "framebench:note=draw,300", "framebench:note=typing,60"]
@@ -762,13 +775,37 @@ def web_race(f034, first_screen_text):
     """{note: {step: {p95, max}}} from PN's benchmark-f034 --out JSON, plus first screen ms."""
     res = {}
     for r in f034.get("results", []):
-        note = "stress" if "stress" in str(r.get("note", r.get("name", ""))) else "600"
+        note = "stress" if "stress" in json.dumps(r.get("note", r.get("name", r.get("setup", ""))))[:200] else "600"
         for sc in r.get("scenarios", r.get("rows", [])):
             name = str(sc.get("scenario", "")).lower()
-            for step in RACE_STEPS:
-                if name.startswith(step) or step in name:
-                    res.setdefault(note, {})[step] = {"p95": float(sc.get("p95", 0)), "max": float(sc.get("max", 0))}
-                    break
+            # (fixed 11-19, D-7915) the web's own row names: "drag 30 selected objects" is its drag-40 step (it drags
+            # the 40 it can see), "undo/redo" is the worse of its undo and redo rows timed "to the frame after", and
+            # the open row has only a p50 (one cold open): that number stands for its p95 and max
+            step = None
+            if name.startswith("open"):
+                step = "open"
+            elif name.startswith("drag one"):
+                step = "drag one"
+            elif re.match(r"drag \d+ selected", name):
+                step = "drag 40"
+            elif (name.startswith("undo") or name.startswith("redo")) and "frame after" in name:
+                step = "undo/redo"
+            elif name.startswith("pen strokes") and "frame gaps" in name:
+                step = "pen"
+            elif name.startswith("typing") and "frame gaps" in name:
+                step = "typing"
+            elif name.startswith("pan"):
+                step = "pan"
+            elif name.startswith("zoom"):
+                step = "zoom"
+            if step is None:
+                continue
+            p95 = sc.get("p95") if sc.get("p95") is not None else sc.get("p50", 0)
+            mx = sc.get("max") if sc.get("max") is not None else sc.get("p50", 0)
+            old = res.setdefault(note, {}).get(step)
+            row = {"p95": float(p95), "max": float(mx)}
+            if old is None or row["p95"] > old["p95"] or row["max"] > old["max"]:  # (the worse of two rows: pan at 30 % and 100 %, undo and redo)
+                res[note][step] = {"p95": max(row["p95"], old["p95"] if old else 0), "max": max(row["max"], old["max"] if old else 0)}
     m = re.search(r"first screen (\d+)", first_screen_text)
     res["first_screen_ms"] = float(m.group(1)) if m else None
     m = re.search(r"rss[^\d]*(\d+)", first_screen_text, re.I)

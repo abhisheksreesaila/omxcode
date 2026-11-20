@@ -1790,3 +1790,62 @@ def import_fabric(json_text: String, font: Font) raises -> ObjectLayer:
         o.line_width = j.real(j.get(n, "lineWidth"), 2)
         _ = ol.adopt(o^)
     return ol^
+
+
+def _canvas_color(c: String, fallback: UInt32) -> UInt32:
+    """A JSON Canvas colour: a preset "1"–"6" (red, orange, yellow, green, cyan, purple, as Obsidian draws them) or
+    "#rrggbb"."""
+    var presets: List[UInt32] = [0xFF4F4AFB, 0xFF3C9DFF, 0xFF6CDCE0, 0xFF62C96E, 0xFFD3C35A, 0xFFD87AA8]
+    if c.byte_length() == 1:
+        var d = Int(c.as_bytes()[0]) - 49
+        if d >= 0 and d < 6:
+            return presets[d]
+    if c.byte_length() == 7 and c.startswith("#"):
+        var v = 0
+        for i in range(1, 7):
+            var ch = Int(c.as_bytes()[i])
+            v = v * 16 + (ch - 48 if ch <= 57 else (ch - 87 if ch >= 97 else ch - 55))
+        return UInt32(0xFF000000) | UInt32((v >> 16) & 255) | (UInt32((v >> 8) & 255) << 8) | (UInt32(v & 255) << 16)
+    return fallback
+
+
+def import_json_canvas(json_text: String) raises -> ObjectLayer:
+    """A JSON Canvas 1.0 document (jsoncanvas.org: {nodes, edges}, with Personal Note's `pn` extras) as an object layer:
+    a coloured text node is a sticky (pn.type "sticky" too), a plain one a text box (pn.style.fontSize), a file node a
+    placeholder card, an edge a connector between the nodes it names. Goal 79: the fixture's canvas and PN's 5,000-object
+    stress note."""
+    var j = Json.parse(json_text)
+    var ol = ObjectLayer()
+    var nodes = j.get(0, "nodes")
+    var ids = Dict[String, Int]()
+    for i in range(j.size(nodes)):
+        var n = j.at(nodes, i)
+        var kind = j.text(j.get(n, "type"))
+        var x = j.real(j.get(n, "x"))
+        var y = j.real(j.get(n, "y"))
+        var w = j.real(j.get(n, "width"), 200)
+        var h = j.real(j.get(n, "height"), 100)
+        var pn = j.get(n, "pn")
+        var color = j.text(j.get(n, "color"))
+        var oid = -1
+        if kind == "text":
+            var size = j.real(j.get(j.get(pn, "style"), "fontSize"), 16)
+            if color != "" or j.text(j.get(pn, "type")) == "sticky":
+                oid = ol.add_sticky(x, y, w, j.text(j.get(n, "text")), _canvas_color(color, 0xFF9DE8FF), size)
+                var p = ol.index(oid)
+                ol.objs[p].h = h
+            else:
+                oid = ol.add_text(x, y, w, h, j.text(j.get(n, "text")), size)
+        elif kind == "file" or kind == "link" or kind == "group":
+            oid = ol.add_rect(x, y, w, h, 0xFFF0F2F4, 0xFFD4D8DC, 1, 6)
+        if oid >= 0:
+            ids[j.text(j.get(n, "id"))] = oid
+    var edges = j.get(0, "edges")
+    for i in range(j.size(edges)):
+        var e = j.at(edges, i)
+        var a = ids.get(j.text(j.get(e, "fromNode")), -1)
+        var b = ids.get(j.text(j.get(e, "toNode")), -1)
+        if a >= 0 and b >= 0:
+            _ = ol.add_connector(a, b, _canvas_color(j.text(j.get(e, "color")), 0xFF332222), j.real(j.get(j.get(e, "pn"), "lineWidth"), 2))
+    ol.history.clear()
+    return ol^

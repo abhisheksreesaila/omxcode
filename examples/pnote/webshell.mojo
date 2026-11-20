@@ -111,6 +111,7 @@ struct WebShell(Movable):
     var card_open: Bool
     var settings_open: Bool
     var omni: Omnibar
+    var bench_kind: Int
     var px: Float64  # where the pointer is (HOVER), -1: away
     var py: Float64
 
@@ -128,6 +129,7 @@ struct WebShell(Movable):
         self.problem = ""
         self.px = -1
         self.py = -1
+        self.bench_kind = 0
         self.searching = False
         self.card_open = False
         self.settings_open = False
@@ -340,6 +342,26 @@ struct WebShell(Movable):
         else:
             return False
         return True
+
+    def bench(mut self, name: String) -> Tuple[Float64, Float64]:
+        """The race's app steps: switch to the next note, open or close the omnibar, open a note of each kind in turn."""
+        if name == "bench:switch":
+            var i = self.note_index(self.current)
+            self.open(self.notes[(i + 1) % len(self.notes)].id)
+        elif name == "bench:omnibar":
+            self.searching = not self.searching
+            if self.searching:
+                self.omni.query = ""
+                self.search()
+        elif name == "bench:openall":
+            var kinds: List[String] = ["page", "canvas", "mindmap"]
+            var at = self.bench_kind % 3
+            self.bench_kind += 1
+            for ref n in self.notes:
+                if n.kind == kinds[at]:
+                    self.open(n.id)
+                    break
+        return (-1.0, -1.0)
 
     # ------------------------------------------------ input
 

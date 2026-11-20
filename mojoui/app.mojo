@@ -117,6 +117,11 @@ trait App(Movable, Deinitable):
         (count 0: what's on screen), tab-separated; "" when the canvas has no text to offer."""
         return ""
 
+    def bench(mut self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+        """A benchmark's hook (the GTK framebench: dragone, drag40, undoredo, open; goal 79): the app prepares the step on
+        Canvas `canvas` and says where it starts, in points; (-1, -1) when there's no such step. The default: none."""
+        return (-1.0, -1.0)
+
     def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
         """Where on Canvas `canvas` the part called `name` is drawn (a grid's column header), in points from the canvas's
         top-left; (-1, -1) when there's none. Test drivers and agents reach drawn parts with it (a drag that starts on a
