@@ -326,6 +326,11 @@ struct StageTV(Copyable, Movable):
         var r = TV_RADIUS_BAR + (TV_RADIUS_OPEN - TV_RADIUS_BAR) * _clamp01(p)
         return TVBox(inset, bottom - h, area_w - 2 * inset, h, r)
 
+    def target(self) -> String:
+        """The card the TV is showing, or swapping to (a card on its way out is never the target): what an app lets her point
+        at; "" when nothing."""
+        return self.next_card if self.leave_t0 >= 0 and not self.leave_whole else self.card
+
     def hides_tiles(self) -> Bool:
         """The TV covers the stage's tiles (open, or still on its way there or back with the tiles' veil up): what an app
         tells mojoui.pointer is on screen must leave the tiles out (pointed_parts), so she never points at a hidden tile."""
@@ -700,3 +705,46 @@ def pointed_parts(tv: StageTV, parts: List[Part], tiles: String) -> List[Part]:
             continue
         out.append(p.copy())
     return out^
+
+
+comptime RECENT_MAX = 5  # the cards Recent keeps: the one in the TV and up to four before it
+
+
+struct RecentCards(Copyable, Movable):
+    """The cards a Stage's TV has shown, newest first (keys and titles, one each, at most `most`): Recent's pills tap one back
+    into the TV. `show` puts a card at the front (once); `others(current)` lists the ones to offer beside the TV's card."""
+
+    var keys: List[String]
+    var titles: List[String]
+    var most: Int
+
+    def __init__(out self, most: Int = RECENT_MAX):
+        self.keys = List[String]()
+        self.titles = List[String]()
+        self.most = most
+
+    def show(mut self, key: String, title: String):
+        """Card `key` (now in the TV) to the front; a card seen before moves there, the oldest past `most` goes."""
+        var keys = List[String]()
+        var titles = List[String]()
+        keys.append(key)
+        titles.append(title)
+        for i in range(len(self.keys)):
+            if self.keys[i] != key and len(keys) < self.most:
+                keys.append(self.keys[i])
+                titles.append(self.titles[i])
+        self.keys = keys^
+        self.titles = titles^
+
+    def others(self, current: String) -> List[Int]:
+        """The indices (into keys/titles: what a pill's message carries) of the cards to offer beside `current`, the TV's:
+        every other kept card, newest first, at most `most` - 1."""
+        var out = List[Int]()
+        for k in range(len(self.keys)):
+            if self.keys[k] != current and len(out) < self.most - 1:
+                out.append(k)
+        return out^
+
+    def label(self, k: Int) -> String:
+        """Card k's title, or its key when it had none."""
+        return self.titles[k] if self.titles[k] != "" else self.keys[k]

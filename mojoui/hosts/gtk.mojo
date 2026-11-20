@@ -5588,6 +5588,17 @@ def find_field(host: GtkHost, key: String) -> Int:
     return i
 
 
+def canvas_index(host: GtkHost, which: String) -> Int:
+    """The canvases-list index of a canvas step's target now (canvas_node), -1 when it isn't on screen."""
+    var node = canvas_node(host, which)
+    if node < 0:
+        return -1
+    for k in range(len(host.canvases)):
+        if host.canvases[k].node == node:
+            return k
+    return -1
+
+
 def canvas_node(host: GtkHost, which: String) -> Int:
     """A canvas step's target: the nth content canvas ("0", "1"…) or the canvas tagged `which` ("island")."""
     var digits = which != ""
@@ -6553,20 +6564,31 @@ def run_step[A: App](host_addr: Int, step: String):
             ref cv = host[].canvases[ci]
             cv.test_pressure = pts[0][2]
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](cv.drag, begin.as_c_string_span(), pts[0][0], pts[0][1])
+            # (pump() runs pending rebuilds, which renumber or replace the canvases: the canvas is found again by its tag after
+            # each one, never written through an index from before it, D-7876)
             for k in range(1, len(pts)):
                 var free_by = perf_counter_ns() + 3_000_000_000  # (as drag: a move sent mid-rebuild is dropped, D-304)
                 while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
                     pump()
+                ci = canvas_index(host[], kv[0])
+                if ci < 0:
+                    print("TEST: the canvas went mid-stroke", kv[0])
+                    return
                 host[].canvases[ci].test_pressure = pts[k][2]
                 external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(),
                     pts[k][0] - pts[0][0], pts[k][1] - pts[0][1])
             var free_by = perf_counter_ns() + 3_000_000_000
             while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
                 pump()
+            ci = canvas_index(host[], kv[0])
+            if ci < 0:
+                print("TEST: the canvas went mid-stroke", kv[0])
+                return
             var last = pts[len(pts) - 1]
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, end.as_c_string_span(),
                 last[0] - pts[0][0], last[1] - pts[0][1])
-            host[].canvases[ci].test_pressure = -1
+            if ci < len(host[].canvases):
+                host[].canvases[ci].test_pressure = -1
         elif verb == "zoom":  # the scroll controller's signal: 4 notches up = 2×
             var factor = Float64(to_int(kv[1]))
             var handled = List[c_int](length=1, fill=0)

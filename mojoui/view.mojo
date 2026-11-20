@@ -575,8 +575,15 @@ def _container(var root: Node, items: List[View]) -> View:
     var vertical = root.kind != HSTACK  # VStack, Scroll (and Grid cells) stack downwards
     var nodes = List[Node]()
     nodes.append(root^)
+    # An empty View among the items (counted as is, it took the next sibling's first node as its own, D-7859): a stack
+    # (VStack, HStack, Card, Scroll, Overlay) skips it; where a child's place means something (a Grid's or Table's cell,
+    # a Board child's index in its messages and tones) it stays, as an empty VStack holding that place.
+    var positional = nodes[0].kind == GRID or nodes[0].kind == TABLE or nodes[0].kind == BOARD
     for item in items:
-        if len(item.nodes) == 0:  # (an empty View is no child: counted, it took the next sibling's first node as its own)
+        if len(item.nodes) == 0:
+            if positional:
+                nodes[0].children.append(len(nodes))
+                nodes.append(Node(VSTACK, spacing=0))
             continue
         var base = len(nodes)
         nodes[0].children.append(base)

@@ -142,6 +142,11 @@ def localtime_r(seconds_addr: Int, tm_addr: Int) -> Int:
     return external_call["localtime_r", Int](seconds_addr, tm_addr)
 
 
+def tzset():
+    """Re-read $TZ: glibc's localtime_r reads the zone once, so a test that sets $TZ calls this before reading the clock."""
+    external_call["tzset", NoneType]()
+
+
 def strtod(text: Int) -> Float64:
     """`text`: the address of a NUL-terminated number. Looked up, not declared (_sym)."""
     var f = _sym("strtod")

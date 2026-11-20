@@ -44,6 +44,19 @@ def is_tile_id(s: String) -> Bool:
     return True
 
 
+comptime SAMPLE_PREFIX = "sample_"  # an app's stand-in tile for a source it doesn't have yet: "sample_weather" (never an agent's id)
+
+
+def is_sample(id: String) -> Bool:
+    """A sample tile's id (SAMPLE_PREFIX): Screens.keep lets it step aside for an agent's tile of its plain name."""
+    return id.startswith(SAMPLE_PREFIX)
+
+
+def sample_plain(id: String) -> String:
+    """"sample_weather" → "weather" (the agent's tile that takes its place); any other id as it is."""
+    return String(id[byte = SAMPLE_PREFIX.byte_length():]) if is_sample(id) else id
+
+
 def kind_of(j: Json, t: Int) -> String:
     var k = j.get(t, "kind")
     return j.text(k) if k >= 0 and j.kind(k) == J_STRING else String(KIND_CENTRE)

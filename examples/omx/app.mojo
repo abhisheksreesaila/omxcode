@@ -21,7 +21,7 @@
 #   cards              mojoui.agentui.Screens             the agent's render_ui calls, validated and drawn natively (mojoui.genui)
 #   the orb, the rim   mojoui.orb                         in the chat bar: listens/thinks/speaks; the cloud lane's frame
 #   the pointer        mojoui.pointer.Pointer             a ring over the whole page that moves to the part she names (a card's part,
-#                                                         a tile while the tiles show: mojoui.stagetv.pointed_parts)
+#                                                         a tile while the tiles show: mojoui.agentui.stage_parts)
 #   the look           themes.omxqua.omxqua_counter        omxqua's Counter family, light or night as the system is
 #   the features       mojoui.assistant.Assistant         to-do (a file; the voice and the tick boxes edit it), news (cards of links),
 #                                                         think-it-through jobs (the model's second sequence), the cloud lane (`claude
@@ -54,13 +54,12 @@ from mojoui.agui import Agent, EV_TEXT, EV_RUN_FINISHED, EV_RUN_ERROR
 from mojoui.assistant import Assistant, ASSISTANT_SYSTEM
 from mojoui.cloudlane import route, LANE_CLOUD, LANE_BACKGROUND, STEP_ANSWERED, STEP_FAILED, STEP_FRAME_OFF
 from mojoui.http import Http, Request
-from mojoui.agentui import Screens
+from mojoui.agentui import Screens, stage_parts
 from mojoui.canvas import Surface
-from mojoui.clock import now_ns, local_time, clock_text, date_text
+from mojoui.clock import now_ns, local_time, wall_clock_text, wall_date_text
 from mojoui.effects import Every
 from mojoui.geometry import rect_of
-from mojoui.json import Json, json_string, J_STRING
-from mojoui.jsonpatch import JDoc
+from mojoui.json import Json
 from mojoui.genui import dump
 from mojoui.llm import Llm
 from mojoui.llmagent import LlmAgent, AppTool, press_with, view_tools, render_ui_tool
@@ -75,13 +74,13 @@ from mojoui.utf8 import head, boundary
 from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, POINT, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
 from mojoui.voiceui import VoiceDock, VoiceLane
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, TAPPED, DROPPED, tile_icon
-from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tile_of, kind_of, tile_json
+from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tile_of, kind_of, is_sample
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote, StageTool
 from mojoui.stage import stage_compact, stage_layout
 from mojoui.stagefeed import FeedTile, StageFeed, stage_feed, stage_tiles, tile_by_id, tint_hue
-from mojoui.stagetv import StageTV, TVContent, StageThread, StageChips, StageMsg, TV_YOU, TV_OMX, TV_QUIET_MS, tv_now, pointed_parts
-from themes.omxqua import omxqua_counter, counter_ground, counter_tv_look
-from samples import sample_tiles, sample_kinds, is_sample, sample_weather
+from mojoui.stagetv import StageTV, TVContent, StageThread, StageChips, StageMsg, TV_YOU, TV_OMX, TV_QUIET_MS, tv_now, RecentCards, RECENT_MAX
+from themes.omxqua import omxqua_counter, counter_palette, counter_ground, counter_tv_look
+from samples import sample_tiles, sample_kinds, sample_weather
 
 comptime TICK = 1
 comptime MUTE = 2
@@ -117,7 +116,6 @@ comptime LOOK_CANVAS = 15_000  # the camera cards' canvases (mojoui.looker)
 comptime STAGE_CARD = "stage"  # the tiles' card on Screens: the app's tiles, the samples and the agent's
 comptime TILES_TAG = "stage.tiles"  # the tiles' canvas (a dotted tag: every host reports its rect, mojoui.geometry)
 comptime HINT = "Ask omx, or just say “omx”"
-comptime MOST_RECENT = 5  # the cards Recent keeps: the one in the TV and up to four before it
 
 
 @fieldwise_init
@@ -180,8 +178,7 @@ struct Main(App):
     var tv: StageTV
     var msgs: List[StageMsg]  # the conversation the TV shows
     var reply_msg: Int  # the TV message this turn's reply is being written into (-1 none yet)
-    var recent: List[String]  # the cards shown, newest first (keys: cardN, todo, job, newsK, lookN, makeK)
-    var recent_titles: List[String]
+    var recent: RecentCards  # the cards shown, newest first (keys: cardN, todo, job, newsK, lookN, makeK)
     var speaking: Bool  # she was speaking at the last tick (the TV's quiet counts from when she stops)
     var stopped_at: Int  # when she last stopped speaking (tv_now): her subtitles stay as long as the TV's quiet
     var todo_sig: String
@@ -263,8 +260,7 @@ struct Main(App):
         self.tv.resize(1280)
         self.msgs = List[StageMsg]()
         self.reply_msg = -1
-        self.recent = List[String]()
-        self.recent_titles = List[String]()
+        self.recent = RecentCards()
         self.speaking = False
         self.stopped_at = -1
         self.todo_sig = ""
@@ -357,11 +353,11 @@ struct Main(App):
             self.keep_stage()
         elif m >= PERSON and m < PERSON + 4:
             self.person = m - PERSON
-        elif m >= RECENT and m < RECENT + MOST_RECENT:
+        elif m >= RECENT and m < RECENT + RECENT_MAX:
             var k = m - RECENT
-            if k < len(self.recent):
-                var key = self.recent[k]
-                var t = self.recent_titles[k]
+            if k < len(self.recent.keys):
+                var key = self.recent.keys[k]
+                var t = self.recent.titles[k]
                 self.show_card(key, t)
         elif m >= UNPIN and m < UNPIN + 20:
             self.unpin(m - UNPIN)
@@ -506,7 +502,7 @@ struct Main(App):
         self.heard = e.text
         self.reply = ""
         self.stopped_at = -1
-        self.msgs.append(StageMsg(TV_YOU, e.text, clock_text(local_time())))
+        self.msgs.append(StageMsg(TV_YOU, e.text, wall_clock_text(local_time())))
         self.reply_msg = -1
         self.tv.touch(tv_now())
         self.out("OMX HEARD: turn=" + String(self.turns) + " ms=" + String(Int(e.ms + 0.5)) + " text=" + e.text)
@@ -524,7 +520,7 @@ struct Main(App):
         if text == "":
             return
         if self.reply_msg < 0 or self.reply_msg >= len(self.msgs):
-            self.msgs.append(StageMsg(TV_OMX, text, clock_text(local_time())))
+            self.msgs.append(StageMsg(TV_OMX, text, wall_clock_text(local_time())))
             self.reply_msg = len(self.msgs) - 1
         else:
             self.msgs[self.reply_msg].text = text
@@ -550,31 +546,15 @@ struct Main(App):
         self.marks.append(PointMark(tag, e.ns, now_ns(), self.pointer.version()))
         self.out("OMX POINT_SENT: turn=" + String(self.turns) + " tag=" + tag + " at_ms=" + String(Int(e.ms)) + " late_ms=" + String(Int(Float64(now_ns() - e.ns) / 1e6)))
 
-    def tv_target(self) -> String:
-        """The card the TV shows, or is swapping to (what she may point at)."""
-        return self.tv.next_card if self.tv.leave_t0 >= 0 and not self.tv.leave_whole else self.tv.card
-
     def known_parts(self) -> List[Part]:
-        """What she may point at now: the card in the TV if this turn made it (the agent's, or the camera's boxes; never a card
-        swapped out of it or one from an earlier turn), and the stage's tiles while the TV doesn't hide them (pointed_parts)."""
-        var parts = List[Part]()
-        var shown = self.tv_target() if self.tv.is_open else String("")
-        var k = self.screens.card_index(shown) if shown != "" else -1
-        if k >= self.turn_card and k >= 0 and self.screens.uis[k].tiles_node() < 0 and not self.screens.live[k]:  # (this turn's)
-            for pt in self.screens.uis[k].parts():
-                parts.append(pt.copy())
-        if shown.startswith("look"):
-            for pt in self.looker.parts(self.turn_look):  # (this turn's camera card's boxes, named by their labels)
-                if pt.card == shown:
-                    parts.append(pt.copy())
-        for pt in self.tiles.parts(STAGE_CARD, TILES_TAG):
-            parts.append(pt.copy())
-        return pointed_parts(self.tv, parts, TILES_TAG)
+        """What she may point at now (agentui.stage_parts): this turn's card in the TV (a Screens card, or the camera's boxes),
+        and the stage's tiles while the TV doesn't hide them."""
+        return stage_parts(self.screens, self.tv, self.turn_card, self.looker.parts(self.turn_look), self.tiles.parts(STAGE_CARD, TILES_TAG), TILES_TAG)
 
     def tell_points(mut self):
         """The ring has been drawn on a point: its lag from the audio that names the part is printed (what the checker reads)."""
         var lay = self.tiles.layout()
-        var key = String(len(self.screens.uis)) + "/" + String(self.looker.serial) + "/" + String(self.tv.hides_tiles()) + "/" + String(self.tv.is_open) + "/" + self.tv_target() + "/" + String(self.turn_card)
+        var key = String(len(self.screens.uis)) + "/" + String(self.looker.serial) + "/" + String(self.tv.hides_tiles()) + "/" + String(self.tv.is_open) + "/" + self.tv.target() + "/" + String(self.turn_card)
         for id in lay.ids:
             key += "," + id
         if key != self.parts_key:  # (a card arrived, the TV opened or closed, the tiles moved: what she may point at now)
@@ -700,7 +680,7 @@ struct Main(App):
                     self.looker.call(c.id, c.arguments)
                     continue
                 if c.name == TILES:
-                    self.llm.value().answer(c.id, self.screens.tiles(self.on_stage(c.arguments)))
+                    self.llm.value().answer(c.id, self.screens.tiles(c.arguments, into=STAGE_CARD))
                     self.place_stage()
                     continue
                 self.by_agent = True
@@ -765,49 +745,16 @@ struct Main(App):
     # --- the Stage: its tiles -------------------------------------------------------------------------------------
 
     def keep_stage(mut self):
-        """The assistant's tiles and the samples on the stage card (Screens.keep: the agent's tiles and promotes stay), then placed."""
-        var mine = self.assist.tiles()
-        var kinds = self.assist.tile_kinds()
-        if self.samples_on:  # (a sample whose place an agent's tile has taken (its id without "sample_") leaves the stage)
-            var theirs = self.agent_tile_ids()
-            var made = sample_tiles()
-            var made_kinds = sample_kinds()
-            for i in range(len(made)):
-                var plain = String(made[i].id[byte = 7:])
-                var taken = False
-                for id in theirs:
-                    if id == plain:
-                        taken = True
-                if not taken:
-                    mine.append(made[i].copy())
-                    kinds.append(made_kinds[i])
+        """The assistant's tiles and the samples on the stage card (Screens.keep: the agent's tiles and promotes stay; a sample
+        steps aside for an agent's tile of its plain name), then placed."""
         var lead = String("")
         if self.assist.job and self.assist.job.value().state != 0:  # (a job that has finished leads once)
             lead = "job"
-        var why = self.screens.keep(STAGE_CARD, mine, kinds, lead)
+        var why = self.screens.keep(STAGE_CARD, self.assist.tiles(), self.assist.tile_kinds(), lead,
+                                    sample_tiles() if self.samples_on else List[Tile](), sample_kinds())
         if why != "":
             self.out("OMX STAGE: refused " + why)
         self.place_stage()
-
-    def agent_tile_ids(self) -> List[String]:
-        """The ids on the stage card that aren't the app's own (the agent's: render_ui's LiveTiles, the tiles tool's adds)."""
-        var out = List[String]()
-        var k = self.screens.card_index(STAGE_CARD)
-        if k < 0:
-            return out^
-        var n = self.screens.uis[k].tiles_node()
-        if n < 0:
-            return out^
-        var ts = self.screens.uis[k].json.get(n, "tiles")
-        for i in range(self.screens.uis[k].json.size(ts)):
-            var id = self.screens.uis[k].json.text(self.screens.uis[k].json.get(self.screens.uis[k].json.at(ts, i), "id"))
-            var mine = False
-            for m in self.screens.kept_ids:
-                if m == id:
-                    mine = True
-            if not mine:
-                out.append(id)
-        return out^
 
     def place_stage(mut self):
         """The stage card's tiles placed (mojoui.stagefeed): the first is the urgent one, then the centre tiles, then samples that fill;
@@ -844,46 +791,10 @@ struct Main(App):
         self.out("OMX STAGE: shown=" + shown + " today=" + String(len(self.feed.today)) + " live=" + String(len(self.feed.live)) + " pinned=" + String(len(self.feed.pinned)))
 
     def tiles_to_stage(mut self, k: Int):
-        """An agent's LiveTiles card: its tiles join the stage (a tile already there takes the new face), its first one leads."""
-        var n = self.screens.uis[k].tiles_node()
-        var ts = self.screens.uis[k].json.get(n, "tiles")
-        var on = List[String]()
-        for t in self.all:
-            on.append(t.id)
-        for i in range(self.screens.uis[k].json.size(ts)):
-            var t = self.screens.uis[k].json.at(ts, i)
-            var tile = tile_of(self.screens.uis[k].json, t)
-            var there = False
-            for id in on:
-                if id == tile.id:
-                    there = True
-            var args: String
-            if there:
-                args = '{"op":"set_face","card":"' + STAGE_CARD + '","id":' + json_string(tile.id) + ',"face":{"big":' + json_string(tile.faces[0].big) + ',"sub":' + json_string(tile.faces[0].sub) + "}}"
-            else:
-                args = '{"op":"add","card":"' + STAGE_CARD + '","tile":' + tile_json(tile, kind_of(self.screens.uis[k].json, t)) + "}"
-            _ = self.screens.tiles(args)
-            if i == 0:
-                _ = self.screens.tiles('{"op":"promote","card":"' + STAGE_CARD + '","id":' + json_string(tile.id) + "}")
-        self.keep_stage()  # (a sample the agent's tile now stands for leaves: keep_stage)
-
-    def on_stage(self, args: String) -> String:
-        """A `tiles` call aimed at the stage's card when it names no card (or an empty one), or names a LiveTiles card the agent
-        made (its tiles are on the stage now); any other card name is left as it is (the call is refused with that card's
-        reason). Only the "card" member changes."""
-        try:
-            var doc = JDoc.parse(args)
-            var j = Json.parse(args)
-            var c = j.get(0, "card")
-            var name = j.text(c) if c >= 0 and j.kind(c) == J_STRING else String("")
-            if name != "":
-                var k = self.screens.card_index(name)
-                if k < 0 or self.screens.uis[k].tiles_node() < 0 or name == STAGE_CARD:
-                    return args
-            doc.patch('[{"op":"add","path":"/card","value":' + json_string(STAGE_CARD) + "}]")
-            return doc.dump()
-        except:
-            return args  # (not a JSON object: Screens.tiles refuses it with what to send)
+        """An agent's LiveTiles card: its tiles join the stage (Screens.merge_tiles: a tile already there takes the new face, its
+        first one leads), then keep_stage (a sample the agent's tile now stands for leaves)."""
+        _ = self.screens.merge_tiles(k, STAGE_CARD)
+        self.keep_stage()
 
     def drop_zones(mut self):
         """Pinned, as a place a dragged tile can be let go (in the tiles canvas's points: it lies outside the canvas)."""
@@ -925,16 +836,7 @@ struct Main(App):
     def show_card(mut self, key: String, title: String):
         """Card `key` into the TV (opening it, or swapping the card in place), and to the front of Recent."""
         self.tv.open(tv_now(), title, key)
-        var keys = List[String]()
-        var titles = List[String]()
-        keys.append(key)
-        titles.append(title)
-        for i in range(len(self.recent)):
-            if self.recent[i] != key and len(keys) < MOST_RECENT:
-                keys.append(self.recent[i])
-                titles.append(self.recent_titles[i])
-        self.recent = keys^
-        self.recent_titles = titles^
+        self.recent.show(key, title)
 
     def watch_cards(mut self):
         """Cards that aren't the agent's render_ui (the to-do list changing, the job starting or ending, the news, a comic, the
@@ -956,7 +858,7 @@ struct Main(App):
             if js != "":
                 var title = self.assist.job.value().title
                 self.show_card("job", title)
-            elif self.tv.is_open and self.tv_target() == "job":
+            elif self.tv.is_open and self.tv.target() == "job":
                 self.tv.close(tv_now(), "app")  # (dismissed: its card is gone)
             self.keep_stage()
         if len(self.assist.news) != self.news_seen:
@@ -1002,10 +904,8 @@ struct Main(App):
     def recent_view(self) -> View:
         """The cards shown before this one, one tap each back into the TV."""
         var items = List[View]()
-        for k in range(len(self.recent)):
-            if self.recent[k] != self.tv.card and len(items) < MOST_RECENT - 1:
-                var t = self.recent_titles[k] if self.recent_titles[k] != "" else self.recent[k]
-                items.append(StagePill(_icon_of(self.recent[k]), head(t, 34), RECENT + k))
+        for k in self.recent.others(self.tv.card):
+            items.append(StagePill(_icon_of(self.recent.keys[k]), head(self.recent.label(k), 34), RECENT + k))
         if len(items) == 0:
             return View(List[Node]())
         return VStack(StageLabel("clock", "Recent"), VStack(items^, spacing=SPACE_S).align(START), spacing=SPACE_S).align(START)
@@ -1083,7 +983,7 @@ struct Main(App):
         var left_items = List[View]()
         if compact:
             left_items.append(where.copy())
-        left_items.append(StageClock(clock_text(t), date_text(t), sample_weather() if self.samples_on else String(""), compact))
+        left_items.append(StageClock(wall_clock_text(t), wall_date_text(t), sample_weather() if self.samples_on else String(""), compact))
         var today = List[View]()
         for id in self.feed.today:
             today.append(self.row(id))
@@ -1127,7 +1027,7 @@ struct Main(App):
         return Overlay(page^, ring^).grow().fill()
 
     def draw(mut self, canvas: Int, mut surface: Surface):
-        var p = omxqua_counter(self.dark).palette.copy()
+        var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
             var gaze = self.pointer.look("orb-small")
             self.orb.look(gaze[0], gaze[1], gaze[2])

@@ -5,7 +5,10 @@
 #   scripts/mxbuild.sh tests/test_tiles_agent.mojo -o build/test_tiles_agent && build/test_tiles_agent
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.agui import Agent, Tool
-from mojoui.agentui import Screens, tiles_tool
+from mojoui.agentui import Screens, tiles_tool, stage_parts
+from mojoui.stagetv import StageTV
+from mojoui.pointer import Part
+from mojoui.tilescard import tile_ids, is_sample, sample_plain
 from mojoui.genui import sample, schema
 from mojoui.json import Json, json_string
 from mojoui.jsonpatch import JDoc
@@ -52,6 +55,154 @@ def tiles_card(n: Int) -> String:
     for i in range(n):
         t += ("," if i > 0 else "") + '{"id":"t' + String(i) + '","head":"Tile ' + String(i) + '","faces":[{"big":"' + String(i) + '"}]}'
     return '{"ui":{"component":"Card","title":"Now","children":[{"component":"LiveTiles","tiles":[' + t + "]}]}}"
+
+
+def ids_of(screens: Screens, name: String) -> String:
+    """The ids on card `name`'s tiles, in the card's order (passive ones too)."""
+    var k = screens.card_index(name)
+    var out = String("")
+    var ids = tile_ids(screens.uis[k].json, screens.uis[k].tiles_node())
+    for i in range(len(ids)):
+        out += ("," if i > 0 else "") + ids[i]
+    return out
+
+
+def card_of(args: String) -> String:
+    """A tiles call's "card" member as JSON text ("-" when it has none)."""
+    try:
+        var j = Json.parse(args)
+        var c = j.get(0, "card")
+        return j.dump(c) if c >= 0 else String("-")
+    except:
+        return String("not json")
+
+
+def cards_of(parts: List[Part]) -> String:
+    var out = String("")
+    for p in parts:
+        out += ("," if out != "" else "") + p.card + ":" + p.part
+    return out
+
+
+def test_stage_logic() raises:
+    """omx's stage logic, lifted into the framework (review of M7f): Screens.aimed (on_stage), agent_tile_ids, keep's samples
+    and refused adds, merge_tiles (tiles_to_stage) and stage_parts (known_parts)."""
+    var agent = Agent("", 0, 0, "t")
+    agent.offer(Tool("render_ui", "Show UI", schema()))
+    agent.offer(tiles_tool())
+    var s = Screens(50_000, 5000)
+    var mine = List[Tile]()
+    mine.append(Tile("todo", 0, "To do", "3 to do", "milk"))
+    var kinds: List[String] = ["centre"]
+    var samples = List[Tile]()
+    samples.append(Tile("sample_weather", 0, "Weather", "9°", "sample"))
+    samples.append(Tile("sample_cal", 0, "Calendar", "3:15", "sample"))
+    var skinds: List[String] = ["passive", "passive"]
+    assert_true(is_sample("sample_cal") and not is_sample("cal"))
+    assert_equal(sample_plain("sample_weather"), "weather")
+    assert_equal(sample_plain("weather"), "weather")
+    assert_equal(s.keep("stage", mine, kinds, "", samples, skinds), "")
+    assert_equal(ids_of(s, "stage"), "todo,sample_weather,sample_cal")
+    assert_equal(len(s.agent_tile_ids("stage")), 0)
+    assert_equal(len(s.agent_tile_ids("nowhere")), 0)
+
+    # aimed: no card, an empty one, a non-string one, an agent's LiveTiles card -> the stage; any other card, the stage itself,
+    # or not a JSON object -> as it is
+    call(agent, "a1", "render_ui", sample("LiveTiles"))
+    _ = s.take(agent)
+    var agent_card = s.uis[len(s.uis) - 1].card
+    _ = s.show("word", sample("WordCard"))
+    assert_equal(card_of(s.aimed('{"op":"promote","id":"todo"}', "stage")), '"stage"')
+    assert_equal(card_of(s.aimed('{"op":"promote","id":"todo","card":""}', "stage")), '"stage"')
+    assert_equal(card_of(s.aimed('{"op":"promote","id":"todo","card":7}', "stage")), '"stage"')
+    assert_equal(card_of(s.aimed('{"op":"promote","id":"todo","card":' + json_string(agent_card) + "}", "stage")), '"stage"')
+    var unknown = '{"op":"promote","id":"todo","card":"card9"}'
+    assert_equal(s.aimed(unknown, "stage"), unknown)
+    var not_tiles = '{"op":"promote","id":"todo","card":"word"}'
+    assert_equal(s.aimed(not_tiles, "stage"), not_tiles)
+    var itself = '{"op":"promote","id":"todo","card":"stage"}'
+    assert_equal(s.aimed(itself, "stage"), itself)
+    assert_equal(s.aimed("[1,2]", "stage"), "[1,2]")
+    assert_equal(s.aimed("not json", "stage"), "not json")
+    assert_true(s.tiles('{"op":"promote","id":"todo"}', into="stage").find('"card":"stage"') >= 0)
+    assert_true(s.tiles('{"op":"promote","id":"todo","card":"card9"}', into="stage").find("refused") >= 0)
+    print("aimed: no card, empty, non-string, the agent's tiles card -> the stage; unknown, other, itself, non-object as they are")
+
+    # keep's samples: an agent's tile "weather" sends sample_weather away; when the agent removes it, the sample comes back
+    assert_true(s.tiles('{"op":"add","card":"stage","tile":{"id":"weather","head":"Weather","faces":[{"big":"11°"}]}}').find('"done":true') >= 0)
+    assert_equal(s.agent_tile_ids("stage")[0], "weather")
+    assert_equal(s.keep("stage", mine, kinds, "", samples, skinds), "")
+    assert_equal(ids_of(s, "stage"), "todo,sample_cal,weather")
+    assert_true(s.tiles('{"op":"remove","card":"stage","id":"weather"}').find('"done":true') >= 0)
+    assert_equal(s.keep("stage", mine, kinds, "", samples, skinds), "")
+    assert_equal(ids_of(s, "stage"), "todo,sample_cal,sample_weather")
+    assert_equal(s.keep("stage", mine, kinds, "", List[Tile](), skinds), "")  # (samples off: they go)
+    assert_equal(ids_of(s, "stage"), "todo")
+    print("keep: a sample steps aside for the agent's tile of its name and comes back when that tile goes")
+
+    # a refused add is remembered: not tried (nor reported) again until the tile changes
+    var bad = Tile("bad", 0, "Bad", "x", "y")
+    bad.faces.clear()  # (no face: the card refuses it)
+    mine.append(bad.copy())
+    kinds.append("centre")
+    var first = s.keep("stage", mine, kinds)
+    assert_true(first != "", "the first refusal is reported")
+    assert_equal(len(s.kept_failed), 1)
+    var before = len(s.take_log())
+    assert_equal(s.keep("stage", mine, kinds), "", "not tried again")
+    assert_equal(s.keep("stage", mine, kinds), "")
+    assert_equal(len(s.take_log()), 0, "nothing more logged")
+    _ = before
+    mine[1].faces.append(Face("fixed", ""))
+    assert_equal(s.keep("stage", mine, kinds), "", "changed: tried again, and taken")
+    assert_equal(len(s.kept_failed), 0)
+    assert_equal(ids_of(s, "stage"), "todo,bad")
+    _ = mine.pop(1)
+    _ = kinds.pop(1)
+    assert_equal(s.keep("stage", mine, kinds), "")
+    print("keep: a refused add is tried once per version of the tile")
+
+    # merge_tiles: the agent's LiveTiles card joins the stage (todo takes the new face, the rest are added, its first leads)
+    var ak = s.card_index(agent_card)
+    var sent = s.merge_tiles(ak, "stage")
+    assert_true(sent >= 4)
+    var on = ids_of(s, "stage")
+    assert_true(on.startswith("traffic,"), on)
+    assert_true(on.find("todo") >= 0 and on.find("weather") >= 0 and on.find("cal") >= 0, on)
+    assert_equal(s.merge_tiles(ak, "nowhere"), 0)
+    assert_equal(s.merge_tiles(s.card_index("word"), "stage"), 0)
+    assert_equal(s.merge_tiles(s.card_index("stage"), "stage"), 0)
+    print("merge_tiles: " + on)
+
+    # stage_parts: only this turn's card in the TV (shown or swapping in), the camera's own boxes for the TV's card, the tiles
+    # only while the TV doesn't hide them
+    _ = s.show("word2", sample("WordCard"))
+    var since = s.card_index("word2")
+    var tile_parts = List[Part]()
+    tile_parts.append(Part("stage", "todo", ["to do"]))
+    tile_parts[0].inside = "stage.tiles"  # (as livetiles' parts(card, inside) makes them: drawn inside the tiles' canvas)
+    var cam = List[Part]()
+    cam.append(Part("look3", "cup", ["cup"]))
+    cam.append(Part("look2", "dog", ["dog"]))
+    var tv = StageTV(1, 2)
+    tv.area_w = 700
+    tv.area_h = 740
+    assert_equal(cards_of(stage_parts(s, tv, since, cam, tile_parts, "stage.tiles")), "stage:todo", "closed: the tiles only")
+    tv.open(0, "w", "word")
+    _ = tv.tick(1_000_000)
+    assert_equal(len(stage_parts(s, tv, since, cam, tile_parts, "stage.tiles")), 0, "an earlier turn's card: nothing (and the tiles hidden)")
+    assert_true(len(stage_parts(s, tv, s.card_index("word"), cam, tile_parts, "stage.tiles")) >= 3, "this turn's: its parts")
+    tv.open(2_000_000, "w2", "word2")  # (swapping: word leaves, word2 comes)
+    _ = tv.tick(2_100_000)
+    var swapping = cards_of(stage_parts(s, tv, s.card_index("word"), cam, tile_parts, "stage.tiles"))
+    assert_true(swapping.find("word2:") >= 0 and swapping.find("word:") < 0, swapping)
+    tv.open(3_000_000, "cam", "look3")
+    _ = tv.tick(3_400_000)
+    assert_equal(cards_of(stage_parts(s, tv, since, cam, tile_parts, "stage.tiles")), "look3:cup", "the camera card's own boxes")
+    tv.open(4_000_000, "tiles", "stage")
+    _ = tv.tick(4_400_000)
+    assert_equal(len(stage_parts(s, tv, 0, cam, tile_parts, "stage.tiles")), 0, "a tiles card in the TV: not its parts")
+    print("stage_parts: closed -> tiles; earlier turn -> none; swap -> the incoming card; camera -> its boxes")
 
 
 def main() raises:
@@ -211,4 +362,5 @@ def main() raises:
     assert_true(s4.show("stage", '{"ui":{"component":"LiveTiles","tiles":[{"id":"x","head":"X","faces":[]}]}}') != "")  # (refused: no face)
     assert_equal(len(s4.uis), 1)
     print("app card: keep adds, changes, removes its own tiles; the agent's add and promote stand; lead once")
+    test_stage_logic()
     print("tiles agent: ok")

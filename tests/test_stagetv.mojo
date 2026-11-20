@@ -8,7 +8,7 @@ from mojoui.view import View, Text, Canvas, VStack, HStack, OVERLAY, CANVAS, STR
 from mojoui.stage import Stage, StageChat
 from mojoui.stagetv import StageTV, TVContent, StageThread, StageChips, StageMsg, soft_spring, ease_v2, tv_layout
 from mojoui.stagetv import TV_YOU, TV_OMX, TV_MORPH_MS, TV_QUIET_MS
-from mojoui.stagetv import pointed_parts
+from mojoui.stagetv import pointed_parts, RecentCards, RECENT_MAX
 from mojoui.pointer import Part, area_part
 from themes.omxqua import omxqua_counter, counter_tv_look
 
@@ -267,6 +267,50 @@ def test_pointer_leaves_hidden_tiles_out() raises:
     assert_equal(len(pointed_parts(tv, parts, "stage-tiles")), 2, "closed again: back")
 
 
+def test_target_and_recent() raises:
+    """StageTV.target (what an app lets her point at, D-7864): the card on screen, the one a swap is bringing in (never the one
+    leaving), "" once closed. RecentCards (omx's Recent, lifted for the review of M7f): newest first, a card shown again moves to
+    the front once, at most RECENT_MAX kept; others() leaves the TV's card out and offers at most RECENT_MAX - 1, by the index a
+    pill's message carries."""
+    var tv = opened_tv()
+    assert_equal(tv.target(), "")
+    tv.open(0, "Ephemeral", "word")
+    _ = tv.tick(1_000 * MS)
+    assert_equal(tv.target(), "word")
+    tv.open(2_000 * MS, "Heat pump", "iso")
+    _ = tv.tick(2_130 * MS)
+    assert_equal(tv.card, "word", "the old card is still on screen under its veil")
+    assert_equal(tv.target(), "iso", "a swap's target, not the card leaving")
+    _ = tv.tick(2_470 * MS)
+    assert_equal(tv.target(), "iso")
+    tv.close(3_000 * MS)
+    _ = tv.tick(3_400 * MS)
+    assert_equal(tv.target(), "", "closed: nothing to point at")
+
+    var r = RecentCards()
+    assert_equal(len(r.others("")), 0)
+    r.show("card1", "Ephemeral")
+    r.show("todo", "Your to-do list")
+    r.show("card1", "Ephemeral again")  # (shown again: to the front, once, with its new title)
+    assert_equal(len(r.keys), 2)
+    assert_equal(r.keys[0], "card1")
+    assert_equal(r.titles[0], "Ephemeral again")
+    assert_equal(r.keys[1], "todo")
+    var o = r.others("card1")
+    assert_equal(len(o), 1)
+    assert_equal(r.keys[o[0]], "todo")
+    for i in range(8):
+        r.show("news" + String(i), "")
+    assert_equal(len(r.keys), RECENT_MAX)
+    assert_equal(r.keys[0], "news7")
+    assert_equal(r.keys[RECENT_MAX - 1], "news3")
+    assert_equal(r.label(0), "news7", "no title: the key")
+    var shown = r.others("news7")
+    assert_equal(len(shown), RECENT_MAX - 1)
+    assert_equal(r.keys[shown[0]], "news6")
+    assert_equal(len(r.others("elsewhere")), RECENT_MAX - 1, "the TV on another card: still at most four offered")
+
+
 def main() raises:
     test_soft_spring()
     test_open_morph()
@@ -277,4 +321,5 @@ def main() raises:
     test_stage_layers()
     test_counter_styles_tv_tags()
     test_pointer_leaves_hidden_tiles_out()
-    print("test_stagetv: 9 tests passed")
+    test_target_and_recent()
+    print("test_stagetv: 10 tests passed")

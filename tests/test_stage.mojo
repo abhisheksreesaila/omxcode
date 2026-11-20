@@ -4,7 +4,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.view import View, Text, Canvas, VStack, HStack, SCROLL, NO_MSG
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote, StageTool
-from mojoui.view import Node
+from mojoui.view import Node, Grid, TableGrid, VSTACK
 from mojoui.stage import stage_layout, stage_compact, STAGE_PHONE, STAGE_NARROW
 from themes.omxqua import omxqua_counter, counter_ground, counter_shade
 
@@ -139,10 +139,6 @@ def test_counter_styles_every_tag() raises:
         assert_equal(voice.nodes[tagged(voice, "stage-subtitle")[0]].text, "Paris is the capital.")
         assert_equal(len(tagged(voice, "stage-mic")), 1)
         assert_equal(voice.nodes[tagged(voice, "stage-mic")[0]].text, "Mute")
-        # an empty View among a container's children is no child (it took its next sibling's first node before)
-        var mixed = VStack(Text("a"), View(List[Node]()), Text("b"), spacing=0)
-        assert_equal(len(mixed.nodes[0].children), 2)
-        assert_equal(len(mixed.nodes), 3)
         var panel = look.surfaces[look.surface("stage-panel")].copy()
         assert_equal(panel.fill, counter_ground(dark))
         assert_equal(panel.radius_top, 30)
@@ -155,6 +151,44 @@ def test_counter_styles_every_tag() raises:
         assert_equal(bar.fill, omxqua_counter(dark).palette.card)
 
 
+def test_container_empty_views() raises:
+    """An empty View among a container's children (D-7859, review of M7f): a stack skips it (counted, it took its next
+    sibling's first node as its own); a Grid's or Table's cell and a Board's child keep their place as an empty box, so the
+    cells after it don't shift."""
+    var mixed = VStack(Text("a"), View(List[Node]()), Text("b"), spacing=0)
+    assert_equal(len(mixed.nodes[0].children), 2)
+    assert_equal(len(mixed.nodes), 3)
+    assert_equal(mixed.nodes[mixed.nodes[0].children[1]].text, "b")
+    var row = HStack(View(List[Node]()), Text("x"), spacing=0)
+    assert_equal(len(row.nodes[0].children), 1)
+    assert_equal(row.nodes[row.nodes[0].children[0]].text, "x")
+    # a 2-column Grid: a, (empty), c, d: c stays in row 2, column 1 (the third cell), the hole is an empty box
+    var cells = List[View]()
+    cells.append(Text("a"))
+    cells.append(View(List[Node]()))
+    cells.append(Text("c"))
+    cells.append(Text("d"))
+    var g = Grid(cells, 2, spacing=0)
+    assert_equal(len(g.nodes[0].children), 4)
+    var kids = g.nodes[0].children.copy()
+    assert_equal(g.nodes[kids[0]].text, "a")
+    assert_equal(g.nodes[kids[1]].kind, VSTACK)
+    assert_equal(len(g.nodes[kids[1]].children), 0)
+    assert_equal(g.nodes[kids[2]].text, "c")
+    assert_equal(g.nodes[kids[3]].text, "d")
+    for k in kids:
+        assert_true(k < len(g.nodes), "a cell points past the nodes")
+    # a Table's cells keep their columns the same way
+    var tcells = List[View]()
+    tcells.append(Text("h1"))
+    tcells.append(Text("h2"))
+    tcells.append(View(List[Node]()))
+    tcells.append(Text("v2"))
+    var tb = TableGrid(tcells^, 2)
+    assert_equal(len(tb.nodes[0].children), 4)
+    assert_equal(tb.nodes[tb.nodes[0].children[3]].text, "v2")
+
+
 def main() raises:
     test_layout_desktop()
     test_layout_side_minimum()
@@ -163,4 +197,5 @@ def main() raises:
     test_regions_narrow()
     test_regions_phone()
     test_counter_styles_every_tag()
-    print("test_stage: 7 tests passed")
+    test_container_empty_views()
+    print("test_stage: 8 tests passed")

@@ -22,6 +22,7 @@ Prints the numbers; returns ("PASS" | "FAIL" | "BLOCKED", why).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -435,9 +436,14 @@ def run():
     OUT.mkdir(parents=True, exist_ok=True)
     SHOTS.mkdir(parents=True, exist_ok=True)
     r = sh(["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_stagetv.mojo"], 900)
-    if "test_stagetv: 9 tests passed" not in r.stdout:
-        return "FAIL", "tests/test_stagetv.mojo: " + (r.stdout + r.stderr)[-600:]
-    said.append("test_stagetv 9/9")
+    # (the printed count parsed and held to the file's own test functions and main()'s calls, not a fixed string)
+    src = (ROOT / "tests/test_stagetv.mojo").read_text()
+    defs = len(re.findall(r"^def (test_\w+)\(", src, re.M))
+    calls = len(re.findall(r"^\s+test_\w+\(\)", src.split("\ndef main()", 1)[-1], re.M))
+    m = re.search(r"^test_stagetv: (\d+) tests passed$", r.stdout, re.M)
+    if r.returncode or not m or not (int(m.group(1)) == defs == calls):
+        return "FAIL", f"tests/test_stagetv.mojo (printed {m.group(1) if m else None}, {defs} tests, {calls} called): " + (r.stdout + r.stderr)[-600:]
+    said.append(f"test_stagetv {m.group(1)}/{defs}")
     for target in ("linux", "web"):
         b = sh(["bash", "scripts/build.sh", "stage", target], 1800)
         if b.returncode:

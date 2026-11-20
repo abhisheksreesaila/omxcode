@@ -177,15 +177,32 @@ def _m7a_style(style, dark):
     return bad, f"panel {p.get('bg')} r {p.get('radius')} shadow '{p.get('shadow')}', bands {sides[0]['bg'] if sides else '-'}"
 
 
+def _test_stage():
+    """tests/test_stage.mojo run, its result read: (ok, n, why). The "test_stage: N tests passed" line is parsed, and N must
+    equal both the file's `def test_…` functions and the `test_…()` calls in its main() (a test dropped from main, or the
+    printed count left behind, fails here instead of passing on a fixed string)."""
+    import re
+    t = _m7a_sh(["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_stage.mojo"], 900)
+    src = (_M7A_ROOT / "tests/test_stage.mojo").read_text()
+    defs = len(re.findall(r"^def (test_\w+)\(", src, re.M))
+    main = src.split("\ndef main()", 1)[1] if "\ndef main()" in src else ""
+    calls = len(re.findall(r"^\s+test_\w+\(\)", main, re.M))
+    m = re.search(r"^test_stage: (\d+) tests passed$", t.stdout, re.M)
+    n = int(m.group(1)) if m else -1
+    ok = t.returncode == 0 and m is not None and n == defs == calls and n > 0
+    why = "" if ok else f"rc={t.returncode} printed={n} defs={defs} calls={calls}: " + (t.stdout + t.stderr)[-500:]
+    return ok, n, why
+
+
 def m7a():
     _M7A_OUT.mkdir(parents=True, exist_ok=True)
     for host in ("linux", "web"):
         r = _m7a_sh(["scripts/build.sh", "stage", host], 3600)
         if r.returncode:
             return ("FAIL", f"scripts/build.sh stage {host}: " + (r.stdout + r.stderr)[-800:])
-    t = _m7a_sh(["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_stage.mojo"], 900)
-    if t.returncode or "test_stage: 7 tests passed" not in t.stdout:
-        return ("FAIL", "tests/test_stage.mojo: " + (t.stdout + t.stderr)[-600:])
+    t_ok, t_n, t_why = _test_stage()
+    if not t_ok:
+        return ("FAIL", "tests/test_stage.mojo: " + t_why)
     import shutil
     bad, said = [], []
     for name, w, h, dark in _M7A_RUNS:
@@ -214,7 +231,7 @@ def m7a():
     (_M7A_OUT / "m7a.txt").write_text("\n".join(said + bad) + "\n")
     if bad:
         return ("FAIL", "; ".join(bad))
-    return ("PASS", "test_stage 7/7; " + "; ".join(said) + "; shots docs/goals/77/m7a-{gtk,web}-{desktop-light,desktop-dark,phone}.png")
+    return ("PASS", f"test_stage {t_n}/{t_n}; " + "; ".join(said) + "; shots docs/goals/77/m7a-{gtk,web}-{desktop-light,desktop-dark,phone}.png")
 
 
 def m7b():
@@ -299,9 +316,8 @@ def m7f():
         return _m7a_sh(cmd, timeout)
 
     # (3) the unit tests and the lints
-    for name, flags, want in (("test_stage", ["pixi", "run", "mojo", "run", "--disable-warnings", "-I", ".", "tests/test_stage.mojo"], "test_stage: 7 tests passed"),):
-        r = sh(flags, 900)
-        (said if r.returncode == 0 and want in r.stdout else probs).append(name + (": ok" if r.returncode == 0 and want in r.stdout else ": " + (r.stdout + r.stderr)[-300:]))
+    t_ok, t_n, t_why = _test_stage()
+    (said.append(f"test_stage: {t_n}/{t_n}") if t_ok else probs.append("test_stage: " + t_why[-300:]))
     for name, extra in (("test_tiles_agent", []), ("test_assistant", ["-I", "vendor"])):
         b = sh(["scripts/mxbuild.sh", f"tests/{name}.mojo", "-o", f"build/{name}"] if not extra else
                ["pixi", "run", "mojo", "build", "--disable-warnings", "-I", ".", *extra, f"tests/{name}.mojo", "-o", f"build/{name}"], 1800)

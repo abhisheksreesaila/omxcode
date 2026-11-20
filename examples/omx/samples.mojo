@@ -2,7 +2,7 @@
 # house). They are SAMPLES, not data: every one says "sample" on its face, Settings turns them off, and each goes the day a
 # real source plugs in. The assistant's own tiles (to-do, the job, the news) are real: mojoui.assistant.Assistant.tiles().
 # Their ids start "sample_" (never an id the agent would pick); when the agent puts up a tile of the plain name ("weather"),
-# its sample leaves the stage (the app's keep_stage).
+# its sample leaves the stage and comes back once that tile is gone (mojoui.agentui.Screens.keep's samples).
 
 from mojoui.livetiles import Tile, Face
 
@@ -26,10 +26,6 @@ def sample_tiles() -> List[Tile]:
 
 def sample_kinds() -> List[String]:
     return ["passive", "passive", "passive", "passive"]
-
-
-def is_sample(id: String) -> Bool:
-    return id.startswith("sample_")
 
 
 def sample_weather() -> String:

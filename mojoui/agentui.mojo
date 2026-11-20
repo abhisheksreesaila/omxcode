@@ -27,7 +27,7 @@
 # tiles tool and ui_patch work on it like on any card.
 
 from mojoui.agui import Agent, Tool
-from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tiles_patch, tile_json, tile_ids
+from mojoui.tilescard import TILES, TILES_ABOUT, TILES_PARAMS, tiles_patch, tile_json, tile_ids, tile_of, kind_of, sample_plain, is_sample
 from mojoui.livetiles import size_name, Tile
 from mojoui.json import Json, J_OBJECT
 from mojoui.tripmap import SHOW_MAP, trip_ui
@@ -38,6 +38,8 @@ from mojoui.datahub import Hub, NoData
 from mojoui.album import Album
 from mojoui.jsonpatch import JDoc
 from mojoui.pointer import Part
+from mojoui.stagetv import StageTV, pointed_parts
+from mojoui.json import J_STRING
 from mojoui.json import json_string
 from mojoui.view import View, Text, Card, CAPTION, SPACE_XS, CARD_WARN
 from mojoui.canvas import Surface
@@ -96,6 +98,7 @@ struct Screens[H: Hub = NoData](Movable):
     var kept_ids: List[String]  # keep(): the app's own tiles on its card, as last sent …
     var kept: List[String]  # … and their JSON
     var kept_lead: String
+    var kept_failed: List[String]  # keep(): app tiles whose add was refused, as "<id>\n<JSON>": not tried again until the tile changes
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi[Self.H]]()
@@ -116,6 +119,7 @@ struct Screens[H: Hub = NoData](Movable):
         self.kept_ids = List[String]()
         self.kept = List[String]()
         self.kept_lead = String("")
+        self.kept_failed = List[String]()
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -315,15 +319,41 @@ struct Screens[H: Hub = NoData](Movable):
         self.sizes.append(ui_json.byte_length())
         return ""
 
-    def keep(mut self, name: String, tiles: List[Tile], kinds: List[String], lead: String = "") -> String:
-        """The app's own live tiles (`kinds[i]`: centre, passive or live) on its card `name`, made on the first call (a LiveTiles
-        screen of them), then kept in step: a tile the app has and the card hasn't is added after the others, one that changed is
-        replaced where it stands, one the app had and no longer has is removed. The agent's tiles on the card, its order and its
-        promotes stay. `lead`: a tile the app wants first now (a job that has just finished); moved there once each time it
-        changes, so a later promote by the agent still wins. "" when done, else the first refusal."""
+    def keep(mut self, name: String, own: List[Tile], own_kinds: List[String], lead: String = "", samples: List[Tile] = [],
+             sample_kinds: List[String] = []) -> String:
+        """The app's own live tiles (`own_kinds[i]`: centre, passive or live) on its card `name`, made on the first call (a
+        LiveTiles screen of them), then kept in step: a tile the app has and the card hasn't is added after the others, one that
+        changed is replaced where it stands, one the app had and no longer has is removed. The agent's tiles on the card, its
+        order and its promotes stay. `lead`: a tile the app wants first now (a job that has just finished); moved there once each
+        time it changes, so a later promote by the agent still wins. `samples`: stand-ins for sources the app doesn't have yet
+        (ids "sample_<plain>", tilescard.is_sample): each one steps aside while the card holds an agent's tile called <plain>,
+        and comes back on the next keep once that tile is gone. An add the card refuses is remembered with the tile it tried and
+        not tried again (nor reported again) until that tile changes. "" when done, else the first new refusal."""
+        var tiles = own.copy()
+        var kinds = own_kinds.copy()
+        if len(samples) > 0:
+            var theirs = self.agent_tile_ids(name)
+            for i in range(len(samples)):
+                var taken = False
+                for id in theirs:
+                    if id == sample_plain(samples[i].id):
+                        taken = True
+                if not taken:
+                    tiles.append(samples[i].copy())
+                    kinds.append(sample_kinds[i] if i < len(sample_kinds) else String("passive"))
         var made = List[String]()
         for i in range(len(tiles)):
             made.append(tile_json(tiles[i], kinds[i] if i < len(kinds) else String("centre")))
+        # (refused adds of tiles the app no longer has, or has changed, are forgotten: a changed tile is tried again)
+        var f = len(self.kept_failed) - 1
+        while f >= 0:
+            var still = False
+            for i in range(len(tiles)):
+                if self.kept_failed[f] == tiles[i].id + "\n" + made[i]:
+                    still = True
+            if not still:
+                _ = self.kept_failed.pop(f)
+            f -= 1
         var k = self.card_index(name)
         if k < 0:
             var body = String('{"ui":{"component":"LiveTiles","tiles":[')
@@ -337,6 +367,7 @@ struct Screens[H: Hub = NoData](Movable):
                     self.kept_ids.append(tiles[i].id)
                     self.kept.append(made[i])
                 self.kept_lead = lead
+                self.kept_failed = List[String]()
             return why
         var first_why = String("")
         # gone: the app's tiles it no longer has
@@ -362,9 +393,18 @@ struct Screens[H: Hub = NoData](Movable):
                     at = q
             if at >= 0 and self.kept[at] == made[i]:
                 continue
+            var key = tiles[i].id + "\n" + made[i]
+            var failed_before = False
+            for fk in self.kept_failed:
+                if fk == key:
+                    failed_before = True
+            if at < 0 and failed_before:
+                continue  # (refused before as it is: not again)
             var why = self._tile_op(k, tiles[i].id, "replace" if at >= 0 else "add", made[i])
             if why != "" and first_why == "":
                 first_why = why
+            if why != "" and at < 0:
+                self.kept_failed.append(key)
             if why == "" or at >= 0:
                 if at >= 0:
                     self.kept[at] = made[i]
@@ -405,6 +445,77 @@ struct Screens[H: Hub = NoData](Movable):
         else:
             ops = '[{"op":"add","path":' + json_string(base + "-") + ',"value":' + tile + "}]"
         return self.patch(k, ops)
+
+    def agent_tile_ids(self, name: String) -> List[String]:
+        """The ids on card `name`'s live tiles that aren't the app's own (keep()'s): the agent's (render_ui's LiveTiles merged in,
+        the tiles tool's adds). Empty when there is no such card or it holds no tiles."""
+        var out = List[String]()
+        var k = self.card_index(name)
+        if k < 0:
+            return out^
+        var n = self.uis[k].tiles_node()
+        if n < 0:
+            return out^
+        for id in tile_ids(self.uis[k].json, n):
+            var mine = False
+            for m in self.kept_ids:
+                if m == id:
+                    mine = True
+            if not mine:
+                out.append(id)
+        return out^
+
+    def aimed(self, args: String, card: String) -> String:
+        """A `tiles` call aimed at the app's tiles card `card` when it names no card (or an empty one, or not a string), or names
+        a LiveTiles card the agent made (whose tiles merge_tiles put on `card`); a call naming any other card, `card` itself or
+        no JSON object is returned as it is (tiles() then answers for that card, or refuses with what to send). Only the "card"
+        member changes."""
+        try:
+            var j = Json.parse(args)
+            if j.kind(0) != J_OBJECT:
+                return args
+            var c = j.get(0, "card")
+            var name = j.text(c) if c >= 0 and j.kind(c) == J_STRING else String("")
+            if name == card:
+                return args
+            if name != "":
+                var k = self.card_index(name)
+                if k < 0 or self.uis[k].tiles_node() < 0:
+                    return args
+            var doc = JDoc.parse(args)
+            doc.patch('[{"op":"add","path":"/card","value":' + json_string(card) + "}]")
+            return doc.dump()
+        except:
+            return args
+
+    def merge_tiles(mut self, k: Int, into: String) -> Int:
+        """Card k's live tiles (an agent's LiveTiles card) join card `into` (the app's, keep()'s): a tile whose id is there
+        already takes the new face, the others are added; card k's first tile is promoted there. Returns the tiles sent."""
+        var n = self.uis[k].tiles_node() if 0 <= k < len(self.uis) else -1
+        var to = self.card_index(into)
+        if n < 0 or to < 0 or to == k:
+            return 0
+        var on = tile_ids(self.uis[to].json, self.uis[to].tiles_node())
+        var ts = self.uis[k].json.get(n, "tiles")
+        var sent = 0
+        for i in range(self.uis[k].json.size(ts)):
+            var t = self.uis[k].json.at(ts, i)
+            var tile = tile_of(self.uis[k].json, t)
+            var there = False
+            for id in on:
+                if id == tile.id:
+                    there = True
+            var args: String
+            if there:
+                args = ('{"op":"set_face","card":' + json_string(into) + ',"id":' + json_string(tile.id) + ',"face":{"big":'
+                        + json_string(tile.faces[0].big) + ',"sub":' + json_string(tile.faces[0].sub) + "}}")
+            else:
+                args = '{"op":"add","card":' + json_string(into) + ',"tile":' + tile_json(tile, kind_of(self.uis[k].json, t)) + "}"
+            _ = self.tiles(args)
+            sent += 1
+            if i == 0:
+                _ = self.tiles('{"op":"promote","card":' + json_string(into) + ',"id":' + json_string(tile.id) + "}")
+        return sent
 
     def was_refused(self, call_id: String) -> Bool:
         for r in self.refused:
@@ -495,10 +606,12 @@ struct Screens[H: Hub = NoData](Movable):
         self.said.append("PATCH: card=" + card + (" ok" if why == "" else " refused=" + why))
         return why
 
-    def tiles(mut self, args: String) -> String:
+    def tiles(mut self, call_args: String, into: String = "") -> String:
         """The `tiles` tool's answer (JSON): its operation as a patch on the card it names (or the newest one with live tiles),
         validated again: {"done": true, "card", "order": [the grid's ids], "first", "say"}, or {"error": "refused: …"} with what
-        to fix (an unknown id lists the ids)."""
+        to fix (an unknown id lists the ids). `into`: an app's own tiles card that takes calls naming no card or an agent's
+        LiveTiles card (aimed())."""
+        var args = self.aimed(call_args, into) if into != "" else call_args
         var card = String("")
         var op = String("")
         try:
@@ -582,3 +695,24 @@ struct Screens[H: Hub = NoData](Movable):
         for k in range(len(self.uis)):
             if self.uis[k].draws(canvas):
                 self.uis[k].draw(canvas, surface, p, state, self.font)
+
+
+def stage_parts[H: Hub](screens: Screens[H], tv: StageTV, since: Int, own: List[Part], tiles: List[Part], tiles_tag: String) -> List[Part]:
+    """What an assistant may point at on a Stage (mojoui.pointer's know()): the card the TV shows or is swapping to
+    (StageTV.target; never one on its way out), if this turn made it: a Screens card at index >= `since` that is not a live
+    tiles card and has finished streaming (its parts()), or a card the app draws itself, whose parts are in `own` (a camera
+    card's boxes: only those whose card is the TV's); then the stage's `tiles` parts while the TV doesn't hide them
+    (stagetv.pointed_parts, `tiles_tag` the tiles' canvas)."""
+    var parts = List[Part]()
+    var shown = tv.target() if tv.is_open else String("")
+    if shown != "":
+        var k = screens.card_index(shown)
+        if k >= since and k >= 0 and screens.uis[k].tiles_node() < 0 and not screens.live[k]:
+            for pt in screens.uis[k].parts():
+                parts.append(pt.copy())
+        for pt in own:
+            if pt.card == shown:
+                parts.append(pt.copy())
+    for pt in tiles:
+        parts.append(pt.copy())
+    return pointed_parts(tv, parts, tiles_tag)

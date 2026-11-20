@@ -44,7 +44,7 @@ from mojoui.jsonpatch import JDoc
 from mojoui.clock import now_ns
 from mojoui.png import encode_png
 from mojoui.shared import environment
-from themes.omxqua import omxqua_counter, counter_ground, counter_tv_look
+from themes.omxqua import omxqua_counter, counter_palette, counter_ground, counter_tv_look
 from days import Moment, moments, ranked, day_tiles, clock_text
 
 comptime TILES_CANVAS = 1
@@ -405,7 +405,7 @@ struct Main(App):
         return Stage(top, left, stage, right, chat, self.width, compact_panel=self.tiles.compact_height() + 20, tv=self.tv, content=content)
 
     def draw(mut self, canvas: Int, mut surface: Surface):
-        var p = omxqua_counter(self.dark).palette.copy()
+        var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
             self.orb.draw(surface, p.with_accent(p.series[1]))  # (the Counter's accent is ink: the orb in the family's blue)
             return
