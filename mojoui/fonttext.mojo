@@ -35,6 +35,50 @@ comptime FT_FACE_FLAG_COLOR = 1 << 14
 comptime PIXEL_GRAY = 2
 comptime PIXEL_BGRA = 7
 
+comptime _M_CTFONT = 0
+comptime _M_DESCR = 1
+comptime _M_GLYPHS4CHARS = 2
+comptime _M_FORSTRING = 3
+comptime _M_COPYCG = 4
+comptime _M_CTBYNAME = 5
+comptime _M_TRAITS = 6
+comptime _M_LINE = 7
+comptime _M_RUNS = 8
+comptime _M_RUNCOUNT = 9
+comptime _M_RUNGLYPHS = 10
+comptime _M_RUNPOS = 11
+comptime _M_RUNADV = 12
+comptime _M_RUNATTRS = 13
+comptime _M_ADVANCES = 14
+comptime _M_BOUNDS = 15
+comptime _M_DRAW = 16
+comptime _M_PSNAME = 17
+comptime _M_CGPROV = 18
+comptime _M_CGFONT = 19
+comptime _M_UPEM = 20
+comptime _M_ASC = 21
+comptime _M_DESC = 22
+comptime _M_GRAY = 23
+comptime _M_RGB = 24
+comptime _M_BITMAP = 25
+comptime _M_GRAYFILL = 26
+comptime _M_SMOOTH = 27
+comptime _M_AA = 28
+comptime _M_SUBPOS_OK = 29
+comptime _M_SUBPOS = 30
+comptime _M_CTXREL = 31
+comptime _M_CFSTR = 32
+comptime _M_ATTRSTR = 33
+comptime _M_CFDICT = 34
+comptime _M_DICTGET = 35
+comptime _M_CFNUM = 36
+comptime _M_ARRCOUNT = 37
+comptime _M_ARRAT = 38
+comptime _M_CFRELEASE = 39
+comptime _M_CFGETCSTR = 40
+comptime _M_LEADING = 41
+comptime _M_RGBFILL = 42
+
 # alignment of a run at x
 comptime ALIGN_LEFT = 0
 comptime ALIGN_CENTER = 1
@@ -263,6 +307,14 @@ struct FontEngine(Movable):
     var images: List[GlyphImage]
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
+    # the Mac: CoreText, CoreGraphics, CoreFoundation (by address, dlopen'd as on Linux)
+    var mac: List[Int]  # function addresses, by the _M_* indices below
+    var k_font_attr: Int  # kCTFontAttributeName's value
+    var k_var_attr: Int  # kCTFontVariationAttribute's value
+    var k_dict_keys: Int  # &kCFTypeDictionaryKeyCallBacks
+    var k_dict_vals: Int
+    var ct_fonts: Dict[String, Int]  # (instance, size) → CTFont
+    var face_of_name: Dict[String, Int]  # a system face's PostScript name → its face
     var error: String
 
     def __init__(out self):
@@ -316,10 +368,19 @@ struct FontEngine(Movable):
         var h = getenv("FONTTEXT_HINT", "light")
         self.hint = FT_LOAD_NO_HINTING if h == "none" else (0 if h == "full" else FT_LOAD_TARGET_LIGHT)
         self.error = ""
+        self.mac = List[Int]()
+        self.k_font_attr = 0
+        self.k_var_attr = 0
+        self.k_dict_keys = 0
+        self.k_dict_vals = 0
+        self.ct_fonts = Dict[String, Int]()
+        self.face_of_name = Dict[String, Int]()
 
     # ------------------------------------------------ loading
 
     def load(mut self) -> Bool:
+        comptime if CompilationTarget.is_macos():
+            return self._mac_load()
         var anywhere = -2 if CompilationTarget.is_macos() else 0
         var dlopen = _dlsym(anywhere, "dlopen")
         if dlopen == 0:
@@ -393,6 +454,8 @@ struct FontEngine(Movable):
 
     def _open_face(mut self, var f: _Face) -> Int:
         """Opens the file in FreeType and HarfBuzz; the face's index, or -1."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_open_face(f^)
         var key = f.path + "#" + String(f.index)
         if key in self.face_of_file and f.family == "":
             return self.face_of_file.get(key, -1)
@@ -448,6 +511,8 @@ struct FontEngine(Movable):
 
     def inst(mut self, face: Int, weight: Int, size: Float64) -> Int:
         """The face at a weight and (Chromium's automatic optical sizing: opsz = the size in CSS px) an optical size."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_inst(face, weight, size)
         ref f = self.faces[face]
         var wght = Float64(weight)
         var opsz = 0.0
@@ -486,6 +551,8 @@ struct FontEngine(Movable):
         return len(self.insts) - 1
 
     def has(mut self, inst: Int, cp: Int) -> Bool:
+        comptime if CompilationTarget.is_macos():
+            return self._mac_has(inst, cp)
         var g = List[UInt32](length=1, fill=0)
         var ok = _fn[def(Int, c_uint, Int) thin abi("C") -> c_int](self.hb_font_get_nominal_glyph)(self.insts[inst].hb_font, c_uint(cp), Int(g.unsafe_ptr())) != 0
         _ = g
@@ -493,6 +560,8 @@ struct FontEngine(Movable):
 
     def system_face(mut self, cp: Int, emoji: Bool) -> Int:
         """fontconfig's face for a codepoint the chosen face lacks (or the emoji face); cached; -1 if none."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_system_face(cp, emoji)
         var key = -1 if emoji else cp
         if key in self.fallback:
             return self.fallback.get(key, -1)
@@ -601,6 +670,8 @@ struct FontEngine(Movable):
         return run^
 
     def _shape_part(mut self, mut run: Run, inst: Int, text: String, start: Int, length: Int, st: TextStyle, pen0: Float64) -> Float64:
+        comptime if CompilationTarget.is_macos():
+            return self._mac_shape_part(run, inst, text, start, length, st, pen0)
         var buf = self.hb_buf
         _fn[def(Int) thin abi("C") -> NoneType](self.hb_buffer_clear_contents)(buf)
         _fn[def(Int, Int, c_int, c_uint, c_int) thin abi("C") -> NoneType](self.hb_buffer_add_utf8)(
@@ -670,6 +741,8 @@ struct FontEngine(Movable):
     def advance_units(mut self, inst: Int, gid: Int) -> Int:
         """FreeType's advance of a glyph in font units with the instance's variations (what Skia hands Chromium's
         HarfBuzz: HVAR or gvar's phantom points, which HarfBuzz's own functions miss for some faces, D-7905)."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_advance_units(inst, gid)
         var key = inst * 1048576 + gid
         if key in self.adv_of:
             return self.adv_of.get(key, 0)
@@ -683,6 +756,8 @@ struct FontEngine(Movable):
 
     def image(mut self, inst: Int, gid: Int, size_dev: Float64, subx: Int) -> Int:
         """The glyph at a device size (and a quarter-pixel x offset), rasterized once and cached; its index in images."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_image(inst, gid, size_dev, subx)
         var s64 = Int(size_dev * 64 + 0.5)
         var key = (((inst * 1048576 + gid) * 65536 + s64) << 2) | (subx & 3)
         if key in self.image_of:
@@ -735,6 +810,352 @@ struct FontEngine(Movable):
         self.images.append(img^)
         self.image_of[key] = len(self.images) - 1
         return len(self.images) - 1
+
+
+    # ------------------------------------------------ the Mac: CoreText (goal 79 M1)
+
+    def _m(self, i: Int) -> Int:
+        return self.mac[i]
+
+    def _mac_load(mut self) -> Bool:
+        var dlopen = _dlsym(-2, "dlopen")
+        var ct = self._open(dlopen, "/System/Library/Frameworks/CoreText.framework/CoreText")
+        var cg = self._open(dlopen, "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        var cf = self._open(dlopen, "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        if ct == 0 or cg == 0 or cf == 0:
+            self.error = "CoreText, CoreGraphics or CoreFoundation didn't load"
+            return False
+        var names: List[String] = [
+            "CTFontCreateWithGraphicsFont", "CTFontDescriptorCreateWithAttributes", "CTFontGetGlyphsForCharacters", "CTFontCreateForString",
+            "CTFontCopyGraphicsFont", "CTFontCreateWithName", "CTFontGetSymbolicTraits", "CTLineCreateWithAttributedString",
+            "CTLineGetGlyphRuns", "CTRunGetGlyphCount", "CTRunGetGlyphs", "CTRunGetPositions", "CTRunGetAdvances", "CTRunGetAttributes",
+            "CTFontGetAdvancesForGlyphs", "CTFontGetBoundingRectsForGlyphs", "CTFontDrawGlyphs", "CTFontCopyPostScriptName",
+            "CGDataProviderCreateWithFilename", "CGFontCreateWithDataProvider", "CGFontGetUnitsPerEm", "CGFontGetAscent", "CGFontGetDescent",
+            "CGColorSpaceCreateDeviceGray", "CGColorSpaceCreateDeviceRGB", "CGBitmapContextCreate", "CGContextSetGrayFillColor",
+            "CGContextSetShouldSmoothFonts", "CGContextSetShouldAntialias", "CGContextSetAllowsFontSubpixelPositioning",
+            "CGContextSetShouldSubpixelPositionFonts", "CGContextRelease", "CFStringCreateWithBytes", "CFAttributedStringCreate",
+            "CFDictionaryCreate", "CFDictionaryGetValue", "CFNumberCreate", "CFArrayGetCount", "CFArrayGetValueAtIndex", "CFRelease",
+            "CFStringGetCString", "CGFontGetLeading", "CGContextSetRGBFillColor",
+        ]
+        for n in names:
+            var lib = ct if n.startswith("CT") else (cg if n.startswith("CG") else cf)
+            var a = _dlsym(lib, n)
+            if a == 0:
+                self.error = "missing " + n
+                return False
+            self.mac.append(a)
+        self.k_font_attr = _peek(_dlsym(ct, "kCTFontAttributeName"))
+        self.k_var_attr = _peek(_dlsym(ct, "kCTFontVariationAttribute"))
+        self.k_dict_keys = _dlsym(cf, "kCFTypeDictionaryKeyCallBacks")
+        self.k_dict_vals = _dlsym(cf, "kCFTypeDictionaryValueCallBacks")
+        var dir = fonts_dir()
+        for row in _registry():
+            var path = dir + "/" + row[2]
+            _ = self._mac_open_face(_Face(path, 0, row[0], row[1] == "italic", Int(atol(row[3]))))
+        return True
+
+    def _cfstr(self, s: String) -> Int:
+        var t = s
+        var r = _fn[def(Int, Int, Int, UInt32, UInt8) thin abi("C") -> Int](self._m(_M_CFSTR))(0, Int(t.unsafe_ptr()), t.byte_length(), UInt32(0x08000100), UInt8(0))
+        _ = t
+        return r
+
+    def _cfnum_f(self, v: Float64) -> Int:
+        var b = List[Float64](length=1, fill=v)
+        var r = _fn[def(Int, Int, Int) thin abi("C") -> Int](self._m(_M_CFNUM))(0, 13, Int(b.unsafe_ptr()))  # kCFNumberDoubleType
+        _ = b
+        return r
+
+    def _cfnum_i(self, v: Int) -> Int:
+        var b = List[Int32](length=1, fill=Int32(v))
+        var r = _fn[def(Int, Int, Int) thin abi("C") -> Int](self._m(_M_CFNUM))(0, 3, Int(b.unsafe_ptr()))  # kCFNumberSInt32Type
+        _ = b
+        return r
+
+    def _cfdict(self, keys: List[Int], vals: List[Int]) -> Int:
+        var r = _fn[def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int](self._m(_M_CFDICT))(0, Int(keys.unsafe_ptr()), Int(vals.unsafe_ptr()), len(keys), self.k_dict_keys, self.k_dict_vals)
+        _ = keys
+        _ = vals
+        return r
+
+    def _release(self, x: Int):
+        if x != 0:
+            _fn[def(Int) thin abi("C") -> NoneType](self._m(_M_CFRELEASE))(x)
+
+    def _mac_open_face(mut self, var f: _Face) -> Int:
+        var key = f.path + "#" + String(f.index)
+        if f.path != "" and key in self.face_of_file:
+            return self.face_of_file.get(key, -1)
+        if f.ft == 0:  # (a file: a system face arrives with its CGFont already made)
+            var p = f.path
+            var prov = _fn[def(Int) thin abi("C") -> Int](self._m(_M_CGPROV))(Int(p.as_c_string_span().ptr()))
+            _ = p
+            if prov == 0:
+                return -1
+            f.ft = _fn[def(Int) thin abi("C") -> Int](self._m(_M_CGFONT))(prov)
+            if f.ft == 0:
+                return -1
+            f.axes = read_fvar(f.path)
+            f.color = has_table(f.path, "sbix") or has_table(f.path, "CBDT") or has_table(f.path, "COLR")
+        f.upem = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_UPEM))(f.ft))
+        f.asc = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_ASC))(f.ft))
+        f.desc = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_DESC))(f.ft))
+        self.faces.append(f^)
+        var idx = len(self.faces) - 1
+        if self.faces[idx].path != "":
+            self.face_of_file[key] = idx
+        return idx
+
+    def _mac_inst(mut self, face: Int, weight: Int, size: Float64) -> Int:
+        ref f = self.faces[face]
+        var wght = Float64(weight)
+        var opsz = 0.0
+        var has_w = False
+        for a in f.axes:
+            if a.tag == _tag("wght"):
+                has_w = True
+                wght = max(a.lo, min(a.hi, wght))
+            if a.tag == _tag("opsz"):
+                opsz = max(a.lo, min(a.hi, size))
+        if not has_w:
+            wght = 0
+        var key = String(face) + ":" + String(Int(wght)) + ":" + String(Int(opsz * 4))
+        if key in self.inst_of:
+            return self.inst_of.get(key, 0)
+        self.insts.append(_Inst(face, wght, opsz, 0))
+        self.inst_of[key] = len(self.insts) - 1
+        return len(self.insts) - 1
+
+    def ct_font(mut self, inst: Int, size: Float64) -> Int:
+        """The instance's CTFont at a size (its variations applied), made once."""
+        var key = String(inst) + "@" + String(Int(size * 64 + 0.5))
+        if key in self.ct_fonts:
+            return self.ct_fonts.get(key, 0)
+        var fi = self.insts[inst].face
+        var desc = 0
+        if len(self.faces[fi].axes) > 0:
+            var keys = List[Int]()
+            var vals = List[Int]()
+            for a in self.faces[fi].axes:
+                var v = a.default
+                if a.tag == _tag("wght"):
+                    v = self.insts[inst].wght
+                elif a.tag == _tag("opsz"):
+                    v = self.insts[inst].opsz
+                keys.append(self._cfnum_i(Int(a.tag)))
+                vals.append(self._cfnum_f(v))
+            var vd = self._cfdict(keys, vals)
+            var ak = List[Int](length=1, fill=self.k_var_attr)
+            var av = List[Int](length=1, fill=vd)
+            var attrs = self._cfdict(ak, av)
+            desc = _fn[def(Int) thin abi("C") -> Int](self._m(_M_DESCR))(attrs)
+        var font = _fn[def(Int, Float64, Int, Int) thin abi("C") -> Int](self._m(_M_CTFONT))(self.faces[fi].ft, size, 0, desc)
+        self.ct_fonts[key] = font
+        return font
+
+    def _utf16(self, cp: Int) -> List[UInt16]:
+        var out = List[UInt16]()
+        if cp >= 0x10000:
+            var v = cp - 0x10000
+            out.append(UInt16(0xD800 + (v >> 10)))
+            out.append(UInt16(0xDC00 + (v & 0x3FF)))
+        else:
+            out.append(UInt16(cp))
+        return out^
+
+    def _mac_has(mut self, inst: Int, cp: Int) -> Bool:
+        var u = self._utf16(cp)
+        var g = List[UInt16](length=len(u), fill=0)
+        var ok = _fn[def(Int, Int, Int, Int) thin abi("C") -> UInt8](self._m(_M_GLYPHS4CHARS))(self.ct_font(inst, 16), Int(u.unsafe_ptr()), Int(g.unsafe_ptr()), len(u)) != 0
+        var nonzero = g[0] != 0
+        _ = u
+        _ = g
+        return ok and nonzero
+
+    def _face_from_ctfont(mut self, font: Int, emoji: Bool) -> Int:
+        var name = self._cf_text(_fn[def(Int) thin abi("C") -> Int](self._m(_M_PSNAME))(font))
+        if name in self.face_of_name:
+            return self.face_of_name.get(name, -1)
+        var f = _Face("", 0, "", False, 400)
+        f.ft = _fn[def(Int, Int) thin abi("C") -> Int](self._m(_M_COPYCG))(font, 0)
+        f.color = emoji or (Int(_fn[def(Int) thin abi("C") -> UInt32](self._m(_M_TRAITS))(font)) & (1 << 13)) != 0
+        var idx = self._mac_open_face(f^)
+        self.face_of_name[name] = idx
+        return idx
+
+    def _cf_text(self, cfs: Int) -> String:
+        if cfs == 0:
+            return ""
+        var buf = List[UInt8](length=512, fill=0)
+        _ = _fn[def(Int, Int, Int, UInt32) thin abi("C") -> UInt8](self._m(_M_CFGETCSTR))(cfs, Int(buf.unsafe_ptr()), 511, UInt32(0x08000100))
+        var n = 0
+        while n < 511 and buf[n] != 0:
+            n += 1
+        return String(from_utf8_lossy=Span(buf)[:n])
+
+    def _mac_system_face(mut self, cp: Int, emoji: Bool) -> Int:
+        var key = -1 if emoji else cp
+        if key in self.fallback:
+            return self.fallback.get(key, -1)
+        var idx = -1
+        if emoji:
+            var n = self._cfstr("AppleColorEmoji")
+            var font = _fn[def(Int, Float64, Int) thin abi("C") -> Int](self._m(_M_CTBYNAME))(n, 16.0, 0)
+            if font != 0:
+                idx = self._face_from_ctfont(font, True)
+        else:
+            var base = self.pick("Geist", 400, False)
+            var s = String(chr(cp))
+            var cfs = self._cfstr(s)
+            var u = self._utf16(cp)
+            var font = _fn[def(Int, Int, Int, Int) thin abi("C") -> Int](self._m(_M_FORSTRING))(self.ct_font(self.inst(base, 400, 16), 16), cfs, 0, len(u))
+            if font != 0:
+                idx = self._face_from_ctfont(font, False)
+                if idx >= 0 and not self._mac_has(self.inst(idx, 400, 16), cp):
+                    idx = -1
+        self.fallback[key] = idx
+        return idx
+
+    def _mac_advance_units(mut self, inst: Int, gid: Int) -> Int:
+        var key = inst * 1048576 + gid
+        if key in self.adv_of:
+            return self.adv_of.get(key, 0)
+        var upem = Float64(self.faces[self.insts[inst].face].upem)
+        var g = List[UInt16](length=1, fill=UInt16(gid))
+        var adv = List[Float64](length=2, fill=0)
+        _ = _fn[def(Int, UInt32, Int, Int, Int) thin abi("C") -> Float64](self._m(_M_ADVANCES))(self.ct_font(inst, upem), UInt32(0), Int(g.unsafe_ptr()), Int(adv.unsafe_ptr()), 1)
+        var v = Int(adv[0] + 0.5)
+        _ = g
+        self.adv_of[key] = v
+        return v
+
+    def _mac_shape_part(mut self, mut run: Run, inst: Int, text: String, start: Int, length: Int, st: TextStyle, pen0: Float64) -> Float64:
+        """A stretch of one face shaped by CoreText (CTLine: kerning, ligatures, marks), its advances taken as Chromium
+        does (D-7905): the face's own advance rounded, plus the kerning CoreText adds, rounded again."""
+        var part = String(text[byte=start:start + length])
+        var cfs = self._cfstr(part)
+        var font = self.ct_font(inst, st.size)
+        var ak = List[Int](length=1, fill=self.k_font_attr)
+        var av = List[Int](length=1, fill=font)
+        var attrs = self._cfdict(ak, av)
+        var astr = _fn[def(Int, Int, Int) thin abi("C") -> Int](self._m(_M_ATTRSTR))(0, cfs, attrs)
+        var line = _fn[def(Int) thin abi("C") -> Int](self._m(_M_LINE))(astr)
+        var runs = _fn[def(Int) thin abi("C") -> Int](self._m(_M_RUNS))(line)
+        var nr = _fn[def(Int) thin abi("C") -> Int](self._m(_M_ARRCOUNT))(runs)
+        var face = self.insts[inst].face
+        var k = st.size / Float64(self.faces[face].upem)
+        var pen = pen0
+        for ri in range(nr):
+            var r = _fn[def(Int, Int) thin abi("C") -> Int](self._m(_M_ARRAT))(runs, ri)
+            var n = _fn[def(Int) thin abi("C") -> Int](self._m(_M_RUNCOUNT))(r)
+            var glyphs = List[UInt16](length=n, fill=0)
+            var pos = List[Float64](length=2 * n, fill=0)
+            var adv = List[Float64](length=2 * n, fill=0)
+            _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNGLYPHS))(r, 0, 0, Int(glyphs.unsafe_ptr()))
+            _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNPOS))(r, 0, 0, Int(pos.unsafe_ptr()))
+            _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNADV))(r, 0, 0, Int(adv.unsafe_ptr()))
+            # the run's own font (CoreText may substitute): its face, as fallback does on Linux
+            var rinst = inst
+            var rattrs = _fn[def(Int) thin abi("C") -> Int](self._m(_M_RUNATTRS))(r)
+            var rfont = _fn[def(Int, Int) thin abi("C") -> Int](self._m(_M_DICTGET))(rattrs, self.k_font_attr)
+            if rfont != 0 and rfont != font:
+                rinst = self.inst(self._face_from_ctfont(rfont, False), st.weight, st.size)
+            var rk = st.size / Float64(self.faces[self.insts[rinst].face].upem)
+            var unrounded = 0.0
+            for g in range(n):
+                var gid = Int(glyphs[g])
+                if gid == 0:
+                    run.missing += 1
+                var xo = pos[2 * g] - unrounded
+                run.glyphs.append(Glyph(self.insts[rinst].face, rinst, gid, pen + xo, -pos[2 * g + 1], 0))
+                var fa = Float64(self._mac_advance_units(rinst, gid)) * rk
+                var kern = adv[2 * g] - fa
+                var a = fa + kern
+                if not st.exact:
+                    var ar = Float64(Int(fa + 0.5)) if fa > 0 else 0.0
+                    var t = ar + kern
+                    a = Float64(Int(t + 0.5)) if t >= 0 else -Float64(Int(-t + 0.5))
+                unrounded += adv[2 * g]
+                pen += a + st.letter_spacing
+            _ = glyphs
+            _ = pos
+            _ = adv
+        self._release(line)
+        self._release(astr)
+        self._release(attrs)
+        self._release(cfs)
+        _ = ak
+        _ = av
+        _ = k
+        return pen
+
+    def _mac_image(mut self, inst: Int, gid: Int, size_dev: Float64, subx: Int) -> Int:
+        var s64 = Int(size_dev * 64 + 0.5)
+        var key = (((inst * 1048576 + gid) * 65536 + s64) << 2) | (subx & 3)
+        if key in self.image_of:
+            return self.image_of.get(key, 0)
+        var img = GlyphImage()
+        var font = self.ct_font(inst, size_dev)
+        var color = self.faces[self.insts[inst].face].color
+        var g = List[UInt16](length=1, fill=UInt16(gid))
+        var rect = List[Float64](length=4, fill=0)
+        _ = _fn[def(Int, UInt32, Int, Int, Int) thin abi("C") -> Float64](self._m(_M_BOUNDS))(font, UInt32(0), Int(g.unsafe_ptr()), Int(rect.unsafe_ptr()), 1)
+        if rect[2] > 0 and rect[3] > 0:
+            var x0 = Int(rect[0] + Float64(subx) / 4 + 1e6) - 1000000 - 1
+            var y0 = Int(rect[1] + 1e6) - 1000000 - 1
+            var x1 = Int(rect[0] + rect[2] + Float64(subx) / 4 + 1e6) - 1000000 + 2
+            var y1 = Int(rect[1] + rect[3] + 1e6) - 1000000 + 2
+            var w = x1 - x0
+            var h = y1 - y0
+            img.w = w
+            img.h = h
+            img.left = x0
+            img.top = y1
+            img.color = color
+            var bpp = 4 if color else 1
+            var buf = List[UInt8](length=w * h * bpp, fill=0)
+            var cs = _fn[def() thin abi("C") -> Int](self._m(_M_RGB if color else _M_GRAY))()
+            var info = 1 if color else 0  # kCGImageAlphaPremultipliedLast | none
+            var ctx = _fn[def(Int, Int, Int, Int, Int, Int, UInt32) thin abi("C") -> Int](self._m(_M_BITMAP))(Int(buf.unsafe_ptr()), w, h, 8, w * bpp, cs, UInt32(info))
+            if ctx != 0:
+                _fn[def(Int, UInt8) thin abi("C") -> NoneType](self._m(_M_AA))(ctx, UInt8(1))
+                _fn[def(Int, UInt8) thin abi("C") -> NoneType](self._m(_M_SMOOTH))(ctx, UInt8(0))
+                _fn[def(Int, UInt8) thin abi("C") -> NoneType](self._m(_M_SUBPOS_OK))(ctx, UInt8(1))
+                _fn[def(Int, UInt8) thin abi("C") -> NoneType](self._m(_M_SUBPOS))(ctx, UInt8(1))
+                if color:
+                    _fn[def(Int, Float64, Float64, Float64, Float64) thin abi("C") -> NoneType](self._m(_M_RGBFILL))(ctx, 0, 0, 0, 1)
+                else:
+                    _fn[def(Int, Float64, Float64) thin abi("C") -> NoneType](self._m(_M_GRAYFILL))(ctx, 1, 1)
+                var p = List[Float64](length=2, fill=0)
+                p[0] = -Float64(x0) + Float64(subx) / 4
+                p[1] = -Float64(y0)
+                _fn[def(Int, Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_DRAW))(font, Int(g.unsafe_ptr()), Int(p.unsafe_ptr()), 1, ctx)
+                _ = p
+                _fn[def(Int) thin abi("C") -> NoneType](self._m(_M_CTXREL))(ctx)
+            self._release(cs)
+            if color:
+                img.rgba = List[UInt32](capacity=w * h)
+                for i in range(w * h):
+                    img.rgba.append(UInt32(buf[4 * i]) | (UInt32(buf[4 * i + 1]) << 8) | (UInt32(buf[4 * i + 2]) << 16) | (UInt32(buf[4 * i + 3]) << 24))
+            else:
+                img.cov = buf^
+        _ = g
+        _ = rect
+        self.images.append(img^)
+        self.image_of[key] = len(self.images) - 1
+        return len(self.images) - 1
+
+    def _mac_metrics(mut self, st: TextStyle) -> LineMetrics:
+        var fi = self.pick(st.family, st.weight, st.italic)
+        if fi < 0:
+            fi = self.pick("Geist", st.weight, st.italic)
+        if fi < 0:
+            return LineMetrics(Int(st.size * 0.9 + 0.5), Int(st.size * 0.25 + 0.5), 0)
+        var k = st.size / Float64(self.faces[fi].upem)
+        var asc = Float64(self.faces[fi].asc) * k
+        var desc = -Float64(self.faces[fi].desc) * k
+        var gap = Float64(Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_LEADING))(self.faces[fi].ft))) * k
+        return LineMetrics(Int(asc + 0.5), Int(desc + 0.5), max(0.0, gap))
 
 
 def truncate_i32(v: Int) -> Int:
@@ -993,6 +1414,8 @@ struct LineMetrics(ImplicitlyCopyable, Movable):
 
 def line_metrics(st: TextStyle) -> LineMetrics:
     var e = engine()
+    comptime if CompilationTarget.is_macos():
+        return e[]._mac_metrics(st)
     var fi = e[].pick(st.family, st.weight, st.italic)
     if fi < 0:
         fi = e[].pick("Geist", st.weight, st.italic)
@@ -1016,3 +1439,59 @@ def baseline_in(top: Float64, line_height: Float64, st: TextStyle) -> Float64:
     var half = lead / 2
     var h = Float64(Int(half)) if half >= 0 else -Float64(Int(-half + 0.999999))
     return top + h + Float64(m.ascent)
+
+
+
+def _read_file(path: String) -> List[UInt8]:
+    try:
+        with open(path, "r") as f:
+            return f.read_bytes()
+    except:
+        return List[UInt8]()
+
+
+def _be16(b: List[UInt8], at: Int) -> Int:
+    return (Int(b[at]) << 8) | Int(b[at + 1])
+
+
+def _be32(b: List[UInt8], at: Int) -> Int:
+    return (Int(b[at]) << 24) | (Int(b[at + 1]) << 16) | (Int(b[at + 2]) << 8) | Int(b[at + 3])
+
+
+def _table(b: List[UInt8], tag: String) -> Int:
+    """Where an sfnt table starts in the file (-1: none)."""
+    if len(b) < 12:
+        return -1
+    var want = Int(_tag(tag))
+    var n = _be16(b, 4)
+    for i in range(n):
+        var rec = 12 + 16 * i
+        if rec + 16 > len(b):
+            break
+        if _be32(b, rec) == want:
+            return _be32(b, rec + 8)
+    return -1
+
+
+def has_table(path: String, tag: String) -> Bool:
+    return _table(_read_file(path), tag) >= 0
+
+
+def read_fvar(path: String) -> List[_Axis]:
+    """A variable font's axes (tag, min, default, max) from its fvar table, read from the file (the Mac's CoreText path:
+    the same axes HarfBuzz reports on Linux)."""
+    var out = List[_Axis]()
+    var b = _read_file(path)
+    var t = _table(b, "fvar")
+    if t < 0:
+        return out^
+    var axes_at = t + _be16(b, t + 4)
+    var count = _be16(b, t + 8)
+    var size = _be16(b, t + 10)
+    for i in range(count):
+        var a = axes_at + i * size
+        var mn = Float64(_be32(b, a + 4) - ((1 << 32) if _be32(b, a + 4) >= (1 << 31) else 0)) / 65536.0
+        var df = Float64(_be32(b, a + 8) - ((1 << 32) if _be32(b, a + 8) >= (1 << 31) else 0)) / 65536.0
+        var mx = Float64(_be32(b, a + 12) - ((1 << 32) if _be32(b, a + 12) >= (1 << 31) else 0)) / 65536.0
+        out.append(_Axis(UInt32(_be32(b, a)), mn, df, mx))
+    return out^

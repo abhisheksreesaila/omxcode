@@ -33,6 +33,7 @@ from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
 from webshell import WebShell
+from mojoui.fonttext_check import fontcheck
 
 comptime NEW_PAGE = 1
 comptime NEW_CANVAS = 2
@@ -259,6 +260,11 @@ struct Main(App):
         self.box_h = 600
         self.web = List[WebShell]()
         self.boxes_path = environment("PNOTE_BOXES", "")
+        if environment("PNOTE_FONTCHECK", "") != "":  # (goal 79 M1 on the Mac: test_fonttext's lines from the app itself)
+            try:
+                _ = fontcheck(environment("FONTTEXT_REF", ""), environment("FONTTEXT_FIXTURE", ""), Float64(environment("FONTTEXT_DPR", "2")))
+            except e:
+                print("fonttext: FAIL " + String(e), flush=True)
         var pn_db = environment("PNOTE_DB", "")
         if pn_db != "":
             # (D-7907) the web look runs on a Personal Note database; goal 74/75's contract (PNOTE_DIR, its own store, the

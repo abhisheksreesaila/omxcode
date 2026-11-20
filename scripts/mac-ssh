@@ -22,7 +22,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 out=build/mac-ssh/$app-$stamp
 mkdir -p "$out"
 tar -czf "$out/src.tar.gz" --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
-    mojoui themes hosts "examples/$app" apple vendor
+    mojoui themes hosts "examples/$app" apple vendor fonts
 "${ssh_[@]}" "mkdir -p $remote/data"
 grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > "$out/steps.txt"  # (a file: ssh's remote shell would split the steps at each ;)
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)

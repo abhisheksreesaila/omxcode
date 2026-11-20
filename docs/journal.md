@@ -1558,3 +1558,5 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
   - pagesheet (page host, toolbar, sheet, CodeMirror-look Markdown lines, CSS line boxes): ❌ → 🔨
   - blit now blends straight alpha (icons as images on CPU); gpu2d's image path to check
   pnote composes them in examples/pnote/webshell.mojo (DB reading, screen state, taps only).
+- (continuation, D-7909) GPU text: gpu2d draws OP_RUN from GlyphPages in the atlas's extra rows (D-7910); GL test: mean 0.001 levels / 0 px at 4×. Checker strengthened (D-7911, gpushot: the presented GPU frame; grim impossible: the session is locked, the hidden output shows the lock screen). M2 PASS again on GPU frames.
+- CoreText half of fonttext written (dlopen CoreText/CG/CF, CTLine shaping with rule D, CGBitmapContext raster, fvar read from the file: matches HarfBuzz's axes on all 18 faces). Built for Linux only; NOT yet compiled or run on the Mac: at 21:2x the M4 is offline (tailscale: offline, last seen 5 m ago; ssh times out). Retry `scripts/check M1` when it's back.

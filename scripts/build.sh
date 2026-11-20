@@ -236,6 +236,7 @@ build_mac() {
   fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
+  [ -d fonts ] && cp -R fonts/* "$app/Contents/Resources/fonts/"  # (mojoui.fonttext's faces, OFL, with their licences: goal 79)
   # Its JavaScript (docs/js.md, goal 34b M2): each WebComponent runs in a WKWebView loading the web's own bundles, built
   # into Resources/webview by the same esbuild step (nothing for an app without web/widgets/)
   pixi run python scripts/web_assets.py --webview "$app/Contents/Resources/webview" "$EX"
