@@ -46,7 +46,8 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
-from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TILE, TILE_TEX
+from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TileRead, TILE, TILE_TEX, _pack
+from mojoui.viewsnap import snap_read, set_renderer_id, fnv
 
 comptime RING = 6  # textures in the ring: one on screen, one being drawn, the rest waiting for the toolkit to let go
 
@@ -767,6 +768,7 @@ struct GL2D(Movable):
                 return False
         self.renderer = c_text(fcall[Int](self.f(F_GET_STRING), c_uint(GL_RENDERER)))
         self.version = c_text(fcall[Int](self.f(F_GET_STRING), c_uint(GL_VERSION)))
+        set_renderer_id(fnv(c_text(fcall[Int](self.f(F_GET_STRING), c_uint(0x1F00))) + "|" + self.renderer + "|" + self.version))  # (D-7956: snapshot keys)
         if self.renderer == "":
             self.why = "no GL context current"
             return False
@@ -1409,6 +1411,43 @@ struct GL2D(Movable):
         for li in range(len(frame.layers)):
             frame.layers[li].dx = saved[2 * li]
             frame.layers[li].dy = saved[2 * li + 1]
+
+    def _tile_fb(mut self, slot: Int) -> Int:
+        """Tile slot's texture bound as the colour of the resolve framebuffer (scissor off), for a clear, a read or a copy."""
+        var tex = self.tile_texture(slot)
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(self.resolve_fbo))
+        fcall[NoneType](self.f(F_FRAMEBUFFER_TEXTURE_2D), c_uint(GL_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_TEXTURE_2D), c_uint(tex), c_int(0))
+        return tex
+
+    def upload_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, src: Int) -> Bool:
+        """(D-7956) A restored snapshot tile: slot's texture cleared to transparent, then w × h pixels (rows packed,
+        premultiplied RGBA8) put at texture px (x0, y0)."""
+        if not self.ok:
+            return False
+        var tex = self._tile_fb(slot)
+        fcall[NoneType](self.f(F_VIEWPORT), c_int(0), c_int(0), c_int(TILE_TEX), c_int(TILE_TEX))
+        fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
+        fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        if w > 0 and h > 0:
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(tex))
+            fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(1))
+            fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(x0), c_int(y0), c_int(w), c_int(h), c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), src)
+            fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+        return self.error() == 0
+
+    def read_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, dst: Int) -> Bool:
+        """(D-7956) w × h pixels of slot's texture from texture px (x0, y0) into dst (rows packed)."""
+        if not self.ok:
+            return False
+        _ = self._tile_fb(slot)
+        fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_PACK_ALIGNMENT), c_int(1))
+        fcall[NoneType](self.f(F_READ_PIXELS), c_int(x0), c_int(y0), c_int(w), c_int(h), c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), dst)
+        fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_PACK_ALIGNMENT), c_int(4))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        return self.error() == 0
 
     def draw_tiles(mut self, draws: List[TileDraw]):
         """Kept tiles onto the frame being drawn (between begin and end), premultiplied over what's there, the frame's
@@ -2090,6 +2129,52 @@ struct GPU2D(Movable):
             self.t_raster += Int(perf_counter_ns() - m1)
         return True
 
+    def _snap_restore(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, path: String):
+        """(D-7956) Tiled layer i's snapshot from path, when every part of its key matches: its tiles uploaded as the
+        layer's fallback tiling (mojoui.viewsnap, gpu2d_tiles.Tiles.snap_restored)."""
+        var t0 = perf_counter_ns()
+        var snap = snap_read(path)
+        if not snap.ok:
+            if self.tiles.snap_log:
+                print("SNAP: none at " + path, flush=True)
+            return
+        var want = self.tiles.snap_key(scene, i, w, h)
+        if not snap.key.same(want):
+            if self.tiles.snap_log:
+                print("SNAP: refused (" + snap.key.why_not(want) + " differs) " + path, flush=True)
+            return
+        var keys = List[Int]()
+        var slots = List[Int]()
+        var px = List[UInt32](length=TILE_TEX * TILE_TEX, fill=0)
+        var t1 = perf_counter_ns()
+        var dec_ns = 0
+        for t in snap.tiles:
+            if t.w == 0 or t.h == 0:
+                continue
+            var d0 = perf_counter_ns()
+            var good = t.x0 >= 0 and t.y0 >= 0 and t.x0 + t.w <= TILE_TEX and t.y0 + t.h <= TILE_TEX and snap.decode(t, Int(px.unsafe_ptr()))
+            dec_ns += Int(perf_counter_ns() - d0)
+            if not good:
+                if self.tiles.snap_log:
+                    print("SNAP: refused (a tile doesn't decode) " + path, flush=True)
+                for sl in slots:
+                    self.tiles.free.append(sl)
+                return
+            var slot = self.tiles.snap_slot(scene, i, owner)
+            if slot < 0 or not self.gl.upload_tile_part(slot, t.x0, t.y0, t.w, t.h, Int(px.unsafe_ptr())):
+                if slot >= 0:
+                    self.tiles.free.append(slot)
+                for sl in slots:
+                    self.tiles.free.append(sl)
+                return
+            keys.append(_pack(t.i, t.j))
+            slots.append(slot)
+        _ = len(px)
+        self.tiles.snap_restored(scene, i, owner, w, h, keys, slots)
+        if self.tiles.snap_log:
+            print("SNAP: restore took " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms (read " + String(Float64(Int(t1 - t0)) / 1e6)
+                  + ", decode " + String(Float64(dec_ns) / 1e6) + ", " + String(len(snap.bytes)) + " bytes)", flush=True)
+
     def draw(mut self, scene: Scene, prev: Scene, owner: Int, w: Int, h: Int) -> Int:
         """The scene into a free ring texture of w × h, fenced: its slot, or -1 (every texture still held, or GL
         failed: gl.ok then False and gl.why says why). `prev` is the scene this canvas (`owner`) drew last, when the
@@ -2130,7 +2215,8 @@ struct GPU2D(Movable):
             var span = scene.layer_range(i)
             var tr = layer_traits(scene, i, open)  # (D-7930: shared with the Metal renderer)
             open = tr.open
-            if scene.layer_tiled[i] and tr.fixed and self.tiles_on and owner != 0 and span[1] - span[0] >= TILE_MIN_OPS:
+            if scene.layer_tiled[i] and tr.fixed and self.tiles_on and owner != 0 and (span[1] - span[0] >= TILE_MIN_OPS or scene.layer_hold[i]
+                                                                                    or self.tiles.has_snap(scene.layer_keys[i], owner)):
                 tiled[i] = True
                 dirty[i] = False
                 self.fills[i] = 0
@@ -2227,12 +2313,23 @@ struct GPU2D(Movable):
             if not tiled[i]:
                 continue
             var p0 = perf_counter_ns()
+            var want = self.tiles.restore_want(scene, i, owner, w, h)
+            if want != "":
+                self._snap_restore(scene, i, owner, w, h, want)
             var plan = self.tiles.plan(scene, i, owner, w, h)
             self.t_plan += Int(perf_counter_ns() - p0)
             if not self._raster_plan(scene, plan):
                 self.gl.ok = False
                 self.built = 0
                 return -1
+            for rd in plan.reads:  # (D-7956: the settled view's tiles read back for its snapshot, one a frame)
+                if rd.w > 0 and rd.h > 0:
+                    var px = List[UInt32](length=rd.w * rd.h, fill=0)
+                    if self.gl.read_tile_part(rd.slot, rd.x0, rd.y0, rd.w, rd.h, Int(px.unsafe_ptr())):
+                        self.tiles.save_add(rd, Int(px.unsafe_ptr()))
+                    _ = len(px)
+                else:
+                    self.tiles.save_add(rd, 0)
             tile_draws[i] = plan.draws.copy()
         self.more = self.tiles.more
         self.tile_ns = Int(perf_counter_ns() - tt0)

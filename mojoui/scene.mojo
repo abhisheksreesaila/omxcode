@@ -89,6 +89,14 @@ trait Painter:
         meet; with no damage (or another base) a new version invalidates every tile."""
         ...
 
+    def layer_snapshot(mut self, path: String, tag: String, hold: Bool):
+        """(D-7956) A tiled layer's last view may be kept in the file at `path` (mojoui.viewsnap) and shown from it the
+        next time the layer opens with the same `tag` (the app's: what its picture depends on, e.g. the document's
+        revision and the skin; the host adds the zoom, view, size, renderer and build). An empty tag: nothing is kept
+        or shown (the layer is being edited). hold: the layer's ops aren't complete in the view yet (a document still
+        loading): the host shows the kept view, if it has one that matches, and rasters nothing from the ops."""
+        ...
+
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         """Cuts what follows (until pop_clip) to this rect."""
         ...
@@ -209,6 +217,9 @@ struct SurfacePainter(Painter, Movable):
     def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         pass
 
+    def layer_snapshot(mut self, path: String, tag: String, hold: Bool):
+        pass
+
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         var k = self.tk
         var c = Clip(Int(x * k + self.tx + 0.5), Int(y * k + self.ty + 0.5), Int((x + w) * k + self.tx + 0.5), Int((y + h) * k + self.ty + 0.5))
@@ -306,6 +317,9 @@ struct Scene(Painter, Movable, Copyable):
     var layer_tiled: List[Bool]  # (D-7940) layer_tiles: kept as raster tiles; its extent (x0, y0, x1, y1 per layer)
     var layer_ext: List[Float64]
     var layer_since: List[Int]  # layer_damage's base version (-1: no damage given), and the rects (layer, x0, y0, x1, y1)
+    var layer_snap: List[String]  # (D-7956) layer_snapshot: the file, the app's tag, and whether its ops are still coming
+    var layer_snap_tag: List[String]
+    var layer_hold: List[Bool]
     var dmg_layer: List[Int]
     var dmg: List[Float64]
 
@@ -334,6 +348,9 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_tiled = List[Bool]()
         self.layer_ext = List[Float64]()
         self.layer_since = List[Int]()
+        self.layer_snap = List[String]()
+        self.layer_snap_tag = List[String]()
+        self.layer_hold = List[Bool]()
         self.dmg_layer = List[Int]()
         self.dmg = List[Float64]()
 
@@ -363,6 +380,9 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_tiled.clear()
         self.layer_ext.clear()
         self.layer_since.clear()
+        self.layer_snap.clear()
+        self.layer_snap_tag.clear()
+        self.layer_hold.clear()
         self.dmg_layer.clear()
         self.dmg.clear()
 
@@ -398,6 +418,9 @@ struct Scene(Painter, Movable, Copyable):
         for _ in range(4):
             self.layer_ext.append(0)
         self.layer_since.append(-1)
+        self.layer_snap.append("")
+        self.layer_snap_tag.append("")
+        self.layer_hold.append(False)
 
     def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         if len(self.layer_keys) == 0:
@@ -426,6 +449,14 @@ struct Scene(Painter, Movable, Copyable):
         self.dmg.append(y0)
         self.dmg.append(x1)
         self.dmg.append(y1)
+
+    def layer_snapshot(mut self, path: String, tag: String, hold: Bool):
+        if len(self.layer_keys) == 0:
+            return
+        var i = len(self.layer_keys) - 1
+        self.layer_snap[i] = path
+        self.layer_snap_tag[i] = tag
+        self.layer_hold[i] = hold
 
     def damage_of(self, i: Int) -> List[Float64]:
         """Layer i's damage rects (x0, y0, x1, y1 each), in its units."""

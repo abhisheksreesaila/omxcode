@@ -30,6 +30,7 @@ from std.time import perf_counter_ns
 from std.collections import Dict
 from std.os import getenv
 from mojoui.fonttext import shape as ft_shape
+from mojoui.viewsnap import SnapKey, SnapWriter, renderer_id, build_id
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
 
 comptime TILE = 512  # content px per tile side
@@ -272,6 +273,20 @@ struct TileRaster(Copyable, Movable):
 
 
 @fieldwise_init
+struct TileRead(Copyable, Movable, ImplicitlyCopyable):
+    """(D-7956) Read back the part (x0, y0, w × h texture px) of tile (i, j)'s texture `slot` for the snapshot of set
+    `set` (w = h = 0: the tile is empty, nothing to read): hand the pixels to Tiles.save_add."""
+    var set: Int
+    var slot: Int
+    var i: Int
+    var j: Int
+    var x0: Int
+    var y0: Int
+    var w: Int
+    var h: Int
+
+
+@fieldwise_init
 struct TileDraw(Copyable, Movable, ImplicitlyCopyable):
     """Show tile (i, j)'s texture `slot`: content px c lands at c·s + (tx, ty) on screen; only pixel centres inside the
     clip rect (screen px) and the tile."""
@@ -305,6 +320,13 @@ struct TileSet(Movable):
     var k_since: Int
     var used: Int
     var bins: OpBins
+    var snap: Bool  # (D-7956) the fallback tiling is a restored snapshot (kept through damage until replaced)
+    var snap_tried: String  # the snapshot key last looked for (restore once per key)
+    var saved: String  # the key of the snapshot on disk (saved or restored here): not saved again
+    var save_list: List[Int]  # tiles still to read back for the snapshot being written, and its key and version
+    var save_key: String
+    var save_version: Int
+    var writer: List[SnapWriter]
 
     def __init__(out self, key: String, owner: Int):
         self.key = key
@@ -323,15 +345,24 @@ struct TileSet(Movable):
         self.k_since = 0
         self.used = 0
         self.bins = OpBins()
+        self.snap = False
+        self.snap_tried = ""
+        self.saved = ""
+        self.save_list = List[Int]()
+        self.save_key = ""
+        self.save_version = -1
+        self.writer = List[SnapWriter]()
 
 
 struct TilePlan(Movable):
     var rasters: List[TileRaster]
     var draws: List[TileDraw]
+    var reads: List[TileRead]  # (D-7956) snapshot tiles to read back this frame
 
     def __init__(out self):
         self.rasters = List[TileRaster]()
         self.draws = List[TileDraw]()
+        self.reads = List[TileRead]()
 
 
 struct Tiles(Movable):
@@ -348,6 +379,9 @@ struct Tiles(Movable):
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
     var trace: Bool  # MOJOUI_TILE_TRACE=1: why each tile is rastered (diagnosis)
+    var build: Int  # (D-7956) this program's build id, for snapshot keys (once)
+    var snaps_on: Bool  # MOJOUI_SNAP=0 turns snapshots off (the race prints the open without them)
+    var snap_log: Bool  # MOJOUI_SNAP_LOG=1: each restore, refusal and save
 
     def __init__(out self):
         self.sets = List[TileSet]()
@@ -362,6 +396,9 @@ struct Tiles(Movable):
         self.settle_ns = TILE_SETTLE_NS
         self.planned_ops = 0
         self.trace = getenv("MOJOUI_TILE_TRACE") == "1"
+        self.build = build_id()
+        self.snaps_on = getenv("MOJOUI_SNAP") != "0"
+        self.snap_log = getenv("MOJOUI_SNAP_LOG") == "1"
 
     def begin_frame(mut self):
         self.stamp += 1
@@ -402,6 +439,115 @@ struct Tiles(Movable):
         for e in self.sets[s].fb.items():
             self.free.append(e.value)
         self.sets[s].fb = Dict[Int, Int]()
+        self.sets[s].snap = False
+
+    # ---------- (D-7956) the layer's last view, kept on disk (mojoui.viewsnap) ----------
+
+    def snap_key(self, scene: Scene, i: Int, w: Int, h: Int) -> SnapKey:
+        """What a snapshot of tiled layer i shown on a w × h target must match."""
+        return SnapKey(scene.layer_snap_tag[i], renderer_id(), self.build, scene.layer_tk[i], scene.layer_tx[i], scene.layer_ty[i], w, h)
+
+    def snap_wanted(self, scene: Scene, i: Int) -> Bool:
+        return self.snaps_on and scene.layer_snap[i] != "" and scene.layer_snap_tag[i] != "" and renderer_id() != 0
+
+    def has_snap(self, key: String, owner: Int) -> Bool:
+        """A restored snapshot is shown for this layer (it is tiled even with no ops yet)."""
+        for s in range(len(self.sets)):
+            if self.sets[s].key == key and self.sets[s].owner == owner:
+                return self.sets[s].snap
+        return False
+
+    def restore_want(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int) -> String:
+        """The snapshot file to restore tiled layer i from before planning it ("" when none is wanted: the layer asks
+        for none, already shows tiles, or this key was looked for already)."""
+        if not self.snap_wanted(scene, i):
+            return ""
+        var s = self._set(scene.layer_keys[i], owner)
+        if len(self.sets[s].tiles) > 0 or len(self.sets[s].fb) > 0:
+            return ""
+        var kt = self.snap_key(scene, i, w, h).text()
+        if self.sets[s].snap_tried == kt:
+            return ""
+        self.sets[s].snap_tried = kt
+        return scene.layer_snap[i]
+
+    def snap_slot(mut self, scene: Scene, i: Int, owner: Int) -> Int:
+        """A texture slot for a restored tile of layer i (-1: none free)."""
+        return self._slot(self._set(scene.layer_keys[i], owner))
+
+    def snap_restored(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, keys: List[Int], slots: List[Int]):
+        """The backend uploaded a matching snapshot's tiles (packed keys → slots): they are the fallback tiling at the
+        layer's zoom until its real tiles are rastered."""
+        var s = self._set(scene.layer_keys[i], owner)
+        self._drop_fb(s)
+        for q in range(len(keys)):
+            self.sets[s].fb[keys[q]] = slots[q]
+        self.sets[s].fb_k = scene.layer_tk[i]
+        self.sets[s].k = scene.layer_tk[i]
+        self.sets[s].k_seen = scene.layer_tk[i]
+        self.sets[s].snap = True
+        self.sets[s].saved = self.snap_key(scene, i, w, h).text()
+        if self.snap_log:
+            print("SNAP: restored " + String(len(keys)) + " tiles of " + scene.layer_keys[i], flush=True)
+
+    def _save_abort(mut self, s: Int):
+        self.sets[s].save_list = List[Int]()
+        self.sets[s].writer = List[SnapWriter]()
+        self.sets[s].save_key = ""
+
+    def save_add(mut self, rd: TileRead, addr: Int):
+        """A tile read back for the snapshot being written (its pixels at addr, rows packed); the last one puts the
+        file in place."""
+        var s = rd.set
+        if s < 0 or s >= len(self.sets) or len(self.sets[s].writer) == 0:
+            return
+        self.sets[s].writer[0].add(rd.i, rd.j, rd.x0, rd.y0, rd.w, rd.h, addr)
+        if len(self.sets[s].save_list) == 0:
+            var ok = self.sets[s].writer[0].finish()
+            if ok:
+                self.sets[s].saved = self.sets[s].save_key
+            if self.snap_log:
+                print("SNAP: saved " + String(self.sets[s].writer[0].count) + " tiles to " + self.sets[s].writer[0].path + (" ok" if ok else " FAILED"), flush=True)
+            self._save_abort(s)
+
+    def _save_step(mut self, mut out: TilePlan, s: Int, scene: Scene, i: Int, w: Int, h: Int, ready: Bool, j0: Int, j1: Int, i0: Int, i1: Int):
+        """Starts a snapshot when the layer has settled (every visible tile rastered at the zoom shown, no fallback, no
+        stale part, nothing rastered this frame) and its key isn't the one on disk; then reads one tile a frame."""
+        var want = self.snap_wanted(scene, i)
+        var kt = self.snap_key(scene, i, w, h).text() if want else String("")
+        if self.sets[s].save_key != "":
+            if kt != self.sets[s].save_key or scene.layer_versions[i] != self.sets[s].save_version:
+                if self.snap_log:
+                    print("SNAP: save dropped (the layer changed)", flush=True)
+                self._save_abort(s)
+                return
+        elif want and ready and kt != self.sets[s].saved:
+            for jj in range(j0, j1 + 1):
+                for ii in range(i0, i1 + 1):
+                    self.sets[s].save_list.append(_pack(ii, jj))
+            self.sets[s].save_key = kt
+            self.sets[s].save_version = scene.layer_versions[i]
+            self.sets[s].writer = List[SnapWriter]()
+            self.sets[s].writer.append(SnapWriter(scene.layer_snap[i], self.snap_key(scene, i, w, h), ""))
+        else:
+            return
+        # one tile a frame (an empty one costs nothing: then the next too)
+        var tx = Int(scene.layer_tx[i])
+        var ty = Int(scene.layer_ty[i])
+        while len(self.sets[s].save_list) > 0:
+            var key = self.sets[s].save_list.pop()
+            var ij = _unpack(key)
+            var cx0 = max(ij[0] * TILE, -tx)
+            var cy0 = max(ij[1] * TILE, -ty)
+            var cx1 = min((ij[0] + 1) * TILE, w - tx)
+            var cy1 = min((ij[1] + 1) * TILE, h - ty)
+            var slot = self.sets[s].tiles.get(key, -1)
+            if slot < 0 or key in self.sets[s].empty or cx1 <= cx0 or cy1 <= cy0:
+                out.reads.append(TileRead(s, -1, ij[0], ij[1], 0, 0, 0, 0))
+                continue
+            out.reads.append(TileRead(s, slot, ij[0], ij[1], cx0 - ij[0] * TILE + TILE_BORDER, cy0 - ij[1] * TILE + TILE_BORDER, cx1 - cx0, cy1 - cy0))
+            break
+        self.more = True
 
     def _drop_tiles(mut self, s: Int):
         for e in self.sets[s].tiles.items():
@@ -444,10 +590,14 @@ struct Tiles(Movable):
             if since >= 0 and since == self.sets[s].version and v >= 0:
                 var dm = scene.damage_of(i)
                 self._damage(s, dm, False)
-                self._damage(s, dm, True)
+                if not self.sets[s].snap:  # (D-7956: a restored snapshot is the document as saved: what loads only fills it in)
+                    self._damage(s, dm, True)
             else:
                 self.damaged += len(self.sets[s].tiles)
-                self._drop_all(s)
+                if self.sets[s].snap:
+                    self._drop_tiles(s)
+                else:
+                    self._drop_all(s)
             self.sets[s].version = v
         # the zoom
         if k != self.sets[s].k_seen:
@@ -480,6 +630,20 @@ struct Tiles(Movable):
                 self.sets[s].k = k
             else:
                 self.more = True  # (settle later: a frame after the zoom holds still)
+        # (D-7956) a snapshot the layer no longer asks for (an edit, a view that moved) goes at once
+        if self.sets[s].snap and not self.snap_wanted(scene, i):
+            if self.snap_log:
+                print("SNAP: withdrawn", flush=True)
+            self._drop_fb(s)
+        if scene.layer_hold[i]:  # (its ops aren't complete in the view: the snapshot, if any, alone; nothing rastered)
+            if self.sets[s].snap:
+                var hk = self.sets[s].fb_k
+                var hsc = k / hk
+                for e in self.sets[s].fb.items():
+                    var fij = _unpack(e.key)
+                    out.draws.append(TileDraw(e.value, fij[0], fij[1], hsc, tx, ty, 0, 0, Float64(w), Float64(h)))
+            self.drawn += len(out.draws)
+            return out^
         var tk = self.sets[s].k
         var sc = k / tk  # content px at tk → screen
         # the view in content px at tk, and the tiles it meets
@@ -584,6 +748,13 @@ struct Tiles(Movable):
         if tk != k:
             self.more = True
         self.drawn += len(out.draws)
+        var settled = len(missing) == 0 and len(out.rasters) == 0 and tk == k and len(self.sets[s].fb) == 0
+        if settled:
+            for jj in range(j0, j1 + 1):
+                for ii in range(i0, i1 + 1):
+                    if _pack(ii, jj) in self.sets[s].dirty or not (_pack(ii, jj) in self.sets[s].tiles):
+                        settled = False
+        self._save_step(out, s, scene, i, w, h, settled, j0, j1, i0, i1)
         # far tiles go (beyond two tiles round the view), keeping the pool for what's near
         var far = List[Int]()
         for e in self.sets[s].tiles.items():

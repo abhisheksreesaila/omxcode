@@ -13,7 +13,8 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.scene import Painter
+from mojoui.scene import Painter, snap_px
+from mojoui.viewsnap import snap_read, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
 from mojoui.ink import Stroke
@@ -275,6 +276,10 @@ struct BoardLook(Movable):
     var lift_set: Dict[Int, Bool]
     var snap_lift: List[Int]  # the lift and the look's generation the snapshot was taken with
     var snap_gen: Int
+    var keep_path: String  # (D-7956) the file the board's last view is kept in ("": none), the app's tag for what it
+    var keep_tag: String  # shows ("": being edited: nothing kept or shown), and whether its objects are still loading
+    var keep_hold: Bool
+    var build: Int
 
     def __init__(out self, family: String = "Source Serif 4", line_height: Float64 = 1.16):
         self.family = family
@@ -294,6 +299,22 @@ struct BoardLook(Movable):
         self.wrap_rev = Dict[Int, Int]()
         self.wrap_w = Dict[Int, Float64]()
         self.wrap_lines = Dict[Int, List[String]]()
+        self.keep_path = ""
+        self.keep_tag = ""
+        self.keep_hold = False
+        self.build = build_id()
+
+    def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
+        """(D-7956) Whether the GPU renderer would show the board's last view kept at path for this tag, view and size
+        (its key read from the file's head, every part compared as the renderer will: a cheap read). An app opening a
+        document asks this first: when True it can show the kept view and load the board underneath."""
+        if path == "" or tag == "" or renderer_id() == 0:
+            return False
+        var h = snap_read(path, True)
+        if not h.ok:
+            return False
+        var want = SnapKey(tag, renderer_id(), self.build, v.scale * k, snap_px(v.x * k), snap_px(v.y * k), Int(view_w * k + 0.5), Int(view_h * k + 0.5))
+        return h.key.same(want)
 
     def style_of(self, ref o: Obj) -> TextStyle:
         var st = TextStyle(o.family if o.family != "" else self.family, o.weight, False, o.size)
@@ -350,6 +371,8 @@ struct BoardLook(Movable):
         # (objects are culled by their boxes; a sticky's shadow or a text's lines reach past them, so the ops are complete
         # only a margin inside the culled rect: that is the extent. The window stays inside it: 64 px were added first)
         p.layer_tiles(tx0 + 64, ty0 + 64, tx1 - 64, ty1 - 64)
+        if self.keep_path != "":
+            p.layer_snapshot(self.keep_path, self.keep_tag, self.keep_hold)
         for d in range(len(self.dmg) // 4):
             p.layer_damage(self.since, self.dmg[4 * d], self.dmg[4 * d + 1], self.dmg[4 * d + 2], self.dmg[4 * d + 3])
         var any_lift = len(self.lift_ids) > 0
