@@ -31,11 +31,16 @@ def fingerprint():
     now: commits don't change it, an edit or a new file does."""
     listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", *DEPENDS], cwd=ROOT, capture_output=True, text=True).stdout.split("\n")
     h = hashlib.sha256()
-    for f in sorted(set(x for x in listed if x)):
+    for f in sorted(set(x for x in listed if x and x != "scripts/g77_m7f_run.py")):  # (this file measures the pictures: its own hash, below)
         p = ROOT / f
         h.update(f.encode() + b"\0")
         h.update(p.read_bytes() if p.is_file() else b"(gone)")
     return h.hexdigest()[:16]
+
+
+def runner_hash():
+    """This file's own hash: the pictures part is measured by it, so that part (only) is stale when it changes."""
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
 
 
 def checker(script, names, timeout):
@@ -85,9 +90,9 @@ def busy_share(png, r, ground):
     from PIL import Image
     im = Image.open(png).convert("RGB")
     px = im.load()
-    n = hit = 0
-    for yy in range(int(r["y"]) + 20, int(r["y"] + r["h"]) - 20, 3):
-        for xx in range(int(r["x"]) + 20, int(r["x"] + r["w"]) - 20, 3):
+    n = hit = 0  # (within the picture: a phone's page scrolls, so a region can run past the window's bottom)
+    for yy in range(max(int(r["y"]) + 20, 0), min(int(r["y"] + r["h"]) - 20, im.height), 3):
+        for xx in range(max(int(r["x"]) + 20, 0), min(int(r["x"] + r["w"]) - 20, im.width), 3):
             n += 1
             hit += sum(abs(a - b) for a, b in zip(px[xx, yy], ground)) > 12
     return round(hit / max(n, 1), 3)
@@ -176,7 +181,7 @@ def main():
         path.write_text(json.dumps(res, indent=1))
         print("g77:", json.dumps(res["g77"]["lines"]), flush=True)
     if "shots" in want:
-        res["shots"] = {"rows": shots(), "fingerprint": res["fingerprint_at_start"]}
+        res["shots"] = {"rows": shots(), "fingerprint": res["fingerprint_at_start"], "runner": runner_hash()}
     res["fingerprint_at_end"] = fingerprint()
     res["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
     path.write_text(json.dumps(res, indent=1))

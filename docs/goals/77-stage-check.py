@@ -351,8 +351,9 @@ def m7f():
             else:
                 probs.append(f"{label} {m} FAIL: {why[:400]}")
     sh_ = res.get("shots")
-    if not sh_ or sh_.get("fingerprint") != now:
-        probs.append("omx pictures: " + ("not taken" if not sh_ else f"stale (fingerprint {sh_.get('fingerprint')} ≠ {now})") + ": scripts/g77_m7f_run.py shots")
+    if not sh_ or sh_.get("fingerprint") != now or sh_.get("runner") != run.runner_hash():
+        probs.append("omx pictures: " + ("not taken" if not sh_ else f"stale (fingerprint {sh_.get('fingerprint')} / runner {sh_.get('runner')} ≠ {now} / {run.runner_hash()})")
+                     + ": scripts/g77_m7f_run.py shots")
     else:
         from PIL import Image
         for row in sh_["rows"]:
