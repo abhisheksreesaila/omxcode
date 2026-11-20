@@ -822,8 +822,16 @@ struct WebShell(Movable):
         if name == "bench:coldopens" or name == "bench:keptopens":  # (the race's two open rows)
             self.cold_opens = name == "bench:coldopens"
             self.kept.clear()
-            if self.bench_note < 0:
-                self.bench_note = self.current
+            if self.bench_note < 0:  # (the race's canvas: the open one, else the newest canvas, as when the app starts on
+                # another note for its first open, PNOTE_FIRST)
+                var ci_ = self.note_index(self.current)
+                if ci_ >= 0 and self.notes[ci_].kind == "canvas":
+                    self.bench_note = self.current
+                else:
+                    for ref n in self.notes:
+                        if n.kind == "canvas" and not n.secure:
+                            self.bench_note = n.id
+                            break
             if self.cold_opens:  # (the first timed open comes from another note, as a person switching to it)
                 for ref n in self.notes:
                     if n.kind != "canvas" and not n.secure:
