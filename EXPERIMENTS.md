@@ -4,6 +4,23 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79: Personal Note, native, the exact look of the web app (2026-11-19)
+- **Setup:** worktree ../mojo-ui-g79, branch `goal-79-pnote-lookalike` off goal 75's 654d9471. Owner: "Rebuild Personal Note the exact way the web version looks with a better performance"; then D-7900: framework first, every trick in mojoui, Linux and Mac. Yardstick: the web app's own dist/ build on a scratch database, shot by docs/goals/79/ref.mjs at 1440×900, 1.6×.
+- **Worked:**
+  - **The reference (M0 PASS):** fixture seeded through PN's API, 9 screens, 187 named DOM boxes, Chromium's text widths. Its fonts are served from fonts/ (OFL), so both apps use the same files (D-7901).
+  - **mojoui.fonttext (M1, Linux half):** FreeType + HarfBuzz + fontconfig by dlopen; all 19 test lines (9 faces, 6 scripts, emoji) equal Chromium's widths to the device px. The rule: FreeType's advance rounded, kerning added, rounded again (D-7905).
+  - **The shell (M2 PASS on Linux):** page+sidebar, page, Night, Crayon: every box within 2 px, fills within 4 levels, SSIM 0.963–0.983. Built as mojoui pieces (skin, strokeicon, notesshell, pagesheet, App.hovers/HOVER); pnote's composition is 261 lines.
+  - **Mind map screen:** mojoui.buzanmap ports the web's branch geometry; every box within 2 px, SSIM 0.984.
+- **Broke, and the fixes:**
+  - FreeType returned Raster_Overflow and empty glyphs: Mojo freed the buffers handed to C before the call. Then the keep-alive `_ = list` itself ended the life too early and zeroed axis tags. Keep-alives go after the last read (CLAUDE.md's Mojo rules).
+  - The reference had Literata/Figtree falling back to system fonts (unserved); fixed, and ref.mjs now fails on any unserved family (D-7906).
+  - The web shot shows the panel toggle *hovered* (Playwright's pointer rests there): the native app needed real hover, so the framework got HOVER.
+- **Not done:** M1's CoreText half, M3's canvas/search/island card/settings, M4 step script, M5 IME, M6 race, M7 Mac. **The GPU renderer doesn't draw OP_RUN text yet**: the shots are the app's CPU picture of its canvas.
+- **What it means:** pixel-level parity with a browser is reachable natively: same font files, Blink's advance and line-box rules, the web's own geometry. The text engine and layout rules are now framework pieces any app gets.
+- **Next small step:** OP_RUN and icons on gpu2d (GL, Metal), then CoreText. Report: docs/goals/79-report.md.
+
+---
+
 ## Goal 75: silky on the GPU, Linux and Mac (2026-11-18/19)
 - **Setup:** worktree ../mojo-ui-g74, branch `goal-75-gpu-canvas` off goal 74's a2a91071. Owner: "native Linux and Mac running on GPU with super speed", judged by whiteboard, canvas and a Buzan mind map, on the RTX 3090 desktop and the owner's M4 (over scripts/mac-ssh, not CI).
 - **Worked:**
