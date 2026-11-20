@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 77 M7f: omx on the Stage (2026-11-19, unattended)
+- **Setup:** ../mojo-ui-g77 (goal-77-show-and-point), both RTX 3090s, `CUDA_DEVICE_ORDER=PCI_BUS_ID`; the real Qwen3.8-27B for goal 72's and 77's checks.
+- **Built:** examples/omx now composes mojoui.stage in omxqua's Counter family: top bar (avatars, Settings popover, what she's doing, the lane chip), left (local clock, Today, Pinned), right (Live rows), centre LiveTiles from one Screens card `stage` (Screens.show/keep: the assistant's to-do/job/news tiles, sample tiles marked "sample", the agent's LiveTiles and the tiles tool), a voice-first chat bar (orb, her subtitles or the text box behind a "Type" keyboard, Stop, the mic as mute), the TV for every card (one at a time, conversation beside it, Recent), the pointer over the whole page with only the TV's card and visible tiles pointable. Framework: StageChat/StageTool, press_with, Screens.show/keep, tile_json, Assistant.tiles, local_time, tint_hue, StageTV size guess and stacked layout, view._container skipping empty views, the web host's htmx settle 0 (D-7840).
+- **Worked:** goal 72 M4, M5, M6 (all eight parts) PASS; goal 77 M1, M5, M6 PASS; the Stage pictures at 1280x820 and 390x844, light and dark (ring 1508–1638 px on its part, the TV card inside the TV); D-7840's probe 4/4 against a 20 ms control that is 4/4 squashed; lints, components, unit tests.
+- **Broke:** see decisions D-7866–D-7876 and the journal; still failing in the final run: goal 72 M3 (model answered instead of pressing, once), goal 77 M2 (judge "no" once), M3 web (band, D-7874), M4 bill ring (D-7872), M7E once (intermittent crash, D-7876). M7F: FAIL.
+- **Next:** the owner's call on M3's web band; a trace for the intermittent exits; rerun the model checks for the variance items.
+
+---
+
 ## Goal 77: the map card and the explainer merged; M0-M6 all PASS (2026-11-18)
 - **Setup:** ../mojo-ui-g77 (branch goal-77-show-and-point): main (goal 72's report), g77-map (M3) and g77-iso (M4) merged; both RTX 3090s free, `CUDA_DEVICE_ORDER=PCI_BUS_ID`, brain on GPU 0, M6's vision on GPU 1.
 - **Built:** the merge. genui holds `TripMap` (kind 8) and `Iso` (9); `mojoui.visual` has no stubs left; `agentui.tool_card` turns both card tools' arguments into render_ui's, so `Screens.adopt` shows them all and examples/omx has no per-tool line (D-7735…D-7737); tests/test_agentui_adopt gains an explain call.

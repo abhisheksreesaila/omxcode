@@ -123,8 +123,10 @@ def shots():
                      + "".join(f"shot:{OUT}/shot-{name}-p{k:02d}.png;wait:120;" for k in range(16))
                      + f"waitfor:Listening=170000;wait:6000;regions:{OUT}/shot-{name}-tv.json;shot:{OUT}/shot-{name}-tv.png;wait:200")
             with g72.NullSink():
-                ev, r = g72.run_app(g72.SILENT, steps, window=window, env={"OMX_LLM_CTX": "32768", "MOJOUI_TODO": str(todo)}, timeout=900)
-            (OUT / f"shot-{name}.log").write_text(r.stdout[-30000:])
+                ev, r = g72.run_app(g72.SILENT, steps, window=window, env={"OMX_LLM_CTX": "32768", "MOJOUI_TODO": str(todo), "OMX_TV_QUIET": "60000"}, timeout=900)
+            # (the TV's quiet at 60 s for these pictures only: sixteen point frames at desktop size outlast the 12 s quiet, and the
+            # "tv" picture and the ring-free reference must show the TV still open)
+            (OUT / f"shot-{name}.log").write_text(r.stdout[-30000:] + f"\n--- exit {r.returncode}; stderr ---\n" + r.stderr[-20000:])
             cards = [e for e in ev if e["kind"] == "CARD"]
             points = [e for e in ev if e["kind"] == "POINT"]
             stage = [e for e in ev if e["kind"] == "STAGE"]
