@@ -10,38 +10,38 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 
 | note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |
 |---|---|---|---|---|---|
-| 600 | open (cold): first frame | 1250.0 / 1250.0 | 7.9 / 7.9 | 10.5 / 10.5 · 0.0 / 0.0 (0) | ✓ |
-| 600 | open: frames during (n 60) | — | 3.1 / 4.1 | | ✓ |
-| 600 | open: complete (wall) | 1250.0 | 49.9 / 50.1 | | ✓ |
-| 600 | pan 30% | 16.7 / 33.4 | 4.0 / 26.1 | 2.2 / 2.5 · 0.0 / 0.0 (0) | ✗ |
-| 600 | zoom from 30% | 16.8 / 33.4 | 5.4 / 8.5 | 2.3 / 3.5 · 0.0 / 0.0 (0) | ✓ |
-| 600 | pan 100% | 16.7 / 16.8 | 5.4 / 12.6 | 1.9 / 4.2 · 0.0 / 0.0 (0) | ✓ |
-| 600 | drag one | 16.8 / 66.6 | 3.9 / 4.3 | 2.4 / 4.1 · 0.0 / 0.0 (0) | ✓ |
-| 600 | drag 40 | 16.8 / 16.8 | 2.9 / 3.3 | 2.6 / 4.2 · 0.0 / 0.0 (0) | ✓ |
-| 600 | undo | 17.1 / 17.2 | 2.9 / 3.2 | 3.4 / 3.9 · 0.0 / 0.0 (0) | ✓ |
-| 600 | redo | 16.7 / 16.8 | 3.1 / 3.1 | 2.6 / 3.3 · 0.0 / 0.0 (0) | ✓ |
-| 600 | pen | 16.8 / 16.8 | 1.9 / 4.0 | 2.0 / 4.1 · 0.0 / 0.0 (0) | ✓ |
-| 600 | typing | 16.7 / 16.8 | 2.3 / 3.2 | 3.3 / 5.8 · 0.0 / 0.0 (0) | ✓ |
-| stress | open (cold): first frame | 1198.0 / 1198.0 | 25.4 / 25.4 | 24.7 / 24.7 · 0.0 / 0.0 (0) | ✗ |
-| stress | open: frames during (n 134) | — | 7.1 / 8.9 | | ✓ |
-| stress | open: complete (wall) | 1198.0 | 83.1 / 84.3 | | ✓ |
-| stress | pan 30% | 16.8 / 16.8 | 3.5 / 5.5 | 8.3 / 9.5 · 0.0 / 0.0 (0) | ✓ |
-| stress | zoom from 30% | 33.4 / 116.6 | 5.6 / 15.5 | 10.7 / 30.8 · 0.0 / 0.0 (0) | ✓ |
-| stress | pan 100% | 16.8 / 16.8 | 2.9 / 3.7 | 9.0 / 9.1 · 0.0 / 0.0 (0) | ✓ |
-| stress | drag one | 16.7 / 16.8 | 3.2 / 4.9 | 8.9 / 8.9 · 0.0 / 0.0 (0) | ✓ |
-| stress | drag 40 | 16.8 / 66.7 | 3.2 / 3.7 | 9.8 / 9.8 · 0.0 / 0.0 (0) | ✓ |
-| stress | undo | 16.8 / 22.2 | 5.7 / 6.1 | 15.8 / 16.0 · 0.0 / 0.0 (0) | ✓ |
-| stress | redo | 16.7 / 16.8 | 6.6 / 7.5 | 13.7 / 14.5 · 0.0 / 0.0 (0) | ✓ |
-| stress | pen | 16.8 / 150.0 | 4.5 / 5.9 | 9.0 / 9.1 · 0.0 / 0.0 (0) | ✓ |
-| stress | typing | 16.7 / 16.8 | 5.5 / 7.0 | 9.2 / 9.2 · 0.0 / 0.0 (0) | ✓ |
-| 600 | open again, kept parsed (not judged) | — | 2.6 / 2.6 | | |
-| stress | open again, kept parsed (not judged) | — | 4.8 / 4.8 | | |
+| 600 | open (cold): first frame | 1313.0 / 1313.0 | 6.5 / 6.5 | 10.9 / 10.9 · 0.0 / 0.0 (0) | ✓ |
+| 600 | open: frames during (n 60) | — | 2.6 / 2.9 | | ✓ |
+| 600 | open: complete (wall) | 1313.0 | 49.9 / 50.1 | | ✓ |
+| 600 | pan 30% | 16.7 / 16.8 | 3.1 / 4.3 | 2.9 / 4.2 · 0.0 / 0.0 (0) | ✓ |
+| 600 | zoom from 30% | 16.7 / 33.4 | 4.7 / 5.2 | 6.6 / 9.2 · 0.0 / 0.0 (0) | ✓ |
+| 600 | pan 100% | 16.8 / 16.8 | 4.3 / 6.3 | 6.1 / 6.4 · 0.0 / 0.0 (0) | ✓ |
+| 600 | drag one | 16.7 / 16.8 | 4.6 / 5.7 | 6.3 / 6.4 · 0.0 / 0.0 (0) | ✓ |
+| 600 | drag 40 | 16.8 / 16.8 | 4.8 / 6.3 | 6.4 / 6.5 · 0.0 / 0.0 (0) | ✓ |
+| 600 | undo | 16.7 / 16.8 | 5.8 / 7.9 | 22.1 / 24.5 · 0.0 / 0.0 (0) | ✓ |
+| 600 | redo | 16.8 / 16.8 | 5.9 / 7.5 | 20.8 / 30.2 · 0.0 / 0.0 (0) | ✓ |
+| 600 | pen | 16.7 / 16.8 | 4.9 / 12.8 | 6.0 / 7.9 · 0.0 / 0.0 (0) | ✓ |
+| 600 | typing | 16.7 / 16.8 | 2.5 / 7.1 | 2.8 / 5.1 · 0.0 / 0.0 (0) | ✓ |
+| stress | open (cold): first frame | 1112.0 / 1112.0 | 26.1 / 26.1 | 30.0 / 30.0 · 0.0 / 0.0 (0) | ✗ |
+| stress | open: frames during (n 136) | — | 8.3 / 9.3 | | ✓ |
+| stress | open: complete (wall) | 1112.0 | 83.1 / 84.8 | | ✓ |
+| stress | pan 30% | 16.7 / 16.8 | 5.8 / 6.9 | 9.0 / 11.1 · 0.0 / 0.0 (0) | ✓ |
+| stress | zoom from 30% | 16.8 / 250.0 | 4.6 / 13.0 | 6.4 / 14.3 · 0.0 / 0.0 (0) | ✓ |
+| stress | pan 100% | 16.8 / 50.0 | 2.7 / 56.2 | 4.3 / 17.7 · 0.0 / 0.0 (0) | ✗ |
+| stress | drag one | 16.7 / 16.8 | 4.7 / 7.0 | 9.0 / 16.4 · 0.0 / 0.0 (0) | ✓ |
+| stress | drag 40 | 16.7 / 66.7 | 4.2 / 6.8 | 9.5 / 14.5 · 0.0 / 0.0 (0) | ✓ |
+| stress | undo | 16.8 / 18.7 | 7.5 / 7.8 | 11.3 / 11.5 · 0.0 / 0.0 (0) | ✓ |
+| stress | redo | 16.8 / 18.7 | 9.6 / 13.3 | 10.0 / 13.8 · 0.0 / 0.0 (0) | ✗ |
+| stress | pen | 16.7 / 150.0 | 4.5 / 9.3 | 7.7 / 12.8 · 0.0 / 0.0 (0) | ✓ |
+| stress | typing | 16.8 / 16.8 | 3.1 / 4.9 | 3.2 / 4.0 · 0.0 / 0.0 (0) | ✓ |
+| 600 | open again, kept parsed (not judged) | — | 2.0 / 2.0 | | |
+| stress | open again, kept parsed (not judged) | — | 4.4 / 4.4 | | |
 
 | | web | native | |
 |---|---|---|---|
-| cold start to first screen | 168.0 ms | 290.0 ms | ✗ |
-| RSS after opening all three kinds | 806.3 MB | 219.7 MB | ✓ |
-| note switch p95 | — | 8.34 ms | ✗ |
-| omnibar open p95 | — | 7.82 ms | ✓ |
+| cold start to first screen | 167.0 ms | 300.0 ms | ✗ |
+| RSS after opening all three kinds | 811.5 MB | 202.8 MB | ✓ |
+| note switch p95 | — | 7.51 ms | ✓ |
+| omnibar open p95 | — | 8.49 ms | ✗ |
 
 Cold start: web = PN's benchmark-first-screen.mjs (from navigation, the browser already running); native = from exec to the first frame on screen (FIRSTSCREEN). Note switch and omnibar: native frame work, no web number (PN measures none).
