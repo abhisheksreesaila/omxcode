@@ -46,6 +46,7 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
+from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX
 
 comptime RING = 6  # textures in the ring: one on screen, one being drawn, the rest waiting for the toolkit to let go
 
@@ -448,6 +449,37 @@ out vec4 o;
 void main() { o = v_col; }  // (no discard: the stencil test runs before the shader)
 """
 
+# TILE (D-7940): a kept raster tile (premultiplied, mojoui.gpu2d_tiles) drawn under its layer's transform. One triangle
+# holds the draw's rect; a pixel is drawn when its centre is in the clip and its content point falls in the tile (each
+# pixel belongs to exactly one tile); nearest texel at 1:1, bilinear when scaled (the border ring holds the neighbours).
+comptime TILE_VS = """
+uniform vec2 vp;
+uniform vec4 rect;
+void main() {
+    vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);
+    vec2 p = mix(rect.xy - 1.5, rect.zw + 1.5, corner);
+    gl_Position = vec4(p / vp * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+comptime TILE_FS = """
+uniform sampler2D tile;
+uniform vec4 clip;
+uniform vec4 map;
+uniform vec2 org;
+uniform int lin;
+out vec4 o;
+void main() {
+    vec2 p = gl_FragCoord.xy;
+    if (p.x < clip.x || p.y < clip.y || p.x >= clip.z || p.y >= clip.w) discard;
+    vec2 q = (p - map.yz) / map.x - org;
+    if (q.x < 0.0 || q.y < 0.0 || q.x >= map.w || q.y >= map.w) discard;
+    vec2 tc = q + 1.0;
+    if (lin == 0) o = texelFetch(tile, ivec2(floor(tc)), 0);
+    else o = texture(tile, tc / (map.w + 2.0));
+}
+"""
+
 comptime P_QUAD = 0
 comptime P_GLYPH = 1
 comptime P_IMAGE = 2
@@ -583,6 +615,21 @@ struct GL2D(Movable):
     var poly_groups: Int  # stencil-and-cover groups last frame (fan + cover draws each)
     var draws: Int  # GL draw calls last frame
     var dmabuf: DmabufExport  # the ring textures as dmabufs, when a host starts it (dmabuf.start; D-7570)
+    var cw: Int  # the size of what is being drawn into now (the frame's target, or a tile: D-7940)
+    var ch: Int
+    var tile_prog: Int  # (D-7940) the tile program and its uniforms; the tile target (its own fbo, stencil, MSAA colour)
+    var tl_vp: Int
+    var tl_rect: Int
+    var tl_clip: Int
+    var tl_map: Int
+    var tl_org: Int
+    var tl_lin: Int
+    var tl_tex: Int
+    var tile_fbo: Int
+    var tile_ds: Int
+    var tile_color: Int
+    var tile_tex: List[Int]  # by tile slot (0: not made yet)
+    var timing_open: Bool  # this frame's time-elapsed query already begun (tile rasters before the frame are in it)
 
     def __init__(out self):
         self.ok = False
@@ -656,6 +703,21 @@ struct GL2D(Movable):
         self.poly_groups = 0
         self.draws = 0
         self.dmabuf = DmabufExport(RING)
+        self.cw = 0
+        self.ch = 0
+        self.tile_prog = 0
+        self.tl_vp = -1
+        self.tl_rect = -1
+        self.tl_clip = -1
+        self.tl_map = -1
+        self.tl_org = -1
+        self.tl_lin = -1
+        self.tl_tex = -1
+        self.tile_fbo = 0
+        self.tile_ds = 0
+        self.tile_color = 0
+        self.tile_tex = List[Int]()
+        self.timing_open = False
 
     def at(self, k: Int) -> Int:
         return Int(self.out.unsafe_ptr()) + 8 * k
@@ -763,6 +825,16 @@ struct GL2D(Movable):
         self.loc_img = self.uniform(self.prog[P_IMAGE], "img")
         self.loc_rect = self.uniform(self.prog[P_IMAGE], "rect")
         self.loc_clip = self.uniform(self.prog[P_IMAGE], "clip")
+        self.tile_prog = self.compile(head + String(TILE_VS), head + String(TILE_FS))
+        if self.tile_prog == 0:
+            return False
+        self.tl_vp = self.uniform(self.tile_prog, "vp")
+        self.tl_rect = self.uniform(self.tile_prog, "rect")
+        self.tl_clip = self.uniform(self.tile_prog, "clip")
+        self.tl_map = self.uniform(self.tile_prog, "map")
+        self.tl_org = self.uniform(self.tile_prog, "org")
+        self.tl_lin = self.uniform(self.tile_prog, "lin")
+        self.tl_tex = self.uniform(self.tile_prog, "tile")
         # vertex arrays: instanced vec4 groups (re-pointed per run), the fan's vec2 per vertex
         for b in range(VAOS):
             self.vao[b] = self.gen(F_GEN_VERTEX_ARRAYS)
@@ -1133,17 +1205,9 @@ struct GL2D(Movable):
                     self.msaa_ds = 0
                     return self.begin(tex, w, h)
             fcall[NoneType](self.cov_mod, c_uint(GL_ALPHA))
-        if self.timing and len(self.timer) == 4:  # (this frame's GPU time: a query from begin to end)
-            if len(self.q_free) == 0:
-                if len(self.q_pending) >= 16:
-                    _ = self.gpu_time()
-                else:
-                    self.out[0] = 0
-                    fcall[NoneType](self.timer[0], c_int(1), self.at(0))
-                    self.q_free.append(self.out[0] & 0xFFFFFFFF)
-            var qid = self.q_free.pop()
-            fcall[NoneType](self.timer[1], c_uint(0x88BF), c_uint(qid))  # GL_TIME_ELAPSED
-            self.q_pending.append(qid)
+        self.cw = w
+        self.ch = h
+        self.timer_begin()
         self.set_sizes(w, h)
         fcall[NoneType](self.f(F_VIEWPORT), c_int(0), c_int(0), c_int(w), c_int(h))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
@@ -1163,8 +1227,8 @@ struct GL2D(Movable):
         an unchanged one draws from what it uploaded before, through its current transform). append_from ≥ 0: the frame
         is what this set last uploaded with runs added from run append_from on (instances, fans and points appended at
         the ends of their lists): only those are uploaded and planned."""
-        var w = self.mw
-        var h = self.mh
+        var w = self.cw
+        var h = self.ch
         if upload:
             var add = append_from >= 0 and self.multi_draw != 0 and set < len(self.pgroups)
             self.stream(set, B_QUAD, frame.quads, add)
@@ -1223,10 +1287,163 @@ struct GL2D(Movable):
                     self.polys(set, ri, tx, ty, tk, w, h, cur)
         self.cur_prog = cur
 
+    def timer_begin(mut self):
+        """This frame's GPU time: a time-elapsed query from here to end() (begun once a frame; tile rasters drawn before
+        the frame's target is bound are inside it, D-7940)."""
+        if self.timing_open or not self.timing or len(self.timer) != 4:
+            return
+        if len(self.q_free) == 0:
+            if len(self.q_pending) >= 16:
+                _ = self.gpu_time()
+            else:
+                self.out[0] = 0
+                fcall[NoneType](self.timer[0], c_int(1), self.at(0))
+                self.q_free.append(self.out[0] & 0xFFFFFFFF)
+        var qid = self.q_free.pop()
+        fcall[NoneType](self.timer[1], c_uint(0x88BF), c_uint(qid))  # GL_TIME_ELAPSED
+        self.q_pending.append(qid)
+        self.timing_open = True
+
+    # ---------- raster tiles (D-7940, mojoui.gpu2d_tiles) ----------
+
+    def tile_texture(mut self, slot: Int) -> Int:
+        """Tile slot's texture (TILE_TEX², RGBA8, premultiplied; made on first use)."""
+        while len(self.tile_tex) <= slot:
+            self.tile_tex.append(0)
+        if self.tile_tex[slot] == 0:
+            var t = self.gen(F_GEN_TEXTURES)
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(t))
+            self.tex_params(GL_LINEAR)
+            fcall[NoneType](self.f(F_TEX_STORAGE_2D), c_uint(GL_TEXTURE_2D), c_int(1), c_uint(GL_RGBA8), c_int(TILE_TEX), c_int(TILE_TEX))
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+            self.tile_tex[slot] = t
+        return self.tile_tex[slot]
+
+    def tile_target(mut self) -> Bool:
+        """The tile target (once): its framebuffer and a TILE_TEX² stencil (and, without mixed samples, MSAA colour)."""
+        if self.tile_fbo != 0:
+            return True
+        self.tile_fbo = self.gen(F_GEN_FRAMEBUFFERS)
+        self.tile_ds = self.gen(F_GEN_RENDERBUFFERS)
+        fcall[NoneType](self.f(F_BIND_RENDERBUFFER), c_uint(GL_RENDERBUFFER), c_uint(self.tile_ds))
+        fcall[NoneType](self.f(F_RENDERBUFFER_STORAGE_MS), c_uint(GL_RENDERBUFFER), c_int(self.samples), c_uint(GL_DEPTH24_STENCIL8), c_int(TILE_TEX), c_int(TILE_TEX))
+        if not self.mixed:
+            self.tile_color = self.gen(F_GEN_RENDERBUFFERS)
+            fcall[NoneType](self.f(F_BIND_RENDERBUFFER), c_uint(GL_RENDERBUFFER), c_uint(self.tile_color))
+            fcall[NoneType](self.f(F_RENDERBUFFER_STORAGE_MS), c_uint(GL_RENDERBUFFER), c_int(self.samples), c_uint(GL_RGBA8), c_int(TILE_TEX), c_int(TILE_TEX))
+        fcall[NoneType](self.f(F_BIND_RENDERBUFFER), c_uint(GL_RENDERBUFFER), c_uint(0))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(self.tile_fbo))
+        fcall[NoneType](self.f(F_FRAMEBUFFER_RENDERBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(GL_DEPTH_STENCIL_ATTACHMENT), c_uint(GL_RENDERBUFFER), c_uint(self.tile_ds))
+        if not self.mixed:
+            fcall[NoneType](self.f(F_FRAMEBUFFER_RENDERBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_RENDERBUFFER), c_uint(self.tile_color))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        return self.error() == 0
+
+    def raster_tile(mut self, mut frame: Frame2D, set: Int, slot: Int, ox: Float64, oy: Float64) -> Bool:
+        """frame (one layer's batches built in content px, mojoui.gpu2d.fill_layers(content_k=…)) into tile slot's
+        texture, moved by (ox, oy), cleared first, premultiplied (RGB = Σ c·a over, A = coverage over): drawn later
+        with (ONE, ONE − SRC_ALPHA) it gives what drawing the ops straight onto the frame does."""
+        if not self.ok or not self.tile_target():
+            return False
+        var tex = self.tile_texture(slot)
+        self.timer_begin()
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(self.tile_fbo))
+        if self.mixed:
+            fcall[NoneType](self.f(F_FRAMEBUFFER_TEXTURE_2D), c_uint(GL_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_TEXTURE_2D), c_uint(tex), c_int(0))
+            fcall[NoneType](self.cov_mod, c_uint(GL_ALPHA))
+        self.cw = TILE_TEX
+        self.ch = TILE_TEX
+        self.set_sizes(TILE_TEX, TILE_TEX)
+        fcall[NoneType](self.f(F_VIEWPORT), c_int(0), c_int(0), c_int(TILE_TEX), c_int(TILE_TEX))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_DEPTH_TEST))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_CULL_FACE))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_DITHER))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
+        fcall[NoneType](self.f(F_COLOR_MASK), UInt8(1), UInt8(1), UInt8(1), UInt8(1))
+        fcall[NoneType](self.f(F_STENCIL_MASK), c_uint(0xFF))
+        fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
+        fcall[NoneType](self.f(F_CLEAR_STENCIL), c_int(0))
+        fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
+        fcall[NoneType](self.f(F_BLEND_FUNC_SEPARATE), c_uint(GL_SRC_ALPHA), c_uint(GL_ONE_MINUS_SRC_ALPHA), c_uint(GL_ONE), c_uint(GL_ONE_MINUS_SRC_ALPHA))
+        self.cur_prog = -1
+        self.cur_blend = -1
+        var saved = List[Float64]()
+        for li in range(len(frame.layers)):
+            saved.append(frame.layers[li].dx)
+            saved.append(frame.layers[li].dy)
+        self._move_layers(frame, ox, oy)
+        self.layer(frame, set, True)
+        self._unmove_layers(frame, saved)
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_BLEND))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
+        if not self.mixed:
+            fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_DRAW_FRAMEBUFFER), c_uint(self.resolve_fbo))
+            fcall[NoneType](self.f(F_FRAMEBUFFER_TEXTURE_2D), c_uint(GL_DRAW_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_TEXTURE_2D), c_uint(tex), c_int(0))
+            fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_READ_FRAMEBUFFER), c_uint(self.tile_fbo))
+            fcall[NoneType](self.f(F_BLIT_FRAMEBUFFER), c_int(0), c_int(0), c_int(TILE_TEX), c_int(TILE_TEX), c_int(0), c_int(0), c_int(TILE_TEX), c_int(TILE_TEX),
+                            c_uint(GL_COLOR_BUFFER_BIT), c_uint(GL_NEAREST))
+        else:
+            fcall[NoneType](self.f(F_FRAMEBUFFER_TEXTURE_2D), c_uint(GL_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_TEXTURE_2D), c_uint(0), c_int(0))
+        fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        return True
+
+    def _move_layers(self, mut frame: Frame2D, ox: Float64, oy: Float64):
+        for li in range(len(frame.layers)):
+            frame.layers[li].dx = ox
+            frame.layers[li].dy = oy
+
+    def _unmove_layers(self, mut frame: Frame2D, saved: List[Float64]):
+        for li in range(len(frame.layers)):
+            frame.layers[li].dx = saved[2 * li]
+            frame.layers[li].dy = saved[2 * li + 1]
+
+    def draw_tiles(mut self, draws: List[TileDraw]):
+        """Kept tiles onto the frame being drawn (between begin and end), premultiplied over what's there, the frame's
+        alpha kept."""
+        if len(draws) == 0:
+            return
+        fcall[NoneType](self.f(F_USE_PROGRAM), c_uint(self.tile_prog))
+        self.cur_prog = -1
+        self.cur_blend = -1
+        fcall[NoneType](self.f(F_ENABLE), c_uint(GL_BLEND))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
+        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
+        fcall[NoneType](self.f(F_BLEND_FUNC_SEPARATE), c_uint(GL_ONE), c_uint(GL_ONE_MINUS_SRC_ALPHA), c_uint(GL_ZERO), c_uint(GL_ONE))
+        fcall[NoneType](self.f(F_UNIFORM_2F), c_int(self.tl_vp), Float32(self.cw), Float32(self.ch))
+        fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.tl_tex), c_int(0))
+        fcall[NoneType](self.f(F_ACTIVE_TEXTURE), c_uint(GL_TEXTURE0))
+        fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.empty_vao))
+        for ref d in draws:
+            if d.slot < 0 or d.slot >= len(self.tile_tex) or self.tile_tex[d.slot] == 0:
+                continue
+            var x0 = Float64(d.i) * TILE * d.s + d.tx
+            var y0 = Float64(d.j) * TILE * d.s + d.ty
+            var x1 = Float64(d.i + 1) * TILE * d.s + d.tx
+            var y1 = Float64(d.j + 1) * TILE * d.s + d.ty
+            x0 = max(x0, d.cx0)
+            y0 = max(y0, d.cy0)
+            x1 = min(x1, d.cx1)
+            y1 = min(y1, d.cy1)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.tile_tex[d.slot]))
+            fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.tl_rect), Float32(x0), Float32(y0), Float32(x1), Float32(y1))
+            fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.tl_clip), Float32(d.cx0), Float32(d.cy0), Float32(d.cx1), Float32(d.cy1))
+            fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.tl_map), Float32(d.s), Float32(d.tx), Float32(d.ty), Float32(TILE))
+            fcall[NoneType](self.f(F_UNIFORM_2F), c_int(self.tl_org), Float32(Float64(d.i) * TILE), Float32(Float64(d.j) * TILE))
+            fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.tl_lin), c_int(0 if d.s == 1.0 else 1))
+            fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(1))
+            self.draws += 1
+        fcall[NoneType](self.f(F_BLEND_FUNC_SEPARATE), c_uint(GL_SRC_ALPHA), c_uint(GL_ONE_MINUS_SRC_ALPHA), c_uint(GL_ZERO), c_uint(GL_ONE))
+        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+
     def end(mut self, tex: Int, w: Int, h: Int) -> Bool:
         """Finishes the frame: MSAA resolved into tex (mixed samples: tex was drawn into), GL state back to defaults."""
-        if self.timing and len(self.timer) == 4 and len(self.q_pending) > 0:
+        if self.timing_open:
             fcall[NoneType](self.timer[2], c_uint(0x88BF))
+            self.timing_open = False
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_BLEND))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
@@ -1667,6 +1884,12 @@ struct GPU2D(Movable):
     var next_set: Int  # GL buffer sets handed out so far; sets freed by a dropped cache are reused first
     var free_sets: List[Int]
     var stamp: Int
+    var tiles: Tiles  # (D-7940) tiled layers' kept raster tiles (mojoui.gpu2d_tiles), the frames their batches are built in
+    var tile_frames: List[Frame2D]
+    var tile_set: Int  # the GL buffer set tile rasters upload into (one at a time)
+    var tiles_on: Bool  # MOJOUI_GPU2D_TILES=0: tiled layers drawn directly (for comparisons)
+    var tile_ns: Int  # last frame's tile work (plan + batches + raster submission, CPU side)
+    var more: Bool  # the last frame left tile work for later frames: a host draws again
 
     def __init__(out self):
         self.gl = GL2D()
@@ -1694,6 +1917,12 @@ struct GPU2D(Movable):
         self.next_set = 0
         self.free_sets = List[Int]()
         self.stamp = 0
+        self.tiles = Tiles()
+        self.tile_frames = List[Frame2D]()
+        self.tile_set = -1
+        self.tiles_on = getenv("MOJOUI_GPU2D_TILES") != "0"
+        self.tile_ns = 0
+        self.more = False
 
     def caches(self) -> Int:
         """How many canvases' layer caches are kept (the one drawn last included)."""
@@ -1754,6 +1983,40 @@ struct GPU2D(Movable):
             return False
         return True
 
+    def _raster_plan(mut self, scene: Scene, mut plan: TilePlan) -> Bool:
+        """plan's tiles: every tile's batches built (content px at its zoom), the glyph pages uploaded once, then each
+        tile rastered (D-7940). A glyph-page reset while building builds them all again on the fresh pages."""
+        var n = len(plan.rasters)
+        if n == 0:
+            return True
+        if self.tile_set < 0:
+            if len(self.free_sets) > 0:
+                self.tile_set = self.free_sets.pop()
+            else:
+                self.tile_set = self.next_set
+                self.next_set += 1
+        while len(self.tile_frames) < n:
+            self.tile_frames.append(Frame2D())
+        var pg = glyph_pages(self.atlas.width)
+        for attempt in range(2):
+            var r0 = pg[].resets
+            for r in range(n):
+                ref tr = plan.rasters[r]
+                fill_layers(self.tile_frames[r], scene, self.atlas, self.font, tr.layer, tr.layer + 1, 0, tr.ops, tr.k)
+            if pg[].resets == r0:
+                break
+            if attempt == 1:
+                print("GLYPHPAGES: one frame's tiles need more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
+        self.gl.sync_pages()
+        for r in range(n):
+            ref tr = plan.rasters[r]
+            if self.merge:  # (as a changed layer: runs regrouped, the same pixels, fewer draws)
+                merge_runs(self.tile_frames[r], self.scratch)
+                swap(self.scratch, self.tile_frames[r])
+            if not self.gl.raster_tile(self.tile_frames[r], self.tile_set, tr.slot, Float64(-tr.i * TILE + 1), Float64(-tr.j * TILE + 1)):
+                return False
+        return True
+
     def draw(mut self, scene: Scene, prev: Scene, owner: Int, w: Int, h: Int) -> Int:
         """The scene into a free ring texture of w × h, fenced: its slot, or -1 (every texture still held, or GL
         failed: gl.ok then False and gl.why says why). `prev` is the scene this canvas (`owner`) drew last, when the
@@ -1787,10 +2050,20 @@ struct GPU2D(Movable):
         self.runs_merged = 0
         var pg = glyph_pages(self.atlas.width)
         var resets0 = pg[].resets
+        var tiled = List[Bool](length=n, fill=False)  # (D-7940) layers drawn from kept raster tiles this frame
+        self.tiles.begin_frame()
+        self.more = False
         for i in range(n):
             var span = scene.layer_range(i)
             var tr = layer_traits(scene, i, open)  # (D-7930: shared with the Metal renderer)
             open = tr.open
+            if scene.layer_tiled[i] and tr.fixed and self.tiles_on and owner != 0:
+                tiled[i] = True
+                dirty[i] = False
+                self.fills[i] = 0
+                self.built_resets[i] = -1  # (its frames[i] isn't kept: if it stops being tiled, it is built again)
+                self.frames[i].clear()
+                continue
             var fixed = tr.fixed
             var zoom_bound = tr.zoom_bound
             # a layer whose glyphs were placed before GlyphPages last filled and started again points at slots other glyphs
@@ -1846,7 +2119,7 @@ struct GPU2D(Movable):
             # before that (built earlier this frame, or kept) is built once more on the fresh pages (D-7930)
             var resets1 = pg[].resets
             for i in range(n):
-                if self.built_resets[i] != resets1 and layer_traits(scene, i, 0).runs:
+                if not tiled[i] and self.built_resets[i] != resets1 and layer_traits(scene, i, 0).runs:
                     fill_layers(self.frames[i], scene, self.atlas, self.font, i, i + 1)
                     self.built_k[i] = scene.layer_tk[i]
                     self.built_resets[i] = resets1
@@ -1858,7 +2131,7 @@ struct GPU2D(Movable):
         var full = False
         var see_through = False
         for i in range(n):
-            if dirty[i]:  # (rebuilt or grown: what its replacing runs do, again)
+            if dirty[i] and not tiled[i]:  # (rebuilt or grown: what its replacing runs do, again)
                 self.fills[i] = _fills(self.frames[i])
             full = full or self.fills[i] == 1
             see_through = see_through or self.fills[i] < 0
@@ -1866,12 +2139,32 @@ struct GPU2D(Movable):
         self.owner = owner
         self.built = n
         var t1 = perf_counter_ns()
+        # (D-7940) tiled layers: the tiles to rasterize (their batches built first, then the glyph pages uploaded once,
+        # then each rastered), and what to draw where
+        var tile_draws = List[List[TileDraw]]()
+        for i in range(n):
+            tile_draws.append(List[TileDraw]())
+        var tt0 = perf_counter_ns()
+        for i in range(n):
+            if not tiled[i]:
+                continue
+            var plan = self.tiles.plan(scene, i, owner, w, h)
+            if not self._raster_plan(scene, plan):
+                self.gl.ok = False
+                self.built = 0
+                return -1
+            tile_draws[i] = plan.draws.copy()
+        self.more = self.tiles.more
+        self.tile_ns = Int(perf_counter_ns() - tt0)
         self.gl.sync_pages()
         if not self.gl.begin(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0
             return -1
         for i in range(n):
+            if tiled[i]:
+                self.gl.draw_tiles(tile_draws[i])
+                continue
             self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
         if not self.gl.end(self.gl.tex[slot], w, h):
             self.gl.ok = False

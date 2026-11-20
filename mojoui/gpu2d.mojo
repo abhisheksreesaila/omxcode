@@ -534,11 +534,14 @@ def _zigzag_start(path: List[Float32], p0: Int, n: Int) -> Int:
     return best
 
 
-def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0):
+def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0,
+                only: List[Int] = List[Int](), content_k: Float64 = 0):
     """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
     rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
     skip_ops: layer `first`'s first ops left out (a layer that only grew, Scene.appends: just the new ops; the ops left
-    out must leave no clip open)."""
+    out must leave no clip open). only (non-empty) + content_k > 0 (D-7940, a raster tile): just these ops of layer
+    `first` (offsets from its first op, ascending, no clips among them), built as if the layer were drawn at zoom
+    content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels)."""
     f.clear()
     f.width = scene.w
     f.height = scene.h
@@ -557,6 +560,11 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
         var tx = scene.layer_tx[layer]
         var ty = scene.layer_ty[layer]
         var tk = scene.layer_tk[layer]
+        var subset = len(only) > 0 and content_k > 0 and layer == first
+        if content_k > 0 and layer == first:
+            tx = 0
+            ty = 0
+            tk = content_k
         var ik = 1.0 / tk if tk != 0 else 1.0
         var first_run = len(f.runs)
         f.layers.append(Layer2D(scene.layer_keys[layer].copy(), scene.layer_versions[layer], tx, ty, tk, first_run, 0))
@@ -568,7 +576,10 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
         var c2 = NO_CLIP
         var c3 = NO_CLIP
         var clip_dirty = True
-        for op in range(span[0] + (skip_ops if layer == first else 0), span[1]):
+        var o0 = span[0] + (skip_ops if layer == first else 0)
+        var count = len(only) if subset else span[1] - o0
+        for oi in range(count):
+            var op = span[0] + only[oi] if subset else o0 + oi
             var kind = Int(scene.kinds[op])
             var base = op * 6
             if kind == OP_CLIP or kind == OP_UNCLIP:

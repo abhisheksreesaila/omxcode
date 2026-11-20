@@ -3766,6 +3766,7 @@ struct GtkHost[A: App](Movable):
         var slot = self.gpu2d_draw(ci, widget, sc, wpx, hpx)
         if slot >= 0:
             self.canvases[ci].bench_batch_ms += Float64(self.gpu2d()[].batch_ns) / 1e6
+            again = again or self.gpu2d()[].more  # (D-7940: raster tiles left for later frames)
         if slot < 0:  # (every texture held, or GL failed: the tick draws it as usual)
             swap(sc, self.canvases[ci].spare)
             self.apply(r[1], self_addr)
@@ -3874,6 +3875,7 @@ struct GtkHost[A: App](Movable):
                 self.canvases[ci].bench_scene_ms += Float64(Int(t1 - t0)) / 1e6
                 if on_gpu and self.gpu2d_show(ci, widget, sc, wpx, hpx):
                     via_gpu2d = True
+                    again = again or self.gpu2d()[].more  # (D-7940: raster tiles left for later frames)
                     if self.rt.trace:
                         print("TRACE: gpu2d app draw_scene " + ms(Int(t1) - Int(t0)) + " ms, " + String(sc.ops()) + " ops")
                     t1 = perf_counter_ns()  # (the GPU path: draw_ms is all of it, the app's draw, batches, GL and the wait)

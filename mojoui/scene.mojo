@@ -29,6 +29,11 @@ comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spa
 comptime STRIDE = 6  # floats per op
 
 
+def snap_px(v: Float64) -> Float64:
+    """A translation snapped to a whole device pixel (a tiled layer's, D-7940: its kept tiles then land 1:1)."""
+    return Float64(Int(v + 0.5)) if v >= 0 else -Float64(Int(-v + 0.5))
+
+
 trait Painter:
     """What drawing code paints with: pixels (SurfacePainter) or a display list (Scene). Sizes are pixels."""
 
@@ -67,6 +72,20 @@ trait Painter:
         """The current layer is shown scaled by k and moved by (dx, dy): a point (x, y) it draws lands at
         (x·k + dx, y·k + dy) (goal 40, D-1202). It isn't part of the layer's picture: a host keeps a layer that came
         again unchanged and only moves it (a pan or a zoom redraws nothing). A new layer starts at no transform."""
+        ...
+
+    def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        """(goal 79, D-7940) The current layer may be kept as raster tiles at its zoom (a big board: a pan or a zoom then
+        composites what's kept instead of drawing every item again). Its ops are complete inside this rect of its units
+        (items beyond it may be left out: tiles there aren't rastered from this frame). Its translation is snapped to
+        whole device pixels, so a kept tile lands 1:1. Call after layer_transform; no clips, fills or replacing images
+        in such a layer (a host then draws it directly)."""
+        ...
+
+    def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        """(D-7940) Since the layer's version `since`, only what's inside this rect (its units) changed; call once per
+        rect, all with the same `since`. A host whose tiles show version `since` rasters again only the tiles these
+        meet; with no damage (or another base) a new version invalidates every tile."""
         ...
 
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
@@ -177,6 +196,13 @@ struct SurfacePainter(Painter, Movable):
         self.ty = dy
         self.tk = k
 
+    def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        self.tx = snap_px(self.tx)  # (as the Scene does: the same picture on every path)
+        self.ty = snap_px(self.ty)
+
+    def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        pass
+
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         var k = self.tk
         var c = Clip(Int(x * k + self.tx + 0.5), Int(y * k + self.ty + 0.5), Int((x + w) * k + self.tx + 0.5), Int((y + h) * k + self.ty + 0.5))
@@ -264,6 +290,11 @@ struct Scene(Painter, Movable, Copyable):
     var layer_tk: List[Float64]
     var note_ops: List[Int]  # the ops that carry a meaning, and the meanings
     var notes: List[String]
+    var layer_tiled: List[Bool]  # (D-7940) layer_tiles: kept as raster tiles; its extent (x0, y0, x1, y1 per layer)
+    var layer_ext: List[Float64]
+    var layer_since: List[Int]  # layer_damage's base version (-1: no damage given), and the rects (layer, x0, y0, x1, y1)
+    var dmg_layer: List[Int]
+    var dmg: List[Float64]
 
     def __init__(out self, width: Int, height: Int, scale: Float64):
         self.w = width
@@ -287,6 +318,11 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_tk = List[Float64]()
         self.note_ops = List[Int]()
         self.notes = List[String]()
+        self.layer_tiled = List[Bool]()
+        self.layer_ext = List[Float64]()
+        self.layer_since = List[Int]()
+        self.dmg_layer = List[Int]()
+        self.dmg = List[Float64]()
 
     def reset(mut self, width: Int, height: Int, scale: Float64):
         """Empty again for the next frame, keeping the memory (a host recycles last frame's list)."""
@@ -311,6 +347,11 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_tk.clear()
         self.note_ops.clear()
         self.notes.clear()
+        self.layer_tiled.clear()
+        self.layer_ext.clear()
+        self.layer_since.clear()
+        self.dmg_layer.clear()
+        self.dmg.clear()
 
     def width(self) -> Int:
         return self.w
@@ -340,6 +381,47 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_tx.append(0)
         self.layer_ty.append(0)
         self.layer_tk.append(1)
+        self.layer_tiled.append(False)
+        for _ in range(4):
+            self.layer_ext.append(0)
+        self.layer_since.append(-1)
+
+    def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        if len(self.layer_keys) == 0:
+            self.begin_layer("")
+        var i = len(self.layer_keys) - 1
+        self.layer_tiled[i] = True
+        self.layer_ext[4 * i] = x0
+        self.layer_ext[4 * i + 1] = y0
+        self.layer_ext[4 * i + 2] = x1
+        self.layer_ext[4 * i + 3] = y1
+        self.layer_tx[i] = snap_px(self.layer_tx[i])
+        self.layer_ty[i] = snap_px(self.layer_ty[i])
+
+    def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        if len(self.layer_keys) == 0:
+            return
+        var i = len(self.layer_keys) - 1
+        if self.layer_since[i] != -1 and self.layer_since[i] != since:
+            self.layer_since[i] = -2  # (two bases: no usable damage, every tile goes)
+            return
+        if self.layer_since[i] == -2:
+            return
+        self.layer_since[i] = since
+        self.dmg_layer.append(i)
+        self.dmg.append(x0)
+        self.dmg.append(y0)
+        self.dmg.append(x1)
+        self.dmg.append(y1)
+
+    def damage_of(self, i: Int) -> List[Float64]:
+        """Layer i's damage rects (x0, y0, x1, y1 each), in its units."""
+        var out = List[Float64]()
+        for d in range(len(self.dmg_layer)):
+            if self.dmg_layer[d] == i:
+                for c in range(4):
+                    out.append(self.dmg[4 * d + c])
+        return out^
 
     def layer_version(mut self, version: Int):
         if len(self.layer_versions) > 0:
@@ -502,6 +584,12 @@ struct Scene(Painter, Movable, Copyable):
         var b = other.layer_range(j)
         if self.layer_keys[i] != other.layer_keys[j]:
             return False
+        if self.layer_tiled[i] != other.layer_tiled[j]:
+            return False
+        if self.layer_tiled[i]:  # (D-7940: a tiled layer's version is its content's; its ops also depend on its extent)
+            for c in range(4):
+                if self.layer_ext[4 * i + c] != other.layer_ext[4 * j + c]:
+                    return False
         if self.layer_versions[i] >= 0 and other.layer_versions[j] >= 0:  # (the drawing code said which picture it is)
             return self.layer_versions[i] == other.layer_versions[j]
         if a[1] - a[0] != b[1] - b[0]:
