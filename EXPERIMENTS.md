@@ -4,6 +4,18 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 4: big boards in the framework, M4's rule (2026-11-20, early morning)
+- **Setup:** ../mojo-ui-g79, autopilot; Linux hidden test screen, GL; the Mac unreachable all session.
+- **Worked:** raster tiles for big layers in gpu2d (damage, partial raster, lifted drags, zoom settle), Painter.stroke, a 4×
+  faster JSON reader. PN's 5,296-object note: pan 12–14 → 4–5 ms, zoom 45 → 7.7 ms p95, drags 22–23 → 5.5–6, pen and
+  typing 11–13 → 5; the 600 note silky and ahead on every interaction row. Cold open 151 → 29 ms (600), 732 → 129 ms (stress).
+  M4 PASS under the main session's discriminative rule (D-7942) after four look fixes (D-7943).
+- **Broke and fixed:** an empty tile built the whole layer; text boxes in tiles ±1,666 units; a test file overwritten by
+  name (restored); the culled extent's edge missing shadows of objects just outside.
+- **Means:** the board renderer now scales like Chromium's compositor (composite kept pictures, raster only what changed);
+  remaining misses are cold open/start, the stress undo/redo (~10 ms), and GPU clock state.
+- **Next small step:** the progressive open (parse-then-tile with a completion gate); then cold start; Metal tiles when the Mac answers.
+
 ## Goal 79, review round: what the race really showed (2026-11-20, night)
 - **Setup:** same worktree, autopilot, a fresh reviewer's NEEDS WORK (3 musts, 5 shoulds, nits). The Mac was offline
   all round. Late on, other work shared the machine (goal 77's check, another project's tests, the screensaver).

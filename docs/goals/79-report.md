@@ -8,6 +8,74 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+**Continuation 4 (11-20, 03:5x–05:2x): big boards in the framework, M4's rule.** Everything below comes from the final
+race (docs/goals/79/race.md, 05:13, load 1.7 at the start and 4.5 at the end: another session's goal 77 crashloop held one
+core; both GPUs idle). The baseline before this round is build/g79/race-baseline-0351.md.
+
+## Milestones
+| # | Result | Checker says (11-20) |
+|---|---|---|
+| M0 Reference | **PASS** | unchanged |
+| M1 Text | **BLOCKED (Mac)** | Linux half passes (unchanged) |
+| M2 Shell | **PASS** | not rerun this round (no shell drawing changed except the page frame's bands, drawn the same) |
+| M3 Every screen | **PASS** | not rerun this round (the map's fixture ideas have no fontSize: drawn at 20 as before) |
+| M4 Works the same | **PASS** | D-7942's rule (set by the main session): 28 steps, worst whole-frame SSIM 0.964, saved notes equal; self-test caught (gain −0.323) |
+| M5 IME | **BLOCKED (Mac)** | Linux half passes (unchanged) |
+| M6 Race | **FAIL** | 15 of 20 interaction rows silky and ahead; open, stress zoom max, stress undo/redo, cold start miss |
+| M7 Both machines | **BLOCKED** | the Mac was unreachable all session (ssh port 22 timed out at the start, between items, at the end) |
+
+## The race (final run, from docs/goals/79/race.md only)
+Units as race.md states: web = frame-to-frame gaps in Chromium (floored at 16.7 ms); native = each frame's own work.
+
+| note | step | web p95 / max | native p95 / max | baseline 03:51 (before) | silky and ahead? |
+|---|---|---|---|---|---|
+| 600 | open (cold) | 1,259 | 29.1 | 150.9 | ✗ (43× faster than the web, not the 8.3 bar) |
+| 600 | pan 30 % / 100 % | 16.8 / 16.8, 16.8 / 16.8 | 5.3 / 8.1, 5.4 / 7.4 | 6.7 / 8.7, 6.8 / 10.3 | ✓ ✓ |
+| 600 | zoom from 30 % | 16.8 / 49.9 | 4.6 / 5.8 | 11.9 / 13.5 | ✓ |
+| 600 | drag one / drag 40 | 16.8 / 33.4, 16.8 / 16.8 | 5.7 / 6.2, 4.3 / 5.9 | 10.8 / 11.1, 7.7 / 8.7 | ✓ ✓ |
+| 600 | undo / redo | 16.8 / 16.9, 16.8 / 16.9 | 5.2 / 7.3, 5.5 / 7.2 | 7.9 / 8.4, 7.6 / 7.7 | ✓ ✓ |
+| 600 | pen / typing | 16.8 / 16.8, 16.8 / 16.8 | 5.3 / 7.6, 5.8 / 7.0 | 7.1 / 10.0, 7.5 / 8.6 | ✓ ✓ |
+| stress | open (cold) | 1,153 | 129.0 | 731.7 | ✗ (9× faster than the web) |
+| stress | pan 30 % / 100 % | 16.7 / 16.8, 16.7 / 16.8 | 5.0 / 6.9, 4.4 / 6.1 | 12.1 / 13.8, 14.1 / 15.6 | ✓ ✓ |
+| stress | zoom from 30 % | 16.8 / 283.4 | 7.7 / 28.0 | 44.8 / 50.7 | ✗ (p95 silky; one 28 ms frame as zoom-out reveals edge tiles) |
+| stress | drag one / drag 40 | 16.7 / 16.8, 16.7 / 66.7 | 5.5 / 7.4, 6.0 / 8.0 | 23.3 / 24.8, 22.2 / 31.9 | ✓ ✓ |
+| stress | undo / redo | 16.9 / 17.0, 16.9 / 17.0 | 9.9 / 9.9, 9.8 / 9.9 | 20.4 / 21.6, 20.5 / 21.3 | ✗ ✗ (ahead of the web, not silky) |
+| stress | pen / typing | 16.7 / 133.4, 16.8 / 16.8 | 5.0 / 7.3, 5.0 / 7.2 | 12.8 / 15.1, 11.3 / 12.8 | ✓ ✓ |
+| | cold start to first screen | 170 ms (browser already running) | 400 ms from exec | 400 | ✗ (not worked on this round) |
+| | RSS after a note of each kind | 806 MB | 256 MB | 238 | ✓ |
+
+**Read it honestly:** GPU time per frame follows the GPU's clock state (idle P8 clocks; the same layers measured 1.3 ms or
+0.07 ms in different runs, D-7940), and the stress undo/redo rows varied 5.7–10 ms between probes; the judged numbers are
+this run's. The "composited" column of race.md (GTK compositing the canvas) adds ~4 ms to each row.
+
+## What the framework gained this round
+| Component | What | Test | Runs on |
+|---|---|---|---|
+| `Painter.layer_tiles` / `layer_damage`, `mojoui/gpu2d_tiles.mojo` | a layer kept as raster tiles: plan, damage, partial raster, zoom stretch then settle, ring prefetch, op budget, empty tiles skipped | tests/test_gpu2d_tiles, tests/test_boardraster | GL ✅; Metal ❌ (plan shared, tile raster/composite not written: debt) |
+| `mojoui/damage.mojo` `DamageSnap` | damage by comparing items' keys and painted boxes; lines as chunks | test_boardraster | any |
+| `Painter.stroke` (OP_STROKE) | a polyline as one op, pixel-identical (GPU and CPU) | test_gpu2d_tiles stroke_same | GL ✅, CPU ✅, GSK ✅ |
+| `pagedesk` | board tiled with damage; drags lifted into their own layer; shadow bands as rings; hug_routes | test_boardraster, test_pagedesk, M4 | Linux ✅ |
+| `objectlayer` | grid kept when only boxes move; route_widths; import_json_canvas_doc | test_objectlayer, M4 | any |
+| `mojoui/json.mojo` | 4× faster on PN's documents, same grammar | test_json (fuzz counts identical) | any |
+| `notesshell.draw_inner_ring`, `buzanmap.idea_size` | the web's focus ring; ideas at their own size | M4 | Linux ✅ |
+| GTK host / GPU2D | `more` (tile work left: draw again), MOJOUI_TILE_TRACE, MOJOUI_GPU2D_LAYER_TIMES | — | GTK ✅ |
+
+**Line counts:** pnote's web look is `examples/pnote/webshell.mojo` 1,026 lines + `pnlook.mojo` 303 = **1,329 lines**, against
+the web app's `src/main.js` alone at **4,300 lines** (on top of CodeMirror, Leafer and its modules).
+
+## Limits and debt
+- **Mac:** nothing of this round (tiles, stroke, json) has run on the Mac; the Metal tile raster/composite isn't written.
+- **Open:** 29 ms / 129 ms cold. Designed, not built: parse-then-tile on the UI thread with a `complete()` gate that every
+  reader needing the whole document (save, export, bench spots) calls, so nothing races (D-7926's failure, D-7941).
+- **Cold start:** 400 ms vs 170 ms; not profiled this round.
+- **Stress undo/redo** (9.9 ms) and the zoom-out spike (28 ms): next levers: prefetch two rings while zooming out, fewer
+  full-screen passes (GPU clock state).
+- **M4:** the undo step's last difference is the web's hover state on the button after the click.
+
+---
+
+Earlier rounds below (continuation 3), kept as written then.
+
 **Continuation 3 (11-20): a fresh reviewer's NEEDS WORK, Linux half.** Every finding was checked in the code first; all
 held but half a nit (PN indexes a page's Markdown itself). The biggest one: the last report's race never timed the
 rebuilt app. Its native rows ran goal 74's canvas, so its "native wins every interaction row" claim is withdrawn. The race
