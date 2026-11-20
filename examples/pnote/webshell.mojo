@@ -19,7 +19,9 @@ from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
-from mojoui.objectlayer import ObjectLayer, import_json_canvas
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canvas, TEXT, STICKY
+from mojoui.pagedesk import BoardTools
+from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom
 
@@ -126,6 +128,9 @@ struct WebShell(Movable):
     var rows: Int
     var tool: String
     var card: IslandCard
+    var tools: BoardTools
+    var win_w: Float64  # the window's size (layout px) at the last paint
+    var win_h: Float64
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -154,6 +159,9 @@ struct WebShell(Movable):
         self.rows = 1
         self.tool = "[Text]"
         self.card = IslandCard()
+        self.tools = BoardTools()
+        self.win_w = 1440
+        self.win_h = 900
         try:
             self.load()
         except e:
@@ -208,9 +216,12 @@ struct WebShell(Movable):
             self.cols = 1
             self.rows = 1
             try:
-                self.board = import_json_canvas(n.content)
+                var text = n.content.copy()
+                self.board = import_json_canvas(text)
                 self.board.set_connector_gap(6)
-                var j = Json.parse(n.content)
+                self.tools = BoardTools()
+                self.sticky_look()
+                var j = Json.parse(text)
                 var pg = j.get(j.get(0, "pn"), "page")
                 self.cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
                 self.rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
@@ -240,6 +251,16 @@ struct WebShell(Movable):
     def set_skin(mut self, name: String):
         self.sk = skin_named(name)
         self.panel.skin_name = name
+        self.sticky_look()
+
+    def sticky_look(mut self):
+        """New stickies in the skin's first colour, their words a deep shade of it (objects.js stickyInk: each channel × .16)."""
+        var f = self.sk.c1
+        self.tools.sticky_fill = f
+        var r = Int(Float64(Int(f & 0xFF)) * 0.16 + 0.5)
+        var g = Int(Float64(Int((f >> 8) & 0xFF)) * 0.16 + 0.5)
+        var b = Int(Float64(Int((f >> 16) & 0xFF)) * 0.16 + 0.5)
+        self.tools.sticky_ink = rgba(r, g, b)
 
     # ------------------------------------------------ drawing
 
@@ -249,6 +270,8 @@ struct WebShell(Movable):
         p.begin_layer("shell")
         p.layer_transform(0, 0, k)
         draw_desk(p, w, h, k, self.sk)
+        self.win_w = w
+        self.win_h = h
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
         if i >= 0 and self.notes[i].kind == "canvas":
@@ -258,6 +281,7 @@ struct WebShell(Movable):
                 self.view_set = True
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
             self.look.paint(p, self.board, self.view, w, h, k)
+            self.tools.paint_overlay(p, self.look, self.board, self.view, k)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)
         if self.sidebar:
@@ -286,7 +310,12 @@ struct WebShell(Movable):
                 self.boxes.add("#leafer-host", left, 0, w - left, h)
                 self.boxes.add("#note-input", left, 0, w - left, h)
                 var items = canvas_dock_items(hexc("#20201e"))
-                draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, self.tool, k, self.sk, "#dock-canvas")
+                var active = self.dock_name()
+                if active == "#dock-more":  # (a tool from the flyout shows in its place)
+                    items[8].icon = "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9"
+                draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, active, k, self.sk, "#dock-canvas")
+                if len(self.board.selected) > 0 and self.tools.editing == -1:
+                    _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
             if n.kind == "page" and not False:
@@ -436,6 +465,11 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        if self.on_canvas():
+            var r = self.tools.key(name, mods, self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
+            self.save_canvas()
+            if r:
+                return True
         var ni = self.note_index(self.current)
         if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page":
             if self.page.draw_mode:
@@ -534,6 +568,10 @@ struct WebShell(Movable):
 
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
+        if self.on_canvas():
+            if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button"]) != "":
+                return False
+            return self.tools.press(x, y, self.board, self.view)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and self.page.draw_mode and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
@@ -542,17 +580,103 @@ struct WebShell(Movable):
         return False
 
     def pan(mut self, x: Float64, y: Float64) -> Bool:
+        if self.on_canvas():
+            return self.tools.pan(x, y, self.board, self.view)
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True
         return False
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
+        if self.on_canvas():
+            var r = self.tools.release(x, y, self.board, self.view)
+            self.save_canvas()
+            return r
         if len(self.page.wet) > 0:
             if self.page.mark_release():
                 self.save_page()
             return True
         return False
+
+    def dock_name(self) -> String:
+        var t = self.tools.tool
+        if t == "select":
+            return "[Select]"
+        if t == "text":
+            return "[Text]"
+        if t == "pen":
+            return "[Pen]"
+        if t == "eraser":
+            return "[Stroke eraser]"
+        if t == "shape":
+            return "[Shape]"
+        if t == "sticky":
+            return "[Sticky note]"
+        return "#dock-more"
+
+    def on_canvas(self) -> Bool:
+        var i = self.note_index(self.current)
+        return i >= 0 and self.notes[i].kind == "canvas" and not self.searching and not self.card_open and not self.settings_open
+
+    def canvas_tap(mut self, x: Float64, y: Float64) -> Bool:
+        """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool."""
+        var hit = self.boxes.hit_any(x, y, ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]", "#undo", "#redo",
+                                            "#zoom-in", "#zoom-out", "#zoom-fit", "#zoom-value", "#dock-more", "#ink-options-trigger", "#voice-button",
+                                            "#selection-bar", "[Canvas tools]", "#history-island", "#zoom-control"])
+        var names: List[String] = ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]"]
+        var tools: List[String] = ["select", "text", "pen", "eraser", "shape", "sticky"]
+        for t in range(len(names)):
+            if hit == names[t]:
+                self.tools.set_tool(tools[t], self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
+                return True
+        if hit == "#undo":
+            self.tools.undo(self.board)
+        elif hit == "#redo":
+            self.tools.redo(self.board)
+        elif hit == "#zoom-in" or hit == "#zoom-out":
+            self.view = self.tools.zoom_step(self.view, 1 if hit == "#zoom-in" else -1, self.win_w, self.win_h, self.cols, self.rows)
+        elif hit == "#zoom-fit":
+            self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+        elif hit == "":
+            if not self.tools.tap(x, y, self.board, self.view, self.win_w, self.win_h):
+                return False
+        self.save_canvas()
+        return True
+
+    def save_canvas(mut self):
+        """The open canvas into Personal Note's schema when the board changed: JSON Canvas with its pn extras, a revision,
+        the change log, the search index (the words of its texts and stickies)."""
+        if not self.tools.changed:
+            return
+        self.tools.changed = False
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "canvas":
+            return
+        var content = export_json_canvas(self.board, self.cols, self.rows)
+        var words = String("")
+        for ref o in self.board.objs:
+            if (o.kind == TEXT or o.kind == STICKY) and o.text != "":
+                words += o.text + "\n"
+        try:
+            var db = Database(self.db_path)
+            db.exec("BEGIN")
+            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            up.bind(1, content)
+            up.bind(2, self.notes[i].id)
+            _ = up.step()
+            self._log_change(db, self.notes[i].id)
+            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
+            del_.bind(1, self.notes[i].id)
+            _ = del_.step()
+            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
+            ins.bind(1, self.notes[i].id)
+            ins.bind(2, self.notes[i].title)
+            ins.bind(3, words)
+            _ = ins.step()
+            db.exec("COMMIT")
+        except e:
+            print("PNOTE ERROR: save canvas: " + String(e), flush=True)
+        self.reload()
 
     def rename(mut self, title: String):
         """The open note's new name, saved as the web's API saves one (title, revision, change log, search index); its
@@ -649,6 +773,8 @@ struct WebShell(Movable):
                     at = -1
             self.panel.toggle_shelf(at)
             return True
+        if self.on_canvas() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
+            return self.canvas_tap(x, y)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.searching:
             var tool = self.boxes.hit_any(x, y, [".page-tool:"])

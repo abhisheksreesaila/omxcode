@@ -30,7 +30,7 @@ from mojoui.ink import Stroke
 from mojoui.history import History, Undoable
 from mojoui.textedit import TextEdit, PlainStyler, Styler, Pos
 from mojoui.text import Font, REGULAR, LEFT
-from mojoui.json import Json, J_ARRAY, J_STRING, J_NUMBER
+from mojoui.json import Json, J_ARRAY, J_STRING, J_NUMBER, json_string
 
 comptime TEXT = 1
 comptime STICKY = 2
@@ -219,6 +219,9 @@ struct Obj(Copyable, Movable):
     var pad: Float64
     var ink: UInt32
     var head_end: Bool  # CONNECTOR: an arrowhead at its end (the default) or none
+    var weight: Int  # TEXT, STICKY: the face's weight
+    var markdown: Bool  # TEXT: its words are Markdown (laid out in CSS line boxes), else plain
+    var key: String  # the document's own id for it (a JSON Canvas node's), "" for one made here
 
     def __init__(out self, id: Int, kind: Int, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32):
         self.id = id
@@ -254,6 +257,9 @@ struct Obj(Copyable, Movable):
         self.pad = 0
         self.ink = 0xFF222222
         self.head_end = True
+        self.weight = 400
+        self.markdown = False
+        self.key = ""
 
     def cx(self) -> Float64:
         return self.x + self.w / 2
@@ -791,6 +797,34 @@ struct ObjectLayer(Movable):
         o.y = min(sy, ey)
         o.w = abs(ex - sx)
         o.h = abs(ey - sy)
+
+    def set_words(mut self, id: Int, text: String):
+        """A text's or a sticky's words (in the open step: inside a gesture they join it)."""
+        var p = self.index(id)
+        if p < 0:
+            return
+        self._touch(id)
+        self.objs[p].text = text
+        self.objs[p].rev = self._next_rev()
+        self._changed()
+        self._commit(CH_TEXT)
+
+    def restyle(mut self, id: Int, family: String, size: Float64, line_height: Float64, weight: Int, markdown: Bool, ink: UInt32):
+        """A text's or a sticky's type, as a document gives it."""
+        var p = self.index(id)
+        if p < 0:
+            return
+        self._touch(id)
+        ref o = self.objs[p]
+        o.family = family
+        o.size = size
+        o.line_height = line_height
+        o.weight = weight
+        o.markdown = markdown
+        o.ink = ink
+        o.rev = self._next_rev()
+        self._changed()
+        self._commit(CH_STYLE)
 
     def set_connector_gap(mut self, gap: Float64):
         """Chooses how connectors meet their ends (see connector_gap) and routes every connector again (no undo step:
@@ -1922,10 +1956,27 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
             var q = ol.index(oid)
             ol.objs[q].family = j.text(j.get(style, "fontFamily"))
             ol.objs[q].line_height = j.real(j.get(style, "lineHeight"), 0)
+            ol.objs[q].weight = Int(j.real(j.get(style, "fontWeight"), 400))
+            ol.objs[q].markdown = j.text(j.get(pn, "format")) == "markdown"
+        elif kind == "file" and j.text(j.get(pn, "type")) == "ink" and j.text(j.get(pn, "kind"), "stroke") == "stroke":
+            # a pen stroke: Personal Note keeps its path (M/L/Q commands, relative to the box) in pn
+            var g = j.get(pn, "geometry")
+            var gx = j.real(j.get(g, "x"), x)
+            var gy = j.real(j.get(g, "y"), y)
+            var st = Stroke(j.real(j.get(pn, "width"), 3), _canvas_color(j.text(j.get(pn, "color")), 0xFF1E2020))
+            var path = j.get(pn, "path")
+            for c in range(j.size(path)):
+                var cmd = j.at(path, c)
+                var n = j.size(cmd)
+                if n >= 3:
+                    st.add(gx + j.real(j.at(cmd, n - 2)), gy + j.real(j.at(cmd, n - 1)), 0.5)
+            if st.points() > 0:
+                oid = ol.add_ink(st)
         elif kind == "file" or kind == "link" or kind == "group":
             oid = ol.add_rect(x, y, w, h, 0xFFF0F2F4, 0xFFD4D8DC, 1, 6)
         if oid >= 0:
             ids[j.text(j.get(n, "id"))] = oid
+            ol.objs[ol.index(oid)].key = j.text(j.get(n, "id"))
     var edges = j.get(0, "edges")
     for i in range(j.size(edges)):
         var e = j.at(edges, i)
@@ -1936,5 +1987,84 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
             var heads = j.get(j.get(e, "pn"), "arrowheads")
             if cid >= 0 and heads >= 0:
                 ol.objs[ol.index(cid)].head_end = j.flag(j.get(heads, "end"), True)
+            if cid >= 0:
+                ol.objs[ol.index(cid)].key = j.text(j.get(e, "id"))
     ol.history.clear()
     return ol^
+
+
+def _hex(c: UInt32) -> String:
+    var digits = "0123456789abcdef"
+    var out = String("#")
+    for sh in [0, 8, 16]:
+        var v = Int((c >> UInt32(sh)) & 0xFF)
+        out += String(digits[byte=v // 16:v // 16 + 1]) + String(digits[byte=v % 16:v % 16 + 1])
+    return out^
+
+
+def _jn(v: Float64) -> String:
+    if v == Float64(Int(v)):
+        return String(Int(v))
+    return String(v)
+
+
+def _geometry(x: Float64, y: Float64, w: Float64, h: Float64, rot: Float64) -> String:
+    return ('{"x":' + _jn(x) + ',"y":' + _jn(y) + ',"width":' + _jn(w) + ',"height":' + _jn(h) + ',"rotation":' + _jn(rot * 180 / PI)
+            + ',"scaleX":1,"scaleY":1,"flipX":false,"flipY":false,"skewX":0,"skewY":0}')
+
+
+def node_key(ref o: Obj) -> String:
+    """The document id of an object: its own, or one made from its layer id (stable while the layer lives)."""
+    return o.key if o.key != "" else "obj-" + String(o.id)
+
+
+def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page_w: Float64 = 860, page_h: Float64 = 1080) -> String:
+    """The layer as a JSON Canvas 1.0 document with Personal Note's `pn` extras (the inverse of import_json_canvas): a
+    text box or a sticky is a text node (a sticky with its colour), a pen stroke a file node whose pn holds its path (the
+    derived SVG left to the app that wants one: "file": ""), a connector an edge; the page grid in pn.page."""
+    var nodes = List[String]()
+    var edges = List[String]()
+    for i in layer._order():
+        ref o = layer.objs[i]
+        var key = node_key(o)
+        if o.kind == TEXT or o.kind == STICKY:
+            var style = '{"fontFamily":' + json_string(o.family) + ',"fontSize":' + _jn(o.size)
+            if o.weight != 400:
+                style += ',"fontWeight":' + String(o.weight)
+            style += ',"lineHeight":' + _jn(o.line_height if o.line_height > 0 else 1.16)
+            if o.kind == TEXT:
+                style += ',"padding":8'
+            style += ',"color":"' + _hex(o.color if o.kind == TEXT else o.ink) + '"}'
+            var node = ('{"id":' + json_string(key) + ',"type":"text","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
+                        + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"text":' + json_string(o.text))
+            if o.kind == STICKY:
+                node += ',"color":"' + _hex(o.color) + '"'
+            node += ',"pn":{"type":"' + ("sticky" if o.kind == STICKY else "text") + '","geometry":' + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"style":' + style + ',"extras":{}'
+            if o.kind == STICKY:
+                node += ',"color":"' + _hex(o.color) + '"'
+            else:
+                node += ',"mode":"box"' + (',"format":"markdown"' if o.markdown else "")
+            nodes.append(node + "}}")
+        elif o.kind == INK:
+            ref st = o.stroke
+            var path = String("[")
+            for k in range(len(st.xs)):
+                if k > 0:
+                    path += ","
+                path += '["' + ("M" if k == 0 else "L") + '",' + _jn(st.xs[k] - o.x) + "," + _jn(st.ys[k] - o.y) + "]"
+            path += "]"
+            nodes.append('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
+                         + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"ink","geometry":'
+                         + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"pen","width":'
+                         + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '","path":' + path + "}}")
+        elif o.kind == CONNECTOR and o.from_id >= 0 and o.to_id >= 0:
+            var a = layer.index(o.from_id)
+            var b = layer.index(o.to_id)
+            if a < 0 or b < 0:
+                continue
+            edges.append('{"id":' + json_string(key) + ',"fromNode":' + json_string(node_key(layer.objs[a])) + ',"toNode":' + json_string(node_key(layer.objs[b]))
+                         + ',"color":"' + _hex(o.color) + '","pn":{"type":"connector","geometry":' + _geometry(min(o.ax, o.bx), min(o.ay, o.by), max(abs(o.bx - o.ax), 1.0), max(abs(o.by - o.ay), 1.0), 0)
+                         + ',"color":"' + _hex(o.color) + '","lineWidth":' + _jn(o.line_width) + ',"reverseX":' + ("true" if o.bx < o.ax else "false")
+                         + ',"reverseY":' + ("true" if o.by < o.ay else "false") + ',"arrowheads":{"start":false,"end":' + ("true" if o.head_end else "false") + '},"extras":{}}}')
+    return ('{"nodes":[' + ",".join(nodes) + '],"edges":[' + ",".join(edges) + '],"pn":{"schemaVersion":1,"page":{"columns":' + String(columns)
+            + ',"rows":' + String(rows) + '},"grid":{"width":' + _jn(page_w) + ',"height":' + _jn(page_h) + "}}}")

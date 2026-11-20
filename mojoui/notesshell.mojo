@@ -664,3 +664,24 @@ def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float
     p.rect(x + 136, y + 15, 1, 18, sk.line, 0)
     draw_icon(p, "maximize-2", x + 142 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
     bx.add("#zoom-fit", x + 142, y + 6, 36, 36)
+
+
+def draw_selection_bar[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, labels: List[String], k: Float64, sk: Skin) -> Float64:
+    """The bar of actions over a selection (the web's .selection-bar): centred on cx, quiet text buttons (IBM Plex Sans 500
+    12, padded 7 10) 2 apart in a 10 px rounded pill of the paper at 92 %, a hairline edge, one soft shadow. Returns its width."""
+    var st = TextStyle("IBM Plex Sans", 500, False, 12)
+    var w = 8.0 + 2 * Float64(max(0, len(labels) - 1))
+    for l in labels:
+        w += measure(st, l) + 20
+    var x = cx - w / 2
+    draw_shadows(p, x, y, w, 34, 10, [Shadow(0, 6, 18, 0, rgba(20, 20, 30, 31))])
+    p.rect(x, y, w, 34, sk.line, 10)
+    p.rect(x + 1, y + 1, w - 2, 32, mix(sk.paper, 92, sk.desk), 9)
+    bx.add("#selection-bar", x, y, w, 34)
+    var bxx = x + 4
+    for l in labels:
+        var bw = measure(st, l) + 20
+        text_at(p, st, l, bxx + 10, y + 4 + 7, 12, sk.ui_muted)
+        bx.add(".selection-bar:" + l, bxx, y + 4, bw, 26)
+        bxx += bw + 2
+    return w
