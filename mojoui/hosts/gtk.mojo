@@ -5185,6 +5185,11 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         bench_wait[A](host_addr, ci, 3_000_000_000)
         host[].nodes_built = 0
         host[].layer_textures = 0
+    if what == "pan" or what == "zoom" or what == "draw" or what == "type" or what == "finish":  # (the app readies the step first: a tool, a text box…; D-7937: before the drag's press, which its tool must receive)
+        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        var d0 = host[].rt.refresh()
+        host[].apply(d0, host_addr)
+        bench_wait[A](host_addr, ci, 300_000_000)
     if what == "draw" or what == "pan" or what == "erase":  # (a drag: press, the moves, release; the app's tool decides what it does)
         host[].canvases[ci].pressure = 0.6 if what == "draw" else 0.0
         host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
@@ -5192,11 +5197,6 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         bench_wait[A](host_addr, ci, 200_000_000)
     var drag_x0 = x
     var drag_y0 = y
-    if what == "pan" or what == "zoom" or what == "draw" or what == "type" or what == "finish":  # (the app readies the step: a tool, a text box…)
-        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
-        var d0 = host[].rt.refresh()
-        host[].apply(d0, host_addr)
-        bench_wait[A](host_addr, ci, 300_000_000)
     if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open" or what == "undo" or what == "redo":
         # (goal 79: Personal Note's benchmark steps) the app says where: App.spot(canvas, "bench:<what>") — an object to
         # drag (dragone), the lead of 40 it has selected (drag40), or, for undoredo and open, it prepares the step (App.bench)
