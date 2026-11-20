@@ -384,6 +384,7 @@ struct ObjectLayer(Movable):
     # how connectors meet their ends: -1 at the nearest side midpoints (goal 74), ≥ 0 where the line between the two
     # centres leaves each box, pulled back by this gap (Fabric's and Personal Note's rule: connectorEndpoints)
     var connector_gap: Float64
+    var saved_version: Int  # the version the document had when it was last loaded or saved (-1: never): unchanged since, no save is needed
 
     def __init__(out self):
         self.objs = List[Obj]()
@@ -426,6 +427,7 @@ struct ObjectLayer(Movable):
         self.stamp = List[Int]()
         self.stamp_now = 0
         self.connector_gap = -1
+        self.saved_version = -1
 
     # ------------------------------------------------ looking up
 
@@ -1723,7 +1725,12 @@ struct ObjectLayer(Movable):
         return out^
 
     def load_text(mut self, text: String) raises:
-        """Replaces the objects with save_text's (ids are new; connectors keep their ends); no undo step."""
+        """Replaces the objects with save_text's (ids are new; connectors keep their ends); no undo step. The layer is
+        then saved as it is (mark_saved)."""
+        self._load_text(text)
+        self.mark_saved()
+
+    def _load_text(mut self, text: String) raises:
         self.objs = List[Obj]()
         self.pos_of = Dict[Int, Int]()
         self.selected = List[Int]()
@@ -1797,6 +1804,13 @@ struct ObjectLayer(Movable):
         self.z_top = hi
         self.z_bottom = lo
         self._changed()
+
+    def unsaved(self) -> Bool:
+        """The document changed since it was last loaded or saved (mark_saved)."""
+        return self.version != self.saved_version
+
+    def mark_saved(mut self):
+        self.saved_version = self.version
 
     def adopt(mut self, var o: Obj) -> Int:
         """An object as it is (an importer's): a new id and the top z, no undo step."""

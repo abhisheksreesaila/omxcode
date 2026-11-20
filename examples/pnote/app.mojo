@@ -439,6 +439,8 @@ struct Main(App):
     def save(mut self):
         if self.open_id == 0 or not self.db:
             return
+        if self.open_kind == CANVAS and not self.layer.unsaved():
+            return  # (D-7926: a canvas unchanged since it was read or written isn't written again)
         try:
             var st = self.db.value().prepare("UPDATE notes SET title = ?, body = ?, updated = ? WHERE id = ?")
             var title = self.current_title()
@@ -447,6 +449,8 @@ struct Main(App):
             st.bind(3, now_ms())
             st.bind(4, self.open_id)
             st.run()
+            if self.open_kind == CANVAS:
+                self.layer.mark_saved()
             for ref r in self.rows:
                 if r.id == self.open_id:
                     r.title = title

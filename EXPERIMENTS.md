@@ -4,6 +4,30 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continued again: the canvas screen, the 28-step script, the open row (2026-11-20)
+- **Setup:** same worktree, autopilot. The M4 Mac was offline the whole time (SSH timed out at the start, between
+  milestones and at the end). In the last hour another project's llama-perplexity used the RTX 3090 (22.8 GB, up to 73 %).
+- **Worked:**
+  - **M3 PASS:** the canvas screen from a new `mojoui.pagedesk`: PN's opening view, page frame, the board in the paper
+    look, the dock and islands. Its first shot scored SSIM 0.993. The dividers were settled by measurement (D-7920):
+    ours already drew the true fractional line; the checker now reads a hairline's colour from its ink.
+  - **M4 PASS:** one 28-step script (make_steps.py → steps.json) covering all 26 actions, played on the web by
+    steps.mjs and natively by test mode. Every step's shots are alike (worst 0.964, Draw mode) and the six notes are
+    equal through the web app's API.
+  - The web side came first. Playing it showed what the web really does: a click past a task line's words is a pen
+    press, not a caret; a text started on a zoomed-out canvas jumps to 100 % about the page origin; ink is a JSON
+    Canvas file node with its path in pn.
+  - **Framework gains:** BoardTools (the tools and the web's view moves), JSON Canvas export, map ideas by makeNode,
+    page taps and marks, an editable island-card name, the CPU painter honouring clips (D-7922), skin cards that tap.
+- **Broke and fixed:** native skin cards were never tappable (wrong hit prefix); the map's background spilled over the
+  title island on the CPU path; a task tap 28 px past the words never moved the caret (now the web's rule).
+- **Open row:** 150 → 25 ms by not rewriting an unchanged canvas (ObjectLayer.unsaved). An async read and save was
+  tried and dropped after two failures (D-7926).
+- **Means:** on Linux, pnote looks and works like the web app on every screen and every scripted action, and saves
+  notes the web reads back the same. Left: the Mac (offline), open's silky bar, cold start.
+- **Next:** with the Mac up: scripts/check M1, test_gpu2d_metal, AppKit hover and IME, M7. Rerun M6 with the GPU idle.
+  An async open that owns every path reading the layer.
+
 ## Goal 79, continued: GPU text, the window's own frame, IME, the race (2026-11-19, evening)
 - **Setup:** same worktree. The parent session asked to run on (D-7909). The owner's session was locked, the RTX 3090 was shared with another project's LLM for part of the run, and the M4 was offline throughout.
 - **Worked:**

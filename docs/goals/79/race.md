@@ -4,26 +4,26 @@ Same machine, same notes (PN's own generators), 1440×900 at 1.6×. Web: benchma
 
 | note | step | web p95 / max ms | native p95 / max ms | |
 |---|---|---|---|---|
-| 600 | open | 1246.0 / 1246.0 | 150.5 / 150.5 | ✗ |
-| 600 | pan | 16.8 / 16.8 | 2.3 / 3.5 | ✓ |
-| 600 | zoom | 16.8 / 83.4 | 2.5 / 4.7 | ✓ |
-| 600 | drag one | 16.7 / 50.0 | 2.0 / 4.2 | ✓ |
-| 600 | drag 40 | 16.7 / 16.8 | 2.8 / 3.6 | ✓ |
-| 600 | undo/redo | 17.0 / 17.0 | 2.6 / 6.8 | ✓ |
-| 600 | pen | 16.8 / 16.8 | 4.6 / 7.2 | ✓ |
-| 600 | typing | 16.8 / 16.8 | 2.0 / 2.1 | ✓ |
-| stress | open | 1136.0 / 1136.0 | 51.0 / 51.0 | ✗ |
-| stress | pan | 16.8 / 16.8 | 4.0 / 5.8 | ✓ |
-| stress | zoom | 16.7 / 333.2 | 6.7 / 7.5 | ✓ |
-| stress | drag one | 16.7 / 16.8 | 7.3 / 8.5 | ✓ |
-| stress | drag 40 | 16.8 / 66.7 | 6.0 / 8.0 | ✓ |
-| stress | undo/redo | 16.8 / 16.9 | 6.4 / 7.6 | ✓ |
-| stress | pen | 16.7 / 150.0 | 6.5 / 8.3 | ✓ |
-| stress | typing | 16.7 / 16.8 | 6.6 / 9.8 | ✓ |
+| 600 | open | 2125.0 / 2125.0 | 30.5 / 30.5 | ✗ |
+| 600 | pan | 16.7 / 16.8 | 3.1 / 3.6 | ✓ |
+| 600 | zoom | 16.8 / 133.3 | 4.8 / 6.3 | ✓ |
+| 600 | drag one | 16.7 / 16.8 | 2.8 / 3.3 | ✓ |
+| 600 | drag 40 | 16.7 / 16.8 | 3.4 / 5.0 | ✓ |
+| 600 | undo/redo | 16.8 / 16.9 | 3.4 / 4.0 | ✓ |
+| 600 | pen | 16.8 / 66.7 | 2.7 / 6.7 | ✓ |
+| 600 | typing | 16.7 / 16.8 | 2.3 / 2.5 | ✓ |
+| stress | open | 2055.0 / 2055.0 | 87.4 / 87.4 | ✗ |
+| stress | pan | 16.7 / 33.4 | 11.5 / 13.3 | ✗ |
+| stress | zoom | 49.9 / 100.0 | 10.4 / 11.8 | ✗ |
+| stress | drag one | 16.7 / 16.8 | 11.1 / 13.7 | ✗ |
+| stress | drag 40 | 16.8 / 33.4 | 10.9 / 15.7 | ✗ |
+| stress | undo/redo | 17.0 / 17.0 | 11.7 / 13.8 | ✗ |
+| stress | pen | 16.8 / 366.6 | 10.4 / 13.8 | ✗ |
+| stress | typing | 16.7 / 33.3 | 13.5 / 14.1 | ✗ |
 
 | | web | native | |
 |---|---|---|---|
-| cold start to first screen | 248.0 ms | 420.0 ms | ✗ |
-| RSS after opening all three kinds | 804.9 MB | 241.1 MB | ✓ |
-| note switch p95 | — | 7.78 ms | ✓ |
-| omnibar open p95 | — | 7.51 ms | ✓ |
+| cold start to first screen | 269.0 ms | 640.0 ms | ✗ |
+| RSS after opening all three kinds | 810.9 MB | 229.1 MB | ✓ |
+| note switch p95 | — | 13.22 ms | ✗ |
+| omnibar open p95 | — | 10.09 ms | ✗ |
