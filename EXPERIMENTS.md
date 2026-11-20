@@ -4,6 +4,25 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 5: the progressive open, zoom, cold start (2026-11-20, morning)
+- **Setup:** worktree ../mojo-ui-g79, Linux on the hidden 1.6× test screen; the Mac unreachable all round. Final run
+  06:34–06:53 (load under 2.5 at the start, 3.0–4.3 during; GPUs idle).
+- **What worked:** a progressive open in the framework (mojoui.canvasload, D-7944): a SIMD skim finds every node of PN's
+  11.8 MB stress canvas in 1.1 ms, the view's nodes (and both ends of edges crossing it) are parsed on every core, the
+  rest in 1.5 ms slices; the result equals the whole import. 600-object note: first frame 7.9 ms (was 29), frames during
+  ≤ 4.1, complete in 50 ms (web 1,250). Stress: frames during 7.1 / 8.9, complete 83 ms (web 1,198). Eisel–Lemire in
+  mojoui.json (1M decimals bit-equal to strtod_l). Zoom's kept tiles grow by strips (max 28 → 15.5). Cold start
+  400 → 290 ms by not letting GDK probe dmabuf formats through Vulkan (194 ms) in GPU 2D apps.
+- **What broke and how it was fixed:** the first in-app open drew 79 ms frames: per-node allocations (Json.reparse),
+  connectors arriving after their view (crossing edges load with the view) and a framebench that counted drawn-ahead
+  frames twice (each draw logged by itself). A setenv test was fooled by the probe script exporting GDK_DISABLE="".
+- **Final race:** M6 FAILS on 4 rows: stress open's first frame 25.4 ms, cold start 290 vs 168 ms (the web's starts in a
+  running browser), note switch 8.34 (bar 8.3; 7.5–8.2 in reruns), 600 pan 30 % one 26 ms frame (not reproduced). Stress
+  undo/redo and zoom now pass; undo/redo's GPU cost varies with the GPU's clock state. RSS 220 vs 806 MB. M0, M2, M3, M4
+  PASS; M1, M5, M7 wait for the Mac. Metal tile drawing still unwritten.
+- **Next small step:** Mac back → M1/M5/M7 and the Metal tile raster; then partial rasters with fewer ops (undo/redo) and
+  the stress open's first slice (row read and parse).
+
 ## Goal 79, continuation 4: big boards in the framework, M4's rule (2026-11-20, early morning)
 - **Setup:** ../mojo-ui-g79, autopilot; Linux hidden test screen, GL; the Mac unreachable all session.
 - **Worked:** raster tiles for big layers in gpu2d (damage, partial raster, lifted drags, zoom settle), Painter.stroke, a 4×
