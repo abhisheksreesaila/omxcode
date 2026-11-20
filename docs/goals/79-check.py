@@ -383,7 +383,7 @@ def screen_steps(screen, ref):
         "search": open_page + close_panel + open_note("Book mind map") + [f"tapat:desk={box_center(mm, '#search-button')}", "wait:400", "typekeys:desk=li", "wait:600"],
         "island-card": open_page + close_panel + open_note("Book mind map") + [f"tapat:desk={box_center(mm, '#island-title')}", "wait:600"],
         "settings": open_page + close_panel + open_note("Book mind map") + [f"tapat:desk={box_center(mm, '#island-title')}", "wait:600",
-                                                                              f"tapat:desk={box_center(ic, next(k for k in ic if k.endswith('Settings')))}", "wait:800"],
+                                                                              f"tapat:desk={box_center(ic, '#top-properties')}", "wait:800"],
     }
     return steps[screen]
 

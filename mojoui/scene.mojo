@@ -11,7 +11,7 @@
 #       ...
 
 from mojoui.canvas import Surface
-from mojoui.draw import rect, line, circle, hline, polygon
+from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
 from mojoui.fonttext import TextStyle, shape, draw_run, Clip, run_x
@@ -122,7 +122,12 @@ def blit(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: 
         var sy = min(ph - 1, Int(Float64(dy) * Float64(ph) / h))
         for dx in range(Int(w)):
             var sx = min(pw - 1, Int(Float64(dx) * Float64(pw) / w))
-            s.set(x0 + dx, y0 + dy, pixels[sy * pw + sx])
+            var src = pixels[sy * pw + sx]
+            var a = (src >> 24) & 0xFF
+            if a == 255:
+                s.set(x0 + dx, y0 + dy, src)
+            elif a > 0:  # (straight alpha over what's there: icons, glyph-like pictures; goal 79)
+                s.set(x0 + dx, y0 + dy, blend(s.get(x0 + dx, y0 + dy), src, 1.0))
 
 
 struct SurfacePainter(Painter, Movable):

@@ -65,6 +65,7 @@ comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the pla
 comptime WHEEL = 9  # a plain scroll (wheel, two-finger swipe) on a Canvas(scroll_pans=True): event.dx, dy = how far the
 #   content moves, in points (a swipe up moves it up); ctrl+scroll and pinch on that canvas still send ZOOM
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
+comptime HOVER = 11  # the pointer moved over the canvas (no button held) to event.x, y; x = y = -1 when it left (goal 79: hover states drawn by the app)
 comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT

@@ -428,7 +428,10 @@ struct FontEngine(Movable):
     # ------------------------------------------------ choosing faces
 
     def pick(mut self, family: String, weight: Int, italic: Bool) -> Int:
-        """The registered face for a family, nearest in style and weight; -1 when the family isn't registered."""
+        """The registered face for a family, nearest in style and weight; -1 when the family isn't registered.
+        "emoji" is the system's colour emoji face (fontconfig's choice: Noto Color Emoji here, as Chromium's)."""
+        if family == "emoji":
+            return self.system_face(0x1F600, True)
         var best = -1
         var best_d = 1 << 30
         for i in range(len(self.faces)):
@@ -969,3 +972,42 @@ def run_x(run: Run, x: Float64, align: Int) -> Float64:
     if align == ALIGN_RIGHT:
         return x - run.width
     return x
+
+
+@fieldwise_init
+struct LineMetrics(ImplicitlyCopyable, Movable):
+    """A face's vertical metrics at a size, as Blink keeps them: ascent and descent rounded to whole px, the line gap."""
+    var ascent: Int
+    var descent: Int
+    var gap: Float64
+
+    def normal_height(self) -> Float64:
+        """line-height: normal."""
+        return Float64(self.ascent + self.descent) + self.gap
+
+
+def line_metrics(st: TextStyle) -> LineMetrics:
+    var e = engine()
+    var fi = e[].pick(st.family, st.weight, st.italic)
+    if fi < 0:
+        fi = e[].pick("Geist", st.weight, st.italic)
+    if fi < 0:
+        return LineMetrics(Int(st.size * 0.9 + 0.5), Int(st.size * 0.25 + 0.5), 0)
+    var inst = e[].inst(fi, st.weight, st.size)
+    e[]._use(inst)  # (FreeType applies MVAR's metric deltas for the instance: Literata's ascent moves with opsz)
+    var ft = e[].faces[fi].ft
+    var k = st.size / Float64(e[].faces[fi].upem)
+    var asc = Float64(_peek_i16(ft + 138)) * k
+    var desc = -Float64(_peek_i16(ft + 140)) * k
+    var height = Float64(_peek_i16(ft + 142)) * k  # FT_Face.height: ascender − descender + line gap
+    return LineMetrics(Int(asc + 0.5), Int(desc + 0.5), max(0.0, height - asc - desc))
+
+
+def baseline_in(top: Float64, line_height: Float64, st: TextStyle) -> Float64:
+    """Where the baseline of a line of `st` text sits in a line box of this height starting at top (CSS: half the leading
+    above, floored as Blink lays it out; checked against the reference's text boxes)."""
+    var m = line_metrics(st)
+    var lead = line_height - Float64(m.ascent + m.descent)
+    var half = lead / 2
+    var h = Float64(Int(half)) if half >= 0 else -Float64(Int(-half + 0.999999))
+    return top + h + Float64(m.ascent)

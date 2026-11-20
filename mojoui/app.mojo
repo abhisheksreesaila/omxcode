@@ -133,6 +133,11 @@ trait App(Movable, Deinitable):
         pixels. Returns False (the default) when the canvas only paints pixels (draw())."""
         return False
 
+    def hovers(self) -> Bool:
+        """True: the app's Canvases get HOVER gestures as the pointer moves over them with no button held (it draws hover
+        states itself; goal 79). The default: no, so apps that redraw on every gesture don't redraw on every motion."""
+        return False
+
     def window_size(self) -> Tuple[Int, Int]:
         """The window's starting size in points, on desktops."""
         return (480, 560)

@@ -15,7 +15,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
     CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
-    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL,
+    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL, HOVER,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
@@ -5684,6 +5684,8 @@ def on_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int) abi("
         host[].canvases[ci].ptr_x = at[0]
         host[].canvases[ci].ptr_y = at[1]
         host[].canvases[ci].ptr_seen = True
+        if host[].rt.app.hovers():
+            host[].canvas_send(ci, HOVER, at[0], at[1], 0, 0, 1, host_addr)  # (goal 79: apps draw hover states)
 
 
 def on_pinch_begin[A: App](pinch: Int, sequence: Int, host_addr: Int) abi("C"):
@@ -7418,6 +7420,10 @@ def run_step[A: App](host_addr: Int, step: String):
             var chh = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].canvases[ci].widget)))
             var released = String("released")
             var pressed = String("drag-begin")  # a real click presses first (the drag gesture begins: PRESS)
+            if host[].canvases[ci].motion_ctl != 0:  # (and the pointer got there first: its motion, goal 79's hover)
+                var moved = String("motion")
+                external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].motion_ctl, moved.as_c_string_span(),
+                    Float64(to_int(xy[0])) / 1000.0 * cw, Float64(to_int(xy[1])) / 1000.0 * chh)
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, pressed.as_c_string_span(),
                 Float64(to_int(xy[0])) / 1000.0 * cw, Float64(to_int(xy[1])) / 1000.0 * chh)
             host[].canvases[ci].moved = False
@@ -8224,7 +8230,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["gtk_window_set_resizable", NoneType](host[].window, c_int(0))
         var title = String("mojoui test window (closes by itself)")
         external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
-    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0  # (a picture mid-run, or frames to time (D-7425), need a shown window)
+    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0 or getenv("MOJOUI_TEST").find("render:") >= 0  # (render: a canvas draws only once shown, goal 79) (a picture mid-run, or frames to time (D-7425), need a shown window)
     if not testing or shoots:
         external_call["gtk_window_present", NoneType](host[].window)
     if testing and shoots:

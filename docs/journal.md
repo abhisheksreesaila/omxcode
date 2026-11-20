@@ -1549,3 +1549,12 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - M0: the draft shooter became docs/goals/79/ref.mjs: fixture.json seeded through PN's API, Google Fonts answered from fonts/ (D-7901), 9 screens at 1.6×, 187 names by rule (D-7902), Chromium's widths of M1's lines. Chromium's widths are whole CSS px (D-7903).
 - M1 fonttext: FreeType + HarfBuzz + fontconfig by dlopen. First run: every glyph empty, FT_Load_Glyph → 98 (Raster_Overflow) while the same calls in C worked. Cause: Mojo ends a List's life at its last use, so `Int(list.unsafe_ptr())` handed C a freed buffer (FreeType's var coordinates were heap garbage). Second trap: the keep-alive `_ = list` ends the life *there*: placed before the last read, the axis tags read back as 0 (malloc's free-list pointer). Fix: keep-alives after the last use. Rule added to CLAUDE.md's Mojo rules.
 - Widths: HarfBuzz's own advances missed Geist's wght variation (no HVAR); FreeType's advances + kerning, rounded as Blink does (round(round(adv) + kern)), match all 16 lines exactly (D-7905).
+- D-7900 (owner): components first. M2's component list (docs/components.md status before this goal → now):
+  - fonttext (real faces, shaping, fallback, emoji, Chromium's layout rule): ❌ → ✅ GTK (test_fonttext), 🔨 AppKit (CoreText half to write)
+  - Painter.run (OP_RUN in Scene, SurfacePainter, Scene.raster): ❌ → ✅ CPU; gpu2d (GL/Metal) ❌ still: next
+  - skin (Paper/Night/Crayon tokens, color-mix): ❌ → 🔨 (needs its own test)
+  - strokeicon + lucide_nodes (Lucide 1.24 geometry rasterized natively): ❌ → 🔨 (test to write)
+  - notesshell (desk dots, round island buttons, title island, notes panel with shelves, Boxes hit-test registry, CSS shadows as layers): ❌ → 🔨
+  - pagesheet (page host, toolbar, sheet, CodeMirror-look Markdown lines, CSS line boxes): ❌ → 🔨
+  - blit now blends straight alpha (icons as images on CPU); gpu2d's image path to check
+  pnote composes them in examples/pnote/webshell.mojo (DB reading, screen state, taps only).

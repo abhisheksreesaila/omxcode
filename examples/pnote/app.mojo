@@ -11,7 +11,7 @@
 
 from mojoui import (
     App, Event, View, Surface, VStack, HStack, Text, Button, Canvas, Spacer, Divider, TextField, Overlay,
-    CAPTION, HEADLINE, CENTER, START, END, PAN, ZOOM, TAP, WHEEL, PRESS, RELEASE, DOUBLE, KEY, CTRL, SHIFT, PLAIN,
+    CAPTION, HEADLINE, CENTER, START, END, PAN, ZOOM, TAP, HOVER, WHEEL, PRESS, RELEASE, DOUBLE, KEY, CTRL, SHIFT, PLAIN,
     PROMINENT, SUBTLE, TOOL, TOOL_ON, NO_MSG,
 )
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
@@ -32,6 +32,7 @@ from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
+from webshell import WebShell
 
 comptime NEW_PAGE = 1
 comptime NEW_CANVAS = 2
@@ -217,6 +218,8 @@ struct Main(App):
     var said: String
     var box_w: Float64
     var box_h: Float64
+    var web: List[WebShell]  # goal 79: the web app's look on Personal Note's own database (PNOTE_DB); empty: goal 74's look
+    var boxes_path: String
 
     def __init__(out self):
         self.db = None
@@ -254,6 +257,17 @@ struct Main(App):
         self.said = ""
         self.box_w = 800
         self.box_h = 600
+        self.web = List[WebShell]()
+        self.boxes_path = environment("PNOTE_BOXES", "")
+        var pn_db = environment("PNOTE_DB", "")
+        if pn_db != "":
+            # (D-7907) the web look runs on a Personal Note database; goal 74/75's contract (PNOTE_DIR, its own store, the
+            # judged scenes) keeps goal 74's look so their checks still prove the editors and the GPU path
+            self.web.append(WebShell(pn_db, environment("PNOTE_SKIN", "paper")))
+            if len(self.web[0].notes) > 0:
+                self.web[0].open(self.web[0].notes[0].id)
+            print("PNOTE WEB: " + String(len(self.web[0].notes)) + " notes from " + pn_db, flush=True)
+            return
         var dir = environment("PNOTE_DIR", "")
         if dir == "":
             dir = config_dir("pnote")
@@ -311,7 +325,12 @@ struct Main(App):
     def theme(self) -> Theme:
         return liquid()
 
+    def hovers(self) -> Bool:
+        return len(self.web) > 0
+
     def window_size(self) -> Tuple[Int, Int]:
+        if len(self.web) > 0:
+            return (1440, 900)
         return (1280, 820)
 
     # ------------------------------------------------ storage
@@ -724,6 +743,15 @@ struct Main(App):
 
     def update(mut self, event: Event):
         var m = event.message
+        if len(self.web) > 0:
+            if m == GESTURE and event.number == HOVER:
+                if self.web[0].hover(event.x, event.y):
+                    self.version += 1
+                return
+            if m == GESTURE and event.number == TAP:
+                if self.web[0].tap(event.x, event.y):
+                    self.version += 1
+            return
         if m == GESTURE:
             self.gesture(event)
         elif m == NEW_PAGE:
@@ -762,6 +790,8 @@ struct Main(App):
     # ------------------------------------------------ view
 
     def view(self) -> View:
+        if len(self.web) > 0:
+            return Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
         var side = List[View]()
         side.append(SidebarHead("Notes", String(len(self.rows))))
         side.append(TextField(self.query, "Search notes", on_change=SEARCH).fill().tag("search"))
@@ -843,13 +873,30 @@ struct Main(App):
             self.scale = k
             self.map.paint(p, self.font, self.map_cam.view(w, h, k))
 
+    def write_boxes(self):
+        if self.boxes_path == "" or len(self.web) == 0:
+            return
+        try:
+            with open(self.boxes_path, "w") as f:
+                f.write(self.web[0].boxes.json())
+        except:
+            pass
+
     def draw_scene(mut self, canvas: Int, mut scene: Scene) -> Bool:
         self.tell_gpu()
         var k = scene.scale()
+        if len(self.web) > 0:
+            self.web[0].paint(scene, Float64(scene.width()) / k, Float64(scene.height()) / k, k)
+            self.write_boxes()
+            return True
         self.paint(scene, Float64(scene.width()) / k, Float64(scene.height()) / k)
         return True
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         self.tell_gpu()
         var sp = SurfacePainter(Surface(surface.address, surface.width, surface.height, surface.scale))
+        if len(self.web) > 0:
+            self.web[0].paint(sp, Float64(surface.width) / surface.scale, Float64(surface.height) / surface.scale, surface.scale)
+            self.write_boxes()
+            return
         self.paint(sp, Float64(surface.width) / surface.scale, Float64(surface.height) / surface.scale)
