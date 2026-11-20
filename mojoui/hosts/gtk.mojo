@@ -31,7 +31,7 @@ from mojoui.gpu2d_gl import GPU2D
 from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
@@ -4100,6 +4100,20 @@ struct GtkHost[A: App](Movable):
                 self.put_rgba(c)
                 external_call["gtk_snapshot_append_fill", NoneType](snap, path, c_int(0), self.at(0))  # GSK_FILL_RULE_WINDING
                 external_call["gsk_path_unref", NoneType](path)
+            elif kind == OP_STROKE:  # (D-7940: a polyline, round caps and joins, GTK's renderer strokes it)
+                var m = Int(sc.num(op, 1))
+                var b = external_call["gsk_path_builder_new", Int]()
+                external_call["gsk_path_builder_move_to", NoneType](b, Float32(sc.poly_x(op, 0)), Float32(sc.poly_y(op, 0)))
+                for z in range(1, m):
+                    external_call["gsk_path_builder_line_to", NoneType](b, Float32(sc.poly_x(op, z)), Float32(sc.poly_y(op, z)))
+                var path = external_call["gsk_path_builder_free_to_path", Int](b)
+                var stroke = external_call["gsk_stroke_new", Int](Float32(sc.num(op, 2)))
+                external_call["gsk_stroke_set_line_cap", NoneType](stroke, c_int(1))  # GSK_LINE_CAP_ROUND
+                external_call["gsk_stroke_set_line_join", NoneType](stroke, c_int(1))  # GSK_LINE_JOIN_ROUND
+                self.put_rgba(c)
+                external_call["gtk_snapshot_append_stroke", NoneType](snap, path, stroke, self.at(0))
+                external_call["gsk_stroke_free", NoneType](stroke)
+                external_call["gsk_path_unref", NoneType](path)
             elif kind == OP_CLIP:
                 self.put_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3))
                 external_call["gtk_snapshot_push_clip", NoneType](snap, self.at(4))
@@ -5541,7 +5555,7 @@ def trimmed_node(old: Int, prev: Scene, i: Int, gone: List[Int]) -> Int:
     var r = prev.layer_range(i)
     for op in range(r[0], r[1]):
         var kind = Int(prev.kinds[op])
-        if kind != OP_POLY and kind != OP_RECT and kind != OP_CIRCLE and kind != OP_LINE and kind != OP_IMAGE and kind != OP_FILL:
+        if kind != OP_POLY and kind != OP_STROKE and kind != OP_RECT and kind != OP_CIRCLE and kind != OP_LINE and kind != OP_IMAGE and kind != OP_FILL:
             return -1
     var kids = List[Int]()
     node_children(old, kids)

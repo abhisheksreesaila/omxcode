@@ -79,7 +79,7 @@ from mojoui.shared import get_shared, put_shared
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 from std.collections import Dict
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
 
 comptime PIPE_QUAD = 0
 comptime PIPE_GLYPH = 1
@@ -539,15 +539,16 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
     """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
     rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
     skip_ops: layer `first`'s first ops left out (a layer that only grew, Scene.appends: just the new ops; the ops left
-    out must leave no clip open). only (non-empty) + content_k > 0 (D-7940, a raster tile): just these ops of layer
-    `first` (offsets from its first op, ascending, no clips among them), built as if the layer were drawn at zoom
+    out must leave no clip open). content_k > 0 (D-7940, a raster tile): just the ops in `only` of layer `first`
+    (offsets from its first op, ascending, no clips or images among them; empty: none), built as if the layer were drawn at zoom
     content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels)."""
     f.clear()
     f.width = scene.w
     f.height = scene.h
     f.scale = scene.k
-    for ref px in scene.images:
-        f.pixels.append(px.copy())
+    if content_k <= 0:  # (a tile's layer has no OP_IMAGE: its only pixels are colour glyphs, added as they come)
+        for ref px in scene.images:
+            f.pixels.append(px.copy())
     var clips = List[Float64](capacity=64)  # the clip stack in pixels, x0, y0, x1, y1 per entry (already intersected)
     for layer in range(min(first, scene.layers())):  # (what earlier layers left open)
         var span0 = scene.layer_range(layer)
@@ -560,7 +561,7 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
         var tx = scene.layer_tx[layer]
         var ty = scene.layer_ty[layer]
         var tk = scene.layer_tk[layer]
-        var subset = len(only) > 0 and content_k > 0 and layer == first
+        var subset = content_k > 0 and layer == first  # (a tile: exactly `only`, none when it's empty)
         if content_k > 0 and layer == first:
             tx = 0
             ty = 0
@@ -807,6 +808,18 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     _quad(f.quads, a, b, a, b, c, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                 elif kind == OP_LINE:
                     _quad(f.quads, a, b, c, d, e / 2, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                elif kind == OP_STROKE:  # (D-7940: the capsules and discs a polyline of lines and circles would make)
+                    var p0 = Int(a) * 2
+                    var m = Int(b)
+                    var hw = c / 2
+                    for z in range(m - 1):
+                        _quad(f.quads, Float64(scene.path[p0 + 2 * z]), Float64(scene.path[p0 + 2 * z + 1]), Float64(scene.path[p0 + 2 * z + 2]),
+                              Float64(scene.path[p0 + 2 * z + 3]), hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                    for z in range(m):
+                        var px = Float64(scene.path[p0 + 2 * z])
+                        var py = Float64(scene.path[p0 + 2 * z + 1])
+                        _quad(f.quads, px, py, px, py, hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                    added = 2 * m - 1
                 elif kind == OP_FILL:  # the whole canvas, whatever the layer's transform and clip
                     mode = BLEND_REPLACE
                     _quad(f.quads, -tx * ik, -ty * ik, c * ik, d * ik, 0, SHAPE_BOX, color, -NO_CLIP, -NO_CLIP, NO_CLIP, NO_CLIP)

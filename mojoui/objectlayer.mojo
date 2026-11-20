@@ -381,6 +381,12 @@ struct ObjectLayer(Movable):
     var cell_items: List[Int]
     var stamp: List[Int]
     var stamp_now: Int
+    # (D-7940) a grid built for these objects (ids and z by index) stays when only boxes moved: the moved ones are
+    # `loose` (scanned by every query, besides the grid, whose stale entries are filtered by the current boxes)
+    var built_id: List[Int]
+    var built_z: List[Int]
+    var loose: List[Int]
+    var is_loose: List[Bool]
     # how connectors meet their ends: -1 at the nearest side midpoints (goal 74), ≥ 0 where the line between the two
     # centres leaves each box, pulled back by this gap (Fabric's and Personal Note's rule: connectorEndpoints)
     var connector_gap: Float64
@@ -427,6 +433,10 @@ struct ObjectLayer(Movable):
         self.cell_items = List[Int]()
         self.stamp = List[Int]()
         self.stamp_now = 0
+        self.built_id = List[Int]()
+        self.built_z = List[Int]()
+        self.loose = List[Int]()
+        self.is_loose = List[Bool]()
         self.connector_gap = -1
         self.saved_version = -1
         self.select_on_undo = False
@@ -884,6 +894,36 @@ struct ObjectLayer(Movable):
             return
         self.dirty = False
         var n = len(self.objs)
+        # (D-7940) the same objects in the same order and stacking, only boxes moved (a drag, an edit, an undo of a move):
+        # the boxes refreshed, the moved objects loose, the grid kept
+        if n > 0 and n == len(self.built_id) and len(self.bx0) == n:
+            var same = True
+            var moved = List[Int]()
+            for i in range(n):
+                ref o = self.objs[i]
+                if o.id != self.built_id[i] or o.z != self.built_z[i]:
+                    same = False
+                    break
+                var b = o.bounds()
+                if b[0] != self.bx0[i] or b[1] != self.by0[i] or b[2] != self.bx1[i] or b[3] != self.by1[i]:
+                    self.bx0[i] = b[0]
+                    self.by0[i] = b[1]
+                    self.bx1[i] = b[2]
+                    self.by1[i] = b[3]
+                    moved.append(i)
+            if same and len(self.loose) + len(moved) <= 1024:
+                for i in moved:
+                    if not self.is_loose[i]:
+                        self.is_loose[i] = True
+                        self.loose.append(i)
+                return
+        self.loose = List[Int]()
+        self.is_loose = List[Bool](length=n, fill=False)
+        self.built_id = List[Int](capacity=n)
+        self.built_z = List[Int](capacity=n)
+        for ref o in self.objs:
+            self.built_id.append(o.id)
+            self.built_z.append(o.z)
         self.bx0 = List[Float64](capacity=n)
         self.by0 = List[Float64](capacity=n)
         self.bx1 = List[Float64](capacity=n)
@@ -948,6 +988,11 @@ struct ObjectLayer(Movable):
                     fillp[c] += 1
         self.cell_start = counts^
 
+    def rank_of(mut self, p: Int) -> Int:
+        """objs[p]'s place in the stacking order (0: bottom)."""
+        self._rebuild()
+        return self.rank[p]
+
     def _cells(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Tuple[Int, Int, Int, Int]:
         """The grid cells a box covers (clamped to the grid): cx0, cy0, cx1, cy1 (empty when cx0 > cx1)."""
         var a = Int(floor((x0 - self.gx0) / self.cell))
@@ -976,6 +1021,13 @@ struct ObjectLayer(Movable):
                     if self.bx1[i] < x0 or self.bx0[i] > x1 or self.by1[i] < y0 or self.by0[i] > y1:
                         continue
                     ranks.append(self.rank[i] * (len(self.objs) + 1) + i)
+        for i in self.loose:  # (D-7940: moved since the grid was built)
+            if self.stamp[i] == self.stamp_now:
+                continue
+            self.stamp[i] = self.stamp_now
+            if self.bx1[i] < x0 or self.bx0[i] > x1 or self.by1[i] < y0 or self.by0[i] > y1:
+                continue
+            ranks.append(self.rank[i] * (len(self.objs) + 1) + i)
         sort(ranks)
         for k in ranks:
             out.append(k % (len(self.objs) + 1))

@@ -374,7 +374,7 @@ struct WebShell(Movable):
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
                 self.view_set = True
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
-            self.look.paint(p, self.board, self.view, w, h, k)
+            self.look.paint(p, self.board, self.view, w, h, k, self.tools.lifted(self.board))
             self.tools.paint_overlay(p, self.look, self.board, self.view, k)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)

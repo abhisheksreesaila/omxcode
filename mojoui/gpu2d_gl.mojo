@@ -54,6 +54,7 @@ comptime GL_TEXTURE_2D = 0x0DE1
 comptime GL_RENDERER = 0x1F01
 comptime GL_VERSION = 0x1F02
 comptime GL_RGBA8 = 0x8058
+comptime GL_RGBA16F = 0x881A
 comptime GL_R8 = 0x8229
 comptime GL_RED = 0x1903
 comptime GL_RGBA = 0x1908
@@ -630,6 +631,7 @@ struct GL2D(Movable):
     var tile_color: Int
     var tile_tex: List[Int]  # by tile slot (0: not made yet)
     var timing_open: Bool  # this frame's time-elapsed query already begun (tile rasters before the frame are in it)
+    var lim: List[Int]  # (D-7940) a partial tile raster's scissor (x0, y0, x1, y1), every draw kept inside it; empty: none
 
     def __init__(out self):
         self.ok = False
@@ -718,6 +720,7 @@ struct GL2D(Movable):
         self.tile_color = 0
         self.tile_tex = List[Int]()
         self.timing_open = False
+        self.lim = List[Int]()
 
     def at(self, k: Int) -> Int:
         return Int(self.out.unsafe_ptr()) + 8 * k
@@ -1314,6 +1317,7 @@ struct GL2D(Movable):
             var t = self.gen(F_GEN_TEXTURES)
             fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(t))
             self.tex_params(GL_LINEAR)
+            # (8 bits, as the frame: tried half floats, the frame's own per-item rounding differs from them as much; D-7940)
             fcall[NoneType](self.f(F_TEX_STORAGE_2D), c_uint(GL_TEXTURE_2D), c_int(1), c_uint(GL_RGBA8), c_int(TILE_TEX), c_int(TILE_TEX))
             fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
             self.tile_tex[slot] = t
@@ -1339,7 +1343,8 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
         return self.error() == 0
 
-    def raster_tile(mut self, mut frame: Frame2D, set: Int, slot: Int, ox: Float64, oy: Float64) -> Bool:
+    def raster_tile(mut self, mut frame: Frame2D, set: Int, slot: Int, ox: Float64, oy: Float64, rx0: Int = 0, ry0: Int = 0,
+                    rx1: Int = TILE_TEX, ry1: Int = TILE_TEX) -> Bool:
         """frame (one layer's batches built in content px, mojoui.gpu2d.fill_layers(content_k=…)) into tile slot's
         texture, moved by (ox, oy), cleared first, premultiplied (RGB = Σ c·a over, A = coverage over): drawn later
         with (ONE, ONE − SRC_ALPHA) it gives what drawing the ops straight onto the frame does."""
@@ -1362,6 +1367,11 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
         fcall[NoneType](self.f(F_COLOR_MASK), UInt8(1), UInt8(1), UInt8(1), UInt8(1))
         fcall[NoneType](self.f(F_STENCIL_MASK), c_uint(0xFF))
+        var partial = rx0 > 0 or ry0 > 0 or rx1 < TILE_TEX or ry1 < TILE_TEX
+        if partial:  # (only the stale part: cleared and drawn inside the scissor, the rest of the picture kept)
+            self.lim = [rx0, ry0, rx1, ry1]
+            fcall[NoneType](self.f(F_ENABLE), c_uint(GL_SCISSOR_TEST))
+            fcall[NoneType](self.f(F_SCISSOR), c_int(rx0), c_int(ry0), c_int(rx1 - rx0), c_int(ry1 - ry0))
         fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
         fcall[NoneType](self.f(F_CLEAR_STENCIL), c_int(0))
         fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
@@ -1375,6 +1385,7 @@ struct GL2D(Movable):
         self._move_layers(frame, ox, oy)
         self.layer(frame, set, True)
         self._unmove_layers(frame, saved)
+        self.lim = List[Int]()
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_BLEND))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
@@ -1706,6 +1717,11 @@ struct GL2D(Movable):
             var y0 = _pixel_lo(c1 * Float64(tk) + Float64(ty), h) if c1 > -NO_CLIP * 0.5 else 0
             var x1 = _pixel_lo(c2 * Float64(tk) + Float64(tx), w) if c2 < NO_CLIP * 0.5 else w
             var y1 = _pixel_lo(c3 * Float64(tk) + Float64(ty), h) if c3 < NO_CLIP * 0.5 else h
+            if len(self.lim) == 4:  # (a partial tile raster: never outside its part)
+                x0 = max(x0, self.lim[0])
+                y0 = max(y0, self.lim[1])
+                x1 = min(x1, self.lim[2])
+                y1 = min(y1, self.lim[3])
             if x1 <= x0 or y1 <= y0 or fan_n <= 0:
                 continue
             if x0 != sx0 or y0 != sy0 or x1 != sx1 or y1 != sy1:
@@ -1742,7 +1758,10 @@ struct GL2D(Movable):
         if self.indirect and self.md_on[set]:
             fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(0x8F3F), c_uint(0))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
-        fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
+        if len(self.lim) == 4:  # (back to the partial raster's scissor for the runs after)
+            fcall[NoneType](self.f(F_SCISSOR), c_int(self.lim[0]), c_int(self.lim[1]), c_int(self.lim[2] - self.lim[0]), c_int(self.lim[3] - self.lim[1]))
+        else:
+            fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
 
     def read(mut self, tex: Int, w: Int, h: Int, dst: Int) -> Bool:
         """Tests: a texture read back into CPU memory (rows of w RGBA pixels, top row first)."""
@@ -1890,6 +1909,13 @@ struct GPU2D(Movable):
     var tiles_on: Bool  # MOJOUI_GPU2D_TILES=0: tiled layers drawn directly (for comparisons)
     var tile_ns: Int  # last frame's tile work (plan + batches + raster submission, CPU side)
     var more: Bool  # the last frame left tile work for later frames: a host draws again
+    var tile_trace: Bool  # MOJOUI_TILE_TRACE=1: each frame's tile work printed
+    var tile_merge: Bool  # tiles' runs regrouped before rasterizing (MOJOUI_TILE_MERGE=1)
+    var t_plan: Int  # (trace) last frame's tile planning, batch building, merging, raster submission (ns), ops built
+    var t_fill: Int
+    var t_merge: Int
+    var t_raster: Int
+    var t_ops: Int
 
     def __init__(out self):
         self.gl = GL2D()
@@ -1923,6 +1949,13 @@ struct GPU2D(Movable):
         self.tiles_on = getenv("MOJOUI_GPU2D_TILES") != "0"
         self.tile_ns = 0
         self.more = False
+        self.tile_trace = getenv("MOJOUI_TILE_TRACE") == "1"
+        self.tile_merge = getenv("MOJOUI_TILE_MERGE") == "1"
+        self.t_plan = 0
+        self.t_fill = 0
+        self.t_merge = 0
+        self.t_raster = 0
+        self.t_ops = 0
 
     def caches(self) -> Int:
         """How many canvases' layer caches are kept (the one drawn last included)."""
@@ -1998,23 +2031,31 @@ struct GPU2D(Movable):
         while len(self.tile_frames) < n:
             self.tile_frames.append(Frame2D())
         var pg = glyph_pages(self.atlas.width)
+        var c0 = perf_counter_ns()
         for attempt in range(2):
             var r0 = pg[].resets
             for r in range(n):
                 ref tr = plan.rasters[r]
+                self.t_ops += len(tr.ops)
                 fill_layers(self.tile_frames[r], scene, self.atlas, self.font, tr.layer, tr.layer + 1, 0, tr.ops, tr.k)
             if pg[].resets == r0:
                 break
             if attempt == 1:
                 print("GLYPHPAGES: one frame's tiles need more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
+        var c1 = perf_counter_ns()
+        self.t_fill += Int(c1 - c0)
         self.gl.sync_pages()
         for r in range(n):
             ref tr = plan.rasters[r]
-            if self.merge:  # (as a changed layer: runs regrouped, the same pixels, fewer draws)
+            var m0 = perf_counter_ns()
+            if self.tile_merge:  # (as a changed layer: runs regrouped, the same pixels, fewer draws)
                 merge_runs(self.tile_frames[r], self.scratch)
                 swap(self.scratch, self.tile_frames[r])
-            if not self.gl.raster_tile(self.tile_frames[r], self.tile_set, tr.slot, Float64(-tr.i * TILE + 1), Float64(-tr.j * TILE + 1)):
+            var m1 = perf_counter_ns()
+            self.t_merge += Int(m1 - m0)
+            if not self.gl.raster_tile(self.tile_frames[r], self.tile_set, tr.slot, Float64(-tr.i * TILE + 1), Float64(-tr.j * TILE + 1), tr.rx0, tr.ry0, tr.rx1, tr.ry1):
                 return False
+            self.t_raster += Int(perf_counter_ns() - m1)
         return True
 
     def draw(mut self, scene: Scene, prev: Scene, owner: Int, w: Int, h: Int) -> Int:
@@ -2145,10 +2186,17 @@ struct GPU2D(Movable):
         for i in range(n):
             tile_draws.append(List[TileDraw]())
         var tt0 = perf_counter_ns()
+        self.t_plan = 0
+        self.t_fill = 0
+        self.t_merge = 0
+        self.t_raster = 0
+        self.t_ops = 0
         for i in range(n):
             if not tiled[i]:
                 continue
+            var p0 = perf_counter_ns()
             var plan = self.tiles.plan(scene, i, owner, w, h)
+            self.t_plan += Int(perf_counter_ns() - p0)
             if not self._raster_plan(scene, plan):
                 self.gl.ok = False
                 self.built = 0
@@ -2156,6 +2204,11 @@ struct GPU2D(Movable):
             tile_draws[i] = plan.draws.copy()
         self.more = self.tiles.more
         self.tile_ns = Int(perf_counter_ns() - tt0)
+        if self.tile_trace and (self.tiles.rastered > 0 or self.tiles.damaged > 0):
+            print("TILES: rastered " + String(self.tiles.rastered) + " damaged " + String(self.tiles.damaged) + " drawn " + String(self.tiles.drawn)
+                  + " more " + String(self.more) + " tile_ms " + String(Float64(self.tile_ns) / 1e6) + " (plan " + String(Float64(self.t_plan) / 1e6)
+                  + " fill " + String(Float64(self.t_fill) / 1e6) + " merge " + String(Float64(self.t_merge) / 1e6) + " raster " + String(Float64(self.t_raster) / 1e6)
+                  + " ops " + String(self.t_ops) + ")" + " batch_ms " + String(Float64(t1 - t0) / 1e6), flush=True)
         self.gl.sync_pages()
         if not self.gl.begin(self.gl.tex[slot], w, h):
             self.gl.ok = False
@@ -2173,6 +2226,9 @@ struct GPU2D(Movable):
         _ = self.gl.fence(slot)
         self.batch_ns = Int(t1 - t0)
         self.render_ns = Int(perf_counter_ns() - t1)
+        if self.tile_trace:
+            print("G2D: batch " + String(Float64(self.batch_ns) / 1e6) + " tiles " + String(Float64(self.tile_ns) / 1e6) + " render+tiles " + String(Float64(self.render_ns) / 1e6)
+                  + " layers " + String(n) + " rebuilt " + String(self.rebuilt) + " draws " + String(self.gl.draws), flush=True)
         if getenv("MOJOUI_STARTUP_TRACE") != "" and self.traced < 3:
             self.traced += 1
             print("STARTUP: gpu2d frame: batches " + String(Float64(self.batch_ns) / 1e6) + " ms, render " + String(Float64(self.render_ns) / 1e6) + " ms", flush=True)

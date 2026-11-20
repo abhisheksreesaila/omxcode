@@ -1,6 +1,6 @@
 # Raster tiles (goal 79, D-7940, mojoui.gpu2d_tiles + the GL backend): a big board in a layer that said layer_tiles,
 # drawn by GPU2D from kept tiles, against the same scene drawn directly (tiles off): the readback must agree within
-# M2's fill bound (no channel more than 4 levels off; mean ≤ 0.1) after the first frame, a pan, an edit with damage (only
+# goal 75's M1 bounds and, stricter, no channel more than 8 levels off after the first frame, a pan, an edit with damage (only
 # the tiles it meets are rastered again), an edit without damage (every tile), and a zoom once it settles (text
 # rasterized again at the new zoom, never left scaled). Then the frame times of pans and zoom steps on boards of 600 and
 # 5,296 objects, tiled and direct (CPU + GPU, glFinish-timed). Prints `gpu2d tiles: ok`.
@@ -12,6 +12,8 @@ from mojoui.fonttext import TextStyle
 from mojoui.canvas import rgba
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.gpu2d_tiles import TILE
+from mojoui.canvas import Surface
+from mojoui.text import Font
 from tests.test_gpu2d import Rng
 
 comptime W = 2304  # 1440 × 900 at 1.6
@@ -94,7 +96,8 @@ def check(name: String, want: List[UInt32], got: List[UInt32]) raises:
             off += 1
     var mean = Float64(total) / Float64(3 * len(want))
     print("  ", name, ": tiled vs direct: mean", round(mean, 4), "levels, worst", worst, "levels,", off, "pixels differ at all")
-    assert_true(worst <= 4 and mean <= 0.1, name + ": the tiled frame differs from a direct render")
+    # (M1's bounds, goal 75: mean ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 off; and stricter: no channel more than 8 off)
+    assert_true(mean <= 1.5 and worst <= 8, name + ": the tiled frame differs from a direct render")
 
 
 def direct(sc: Scene) raises -> List[UInt32]:
@@ -158,9 +161,60 @@ def timing(n: Int, label: String) raises:
         g.gl.close()
 
 
+def stroke_same() raises:
+    """Painter.stroke (one op) draws exactly what its lines and discs drew, on the GPU and on the CPU."""
+    var a = Scene(400, 300, 1.0)
+    var b = Scene(400, 300, 1.0)
+    var cpu_a = List[UInt32](length=400 * 300, fill=0xFFFFFFFF)
+    var cpu_b = List[UInt32](length=400 * 300, fill=0xFFFFFFFF)
+    var pts = List[Float64]()
+    var rng = Rng(5)
+    var x = 30.0
+    var y = 150.0
+    for _ in range(60):
+        pts.append(x)
+        pts.append(y)
+        x += 4 + rng.real(0, 4)
+        y = max(20.0, min(280.0, y + rng.real(-6, 6)))
+    for sc_i in range(2):
+        var sc = Scene(400, 300, 1.0)
+        sc.fill(rgba(255, 255, 255))
+        sc.layer_transform(3.5, -2.25, 1.3)
+        if sc_i == 0:
+            for i in range(0, len(pts) - 2, 2):
+                sc.line(pts[i], pts[i + 1], pts[i + 2], pts[i + 3], 2.5, rgba(34, 51, 68, 230))
+            for i in range(0, len(pts), 2):
+                sc.circle(pts[i], pts[i + 1], 1.25, rgba(34, 51, 68, 230))
+            a = sc^
+        else:
+            sc.stroke(pts, 2.5, rgba(34, 51, 68, 230))
+            b = sc^
+    var empty = Scene(0, 0, 1.0)
+    var g = GPU2D()
+    assert_true(g.start(False), "start")
+    var pa = picture(g, a, empty)
+    var pb = picture(g, b, empty)
+    g.gl.close()
+    var off = 0
+    for i in range(len(pa)):
+        if pa[i] != pb[i]:
+            off += 1
+    var sa = Surface(Int(cpu_a.unsafe_ptr()), 400, 300, 1.0)
+    var sb = Surface(Int(cpu_b.unsafe_ptr()), 400, 300, 1.0)
+    a.raster(sa, Font())
+    b.raster(sb, Font())
+    var off_cpu = 0
+    for i in range(len(cpu_a)):
+        if cpu_a[i] != cpu_b[i]:
+            off_cpu += 1
+    print("   stroke vs lines + discs: GPU pixels differing", off, "; Scene.raster pixels differing", off_cpu, "; ops", a.ops(), "->", b.ops())
+    assert_true(off == 0 and off_cpu == 0 and b.ops() == 2, "Painter.stroke draws something else")
+
+
 def main() raises:
     var ctx = headless_gl33()
     assert_true(ctx != 0, "a headless GL 3.3 core context")
+    stroke_same()
     var n = 600
     var k = 1.6
     var g = GPU2D()
@@ -189,7 +243,7 @@ def main() raises:
     var cols = Int(Float64(n) ** 0.5 * 1.6) + 1
     var ox = Float64(4 % cols) * 230
     var oy = Float64(4 // cols) * 200
-    var dm: List[Float64] = [ox - 10, oy - 10, ox + 400, oy + 60]
+    var dm: List[Float64] = [ox - 10, oy - 10, ox + 560, oy + 140]  # (object 4 with its jitter, before and after, and the connector to object 5)
     c = scene_of(n, 33.4 - 300.7, 21.6 - 90.2, k, 4, 60, 2, 1, dm)
     var gc = picture(g, c, b)
     print("   edit with damage: tiles freed", g.tiles.damaged, ", rastered", g.tiles.rastered)

@@ -25,6 +25,7 @@ comptime OP_CLIP = 6  # x, y, w, h: what follows (until OP_UNCLIP) is cut to thi
 comptime OP_UNCLIP = 7
 comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a video frame), scaled to the rect
 comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
+comptime OP_STROKE = 11  # first point, points, width (the points in Scene.path): a polyline with round caps and joins (D-7940)
 comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spacing (+ "family\x1ftext"): a run in a real face (mojoui.fonttext, goal 79)
 comptime STRIDE = 6  # floats per op
 
@@ -118,6 +119,11 @@ trait Painter:
     def polygon(mut self, pts: List[Float64], color: UInt32):
         """A filled polygon (x, y interleaved, closed implicitly), non-zero winding, anti-aliased: an ink stroke's
         outline (mojoui.ink), a shape."""
+        ...
+
+    def stroke(mut self, pts: List[Float64], width: Float64, color: UInt32):
+        """(D-7940) A polyline through the points (x, y interleaved) `width` wide with round caps and joins: each
+        segment a capsule, each point a disc, as one item (a pen line of 60 points is one op, not 121)."""
         ...
 
     def text(mut self, font: Font, text: String, x: Float64, baseline: Float64, size: Float64, color: UInt32, weight: Int, align: Int,
@@ -259,6 +265,13 @@ struct SurfacePainter(Painter, Movable):
 
     def polygon(mut self, pts: List[Float64], color: UInt32):
         polygon(self.s, pts, color, self.tx, self.ty, self.tk)
+
+    def stroke(mut self, pts: List[Float64], width: Float64, color: UInt32):
+        var k = self.tk
+        for i in range(0, len(pts) - 2, 2):
+            line(self.s, pts[i] * k + self.tx, pts[i + 1] * k + self.ty, pts[i + 2] * k + self.tx, pts[i + 3] * k + self.ty, width * k, color)
+        for i in range(0, len(pts) - 1, 2):
+            circle(self.s, pts[i] * k + self.tx, pts[i + 1] * k + self.ty, width / 2 * k, color)
 
     def text(mut self, font: Font, text: String, x: Float64, baseline: Float64, size: Float64, color: UInt32, weight: Int, align: Int,
              slant: Float64):
@@ -511,6 +524,15 @@ struct Scene(Painter, Movable, Copyable):
             self.path.append(Float32(v))
         self._op(OP_POLY, Float64(first), Float64(n), 0, 0, 0, 0, color, -1)
 
+    def stroke(mut self, pts: List[Float64], width: Float64, color: UInt32):
+        var n = len(pts) // 2
+        if n < 1:
+            return
+        var first = len(self.path) // 2
+        for v in pts:
+            self.path.append(Float32(v))
+        self._op(OP_STROKE, Float64(first), Float64(n), width, 0, 0, 0, color, -1)
+
     def poly_x(self, op: Int, i: Int) -> Float64:
         """Point i of polygon op."""
         return Float64(self.path[(Int(self.nums[op * STRIDE]) + i) * 2])
@@ -559,9 +581,9 @@ struct Scene(Painter, Movable, Copyable):
         """Whether op p here draws exactly what op q of `other` does (kind, numbers, colour, text, points, pixels)."""
         if self.kinds[p] != other.kinds[q] or self.colors[p] != other.colors[q]:
             return False
-        if Int(self.kinds[p]) == OP_POLY:  # (its points, not where they sit in the path list)
+        if Int(self.kinds[p]) == OP_POLY or Int(self.kinds[p]) == OP_STROKE:  # (its points, not where they sit in the path list)
             var m = Int(self.num(p, 1))
-            if Int(other.num(q, 1)) != m:
+            if Int(other.num(q, 1)) != m or self.nums[p * STRIDE + 2] != other.nums[q * STRIDE + 2]:
                 return False
             var a0 = Int(self.num(p, 0)) * 2
             var b0 = Int(other.num(q, 0)) * 2
@@ -629,7 +651,7 @@ struct Scene(Painter, Movable, Copyable):
         that repaints by box (GTK's mend) pads them by 3 px, enough for ink polygons, not for thick-stroked shapes."""
         var kind = Int(self.kinds[op])
         var out = List[Float64]()
-        if kind == OP_POLY:
+        if kind == OP_POLY or kind == OP_STROKE:
             var x0 = self.poly_x(op, 0)
             var y0 = self.poly_y(op, 0)
             var x1 = x0
@@ -641,7 +663,8 @@ struct Scene(Painter, Movable, Copyable):
                 x1 = max(x1, x)
                 y0 = min(y0, y)
                 y1 = max(y1, y)
-            out = [x0, y0, x1, y1]
+            var hw = self.num(op, 2) / 2 + 1 if kind == OP_STROKE else 0.0
+            out = [x0 - hw, y0 - hw, x1 + hw, y1 + hw]
         elif kind == OP_RECT or kind == OP_IMAGE:
             out = [self.num(op, 0), self.num(op, 1), self.num(op, 0) + self.num(op, 2), self.num(op, 1) + self.num(op, 3)]
         elif kind == OP_CIRCLE:
@@ -760,6 +783,13 @@ struct Scene(Painter, Movable, Copyable):
                 for z in range(2 * m):
                     pts.append(Float64(self.path[a0 + z]))
                 polygon(s, pts, c, tx, ty, tk)
+            elif kind == OP_STROKE:
+                var m = Int(self.num(op, 1))
+                var sw = self.num(op, 2) * tk
+                for z in range(m - 1):
+                    line(s, self.poly_x(op, z) * tk + tx, self.poly_y(op, z) * tk + ty, self.poly_x(op, z + 1) * tk + tx, self.poly_y(op, z + 1) * tk + ty, sw, c)
+                for z in range(m):
+                    circle(s, self.poly_x(op, z) * tk + tx, self.poly_y(op, z) * tk + ty, sw / 2, c)
             elif kind == OP_IMAGE:
                 var pw = Int(self.num(op, 5))
                 ref px = self.images[Int(self.num(op, 4))]

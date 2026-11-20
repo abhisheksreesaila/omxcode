@@ -11,6 +11,7 @@
 #   var look = BoardLook(); look.paint(p, layer, v, view_w, view_h, k)
 
 from std.collections import Dict
+from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, with_alpha
@@ -20,6 +21,7 @@ from mojoui.objectlayer import CH_ADD, CH_MOVE
 from mojoui.notesshell import Boxes, draw_shadows
 from mojoui.objectlayer import ObjectLayer, Obj, TEXT, STICKY, RECT, ELLIPSE, INK, PICTURE, CONNECTOR
 from mojoui.canvas import rgba
+from mojoui.damage import DamageSnap
 
 comptime PAGE_W = 860.0
 comptime PAGE_H = 1080.0
@@ -128,13 +130,26 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: F
     _ = win_h
     var view_w = Float64(1e12)  # (every label is drawn: the picture mustn't depend on where the window is)
     var view_h = Float64(1e12)
+    var r = sk.page_radius
+    # (D-7940) the paper is opaque, so a band is drawn only where it can show: its rect less the paper's inside (kept
+    # under the paper by the radius and 3 px, so every pixel the paper doesn't wholly cover gets every band, as before);
+    # 32 bands as sheet-sized rects were ~100 M fragments a frame at 100 % on a 16-page desk
+    var opaque = (sk.paper >> 24) == 0xFF
+    var m = r + 3
     for s in sk.shadow2:
         var a = Float64(Int((s.color >> 24) & 0xFF)) / 255.0
         for band in shadow_bands(s.blur, s.spread, a):
             if band[1] <= 0:
                 continue
-            p.rect(v.x - band[0] + s.dx, v.y - band[0] + s.dy, w + band[0] * 2, h + band[0] * 2, with_alpha(s.color, band[1]), 0)
-    var r = sk.page_radius
+            var c = with_alpha(s.color, band[1])
+            var bx0 = v.x - band[0] + s.dx
+            var by0 = v.y - band[0] + s.dy
+            var bx1 = bx0 + w + band[0] * 2
+            var by1 = by0 + h + band[0] * 2
+            if not opaque or w <= 2 * m or h <= 2 * m:
+                p.rect(bx0, by0, bx1 - bx0, by1 - by0, c, 0)
+                continue
+            _ring(p, bx0, by0, bx1, by1, v.x + m, v.y + m, v.x + w - m, v.y + h - m, c)
     p.rect(v.x - 1, v.y - 1, w + 2, h + 2, sk.edge, r + 1)
     p.rect(v.x, v.y, w, h, sk.paper, r)
     for c in range(1, columns):
@@ -157,6 +172,26 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: F
                 p.run(st, "Page " + String(rw * columns + c + 1), lx, ly + (LABEL_SIZE + 0.7 * LABEL_SIZE) / 2, sk.ui_muted, 0)
 
 
+def _ring[P: Painter](mut p: P, bx0: Float64, by0: Float64, bx1: Float64, by1: Float64, hx0: Float64, hy0: Float64, hx1: Float64, hy1: Float64,
+                      c: UInt32):
+    """The rect (bx0, by0)–(bx1, by1) less the hole (hx0, hy0)–(hx1, hy1), as up to four rects that don't overlap."""
+    var ix0 = max(bx0, hx0)
+    var iy0 = max(by0, hy0)
+    var ix1 = min(bx1, hx1)
+    var iy1 = min(by1, hy1)
+    if ix0 >= ix1 or iy0 >= iy1:  # (no hole inside it)
+        p.rect(bx0, by0, bx1 - bx0, by1 - by0, c, 0)
+        return
+    if iy0 > by0:
+        p.rect(bx0, by0, bx1 - bx0, iy0 - by0, c, 0)
+    if by1 > iy1:
+        p.rect(bx0, iy1, bx1 - bx0, by1 - iy1, c, 0)
+    if ix0 > bx0:
+        p.rect(bx0, iy0, ix0 - bx0, iy1 - iy0, c, 0)
+    if bx1 > ix1:
+        p.rect(ix1, iy0, bx1 - ix1, iy1 - iy0, c, 0)
+
+
 def _dashed[P: Painter](mut p: P, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
     var dx = x1 - x0
     var dy = y1 - y0
@@ -176,6 +211,15 @@ struct WrapKey(Copyable, Movable):
     var width: Float64
 
 
+def _obj_key(ref o: Obj) -> Int:
+    """What an object's picture depends on beyond its box (its text's revision, colours, type, stacking, ink length)."""
+    var h = o.kind * 1000003 + o.rev * 7919 + Int(o.color) * 31 + Int(o.line) * 131 + Int(o.ink) * 17 + o.z * 104729
+    h = h * 31 + Int(o.size * 100) + o.weight * 7 + Int(o.line_height * 1000) * 13 + Int(o.pad * 100) * 3 + (1 if o.markdown else 0) * 5
+    h = h * 31 + (1 if o.head_end else 0) + o.text.byte_length() * 11 + len(o.stroke.xs) * 23 + Int(o.rot * 10000) + Int(o.line_width * 100) * 29
+    h = h * 31 + Int(o.radius * 100) + o.family.byte_length() * 37 + len(o.pixels)
+    return h
+
+
 struct BoardLook(Movable):
     """The paper look of a page board: faces and sizes from each object (a document's own type), defaults for objects that
     have none, wrapped lines cached per object revision and width."""
@@ -185,11 +229,35 @@ struct BoardLook(Movable):
     var wrap_w: Dict[Int, Float64]
     var wrap_lines: Dict[Int, List[String]]
     var generation: Int  # bump when the look itself changes (its defaults): part of the board layer's version
+    # (D-7940) the board as raster tiles: its own version (bumped when what it draws changes), the snapshot that finds
+    # what changed (damage), the document version and lift set last seen, the objects lifted out of it during a drag
+    var snap: DamageSnap
+    var board_version: Int
+    var since: Int
+    var dmg: List[Float64]
+    var seen_doc: Int
+    var seen_gen: Int
+    var lift_ids: List[Int]  # the lifted objects and the connectors that end at them (ids)
+    var lift_key: List[Int]  # the lifted objects as asked (selection ids), to see when the lift changes
+    var lift_set: Dict[Int, Bool]
+    var snap_lift: List[Int]  # the lift and the look's generation the snapshot was taken with
+    var snap_gen: Int
 
     def __init__(out self, family: String = "Source Serif 4", line_height: Float64 = 1.16):
         self.family = family
         self.line_height = line_height
         self.generation = 0
+        self.snap = DamageSnap()
+        self.board_version = 0
+        self.since = -1
+        self.dmg = List[Float64]()
+        self.seen_doc = -1
+        self.seen_gen = -1
+        self.lift_ids = List[Int]()
+        self.lift_key = List[Int]()
+        self.lift_set = Dict[Int, Bool]()
+        self.snap_lift = List[Int]()
+        self.snap_gen = 0
         self.wrap_rev = Dict[Int, Int]()
         self.wrap_w = Dict[Int, Float64]()
         self.wrap_lines = Dict[Int, List[String]]()
@@ -229,22 +297,130 @@ struct BoardLook(Movable):
         self.wrap_lines[o.id] = out.copy()
         return out^
 
-    def paint[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, v: DeskView, view_w: Float64, view_h: Float64, k: Float64):
-        """The objects meeting the window, in z order, as one layer in page px shown through the view."""
-        # (D-7929, as ObjectLayer.paint does) culled to the window snapped out to whole tiles, the layer's version from the
-        # document's and the tiles': a pan within the tiles reuses the kept picture without comparing or drawing it
+    def paint[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, v: DeskView, view_w: Float64, view_h: Float64, k: Float64,
+                          lifted: List[Int] = List[Int]()):
+        """The objects meeting the window, in z order, as one layer in page px shown through the view, kept by the
+        renderer as raster tiles (D-7940): a pan or a zoom composites what's kept, an edit rasters again only the tiles
+        its damage meets. `lifted` (ids: what a drag is moving) is drawn in a layer of its own above the board, with the
+        connectors that end at it, so the board's tiles stay as they are until the drag lets go."""
+        # culled to the window snapped out to whole tiles of page px (D-7929): the layer's extent, its ops complete there
         var tl = v.to_page(0, 0)
         var br = v.to_page(view_w, view_h)
         var tx0 = floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE
         var ty0 = floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE
         var tx1 = ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE
         var ty1 = ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE
+        self._lift(layer, lifted)
+        self._track(layer, len(lifted) > 0)
         p.begin_layer("board")
-        p.layer_version((layer.version * 1000003 + Int(tx0 / BOARD_TILE) * 7919 + Int(ty0 / BOARD_TILE) * 104729 + Int(tx1 / BOARD_TILE) * 31
-                         + Int(ty1 / BOARD_TILE) * 131 + self.generation * 17) & 0x3FFFFFFFFFFFFFFF)
+        p.layer_version(self.board_version)
         p.layer_transform(v.x * k, v.y * k, v.scale * k)
+        # (objects are culled by their boxes; a sticky's shadow or a text's lines reach past them, so the ops are complete
+        # only a margin inside the culled rect: that is the extent. The window stays inside it: 64 px were added first)
+        p.layer_tiles(tx0 + 64, ty0 + 64, tx1 - 64, ty1 - 64)
+        for d in range(len(self.dmg) // 4):
+            p.layer_damage(self.since, self.dmg[4 * d], self.dmg[4 * d + 1], self.dmg[4 * d + 2], self.dmg[4 * d + 3])
+        var any_lift = len(self.lift_ids) > 0
+        var up = List[Int]()
         for i in layer.query(tx0, ty0, tx1, ty1):
+            if any_lift and layer.objs[i].id in self.lift_set:
+                up.append(i)
+                continue
             self.paint_obj(p, layer, i)
+        if any_lift:  # (the lifted objects: all of them, wherever they are, over the board)
+            p.begin_layer("board-lift")
+            p.layer_transform(v.x * k, v.y * k, v.scale * k)
+            var all = List[Int]()
+            for id in self.lift_ids:
+                var q = layer.index(id)
+                if q >= 0:
+                    all.append(layer.rank_of(q) * (len(layer.objs) + 1) + q)
+            sort(all)
+            for r in all:
+                self.paint_obj(p, layer, r % (len(layer.objs) + 1))
+
+    def _lift(mut self, mut layer: ObjectLayer, lifted: List[Int]):
+        """The lift set: the lifted ids and the connectors ending at them (worked out once per lift, not per frame)."""
+        var same = len(lifted) == len(self.lift_key)
+        if same:
+            for n in range(len(lifted)):
+                if lifted[n] != self.lift_key[n]:
+                    same = False
+                    break
+        if same:
+            return
+        self.lift_key = lifted.copy()
+        self.lift_ids = List[Int]()
+        self.lift_set = Dict[Int, Bool]()
+        if len(lifted) == 0:
+            return
+        for id in lifted:
+            self.lift_set[id] = True
+        for ref o in layer.objs:
+            if o.kind == CONNECTOR and (o.from_id in self.lift_set or o.to_id in self.lift_set):
+                self.lift_set[o.id] = True
+        for e in self.lift_set.items():
+            self.lift_ids.append(e.key)
+
+    def _track(mut self, mut layer: ObjectLayer, lifting: Bool):
+        """The board's version and damage: when the document (or the lift) changed, every object's key and painted box
+        compared with the last snapshot (lifted ones left out, as if gone); a new version only when something did. A
+        drag that keeps its lift only moves lifted things: nothing to compare."""
+        self.dmg.clear()
+        var lift_changed = self.lift_key != self.snap_lift
+        if layer.version == self.seen_doc and self.generation == self.seen_gen and not lift_changed:
+            return
+        if lifting and not lift_changed and self.generation == self.seen_gen:
+            self.seen_doc = layer.version
+            return
+        self.seen_doc = layer.version
+        self.seen_gen = self.generation
+        self.snap_lift = self.lift_key.copy()
+        var regen = self.generation != self.snap_gen
+        self.snap_gen = self.generation
+        self.snap.begin()
+        for ref o in layer.objs:
+            if len(self.lift_set) > 0 and o.id in self.lift_set:
+                continue
+            var b = self.paint_box(o)
+            self.snap.feed(o.id, _obj_key(o), b[0], b[1], b[2], b[3])
+        var rects = self.snap.finish()
+        if getenv("MOJOUI_TILE_TRACE") == "1":
+            print("BOARD: doc " + String(layer.version) + " board " + String(self.board_version) + " rects " + String(len(rects) // 4) + " fresh " + String(self.snap.fresh)
+                  + " lift " + String(len(self.lift_ids)), flush=True)
+        if self.snap.fresh or regen:
+            self.since = -1
+            self.board_version += 1
+            return
+        if len(rects) == 0:
+            return
+        self.since = self.board_version
+        self.board_version += 1
+        self.dmg = rects^
+
+    def paint_box(mut self, ref o: Obj) -> Tuple[Float64, Float64, Float64, Float64]:
+        """Where the object paints, in page px, generously: its box, a sticky's shadow, a text's lines past its box."""
+        var b = o.bounds()
+        var pad = 28.0
+        var y1 = b[3]
+        var x1 = b[2]
+        if o.kind == TEXT or o.kind == STICKY:
+            var inner = o.w - 2 * (o.pad if o.kind == TEXT else STICKY_PAD)
+            var n = self.line_count(o, inner)
+            var lh = o.line_height if o.line_height > 0 else self.line_height
+            y1 = max(y1, o.y + 2 * STICKY_PAD + Float64(n) * o.size * FONT_SIZE_MULT * lh + o.size)
+            pad += o.size
+            x1 = max(x1, b[2] + o.size)
+        return (b[0] - pad, b[1] - pad, x1 + pad, y1 + pad)
+
+    def line_count(mut self, ref o: Obj, width: Float64) -> Int:
+        """How many lines the object's words wrap into at `width` (from the wrap cache when it holds them)."""
+        if self.wrap_rev.get(o.id, -1) == o.rev and self.wrap_w.get(o.id, -1.0) == width:
+            try:
+                return len(self.wrap_lines[o.id])
+            except:
+                pass
+        return len(self.lines(o, width))
 
     def paint_obj[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, i: Int):
         var kind = layer.objs[i].kind
@@ -348,11 +524,12 @@ def draw_arrow[P: Painter](mut p: P, ax: Float64, ay: Float64, bx: Float64, by: 
 
 
 def polyline[P: Painter](mut p: P, x0: Float64, y0: Float64, pts: List[Float64], width: Float64, color: UInt32):
-    """A stroke through points (relative to (x0, y0)), round caps and joins."""
-    for i in range(0, len(pts) - 2, 2):
-        p.line(x0 + pts[i], y0 + pts[i + 1], x0 + pts[i + 2], y0 + pts[i + 3], width, color)
-    for i in range(0, len(pts), 2):
-        p.circle(x0 + pts[i], y0 + pts[i + 1], width / 2, color)
+    """A stroke through points (relative to (x0, y0)), round caps and joins: one Painter.stroke (D-7940)."""
+    var abs_pts = List[Float64](capacity=len(pts))
+    for i in range(0, len(pts) - 1, 2):
+        abs_pts.append(x0 + pts[i])
+        abs_pts.append(y0 + pts[i + 1])
+    p.stroke(abs_pts, width, color)
 
 
 # ------------------------------------------------ the tools of a page board (the web's dock and Leafer editor)
@@ -456,6 +633,13 @@ struct BoardTools(Movable):
             var t = page_view(view_w, view_h, c[0], c[1], columns, rows)
             if view.scale > t.scale + 0.01:
                 view = t
+
+    def lifted(self, layer: ObjectLayer) -> List[Int]:
+        """What a drag is moving (the selection while a move is under way), for BoardLook.paint to lift out of the
+        board's tiles (D-7940); empty otherwise."""
+        if self.drag == T_MOVE:
+            return layer.selected.copy()
+        return List[Int]()
 
     def finish(mut self, mut layer: ObjectLayer):
         """Ends the writing in progress: a new text with words is made (one undo step with them), a sticky keeps its words."""

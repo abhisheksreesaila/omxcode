@@ -28,13 +28,15 @@
 from std.math import floor, ceil
 from std.time import perf_counter_ns
 from std.collections import Dict
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN
+from mojoui.fonttext import shape as ft_shape
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
 
 comptime TILE = 512  # content px per tile side
 comptime TILE_BORDER = 1
 comptime TILE_TEX = TILE + 2 * TILE_BORDER  # a tile texture's side
 comptime TILE_SETTLE_NS = 120_000_000  # a zoom held this long gets tiles at its own scale
-comptime TILE_BUDGET_NS = 3_000_000  # rasters beyond those a frame must have (ring, settling): stop after this much
+comptime TILE_BUDGET_OPS = 2500  # rasters beyond those a frame must have (ring, settling): ops built per frame at most
+# (batch building, merging and submitting a tile costs ~1–2 µs an op, more when its glyphs are new at that size)
 comptime TILE_POOL = 128  # tile textures at most (128 × 514² × 4 B ≈ 135 MB of GPU memory)
 comptime TILE_PAD_PX = 3.0  # device px round an op's bounds (antialiasing, glyph snapping)
 
@@ -61,7 +63,7 @@ def op_box(scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
     if kind == OP_LINE:
         var hw = scene.num(op, 4) / 2
         return (min(a, c) - hw, min(b, d) - hw, max(a, c) + hw, max(b, d) + hw)
-    if kind == OP_POLY:
+    if kind == OP_POLY or kind == OP_STROKE:
         var n = Int(b)
         var x0 = 1e300
         var y0 = 1e300
@@ -74,8 +76,14 @@ def op_box(scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
             y0 = min(y0, y)
             x1 = max(x1, x)
             y1 = max(y1, y)
-        return (x0, y0, x1, y1)
-    if kind == OP_TEXT or kind == OP_RUN:
+        var hw = c / 2 if kind == OP_STROKE else 0.0
+        return (x0 - hw, y0 - hw, x1 + hw, y1 + hw)
+    if kind == OP_RUN:  # (op_box_run measures it; here, without a width cache, a generous box)
+        var t = Int(scene.text_of[op])
+        var n = scene.texts[t].byte_length() if t >= 0 else 0
+        var wide = Float64(n) * (c * 1.2 + abs(scene.num(op, 5))) + c
+        return (a - wide, b - c * 1.6, a + wide, b + c * 0.8)
+    if kind == OP_TEXT:
         var t = Int(scene.text_of[op])
         var n = scene.texts[t].byte_length() if t >= 0 else 0
         var size = c
@@ -104,8 +112,10 @@ struct OpBins(Movable):
     var by1: List[Float32]
     var stamp: List[Int]
     var stamp_now: Int
+    var widths: Dict[Int, Float64]  # a run's shaped width by a hash of its text and style (kept across builds)
 
     def __init__(out self):
+        self.widths = Dict[Int, Float64]()
         self.version = -999
         self.ext = List[Float64]()
         self.nops = -1
@@ -148,8 +158,10 @@ struct OpBins(Movable):
         var y0 = 1e300
         var x1 = -1e300
         var y1 = -1e300
+        if len(self.widths) > 65536:
+            self.widths = Dict[Int, Float64]()
         for o in range(n):
-            var b = op_box(scene, span[0] + o)
+            var b = self.run_box(scene, span[0] + o) if Int(scene.kinds[span[0] + o]) == OP_RUN else op_box(scene, span[0] + o)
             self.bx0.append(Float32(b[0]))
             self.by0.append(Float32(b[1]))
             self.bx1.append(Float32(b[2]))
@@ -194,6 +206,24 @@ struct OpBins(Movable):
                     at[c] += 1
         self.start = counts^
 
+    def run_box(mut self, scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """An OP_RUN's box from its shaped width (fonttext's run cache, then kept here by a hash of the run): from its
+        start by its alignment, a third of an em more either side (overhangs, swashes), an em above and below."""
+        var t = Int(scene.text_of[op])
+        if t < 0:
+            return op_box(scene, op)
+        var size = scene.num(op, 2)
+        var key = Int(hash(scene.texts[t])) ^ (Int(size * 1000) * 1000003) ^ (Int(scene.num(op, 3)) * 7919) ^ (Int(scene.num(op, 4)) * 104729) ^ (Int(scene.num(op, 5) * 1000) * 31)
+        var wd = self.widths.get(key, -1.0)
+        if wd < 0:
+            wd = ft_shape(scene.run_style(op), scene.run_text(op)).width
+            self.widths[key] = wd
+        var x = scene.num(op, 0)
+        var b = scene.num(op, 1)
+        var align = scene.run_align(op)
+        var x0 = x - wd / 2 if align == 1 else (x - wd if align == 2 else x)
+        return (x0 - size * 0.34, b - size * 1.5, x0 + wd + size * 0.34, b + size * 0.8)
+
     def _cells(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Tuple[Int, Int, Int, Int]:
         var a = Int(floor((max(x0, -1e15) - self.gx0) / self.cell))
         var b = Int(floor((max(y0, -1e15) - self.gy0) / self.cell))
@@ -232,6 +262,10 @@ struct TileRaster(Copyable, Movable):
     var j: Int
     var k: Float64
     var ops: List[Int]
+    var rx0: Int  # the part of the texture to clear and draw again (texture px; the whole: 0, 0, TILE_TEX, TILE_TEX)
+    var ry0: Int
+    var rx1: Int
+    var ry1: Int
 
 
 @fieldwise_init
@@ -259,6 +293,8 @@ struct TileSet(Movable):
     var tiles: Dict[Int, Int]  # packed (i, j) → slot
     var good: Dict[Int, Int]  # packed (i, j) → index into good_r: the part (layer units) the tile was rastered for
     var good_r: List[Float64]
+    var dirty: Dict[Int, Int]  # packed (i, j) → index into dirty_r: the part a damage made stale (texture px)
+    var dirty_r: List[Int]
     var fb_k: Float64
     var fb: Dict[Int, Int]
     var k_seen: Float64
@@ -274,6 +310,8 @@ struct TileSet(Movable):
         self.tiles = Dict[Int, Int]()
         self.good = Dict[Int, Int]()
         self.good_r = List[Float64]()
+        self.dirty = Dict[Int, Int]()
+        self.dirty_r = List[Int]()
         self.fb_k = 0
         self.fb = Dict[Int, Int]()
         self.k_seen = 0
@@ -301,8 +339,9 @@ struct Tiles(Movable):
     var rastered: Int  # tiles rastered / drawn / freed by damage, last frame (tests, framebench)
     var drawn: Int
     var damaged: Int
-    var budget_ns: Int
+    var budget_ops: Int
     var settle_ns: Int
+    var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
 
     def __init__(out self):
         self.sets = List[TileSet]()
@@ -313,8 +352,9 @@ struct Tiles(Movable):
         self.rastered = 0
         self.drawn = 0
         self.damaged = 0
-        self.budget_ns = TILE_BUDGET_NS
+        self.budget_ops = TILE_BUDGET_OPS
         self.settle_ns = TILE_SETTLE_NS
+        self.planned_ops = 0
 
     def begin_frame(mut self):
         self.stamp += 1
@@ -322,6 +362,7 @@ struct Tiles(Movable):
         self.rastered = 0
         self.drawn = 0
         self.damaged = 0
+        self.planned_ops = 0
 
     def _set(mut self, key: String, owner: Int) -> Int:
         for s in range(len(self.sets)):
@@ -361,6 +402,8 @@ struct Tiles(Movable):
         self.sets[s].tiles = Dict[Int, Int]()
         self.sets[s].good = Dict[Int, Int]()
         self.sets[s].good_r = List[Float64]()
+        self.sets[s].dirty = Dict[Int, Int]()
+        self.sets[s].dirty_r = List[Int]()
 
     def _drop_all(mut self, s: Int):
         self._drop_tiles(s)
@@ -412,11 +455,19 @@ struct Tiles(Movable):
                 # covers more of what's on screen than the current tiling does: then that one stays)
                 if len(self.sets[s].tiles) >= len(self.sets[s].fb) or self.sets[s].fb_k == 0:
                     self._drop_fb(s)
+                    # (a stale part can't be shown even scaled: those tiles go rather than become the fallback)
+                    for e in self.sets[s].dirty.items():
+                        try:
+                            self.free.append(self.sets[s].tiles.pop(e.key))
+                        except:
+                            pass
                     swap(self.sets[s].fb, self.sets[s].tiles)
                     self.sets[s].fb_k = self.sets[s].k
                     self.sets[s].tiles = Dict[Int, Int]()
                     self.sets[s].good = Dict[Int, Int]()
                     self.sets[s].good_r = List[Float64]()
+                    self.sets[s].dirty = Dict[Int, Int]()
+                    self.sets[s].dirty_r = List[Int]()
                 else:
                     self._drop_tiles(s)
                 self.sets[s].k = k
@@ -439,7 +490,6 @@ struct Tiles(Movable):
         var ey1 = scene.layer_ext[4 * i + 3] * tk
         var cx = (vx0 + vx1) / 2
         var cy = (vy0 + vy1) / 2
-        var t0 = Int(perf_counter_ns())
         # visible tiles, nearest the middle first
         var order = List[Int]()
         for jj in range(j0, j1 + 1):
@@ -459,11 +509,16 @@ struct Tiles(Movable):
             var px1 = min(Float64(ii + 1) * TILE, vx1) / tk
             var py1 = min(Float64(jj + 1) * TILE, vy1) / tk
             var ready = key in self.sets[s].tiles and self._good_for(s, key, px0, py0, px1, py1)
+            if ready and key in self.sets[s].dirty:  # (kept, but a damage made part of it stale: that part again, now)
+                var d = self.sets[s].dirty.get(key, -1)
+                ref dr = self.sets[s].dirty_r
+                if not self._raster(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1, dr[4 * d], dr[4 * d + 1], dr[4 * d + 2], dr[4 * d + 3]):
+                    missing.append(key)
+                continue
             if ready:
                 continue
             var has_fb = len(self.sets[s].fb) > 0 and self._fb_covers(s, ii, jj, tk)
-            var spent = Int(perf_counter_ns()) - t0
-            if has_fb and spent >= self.budget_ns:
+            if has_fb and self.planned_ops >= self.budget_ops:
                 missing.append(key)
                 self.more = True
                 continue
@@ -485,7 +540,7 @@ struct Tiles(Movable):
                     var gy0 = max(Float64(jj) * TILE, ey0)
                     if gx0 >= min(Float64(ii + 1) * TILE, ex1) or gy0 >= min(Float64(jj + 1) * TILE, ey1):
                         continue
-                    if Int(perf_counter_ns()) - t0 >= self.budget_ns or len(out.rasters) >= 6:
+                    if self.planned_ops >= self.budget_ops or len(out.rasters) >= 6:
                         self.more = True
                         break
                     _ = self._raster(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1)
@@ -528,6 +583,8 @@ struct Tiles(Movable):
                 try:
                     self.free.append(self.sets[s].tiles.pop(key))
                     _ = self.sets[s].good.pop(key)
+                    if key in self.sets[s].dirty:
+                        _ = self.sets[s].dirty.pop(key)
                 except:
                     pass
         return out^
@@ -559,23 +616,40 @@ struct Tiles(Movable):
         return False
 
     def _raster(mut self, mut out: TilePlan, s: Int, layer: Int, ii: Int, jj: Int, tk: Float64, ex0: Float64, ey0: Float64, ex1: Float64,
-                ey1: Float64) -> Bool:
-        """Plans tile (ii, jj) at zoom tk (its texture slot taken or reused): False when no slot is free."""
+                ey1: Float64, rx0: Int = 0, ry0: Int = 0, rx1: Int = TILE_TEX, ry1: Int = TILE_TEX) -> Bool:
+        """Plans tile (ii, jj) at zoom tk (its texture slot taken or reused), the part (rx0, ry0)–(rx1, ry1) of its
+        texture (a damage's partial raster; the whole by default): False when no slot is free."""
         var key = _pack(ii, jj)
         var slot = self.sets[s].tiles.get(key, -1)
+        var whole = rx0 <= 0 and ry0 <= 0 and rx1 >= TILE_TEX and ry1 >= TILE_TEX
         if slot < 0:
             slot = self._slot(s)
             if slot < 0:
                 return False
             self.sets[s].tiles[key] = slot
-        # the tile with its border, padded for antialiasing, in layer units
-        var pad = Float64(TILE_BORDER) + TILE_PAD_PX
-        var lx0 = (Float64(ii) * TILE - pad) / tk
-        var ly0 = (Float64(jj) * TILE - pad) / tk
-        var lx1 = (Float64(ii + 1) * TILE + pad) / tk
-        var ly1 = (Float64(jj + 1) * TILE + pad) / tk
+            whole = True
+        if key in self.sets[s].dirty:
+            try:
+                _ = self.sets[s].dirty.pop(key)
+            except:
+                pass
+        var qx0 = 0 if whole else rx0
+        var qy0 = 0 if whole else ry0
+        var qx1 = TILE_TEX if whole else rx1
+        var qy1 = TILE_TEX if whole else ry1
+        # the part (texture px → content px), padded for antialiasing, in layer units
+        var ox = Float64(ii * TILE - TILE_BORDER)
+        var oy = Float64(jj * TILE - TILE_BORDER)
+        var lx0 = (ox + Float64(qx0) - TILE_PAD_PX) / tk
+        var ly0 = (oy + Float64(qy0) - TILE_PAD_PX) / tk
+        var lx1 = (ox + Float64(qx1) + TILE_PAD_PX) / tk
+        var ly1 = (oy + Float64(qy1) + TILE_PAD_PX) / tk
         var ops = self.sets[s].bins.query(lx0, ly0, lx1, ly1)
-        out.rasters.append(TileRaster(layer, slot, ii, jj, tk, ops^))
+        self.planned_ops += len(ops) + 50
+        out.rasters.append(TileRaster(layer, slot, ii, jj, tk, ops^, qx0, qy0, qx1, qy1))
+        if not whole:  # (a partial raster: the tile is good for what it was)
+            self.rastered += 1
+            return True
         var g = self.sets[s].good.get(key, -1)
         if g < 0:
             if len(self.sets[s].good_r) >= 4 * 8192:  # (compacted now and then: only kept tiles' parts stay)
@@ -622,13 +696,61 @@ struct Tiles(Movable):
                 if dm[4 * d] <= x1 and dm[4 * d + 2] >= x0 and dm[4 * d + 1] <= y1 and dm[4 * d + 3] >= y0:
                     gone.append(key)
                     break
-        for key in gone:
-            try:
-                if fallback:
+        if fallback:
+            for key in gone:
+                try:
                     self.free.append(self.sets[s].fb.pop(key))
-                else:
-                    self.free.append(self.sets[s].tiles.pop(key))
-                    _ = self.sets[s].good.pop(key)
-                    self.damaged += 1
-            except:
-                pass
+                except:
+                    pass
+            return
+        # (current tiles keep their pictures: the part each damage meets is stale, rastered again when it's shown)
+        for key in gone:
+            var ij = _unpack(key)
+            var ox = Float64(ij[0] * TILE - TILE_BORDER)
+            var oy = Float64(ij[1] * TILE - TILE_BORDER)
+            var ux0 = TILE_TEX
+            var uy0 = TILE_TEX
+            var ux1 = 0
+            var uy1 = 0
+            var d0 = self.sets[s].dirty.get(key, -1)
+            if d0 >= 0:
+                ux0 = self.sets[s].dirty_r[4 * d0]
+                uy0 = self.sets[s].dirty_r[4 * d0 + 1]
+                ux1 = self.sets[s].dirty_r[4 * d0 + 2]
+                uy1 = self.sets[s].dirty_r[4 * d0 + 3]
+            for d in range(len(dm) // 4):
+                var a0 = Int(floor(dm[4 * d] * tk - ox - TILE_PAD_PX))
+                var b0 = Int(floor(dm[4 * d + 1] * tk - oy - TILE_PAD_PX))
+                var a1 = Int(ceil(dm[4 * d + 2] * tk - ox + TILE_PAD_PX))
+                var b1 = Int(ceil(dm[4 * d + 3] * tk - oy + TILE_PAD_PX))
+                a0 = max(a0, 0)
+                b0 = max(b0, 0)
+                a1 = min(a1, TILE_TEX)
+                b1 = min(b1, TILE_TEX)
+                if a0 >= a1 or b0 >= b1:
+                    continue
+                ux0 = min(ux0, a0)
+                uy0 = min(uy0, b0)
+                ux1 = max(ux1, a1)
+                uy1 = max(uy1, b1)
+            if ux0 >= ux1 or uy0 >= uy1:
+                continue
+            if d0 < 0:
+                if len(self.sets[s].dirty_r) >= 4 * 8192:
+                    var r2 = List[Int]()
+                    var g2 = Dict[Int, Int]()
+                    for e in self.sets[s].dirty.items():
+                        g2[e.key] = len(r2) // 4
+                        for c in range(4):
+                            r2.append(self.sets[s].dirty_r[4 * e.value + c])
+                    self.sets[s].dirty_r = r2^
+                    self.sets[s].dirty = g2^
+                d0 = len(self.sets[s].dirty_r) // 4
+                for _ in range(4):
+                    self.sets[s].dirty_r.append(0)
+                self.sets[s].dirty[key] = d0
+            self.sets[s].dirty_r[4 * d0] = ux0
+            self.sets[s].dirty_r[4 * d0 + 1] = uy0
+            self.sets[s].dirty_r[4 * d0 + 2] = ux1
+            self.sets[s].dirty_r[4 * d0 + 3] = uy1
+            self.damaged += 1
