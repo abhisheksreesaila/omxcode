@@ -366,9 +366,10 @@ def m3():
                     _, stops = map_stops([e for e in wev if e["kind"] == "MAP"])
                     p_, stops = judge_trip(ask, wanted, stops, [e for e in wev if e["kind"] == "POINT"], [e for e in wev if e["kind"] == "MAP" and "fly" in e])
                     probs += ["web: " + x for x in p_]
-                    web.append({"ask": ask, "stops": stops, "ring_share": t["ring_share"], "tile_colours": t["tile_colours"], "shot": t["shot"]})
+                    web.append({"ask": ask, "stops": stops, "ring_share": t["ring_share"], "ring_control": t.get("ring_control"), "ring_on": t.get("ring_on"),
+                                "tile_colours": t["tile_colours"], "shot": t["shot"]})
                     said.append(f"web {ask!r}: " + ", ".join(f"{st['n']} {st['name']} {st['km']} km" for st in stops)
-                                + f"; ring share {t['ring_share']}, {t['tile_colours']} colours of tiles; {t['shot']}")
+                                + f"; ring share {t['ring_share']} round its own rect on {t.get('ring_on')} (faded frame {t.get('ring_control')}), {t['tile_colours']} colours of tiles; {t['shot']}")
                 bench(m3_web=web)
     said.append(f"tiles: {tile_cold:.0f} ms a tile from the web (request + decode, median), {tile_cached:.2f} ms from the disk cache" if tile_cold else "tiles: no numbers")
     said.append("GTK screenshot docs/goals/77/m3-map-gtk.png")
@@ -577,22 +578,11 @@ def iso_find(blocks, ref):
     return -1
 
 
-def ring_pixels(path, after, dark):
-    """How much of the ring a screenshot shows: pixels near the theme's accent that differ from the shot taken after the ring has
-    faded (the step badges and the text box's focus are accent too, and are in both)."""
-    from PIL import Image
-
-    im = Image.open(path).convert("RGB")
-    ref = Image.open(after).convert("RGB") if after.exists() and Image.open(after).size == im.size else None
-    px, rp = im.load(), (ref.load() if ref else None)
-    want = (60, 196, 207) if dark else (14, 124, 134)
-    n = 0
-    for y in range(90, im.height - 90, 2):
-        for x in range(0, im.width, 2):
-            c = px[x, y]
-            if sum(abs(a - b) for a, b in zip(c, want)) < 90 and (rp is None or sum(abs(a - b) for a, b in zip(c, rp[x, y])) > 40):
-                n += 1
-    return n
+def ring_measure():
+    """scripts/ring_measure.py: the ring read round its own rect (owner OK 2026-11-20; calibration docs/goals/77-ring-calibration.json)."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import ring_measure
+    return ring_measure
 
 
 def lcs(a, b):
@@ -677,22 +667,34 @@ def m4():
             probs.append(f"{q!r}: a point was shown {max(lags, key=abs)} ms from its audio (limit {LAG_LIMIT_MS})")
         # the screenshot: the one mid-walkthrough with the most of the ring on it
         shots_ = sorted(OUT.glob(f"m4_{i}_[0-9]*.png"))
-        if shots_:
+        after = OUT / f"m4_{i}_after.png"
+        if shots_ and after.exists():
+            rm = ring_measure()
             dark = i == len(CONCEPTS)
-            ring = {f: ring_pixels(f, OUT / f"m4_{i}_after.png", dark) for f in shots_}
-            best = max(shots_, key=lambda f: ring[f])
-            row["ring_pixels"] = ring[best]
-            if ring[best] < 150:
-                probs.append(f"{q!r}: no screenshot shows the ring ({ring[best]} ring pixels at best)")
+            rects = {(str(e.get("tag", "")), rm.parse_rect("ring=" + str(e.get("ring", "")))) for e in of(ev, "POINT", i)}
+            rects = {(t, r) for t, r in rects if r and t.partition(".")[2] in parts}  # (rings round the diagram's blocks only)
+            score = {}
+            for f in shots_:
+                for t, r in rects:
+                    share, control = rm.ring_share(f, after, r, dark)
+                    if f not in score or share > score[f][0]:
+                        score[f] = (share, control, t)
+            best = max(shots_, key=lambda f: score.get(f, (0.0,))[0])
+            share, control, on = score.get(best, (0.0, 1.0, ""))
+            row.update(ring_share=share, ring_control=control, ring_on=on)
+            if control > rm.CONTROL_MAX:
+                probs.append(f"{q!r}: the faded frame is already {control} teal round the ring's rect on {on}: the measure can't see the ring")
+            elif share < rm.FLOOR:
+                probs.append(f"{q!r}: no screenshot shows the ring round its own rect (best share {share} on {on or 'no block'}, want >= {rm.FLOOR}; {len(rects)} rects)")
             name = f"iso_phone_{'dark' if dark else 'light'}_{i}.png"
             shutil.copy(best, SHOTS / name)
             row["shot"] = f"docs/goals/77/{name}"
         else:
-            probs.append(f"{q!r}: no screenshot")
+            probs.append(f"{q!r}: no screenshot (or no frame once the ring had faded)")
     bench(m4=rows, m4_lags_ms=all_lags)
     (OUT / "m4.json").write_text(json.dumps(rows, indent=1))
     said.append("; ".join(f"{x['asked']!r}: {len(x.get('blocks', []))} blocks, {x.get('links', 0)} links, {x.get('steps', 0)} steps, points {x.get('points')} "
-                          f"({x.get('in_step_order')} in step order), lags {x.get('lags')} ms, reply {x['sentences']} sentences" for x in rows))
+                          f"({x.get('in_step_order')} in step order), ring share {x.get('ring_share')} on {x.get('ring_on')} (faded {x.get('ring_control')}), lags {x.get('lags')} ms, reply {x['sentences']} sentences" for x in rows))
     said.append("phone screenshots (light, light, dark): " + ", ".join(x.get("shot", "-") for x in rows))
     return ("FAIL", "; ".join(probs) + " | " + " | ".join(said)) if probs else ("PASS", " | ".join(said))
 

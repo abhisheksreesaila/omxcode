@@ -141,6 +141,7 @@ struct Main(App):
     var pointer: Pointer  # the ring that moves to the part of a card (or the tile) she is naming
     var turn_card: Int  # the first card of this turn: only this turn's cards are pointed at
     var parts_key: String  # what the loop's parts were last made from (cards, looks, the tiles' place, whether the TV hides them)
+    var ring_said: String  # the ring's rect as last traced (OMX_TRACE: OMX RING lines follow it as a map flies the part to its middle)
     var turn_look: Int  # the camera's look serial when this turn began: only this turn's looks are pointed at
     var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var dark: Bool
@@ -222,6 +223,7 @@ struct Main(App):
         self.pointer = Pointer()
         self.turn_card = 0
         self.parts_key = ""
+        self.ring_said = ""
         self.turn_look = 0
         self.marks = List[PointMark]()
         self.dark = False
@@ -566,6 +568,11 @@ struct Main(App):
             var m = self.marks.pop(0)
             self.out("OMX POINT: turn=" + String(self.turns) + " tag=" + m.tag + " lag_ms=" + String(Int(Float64(self.pointer.shown_ns - m.due_ns) / 1e6))
                      + " sent_ms=" + String(Int(Float64(m.sent_ns - m.due_ns) / 1e6)) + " seen=" + String(self.pointer.seen) + " ring=" + self.ring_text())
+        if self.trace and self.pointer.active():  # (where the ring is now: a map's stop flies to the middle after the point)
+            var said = self.pointer.tag + " ring=" + self.ring_text()
+            if said != self.ring_said:
+                self.ring_said = said
+                self.out("OMX RING: tag=" + said)
 
     def ring_text(self) -> String:
         """What the ring is drawn round: x,y,w,h in points from the ring layer's corner ("-": not found)."""

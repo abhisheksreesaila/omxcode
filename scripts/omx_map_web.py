@@ -6,6 +6,7 @@ the checker's truth says, and that the ring lands on the marker of the stop bein
 
 Prints `omx_map_web: ok` and writes build/g77/omx-map-web.json, the host's log build/g77/omx-map-web-host.log and, per trip,
 docs/goals/77/m3-map-tablet-<k>.png (the best frame: the ring round the marker in the map's middle, tiles round it).
+The ring is read round its own rect (the app's OMX RING lines, OMX_TRACE) against a frame once it has faded: scripts/ring_measure.py.
 G77_TRIPS: the asks, joined by "|" (default: the two of docs/goals/77-check.py M3).
 """
 import json
@@ -22,6 +23,9 @@ from pathlib import Path
 
 from PIL import Image
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ring_measure import CONTROL_MAX, FLOOR, parse_rect, ring_share  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build/g77"
@@ -47,26 +51,6 @@ def wait_for(fn, seconds, what, every=0.05):
             return v
         time.sleep(every)
     raise AssertionError("timed out waiting for " + what)
-
-
-def teal(px):
-    r, g, b = px[:3]
-    return r < 110 and g > 100 and b > 110 and g - r > 40
-
-
-def ring_share(im, box, margin=14):
-    """The share of ring-teal pixels in the band from 3 px outside `box` (x, y, w, h) to `margin` px out: the marker's own fill is
-    inside, its white casing at the edge, so teal out there is the ring (or its glow)."""
-    px = im.load()
-    x, y, w, h = [int(round(v)) for v in box]
-    n = hits = 0
-    for yy in range(max(y - margin, 0), min(y + h + margin, im.height)):
-        for xx in range(max(x - margin, 0), min(x + w + margin, im.width)):
-            if x - 4 <= xx < x + w + 4 and y - 4 <= yy < y + h + 4:
-                continue
-            n += 1
-            hits += teal(px[xx, yy])
-    return hits / max(n, 1)
 
 
 def tile_colours(im, box):
@@ -120,7 +104,8 @@ def main():
                 box = page.get_by_placeholder("Type to omx")
                 box.fill(ask)
                 box.press("Enter")
-                best, shots, last_point_at, seen_points = None, 0, None, points_before
+                shots, last_point_at, seen_points = [], None, points_before
+                frames = 0
                 end = time.time() + 240
                 while time.time() < end:
                     page.wait_for_timeout(250)
@@ -131,20 +116,27 @@ def main():
                     maps = page.evaluate("() => [...document.querySelectorAll('[data-tag]')].filter(e => /^card\\d+\\.map\\d+$/.test(e.dataset.tag)).map(e => { const r = e.getBoundingClientRect(); return [e.dataset.tag, r.left, r.top, r.width, r.height]; })")
                     if maps and last_point_at and time.time() - last_point_at > 1.3:  # (the flight has landed: the named stop sits in the map's middle)
                         tag, x, y, w, h = maps[-1]
-                        png = OUT / f"m3_web_{k}_{shots:02d}.png"
+                        png = OUT / f"m3_web_{k}_{frames:02d}.png"
                         page.screenshot(path=str(png))
-                        shots += 1
-                        im = Image.open(png).convert("RGB")
-                        marker = (x + w / 2 - 15, y + h / 2 - 15, 30, 30)
-                        share = ring_share(im, marker)
-                        colours = tile_colours(im, (x, y, w, h))
-                        if best is None or share > best[0]:
-                            best = (share, colours, png, tag, [round(v) for v in (x, y, w, h)])
-                        if shots >= 6:
+                        frames += 1
+                        rings = [l for l in log_path.read_text().splitlines()[len(before.splitlines()):] if l.startswith("OMX RING:")]
+                        shots.append((png, parse_rect(rings[-1]) if rings else None, rings[-1].split("tag=")[1].split()[0] if rings else "",
+                                      tile_colours(Image.open(png).convert("RGB"), (x, y, w, h)), [round(v) for v in (x, y, w, h)]))
+                        if frames >= 6:
                             last_point_at = None
                     done = text.count("OMX REPLY:") > replies_before and "OMX STATE: 1" in text.split("OMX REPLY:")[-1]
-                    if done and (last_point_at is None or time.time() - last_point_at > 4) and shots > 0:
+                    if done and (last_point_at is None or time.time() - last_point_at > 4) and shots:
                         break
+                # the same map once the ring has faded (it holds 4.5 s after the last point): what the ring is measured against
+                page.wait_for_timeout(4000)
+                after = OUT / f"m3_web_{k}_after.png"
+                page.screenshot(path=str(after))
+                layer = page.evaluate("() => { const e = document.querySelector('[data-tag=\"pointer\"]'); if (!e) return [0, 0]; const r = e.getBoundingClientRect(); return [r.left, r.top]; }")
+                best = None
+                for png, rect, on, colours, mrect in shots:
+                    share, control = ring_share(png, after, rect, False, offset=layer) if rect else (0.0, 1.0)
+                    if best is None or share > best[0]:
+                        best = (share, colours, png, on, mrect, control, rect)
                 text = log_path.read_text()
                 lines = text.splitlines()
                 new = lines[len(before.splitlines()):]
@@ -152,12 +144,18 @@ def main():
                         "calls": [l for l in new if l.startswith("OMX CALL:")], "reply": next((l for l in new if l.startswith("OMX REPLY:")), "")}
                 assert best, f"trip {k}: no frame of the map after a point ({len(trip['points'])} points, calls {trip['calls']})"
                 trip["ring_share"] = round(best[0], 3)
+                trip["ring_control"] = best[5]
+                trip["ring_on"] = best[3]
+                mx, my, mw, mh = best[4]
+                r = best[6] or (0, 0, 0, 0)
+                trip["ring_rect"] = [r[0] + layer[0], r[1] + layer[1], r[2], r[3]]
+                trip["ring_off_middle"] = round(((r[0] + layer[0] + r[2] / 2 - mx - mw / 2) ** 2 + (r[1] + layer[1] + r[3] / 2 - my - mh / 2) ** 2) ** 0.5)
                 trip["tile_colours"] = best[1]
                 trip["map_rect"] = best[4]
                 shutil.copy(best[2], SHOTS / f"m3-map-tablet-{k}.png")
                 trip["shot"] = f"docs/goals/77/m3-map-tablet-{k}.png"
                 report["trips"].append(trip)
-                print(json.dumps({x: trip[x] for x in ("ask", "ring_share", "tile_colours", "shot")}), len(trip["points"]), "points", flush=True)
+                print(json.dumps({x: trip[x] for x in ("ask", "ring_share", "ring_control", "ring_on", "ring_off_middle", "tile_colours", "shot")}), len(trip["points"]), "points", flush=True)
                 page.wait_for_timeout(2000)
             ctx.close()
             browser.close()
@@ -170,7 +168,10 @@ def main():
     (OUT / "omx-map-web.json").write_text(json.dumps(report, indent=1) + "\n")
     for t in report["trips"]:
         assert t["tile_colours"] > 300, f"{t['ask']!r}: the map shows {t['tile_colours']} colours: no tiles"
-        assert t["ring_share"] > 0.05, f"{t['ask']!r}: no frame with the ring round the marker in the map's middle (best share {t['ring_share']})"
+        assert t["ring_control"] <= CONTROL_MAX, f"{t['ask']!r}: the faded frame is already {t['ring_control']} teal round the ring's rect: the measure can't see the ring"
+        assert t["ring_share"] >= FLOOR, f"{t['ask']!r}: no frame with the ring round its own rect (best share {t['ring_share']}, want >= {FLOOR})"
+        assert ".stop" in t["ring_on"], f"{t['ask']!r}: the best ring is round {t['ring_on']!r}, not a stop"
+        assert t["ring_off_middle"] <= 24, f"{t['ask']!r}: the ring is {t['ring_off_middle']} px from the map's middle (the named stop flies there)"
     print("omx_map_web: ok")
 
 
