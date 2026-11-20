@@ -494,3 +494,45 @@ def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, word
         cut += String(c)
         n += 1
     bx.add(".mindmap-hint:" + cut, x, y, w, 28)
+
+
+def draw_radial_steps[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, at_x: Float64, at_y: Float64, inner: UInt32,
+                                  outer: UInt32, stop: Float64, radius: Float64):
+    """A CSS radial-gradient(circle at at_x at_y, inner 0, outer stop%) over the box, farthest-corner sized, drawn as its
+    8-bit colour steps: the box in the outer colour, then one circle per step inward, each in the exact colour the
+    browser shows there. No gradient primitive is needed, so the CPU painter and the GPU draw it alike, with ≤ 3 × 255
+    circles (here a handful). `radius`: the box's corner radius for the outer fill."""
+    var cx = x + at_x * w
+    var cy = y + at_y * h
+    var fx = max(cx - x, x + w - cx)
+    var fy = max(cy - y, y + h - cy)
+    var r_end = (fx * fx + fy * fy) ** 0.5 * stop
+    p.rect(x, y, w, h, outer, radius)
+    # t where any channel's rounded value changes, from the outside in
+    var ts = List[Float64]()
+    for ch in range(3):
+        var a = Float64(Int((inner >> UInt32(8 * ch)) & 0xFF))
+        var b = Float64(Int((outer >> UInt32(8 * ch)) & 0xFF))
+        if a == b:
+            continue
+        var lo = Int(min(a, b))
+        var hi = Int(max(a, b))
+        for v in range(lo, hi):
+            ts.append(((Float64(v) + 0.5) - a) / (b - a))  # where a + (b − a)·t crosses v + .5
+    # sort descending
+    for i in range(len(ts)):
+        for j in range(i + 1, len(ts)):
+            if ts[j] > ts[i]:
+                var tmp = ts[i]
+                ts[i] = ts[j]
+                ts[j] = tmp
+    p.push_clip(x, y, w, h)
+    for t in ts:
+        var tt = t - 1e-6  # (the colour just inside this boundary)
+        var c = UInt32(0xFF000000)
+        for ch in range(3):
+            var a = Float64(Int((inner >> UInt32(8 * ch)) & 0xFF))
+            var b = Float64(Int((outer >> UInt32(8 * ch)) & 0xFF))
+            c |= UInt32(Int(a + (b - a) * tt + 0.5)) << UInt32(8 * ch)
+        p.circle(cx, cy, t * r_end, c)
+    p.pop_clip()

@@ -11,6 +11,11 @@ from mojoui.notesshell import (
 )
 from mojoui.pagesheet import PageSheet
 from mojoui.buzanmap import BuzanMap, draw_minimap
+from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, word_match, relative_time, short_date, utc_epoch
+from mojoui.shared import environment
+from mojoui.islandcard import IslandCard, CardTile
+from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
+from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
@@ -81,6 +86,8 @@ def notebook_icon(name: String) -> String:
 @fieldwise_init
 struct NoteRec(Copyable, Movable):
     var id: Int
+    var created: String
+    var updated: String
     var title: String
     var kind: String
     var content: String
@@ -100,6 +107,10 @@ struct WebShell(Movable):
     var sidebar: Bool
     var boxes: Boxes
     var problem: String
+    var searching: Bool
+    var card_open: Bool
+    var settings_open: Bool
+    var omni: Omnibar
     var px: Float64  # where the pointer is (HOVER), -1: away
     var py: Float64
 
@@ -117,6 +128,10 @@ struct WebShell(Movable):
         self.problem = ""
         self.px = -1
         self.py = -1
+        self.searching = False
+        self.card_open = False
+        self.settings_open = False
+        self.omni = Omnibar()
         try:
             self.load()
         except e:
@@ -126,7 +141,7 @@ struct WebShell(Movable):
     def load(mut self) raises:
         var db = Database(self.db_path)
         self.notes.clear()
-        var st = db.prepare("SELECT id, title, note_type, content, IFNULL(notebook_id, 0), icon, icon_tint FROM notes ORDER BY updated_at DESC, id DESC")
+        var st = db.prepare("SELECT id, title, note_type, content, IFNULL(notebook_id, 0), icon, icon_tint, created_at, updated_at FROM notes ORDER BY updated_at DESC, id DESC")
         while st.step():
             var title = st.text(1)
             var kind = st.text(2)
@@ -135,7 +150,7 @@ struct WebShell(Movable):
             if emoji == "":
                 emoji = guess_emoji(title, kind)
                 tint = tint_of(emoji)
-            self.notes.append(NoteRec(st.int(0), title, kind, st.text(3), st.int(4), emoji, tint))
+            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, st.text(3), st.int(4), emoji, tint))
         self.panel.notes.clear()
         for ref n in self.notes:
             self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
@@ -202,12 +217,13 @@ struct WebShell(Movable):
         if self.sidebar:
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
-                          44, not self.sidebar and _in(self.px, self.py, 16, 16, 44))
-        draw_round_button(p, self.boxes, "#search-button", w - 60, 16, "search", k, self.sk, self.sk.panel, 44, _in(self.px, self.py, w - 60, 16, 44))
+                          44, not self.sidebar and not self.searching and not self.settings_open and _in(self.px, self.py, 16, 16, 44))
+        draw_round_button(p, self.boxes, "#search-button", w - 60, 16, "search", k, self.sk, self.sk.panel, 44, not self.searching and not self.settings_open and _in(self.px, self.py, w - 60, 16, 44))  # (an overlay takes the pointer)
         if i >= 0:
             ref n = self.notes[i]
             var island_emoji = n.emoji if n.kind != "page" else String("")
-            draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
+            if not self.card_open:
+                draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
             self.boxes.add("#workspace", left, 0, w - left, h)
             if n.kind == "mindmap":
                 var mw = w - left - 4 - 12
@@ -219,8 +235,111 @@ struct WebShell(Movable):
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
                 draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
                 draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
-            if n.kind == "page":
+            if n.kind == "page" and not False:
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
+        self.paint_overlays(p, w, h, k)
+
+    def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
+        var i = self.note_index(self.current)
+        if self.card_open and i >= 0:
+            var c = IslandCard()
+            c.title = self.notes[i].title
+            c.status = "Saved on this device"
+            c.status_dot = self.sk.c2
+            c.place = "Inbox"
+            c.wide_id = "#share-focus"
+            c.wide_label = "Focus"
+            c.wide_icon = "focus"
+            c.wide_key = "Ctrl ."
+            var ids: List[String] = ["#share-print", "#share-png", "#share-backup", "#share-markdown", "#share-vault", "#share-icon", "#share-link", "#share-props", "#top-properties", "#clear-note"]
+            var labels: List[String] = ["Print", "Picture", "Backup", "Markdown", "Obsidian", "Icon", "Link note", "Properties", "Settings", "Clear all"]
+            var icons: List[String] = ["printer", "image-down", "archive", "file-down", "folder-down", "wand-sparkles", "link", "file-text", "sliders-horizontal", "eraser"]
+            for t in range(len(ids)):
+                c.tiles.append(CardTile(ids[t], labels[t], icons[t], t == 9))
+            c.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) + 16, w - 16, k, self.sk)
+        if self.searching:
+            self.omni.draw(p, self.boxes, w, h, k, self.sk)
+        if self.settings_open:
+            var sw = SettingsWindow()
+            var g1 = List[SettingsPage]()
+            g1.append(SettingsPage("Appearance", "sun", "How Personal Note looks. A skin applies at once.", ("Paper" if self.panel.skin_name == "paper" else ("Night" if self.panel.skin_name == "night" else "Crayon"))))
+            g1.append(SettingsPage("Writing", "pen-line", "Fonts and sizes for what you write.", "Mono · 24"))
+            var g2 = List[SettingsPage]()
+            g2.append(SettingsPage("AI", "sparkles", "Not in the native app yet.", "Claude Code"))
+            g2.append(SettingsPage("Plugins", "layout-grid", "Not in the native app yet.", "3 on"))
+            g2.append(SettingsPage("Voice", "mic", "Not in the native app yet.", "Not installed"))
+            g2.append(SettingsPage("Search by meaning", "globe", "Not in the native app yet.", "Not installed"))
+            g2.append(SettingsPage("X bookmarks", "bookmark", "Not in the native app yet.", "Not connected"))
+            var g3 = List[SettingsPage]()
+            g3.append(SettingsPage("Locked notes", "lock", "Not in the native app yet.", ""))
+            g3.append(SettingsPage("Advanced", "gauge", "Not in the native app yet.", ""))
+            sw.groups.append(g1^)
+            sw.groups.append(g2^)
+            sw.groups.append(g3^)
+            var body = sw.draw(p, self.boxes, w, h, k, self.sk)
+            skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name)
+
+    def now(self) -> Int:
+        """The clock (PNOTE_NOW: a fixed UTC time, for comparing with a reference shot then)."""
+        var fixed = environment("PNOTE_NOW", "")
+        if fixed != "":
+            return utc_epoch(fixed)
+        return Int(external_call["time", Int](0))
+
+    def search(mut self):
+        """The omnibar's groups for the query: notes and actions with a word starting with it (the web's word search)."""
+        var notes = List[OmniRow]()
+        var first = -1
+        for i in range(len(self.notes)):
+            ref n = self.notes[i]
+            if self.omni.query == "" or word_match(n.title, self.omni.query):
+                if first < 0:
+                    first = i
+                notes.append(OmniRow(n.emoji, "", self.sk.tint(n.tint), n.title, "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map"),
+                                     "Inbox", self.sk.ink, relative_time(n.updated, self.now())))
+        var acts = List[OmniRow]()
+        var names: List[String] = ["New page", "New canvas", "New mind map", "Link to a note…", "Open settings", "Switch skin"]
+        var icons: List[String] = ["file-pen", "file-text", "git-fork", "link", "sliders-horizontal", "palette"]
+        for i in range(len(names)):
+            if self.omni.query != "" and word_match(names[i], self.omni.query):
+                acts.append(OmniRow("", icons[i], 0, names[i], "", "", 0, ""))
+        self.omni.pills.clear()
+        self.omni.pills.append(OmniPill("All", ""))
+        self.omni.pills.append(OmniPill("Notes", String(len(notes))))
+        self.omni.pills.append(OmniPill("Notebooks", "0"))
+        self.omni.pills.append(OmniPill("Actions", String(len(acts))))
+        self.omni.groups.clear()
+        self.omni.groups.append(OmniGroup("Notes", notes^))
+        self.omni.groups.append(OmniGroup("Actions", acts^))
+        self.omni.selected = 0
+        if first >= 0:
+            ref n = self.notes[first]
+            self.omni.preview_kind = "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map")
+            self.omni.preview_edited = relative_time(n.updated, self.now())
+            self.omni.preview_created = short_date(n.created)
+
+    def key(mut self, name: String, mods: Int) -> Bool:
+        if (self.card_open or self.settings_open) and name == "Escape":
+            self.card_open = False
+            self.settings_open = False
+            return True
+        if not self.searching:
+            return False
+        if name == "Escape":
+            self.searching = False
+            self.card_open = False
+        elif name == "Backspace":
+            var b = self.omni.query.as_bytes()
+            if len(b) > 0:
+                var cut = String(self.omni.query[byte=0:len(b) - 1])
+                self.omni.query = cut
+                self.search()
+        elif name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
+            self.omni.query += name
+            self.search()
+        else:
+            return False
+        return True
 
     # ------------------------------------------------ input
 
@@ -234,6 +353,29 @@ struct WebShell(Movable):
     def tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button"])
+        if self.settings_open:
+            var sh = self.boxes.hit_any(x, y, [".sw-skin:", "#close-properties"])
+            if sh == "#close-properties":
+                self.settings_open = False
+            elif sh.startswith(".sw-skin"):
+                var names: List[String] = ["crayon", "paper", "night"]
+                var at = 0 if sh == ".sw-skin" else (1 if sh == ".sw-skin@2" else 2)
+                self.set_skin(names[at])
+            return True
+        if self.card_open:
+            var ch = self.boxes.hit_any(x, y, ["#top-properties"])
+            self.card_open = False
+            if ch == "#top-properties":
+                self.settings_open = True
+            return True
+        if hit == "#share-button":
+            self.card_open = True
+            return True
+        if hit == "#search-button":
+            self.searching = True
+            self.omni.query = ""
+            self.search()
+            return True
         if hit == "#toggle-sidebar":
             self.sidebar = not self.sidebar
             return True

@@ -410,6 +410,10 @@ def native_shot(screen, ref, outdir, skin=None):
     cfg.mkdir()
     env = dict(os.environ, PNOTE_DB=str(db), PNOTE_SKIN=skin, PNOTE_BOXES=str(boxes), OMX_CONFIG=str(cfg), PNOTE_DIR=str(cfg),
                MOJOUI_TEST=";".join(steps), MOJOUI_SHOT="")
+    # (added 11-19, D-7913) the app's clock is the web shot's: "Edited now" means the same moment in both
+    meta = json.loads((ref / "meta.json").read_text()) if (ref / "meta.json").exists() else {}
+    if meta.get("shots", {}).get(screen):
+        env["PNOTE_NOW"] = meta["shots"][screen]
     r = run(["scripts/testscreen", str(APP)], 600, env=env)
     log = r.stdout + r.stderr
     (outdir / f"{screen}.log").write_text(log)

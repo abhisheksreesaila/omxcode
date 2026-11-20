@@ -146,10 +146,12 @@ await p.goto(`${BASE}/notes`)
 await p.locator('#island-title').waitFor()
 await p.evaluate(() => document.fonts.ready)
 await p.waitForTimeout(1500)
+const shotTimes = {}
 const shot = async (name) => {
   await p.evaluate(() => document.fonts.ready)
   await p.waitForTimeout(900)
   await p.screenshot({ path: path.join(OUT, `${name}.png`) })
+  shotTimes[name] = new Date().toISOString()
   fs.writeFileSync(path.join(OUT, `${name}.boxes.json`), JSON.stringify(await boxes(p), null, 1))
   await dump(p, name)
   console.log('ref: shot', name)
@@ -182,7 +184,7 @@ const widths = await tp.evaluate(async (lines) => {
   return Object.fromEntries(lines.map((l) => [l.id, document.getElementById(l.id).getBoundingClientRect().width * devicePixelRatio]))
 }, FIX.textlines)
 fs.writeFileSync(path.join(OUT, 'textwidths.json'), JSON.stringify({ dpr: DPR, widths }, null, 1))
-fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ dpr: DPR, viewport: [W, H], chromium: browser.version(), ids, when: new Date().toISOString() }, null, 1))
+fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ dpr: DPR, viewport: [W, H], chromium: browser.version(), ids, shots: shotTimes, when: new Date().toISOString() }, null, 1))
 await browser.close()
 stop()
 if (unknownFamilies.size) { console.error(`ref: the web asked for fonts not in fonts/: ${[...unknownFamilies].join(', ')}`); process.exit(3) }

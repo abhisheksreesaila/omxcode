@@ -754,6 +754,10 @@ struct Main(App):
                 if self.web[0].hover(event.x, event.y):
                     self.version += 1
                 return
+            if m == GESTURE and event.number == KEY:
+                if self.web[0].key(event.text, Int(event.dx)):
+                    self.version += 1
+                return
             if m == GESTURE and event.number == TAP:
                 if self.web[0].tap(event.x, event.y):
                     self.version += 1

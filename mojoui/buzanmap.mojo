@@ -11,7 +11,7 @@ from std.math import sqrt, tanh, pow
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
-from mojoui.notesshell import Boxes, draw_shadows, draw_bordered
+from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
 
 comptime SERIF = "Source Serif 4"
@@ -91,7 +91,7 @@ struct BuzanMap(Movable):
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, w: Float64, h: Float64, zoom_in: Float64, sk: Skin, label: String):
         draw_shadows(p, x0, y0, w, h, sk.radius, sk.shadow1)
-        p.rect(x0, y0, w, h, SHEET, sk.radius)
+        draw_radial_steps(p, x0, y0, w, h, 0.48, 0.44, CARD, SHEET, 0.74, sk.radius)  # (.mindmap-stage's background)
         bx.add("#mindmap-host", x0, y0, w, h)
         bx.add("[Mind map canvas]", x0, y0, w, h)
         bx.add("[" + label + " mind map]", x0, y0, w, h)
@@ -138,9 +138,11 @@ struct BuzanMap(Movable):
                 draw_shadows(p, lx, ly, w2, h2, 20 * zoom, sh)
                 p.rect(lx, ly, w2, h2, t.color, 20 * zoom)
                 _smile(p, cx + t.x * zoom, cy + t.y * zoom, s[0], s[1], zoom)
-                var st = TextStyle(SERIF, 700, False, 28 * zoom)
+                # (Chromium draws the root's words at 20 px though layout.js sizes the card from a 28 px measure:
+                # measured from the reference, 88 px wide at 102 %; D-7912)
+                var st = TextStyle(SERIF, 700, False, 20 * zoom)
                 st.exact = True
-                p.run(st, t.text, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(28) * zoom, rgba(255, 255, 255), ALIGN_CENTER)
+                p.run(st, t.text, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, rgba(255, 255, 255), ALIGN_CENTER)
                 # the group's box reaches the add handles: 18 beyond the card plus a handle's 17 hit circle
                 var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
                 var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
