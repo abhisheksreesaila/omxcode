@@ -14,6 +14,7 @@ from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
+from mojoui.fonttext import TextStyle, shape, draw_run, Clip, run_x
 
 comptime OP_RECT = 1  # x, y, w, h, radius
 comptime OP_CIRCLE = 2  # x, y, radius
@@ -24,6 +25,7 @@ comptime OP_CLIP = 6  # x, y, w, h: what follows (until OP_UNCLIP) is cut to thi
 comptime OP_UNCLIP = 7
 comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a video frame), scaled to the rect
 comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
+comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spacing (+ "family\x1ftext"): a run in a real face (mojoui.fonttext, goal 79)
 comptime STRIDE = 6  # floats per op
 
 
@@ -104,6 +106,11 @@ trait Painter:
         """`text` with its baseline at `baseline`, starting at x (or centred on it, or ending at it: `align`)."""
         ...
 
+    def run(mut self, st: TextStyle, text: String, x: Float64, baseline: Float64, color: UInt32, align: Int):
+        """`text` in a real face (mojoui.fonttext: shaped, fallback faces, glyphs rasterized at device pixels), its
+        baseline at `baseline`, at x by `align` (fonttext.ALIGN_*). Sizes are the layer's units (layout px)."""
+        ...
+
 
 def blit(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
     """Pixels scaled (nearest) into a rect of the surface."""
@@ -125,12 +132,14 @@ struct SurfacePainter(Painter, Movable):
     var tx: Float64  # the current layer's transform (layer_transform)
     var ty: Float64
     var tk: Float64
+    var clips: List[Clip]  # push_clip's rects in device px (runs honour them; goal 79)
 
     def __init__(out self, var s: Surface):
         self.s = s^
         self.tx = 0
         self.ty = 0
         self.tk = 1
+        self.clips = List[Clip]()
 
     def width(self) -> Int:
         return self.s.width
@@ -164,10 +173,28 @@ struct SurfacePainter(Painter, Movable):
         self.tk = k
 
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
-        pass  # (pixels are measured with the same metrics they're drawn with: nothing spills)
+        var k = self.tk
+        var c = Clip(Int(x * k + self.tx + 0.5), Int(y * k + self.ty + 0.5), Int((x + w) * k + self.tx + 0.5), Int((y + h) * k + self.ty + 0.5))
+        if len(self.clips) > 0:
+            ref o = self.clips[len(self.clips) - 1]
+            c = Clip(max(c.x0, o.x0), max(c.y0, o.y0), min(c.x1, o.x1), min(c.y1, o.y1))
+        self.clips.append(c)
 
     def pop_clip(mut self):
-        pass
+        if len(self.clips) > 0:
+            _ = self.clips.pop()
+
+    def clip(self) -> Clip:
+        if len(self.clips) > 0:
+            return self.clips[len(self.clips) - 1]
+        return Clip(0, 0, self.s.width, self.s.height)
+
+    def run(mut self, st: TextStyle, text: String, x: Float64, baseline: Float64, color: UInt32, align: Int):
+        if text == "":
+            return
+        var r = shape(st, text)
+        var k = self.tk
+        draw_run(self.s, r, run_x(r, x, align) * k + self.tx, baseline * k + self.ty, k, color, self.clip())
 
     def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
         blit(self.s, pixels, pw, ph, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk)
@@ -401,6 +428,28 @@ struct Scene(Painter, Movable, Copyable):
         self.texts.append(text)
         self._op(OP_TEXT, x, baseline, size, slant, Float64(weight), Float64(align), color, Int32(len(self.texts) - 1))
 
+    def run(mut self, st: TextStyle, text: String, x: Float64, baseline: Float64, color: UInt32, align: Int):
+        if text == "":
+            return
+        self.texts.append(st.family + "\x1f" + text)
+        self._op(OP_RUN, x, baseline, st.size, Float64(st.weight), Float64(align * 2 + (1 if st.italic else 0)), st.letter_spacing, color,
+                 Int32(len(self.texts) - 1))
+
+    def run_style(self, op: Int) -> TextStyle:
+        """An OP_RUN's style (its family, weight, italic, size, letter spacing)."""
+        var t = self.text_at(op)
+        var cut = t.find("\x1f")
+        var st = TextStyle(String(t[byte=:cut]), Int(self.num(op, 3)), (Int(self.num(op, 4)) & 1) == 1, self.num(op, 2))
+        st.letter_spacing = self.num(op, 5)
+        return st
+
+    def run_text(self, op: Int) -> String:
+        var t = self.text_at(op)
+        return String(t[byte=t.find("\x1f") + 1:])
+
+    def run_align(self, op: Int) -> Int:
+        return Int(self.num(op, 4)) // 2
+
     def num(self, op: Int, j: Int) -> Float64:
         return Float64(self.nums[op * STRIDE + j])
 
@@ -614,3 +663,10 @@ struct Scene(Painter, Movable, Copyable):
             elif kind == OP_TEXT:
                 font.draw(s, self.text_at(op), self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c, Int(self.num(op, 4)), Int(self.num(op, 5)),
                           self.num(op, 3))
+            elif kind == OP_RUN:
+                var r = shape(self.run_style(op), self.run_text(op))
+                var cl = Clip(0, 0, s.width, s.height)
+                if len(clips) > 0:
+                    ref q = clips[len(clips) - 1]
+                    cl = Clip(Int(q[0] + 0.5), Int(q[1] + 0.5), Int(q[2] + 0.5), Int(q[3] + 0.5))
+                draw_run(s, r, run_x(r, self.num(op, 0), self.run_align(op)) * tk + tx, self.num(op, 1) * tk + ty, tk, c, cl)

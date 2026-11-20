@@ -49,6 +49,7 @@ The Workbook is a showcase, but the product is the component library. Before bui
 - FFI: scalars and `(ptr, len)` strings only (`s.unsafe_ptr()`, `s.byte_length()`); never structs by value. Exports use `@export` + `abi("C")` and cannot `raise`.
 - Linking a Mojo shared library: add `-Xlinker -rpath -Xlinker '$ORIGIN'` (Mojo sets its own RUNPATH).
 - Inspect Mach-O (iOS) objects on Linux with `llvm-nm` / `llvm-objdump`, not GNU `nm`.
+- A buffer whose address goes to C (`Int(list.unsafe_ptr())`) must outlive the call: Mojo ends a value's life at its last use, so put a keep-alive `_ = list` *after the last read* (the `_ = list` itself ends the life there; goal 79's FreeType crash and zeroed axis tags).
 - A `SIMD` vector indexed with a run-time index as scratch space (`stack[sp] = v`) segfaults the compiler (no message, exit 139): use `stack_allocation[n, T]()`. Bisect compiler crashes with tiny probe files built in parallel.
 - The compiler tries to reach `telemetry.modular.com`; in a sandbox that warning is harmless.
 - When unsure of an API, fetch the docs as Markdown: append `.md` to any `mojolang.org/docs/...` URL, or start from `https://mojolang.org/llms.txt`. Don't guess.
