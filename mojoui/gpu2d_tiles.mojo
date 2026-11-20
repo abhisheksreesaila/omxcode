@@ -38,6 +38,8 @@ comptime TILE_TEX = TILE + 2 * TILE_BORDER  # a tile texture's side
 comptime TILE_SETTLE_NS = 120_000_000  # a zoom held this long gets tiles at its own scale
 comptime TILE_BUDGET_OPS = 2500  # rasters beyond those a frame must have (ring, settling): ops built per frame at most
 # (batch building, merging and submitting a tile costs ~1–2 µs an op, more when its glyphs are new at that size)
+comptime TILE_MIN_OPS = 400  # (D-7949) a layer that asks for tiles but has fewer ops is drawn directly: rastering tiles
+# costs more than drawing a small layer (a 3-object board's first frame after a note switch: tiles 8.3 ms)
 comptime TILE_POOL = 128  # tile textures at most (128 × 514² × 4 B ≈ 135 MB of GPU memory)
 comptime TILE_PAD_PX = 3.0  # device px round an op's bounds (antialiasing, glyph snapping)
 

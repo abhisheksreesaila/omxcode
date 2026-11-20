@@ -5569,6 +5569,8 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
         if host[].canvases[ci].hands != hands0:
             walls.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
             times.append(ev + host[].canvases[ci].draw_ms)
+            if getenv("MOJOUI_TRACE_FRAMES") == "1":
+                print("TRACE: " + label + " step: event " + String(round(ev, 2)) + " draw " + String(round(host[].canvases[ci].draw_ms, 2)), flush=True)
         settle()
     sort(walls)
     var srt = times.copy()

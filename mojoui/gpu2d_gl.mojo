@@ -46,7 +46,7 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
-from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX
+from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TILE, TILE_TEX
 
 comptime RING = 6  # textures in the ring: one on screen, one being drawn, the rest waiting for the toolkit to let go
 
@@ -2130,7 +2130,7 @@ struct GPU2D(Movable):
             var span = scene.layer_range(i)
             var tr = layer_traits(scene, i, open)  # (D-7930: shared with the Metal renderer)
             open = tr.open
-            if scene.layer_tiled[i] and tr.fixed and self.tiles_on and owner != 0:
+            if scene.layer_tiled[i] and tr.fixed and self.tiles_on and owner != 0 and span[1] - span[0] >= TILE_MIN_OPS:
                 tiled[i] = True
                 dirty[i] = False
                 self.fills[i] = 0
