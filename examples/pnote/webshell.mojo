@@ -126,6 +126,7 @@ struct WebShell(Movable):
     var settings_open: Bool
     var omni: Omnibar
     var bench_kind: Int
+    var title_focus: Bool  # the title island's button has the keyboard focus (a rename just ended by Enter)
     var px: Float64  # where the pointer is (HOVER), -1: away
     var py: Float64
     var board: ObjectLayer  # the open canvas note's objects
@@ -166,6 +167,7 @@ struct WebShell(Movable):
         self.px = -1
         self.py = -1
         self.bench_kind = 0
+        self.title_focus = False
         self.searching = False
         self.card_open = False
         self.settings_open = False
@@ -388,7 +390,7 @@ struct WebShell(Movable):
             ref n = self.notes[i]
             var island_emoji = n.emoji if n.kind != "page" else String("")
             if not self.card_open:
-                draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
+                draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji, self.title_focus)
             self.boxes.add("#workspace", left, 0, w - left, h)
             if n.kind == "mindmap" and not n.secure:
                 var mw = w - left - 4 - 12
@@ -638,6 +640,8 @@ struct WebShell(Movable):
                 return True
         if self.on_canvas():
             var r = self.tools.key(name, mods, self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
+            if r and (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y"):  # (an undo or redo by key, as by the island)
+                self.tools.hug_routes(self.board, self.look)
             self.save_canvas()
             if r:
                 return True
@@ -686,6 +690,7 @@ struct WebShell(Movable):
                 var t = self.card.title.copy()
                 self.rename(t)
                 self.card_open = False
+                self.title_focus = True  # (Enter gives the focus back to the island's button: the web shows its ring)
             return r != 0
         if (self.card_open or self.settings_open) and name == "Escape":
             self.card_open = False
@@ -816,6 +821,7 @@ struct WebShell(Movable):
 
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
+        self.title_focus = False  # (a click moves the focus: the ring goes)
         if self.on_canvas():
             if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button"]) != "":
                 return False
@@ -879,8 +885,10 @@ struct WebShell(Movable):
                 return True
         if hit == "#undo":
             self.tools.undo(self.board)
+            self.tools.hug_routes(self.board, self.look)
         elif hit == "#redo":
             self.tools.redo(self.board)
+            self.tools.hug_routes(self.board, self.look)
         elif hit == "#zoom-in" or hit == "#zoom-out":
             self.view = self.tools.zoom_step(self.view, 1 if hit == "#zoom-in" else -1, self.win_w, self.win_h, self.cols, self.rows)
         elif hit == "#zoom-fit":
@@ -937,6 +945,7 @@ struct WebShell(Movable):
 
     def tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
+        self.title_focus = False
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button"])
         if self.settings_open:
             var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])

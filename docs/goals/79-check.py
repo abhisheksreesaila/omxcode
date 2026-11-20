@@ -52,12 +52,14 @@ CRISP_MIN = 0.9       # M1: edge sharpness of a 4× zoomed raster vs a direct 4�
 BOX_TOL = 2.0         # M2/M3: every named element's box, logical px
 FILL_TOL = 4          # M2/M3: each element's sampled fill, levels per channel
 SSIM_MIN = 0.95       # M2/M3/M4: the whole frame's SSIM, grey, device px
-# (added 11-20, D-7931, a strengthening) M4 per step: where the web step changed the picture (grey moved > 24 levels, grown
-# 6 device px; at least REGION_MIN_AREA px), native's shot after the step must match the web's there (SSIM over the
-# region ≥ REGION_SSIM) and be nearer it than native's shot from before the step (by ≥ REGION_GAIN)
+# (D-7931, then D-7942 set by the main session as contract author) M4 per step: where the web step changed the picture
+# (grey moved > 24 levels, grown 6 device px; at least REGION_MIN_AREA px), native's shot after the step must look more
+# like the web's shot after the step than like the web's shot before it: SSIM(native, web after) − SSIM(native, web
+# before), over the region, ≥ REGION_MARGIN. (Replaces D-7931's absolute region bar of 0.80, which small text regions
+# missed on antialiasing alone; the margin was chosen from the data, D-7942: done steps read +0.16…+0.86, the
+# skipped-step self-test −0.32.) The whole frame keeps GOAL.md's bar (SSIM_MIN) and the saved notes must be equal.
 REGION_MIN_AREA = 150
-REGION_SSIM = 0.80
-REGION_GAIN = 0.02
+REGION_MARGIN = 0.10
 STEPS_MIN = 25        # M4
 P95 = 8.3             # M6: silky
 MAX = 16.7
@@ -314,8 +316,8 @@ def changed_region(before, after, level=24, grow=6):
 
 
 def step_region(web_prev, web_cur, nat_prev, nat_cur):
-    """(D-7931) The region the web step changed and how native's shots match the web's there: (area px, SSIM of native's
-    shot after the step, SSIM of native's shot before it), or None when the web step changed nothing visible."""
+    """(D-7931, D-7942) The region the web step changed and how native's shot after the step reads there: (area px,
+    SSIM(native after, web after), SSIM(native after, web before)), or None when the web step changed nothing visible."""
     wp, wc, npv, nc = grey(web_prev), grey(web_cur), grey(nat_prev), grey(nat_cur)
     if not (wp.shape == wc.shape == npv.shape == nc.shape):
         return (0, 0.0, 0.0)
@@ -323,7 +325,7 @@ def step_region(web_prev, web_cur, nat_prev, nat_cur):
     area = int(m.sum())
     if area < REGION_MIN_AREA:
         return None
-    return (area, float(ssim_map(nc, wc)[m].mean()), float(ssim_map(npv, wc)[m].mean()))
+    return (area, float(ssim_map(nc, wc)[m].mean()), float(ssim_map(nc, wp)[m].mean()))
 
 
 def region_verdicts(steps, web_dir, nat_dir):
@@ -341,10 +343,10 @@ def region_verdicts(steps, web_dir, nat_dir):
         if r is None:
             out.append((i, "", "no visible change"))
             continue
-        area, now, before = r
-        bad = now < REGION_SSIM or now < before + REGION_GAIN
-        out.append((i, f"step {i} ({st['name']}): where the web changed ({area} px) native reads {now:.3f} (before the step {before:.3f})" if bad else "",
-                    f"{area} px {now:.3f}/{before:.3f}"))
+        area, after, before = r
+        bad = after - before < REGION_MARGIN
+        out.append((i, f"step {i} ({st['name']}): where the web changed ({area} px) native reads {after:.3f} against the web after the step and {before:.3f} against the web before it (gain {after - before:+.3f} < {REGION_MARGIN})" if bad else "",
+                    f"{area} px after {after:.3f} before {before:.3f} gain {after - before:+.3f}"))
     return out
 
 

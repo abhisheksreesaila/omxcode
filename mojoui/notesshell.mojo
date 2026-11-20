@@ -235,9 +235,47 @@ def title_island_width(title: String, has_icon: Bool) -> Float64:
     return 2 + (44.0 if has_icon else 18.0) + tw + 18
 
 
+def _curve_inset(d: Float64, r: Float64) -> Float64:
+    """How far in a rounded corner of radius r is at distance d from its straight edge (0 past the corner)."""
+    if d >= r:
+        return 0.0
+    var e = r - d
+    return r - sqrt(max(r * r - e * e, 0.0))
+
+
+def draw_inner_ring[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, ix: Float64, iy: Float64, iw: Float64, ih: Float64,
+                                ir: Float64, color: UInt32, offset: Float64 = 4, width: Float64 = 2):
+    """A keyboard focus ring inside a control (CSS `outline: <width> solid; outline-offset: -<offset>px`: a rect frame
+    from offset − width to offset inside the box (x, y, w, h)), cut by the rounded island it sits in (ix, iy, iw, ih,
+    radius ir): its bars end where the island's curve does (D-7943)."""
+    var o = offset - width  # (the frame's outer edge, inside the box)
+    var fx0 = x + o
+    var fy0 = y + o
+    var fx1 = x + w - o
+    var fy1 = y + h - o
+
+    for side in range(2):  # top and bottom bars
+        var by = fy0 if side == 0 else fy1 - width
+        var d = (by + width / 2) - iy if side == 0 else iy + ih - (by + width / 2)
+        var cut = _curve_inset(d, ir)
+        var a = max(fx0, ix + cut)
+        var b = min(fx1, ix + iw - cut)
+        if b > a:
+            p.rect(a, by, b - a, width, color, 0)
+    for side in range(2):  # left and right bars, between the top and bottom ones
+        var bx0 = fx0 if side == 0 else fx1 - width
+        var d = (bx0 + width / 2) - ix if side == 0 else ix + iw - (bx0 + width / 2)
+        var cut = _curve_inset(d, ir)
+        var a = max(fy0 + width, iy + cut)
+        var b = min(fy1 - width, iy + ih - cut)
+        if b > a:
+            p.rect(bx0, a, width, b - a, color, 0)
+
+
 def draw_title_island[P: Painter](mut p: P, mut bx: Boxes, slot_x0: Float64, slot_x1: Float64, title: String, emoji: String, tint: UInt32,
-                                  k: Float64, sk: Skin, face_emoji: String = ""):
-    """The note's title on an island centred over the note area (with its emoji button for canvas and map notes)."""
+                                  k: Float64, sk: Skin, face_emoji: String = "", focused: Bool = False):
+    """The note's title on an island centred over the note area (with its emoji button for canvas and map notes).
+    focused: the title button has the keyboard's focus (after a rename by Enter): the web's focus ring inside it."""
     var has_icon = emoji != ""
     var w = title_island_width(title, has_icon)
     var x = Float64(Int(((slot_x0 + slot_x1) / 2 - w / 2) * 2 + 0.5)) / 2  # (centred as flex does: half-px steps)
@@ -256,6 +294,9 @@ def draw_title_island[P: Painter](mut p: P, mut bx: Boxes, slot_x0: Float64, slo
     var tw = measure(st, title)
     text_normal(p, st, title, title_x, y + (44 - line_metrics(st).normal_height()) / 2, sk.ink)
     bx.add("title.words", title_x, y + (44 - line_metrics(st).normal_height()) / 2, tw, line_metrics(st).normal_height())
+    if focused:  # (the title button: the island less its emoji button)
+        var hx = x + 1 + (44.0 if has_icon else 0.0)
+        draw_inner_ring(p, hx, y + 1, x + w - 1 - hx, 42, x, y, w, 44, 22, sk.accent)
 
 
 # ------------------------------------------------ the notes panel

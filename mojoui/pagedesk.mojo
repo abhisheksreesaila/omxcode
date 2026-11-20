@@ -837,6 +837,17 @@ struct BoardTools(Movable):
         if layer.redo():
             self.changed = True
 
+    def hug_routes(self, mut layer: ObjectLayer, mut look: BoardLook):
+        """After an undo or redo: connectors at Markdown texts route to the words' box (the web draws those texts again
+        from the document, hugging their words, and routes by what it drew; D-7943)."""
+        var widths = Dict[Int, Float64]()
+        for ref o in layer.objs:
+            if o.kind == TEXT and o.markdown and len(layer.connectors_of(o.id)) > 0:
+                var b = self.selection_box(look, o)
+                widths[o.id] = b[2]
+        if len(widths) > 0:
+            layer.route_widths(widths)
+
     def zoom_step(self, view: DeskView, direction: Int, view_w: Float64, view_h: Float64, columns: Int, rows: Int) -> DeskView:
         """The zoom island's − and +: a step of 1.25 about the window's centre, kept inside the margins (zoomTarget)."""
         var s = view.scale * (ZOOM_STEP if direction > 0 else 1 / ZOOM_STEP)

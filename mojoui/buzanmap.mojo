@@ -181,9 +181,15 @@ struct BuzanMap(Movable):
             var st = TextStyle(SERIF, 700, False, 28)
             st.exact = True
             return (max(180.0, measure(st, self.topics[i].text) + 50), 76.0)
-        var st = TextStyle(SERIF, 600, False, 20)
+        var size = self.idea_size(i)
+        var st = TextStyle(SERIF, 600, False, size)
         st.exact = True
-        return (max(58.0, measure(st, self.topics[i].text)) + 26, 40.0)
+        return (max(58.0, measure(st, self.topics[i].text)) + 26, size + 20)
+
+    def idea_size(self, i: Int) -> Float64:
+        """An idea's words: its own size (makeNode's by depth for a new one), else 20 (layout.js: node.fontSize || 20;
+        the weight stays 600: style.css's .map-node-label beats the SVG attribute, D-7943)."""
+        return self.topics[i].font_size if self.topics[i].font_size > 0 else 20.0
 
     def frame(self, i: Int) -> Frame:
         var s = self.card_size(i)
@@ -314,13 +320,14 @@ struct BuzanMap(Movable):
                 sh.append(Shadow(0, 3, 7, 0, rgba(57, 48, 37, 20)))
                 draw_shadows(p, lx, ly, w2, h2, 6 * zoom, sh)
                 draw_bordered(p, lx - 1, ly - 1, w2 + 2, h2 + 2, 6 * zoom + 1, CARD, t.color, 2)
-                var st = TextStyle(SERIF, 600, False, 20 * zoom)
+                var size = self.idea_size(i)
+                var st = TextStyle(SERIF, 600, False, size * zoom)
                 st.exact = True
                 var words = self.edit_text if i == self.editing else t.text
                 if i == self.editing and self.edit_all:
                     var ww = measure(st, words)
-                    p.rect(cx + t.x * zoom - ww / 2, cy + (t.y - 11) * zoom, ww, 22 * zoom, with_alpha(hexc("#3d8fe8"), 0.25), 0)
-                p.run(st, words, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, LABEL, ALIGN_CENTER)
+                    p.rect(cx + t.x * zoom - ww / 2, cy + (t.y - 11 * size / 20) * zoom, ww, 22 * size / 20 * zoom, with_alpha(hexc("#3d8fe8"), 0.25), 0)
+                p.run(st, words, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(size) * zoom, LABEL, ALIGN_CENTER)
                 bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
         # the selection: dashed ring and four add handles
         if self.selected >= 0 and self.selected < len(self.topics):

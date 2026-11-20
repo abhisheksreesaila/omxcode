@@ -383,6 +383,8 @@ struct ObjectLayer(Movable):
     var stamp_now: Int
     # (D-7940) a grid built for these objects (ids and z by index) stays when only boxes moved: the moved ones are
     # `loose` (scanned by every query, besides the grid, whose stale entries are filtered by the current boxes)
+    var route_w: Dict[Int, Float64]  # (D-7943) an object's width for connector routing when it isn't its box's (a text
+    # drawn from its document hugs its words: Personal Note's Leafer text after an undo)
     var built_id: List[Int]
     var built_z: List[Int]
     var loose: List[Int]
@@ -433,6 +435,7 @@ struct ObjectLayer(Movable):
         self.cell_items = List[Int]()
         self.stamp = List[Int]()
         self.stamp_now = 0
+        self.route_w = Dict[Int, Float64]()
         self.built_id = List[Int]()
         self.built_z = List[Int]()
         self.loose = List[Int]()
@@ -786,11 +789,28 @@ struct ObjectLayer(Movable):
         o.w = abs(bx - ax)
         o.h = abs(by - ay)
 
+    def _route_bounds(self, p: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """The box a connector routes to: the object's bounds, or (unturned) its routing width when one is set."""
+        var w = self.route_w.get(self.objs[p].id, -1.0)
+        if w < 0 or self.objs[p].rot != 0:
+            return self.objs[p].bounds()
+        ref o = self.objs[p]
+        return (o.x, o.y, o.x + w, o.y + o.h)
+
+    def route_widths(mut self, widths: Dict[Int, Float64]):
+        """Routing widths for these objects (by id), then every connector routed again."""
+        for e in widths.items():
+            self.route_w[e.key] = e.value
+        for c in range(len(self.objs)):
+            if self.objs[c].kind == CONNECTOR:
+                self._route(c)
+        self._changed()
+
     def _route_centres(mut self, c: Int, fp: Int, tp: Int):
         """The centre-ray rule: each end where the line between the two boxes' centres leaves that box (its bounds as
         turned), pulled back along the line by connector_gap; too short (< 6) or overlapping: no line (ends equal)."""
-        var a = self.objs[fp].bounds()
-        var b = self.objs[tp].bounds()
+        var a = self._route_bounds(fp)
+        var b = self._route_bounds(tp)
         var acx = (a[0] + a[2]) / 2
         var acy = (a[1] + a[3]) / 2
         var bcx = (b[0] + b[2]) / 2
