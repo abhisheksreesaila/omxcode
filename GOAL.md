@@ -1,47 +1,46 @@
-# GOAL 75: silky on the GPU, Linux and Mac (whiteboard, canvas, mind map)
+# GOAL 79: Personal Note, native, the exact look of the web app, faster
 
-**End goal (owner, 2026-11-18):** "I want a native Linux and Mac running on GPU with super speed… I will judge with
-whiteboard and canvas and mindmap… personalnote.app has a Tony Buzan mind map and silky smooth." And: "the mac is
-connected to the env, so you can test instead of relying on CI."
+**End goal (owner, 2026-11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance.
+That's all I'm looking for." Earlier (11-18): "typing in other languages… and of course we have to use system font or else
+it'll be blurry." The yardstick is the web app in `~/Projects/personalnotev2` (its own `dist/` build, Paper skin by default).
 
-Base: goal 74's branch (a2a91071, not yet on main). Worktree ../mojo-ui-g74, branch goal-75-gpu-canvas. Decisions
-D-75xx. Checker: `scripts/check` → `docs/goals/75-check.py`. Goal 74's contract is archived as docs/goals/74-GOAL.md.
-
-**What we found first (D-7501):** on the RTX 3090 desktop with GTK's Vulkan renderer, pnote's 645-object canvas pans at
-0.7 ms a frame (p50) but spikes to 120–230 ms whenever a layer is rebuilt: GTK fills our ink outlines as vector paths on
-the CPU. The Mac host rasterizes every canvas on the CPU at Retina size. So: our own GPU renderer for the Scene.
-
-## The three judged scenes (pnote, `PNOTE_SCENE=`)
-- **whiteboard:** 1,000 pressure strokes (~100k points) on a canvas note; pan, zoom, and a pen drawing a new stroke.
-- **canvas:** Personal Note's own 645-object benchmark note (300 text boxes, 240 ink paths, 60 rects, 45 arrows).
-- **mindmap:** a 300-topic map; pan, zoom, and topics added and collapsed while it animates.
-A scene is **silky** on a machine when, over the steps below, frame work is p95 ≤ 8.3 ms (120 Hz) and no frame passes
-16.7 ms (one 60 Hz frame), measured by the host's framebench on the real GPU (not a virtual display).
+Base: goal-75-gpu-canvas 654d9471 (goal 74's editors + goal 75's GPU renderer; neither is on main yet). Worktree
+../mojo-ui-g79, branch goal-79-pnote-lookalike. Decisions D-79xx in docs/decisions.md, attempts in docs/journal.md.
+Checker: `scripts/check` → `docs/goals/79-check.py` (PASS / FAIL / BLOCKED per milestone, `scripts/check M2` runs one).
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/75-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (docs/goals/79-check.py) |
 |---|---|---|
-| M0 | Baselines, both machines | pnote's PNOTE_SCENE (three scenes); framebench on the AppKit host (pan, zoom, draw, type, as GTK's); scripts/mac-ssh passes app env (MAC_ENV); docs/goals/75/baseline.md generated: each scene's pan/zoom (and draw / grow) numbers on the Linux desktop GPU and the M4 Mac, today's renderers |
-| M1 | The renderer's core | `mojoui/gpu2d.mojo` (backend-free): a Scene → batches: instanced rects, rounded rects and circles (distance in the shader), lines, glyph quads from the baked font atlases, images, filled polygons (non-zero, stencil-and-cover fans), clips, layer transforms; plus a CPU executor of the batches. tests/test_gpu2d: `gpu2d batches: ok` (op counts and order kept per layer), `gpu2d cpu: ok` (the CPU executor's picture vs SurfacePainter's for each primitive and for the three scenes: mean ≤ 1.5 levels, ≤ 0.5 % of pixels more than 40 off) |
-| M2 | Linux on the GPU | a GL backend (mojoui.present's context): batches → an MSAA texture (stencil polygons, the glyph atlas as a texture), shown by GTK as a GdkGLTexture; canvases opt in (`Canvas(…).gpu()`), CPU fallback when GL is missing. Readback vs the CPU executor within M1's bounds; on the desktop (GTK on the real Wayland display): all three scenes silky |
-| M3 | Mac on the GPU | a Metal backend (same batches; instanced pipelines and the stencil fill built once at start), shown through a CAMetalLayer (or the IOSurface the host has); readback vs the CPU executor within M1's bounds; on the owner's M4 over scripts/mac-ssh: all three scenes silky |
-| M4 | A Buzan mind map, silky | mojoui.mindmap: one-bend organic branches as ribbons tapering by depth (thick at the root), a colour per main branch, branch-style labels resting on their branch below the root's children, and motion: topics glide on springs (mojoui.spring) when added, removed, collapsed or relaid, branches following each frame; less-motion jumps. test_mindmap's proofs still pass plus `mindmap motion: ok` (positions converge, no overshoot past 8 %, still frames stop asking for frames); the grow step (20 topics added one per 100 ms, collapse/expand) silky on both machines; a side-by-side shot with Personal Note's map (build/g75/compare.png) |
-| M5 | Whiteboard ink, silky | the wet stroke on its own layer drawn each frame on the GPU; framebench draw (a 300-move stroke) and finish (strokes landing) silky on both machines with 1,000 strokes on the page |
-| M6 | Nothing regressed | goal 74's M1–M7, goal 40's M0–M2, the component matrix (gpu2d listed; ✅ where a check runs it), decisions lint |
+| M0 | The reference, from the web app itself | `docs/goals/79/ref.mjs` seeds a scratch database through the web app's own API (the fixture: a page note with headings, bold, italic, tasks, a numbered list, a quote, inline code; a canvas note with text, two stickies and a connector; a 4-branch mind map with 10 leaves; 3 more notes; a notebook), then shoots the web app at 1440×900 logical in Chromium at the native run's device scale (1.6 Linux test screen, 2.0 Mac) and writes, per screen, the PNG and the boxes of named elements read from the DOM (`getBoundingClientRect`, ≥ 40 names over all screens). Screens: **page+sidebar, page, canvas, mind map, search (typed "li"), island card, settings (Appearance), page+sidebar in Night, page+sidebar in Crayon**. The fixture is a JSON file both apps load. Regenerated by the check, not hand-edited |
+| M1 | Text the way the browser draws it | `mojoui/fonttext.mojo` (or a better name): glyphs rasterized by the platform's font engine at device pixels: FreeType + HarfBuzz + fontconfig on Linux, CoreText on the Mac; shaped runs (kerning, ligatures, combining marks), colour emoji, fallback through the system's fonts for scripts the face lacks. Faces: the web app's own (Bricolage Grotesque, Geist, Geist Mono, IBM Plex Sans/Mono, Source Serif 4, Instrument Serif), OFL files in `fonts/` with their licences. GPU path: a glyph atlas keyed by (face, size in device px, subpixel x); a zoomed canvas re-rasterizes, never scales a bitmap. tests/test_fonttext: a line in each face and lines in Hindi, Tamil, Arabic, Japanese, Chinese, Korean and emoji: **no missing glyphs (.notdef)**; each line's advance width within 1 device px of Chromium's for the same font and size (M0's tool measures it); a word at 1× and 4× zoom both crisp (edge sharpness of the 4× raster ≥ 0.9 of a direct 4× raster); `fonttext: ok` |
+| M2 | The shell looks the same | `examples/pnote` rebuilt to the web look (desk with its dots, the floating notes panel with Quick note, Inbox, the PARA shelves, notebook rows, note icons and skin dots; the three top islands; the page sheet with its Write/Draw toolbar; Paper, Night and Crayon skins as themes). For **page+sidebar, page, and both other skins**: every named element's box within **2 logical px** of the web's, each element's sampled fill within **4 levels per channel**, and the whole frame's SSIM (grey, device px) **≥ 0.95**. The check writes `build/g79/<screen>-compare.png` (web │ native │ diff) for every screen |
+| M3 | Every screen looks the same | The same three tests for **canvas, mind map, search, island card and settings**. Canvas = goal 74's object layer drawn in the web's style (JSON Canvas objects, stickies in the skin's colours, connectors, "Page 1" label, tool island, undo and zoom islands); mind map = the web's Buzan map (branch colours, tapered curved branches, boxed labels, the side actions, minimap, hint line); omnibar with pills, rows, highlight and preview; settings window with its nine pages listed |
+| M4 | It works the same | One step script, run against both apps (web via Playwright, native via test-mode steps), ≥ 25 steps: open each note from the panel, fold a shelf, toggle the panel, rename in the title island, type a paragraph and a heading on the page, tick a task, switch Write/Draw and draw a mark, make a canvas text box and a sticky, connect them, draw a stroke, move and delete an object, undo/redo, zoom with the island, add a child and a sibling on the map and rename one, search and open a result with the keyboard, switch skin in settings, quit and reopen. After each step a shot pair is compared (M2's SSIM bar), and at the end **the saved notes are equal** (normalized documents, read back through the web app's own API). Same database: native reads and writes Personal Note's SQLite schema (notes, notebooks, revisions, FTS5), so a note saved by one app opens in the other with the same shot |
+| M5 | Typing in other languages | Text input goes through the platform's input method: GtkIMContext (preedit drawn underlined at the caret, commit inserts, the candidate window placed at the caret) and NSTextInputClient on the Mac (`setMarkedText`, `insertText`, `firstRectForCharacterRange`). Proof: tests drive the real IM objects (Linux: an IBus/fcitx engine if present, else preedit-changed/commit signals on the GtkIMContext the app created; Mac: the methods on the real view) to type Japanese (かな→漢字), Hindi and Korean into a page, then the saved Markdown holds exactly those words; system paste of the same text works. A manual line for the owner's own keyboard goes in the report |
+| M6 | Faster than the web, on both machines | Same machine, same notes, same window size and device scale. Web side: Personal Note's own `scripts/benchmark-f034.mjs` (with `--gpu`) and `benchmark-first-screen.mjs`; native side: the same steps (open, pan, zoom, drag one, drag 40, undo/redo, pen, typing; on the 600-object note and the 5,000-object stress note) plus cold start to first screen, note switch, omnibar open and RSS after opening all three kinds. **PASS when native is faster on every step's p95 and max, starts sooner, uses less memory, and every interaction step is silky** (p95 ≤ 8.3 ms, max ≤ 16.7 ms, no frame drawn on the CPU when the GPU path is on). `docs/goals/79/race.md` is generated by the check. Mac: if the web app can't run on the M4 without a system-wide install, that half is BLOCKED with the reason; native must still be silky there |
+| M7 | Both machines, nothing regressed | M2–M4 also on the M4 at 2× (window shots taken by the app itself), with the web's Mac window layout (`verify-mac-chrome.mjs`: traffic lights, drag strips); goal 74 M1–M6 and goal 75 M2–M6 still PASS; components matrix regenerated (fonttext ✅ Linux and Mac), decisions lint |
 
 ## Done means
-75-check PASS for M0–M6 (BLOCKED names exactly what is missing); a fresh reviewer passes it; docs/goals/75-report.md with
-the numbers on both machines and shots; EXPERIMENTS.md. Commit after each passing milestone; not merged, never pushed.
+79-check PASS for M0–M7 (a BLOCKED names exactly what's missing); a fresh reviewer passes it; `docs/goals/79-report.md`
+with the compare images for every screen and the race table; EXPERIMENTS.md entry. Commit after each passing milestone.
+Never push; merging to main waits for the owner.
 
 ## Out of bounds
-Pushing; the owner's global macOS settings (`defaults`); other worktrees (goal 73's); pip; a third-party 2D library
-(Skia, Vello, wgpu) in the path: the renderer is ours, in Mojo, over GL and Metal; lowering a proof or deleting a test.
+Pushing; editing `~/Projects/personalnotev2` (read it, run its build, benchmarks and verify scripts, outputs go to this
+worktree's build/); opening the owner's own Personal Note database for writing (scratch copies only); other worktrees
+(`../mojo-ui-apple-test` is frozen); pip (pixi only); JS, a web view or a toolkit text widget inside the native app;
+lowering a threshold, editing a proof to pass, or deleting a test; global settings (NVIDIA driver, macOS `defaults`,
+Hyprland config, Mac privacy settings); nested compositors. Desktop runs only through `scripts/testscreen`.
+
+Features not rebuilt this goal (their buttons and settings pages appear where the web shows them, and say "not in the
+native app yet" when used): voice and dictation, Jam/AI, X bookmarks, search by meaning, secure notes, reminders,
+backup/import/export, print, phone layout, sync.
 
 ## Assumptions (instead of asking)
-- Windows open on the owner's desktop (Linux, a few seconds each) and on the Mac (a minute per run) for the GPU timings;
-  the owner said go. Each check run says so before it opens one.
-- GL through GTK's GdkGLContext on Linux (mojoui.present already makes one and hands textures to GTK, under the Vulkan
-  renderer too); Metal through the Objective-C runtime the AppKit host already uses; shaders compiled once at start.
-- The virtual Xvfb display keeps the CPU path (no GPU there); its checks stay as they are.
-- Text stays the baked atlases (sharp at 1× and 2×; huge zooms blur until a later SDF atlas).
-- Budget: 250 turns.
+- "Exact look" is measured against the web app in Chromium at the same logical size and device scale; where Chromium and
+  the native engine differ only in antialiasing, M2's SSIM bar absorbs it, and positions must still match to 2 px.
+- "System font" means the platform's font engine draws the glyphs at device pixels (never a pre-baked atlas scaled), using
+  the web's own font files so the look matches; the system's fonts fill in scripts and emoji those files lack.
+- Linux first on the hidden 1.6× test screen, then the M4 over SSH. GPU renderer on (App.GPU_2D); the CPU path must still draw.
+- The web numbers are the web at its best (Chromium with the GPU), not the pywebview desktop shell.
+- Budget: 300 turns. Two failures on one approach → stop, attack the premise, log the pivot.
