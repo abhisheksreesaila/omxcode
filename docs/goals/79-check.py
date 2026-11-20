@@ -399,7 +399,12 @@ def native_shot(screen, ref, outdir, skin=None):
     png.unlink(missing_ok=True)
     boxes.unlink(missing_ok=True)
     skin = skin or ("night" if screen.endswith("night") else "crayon" if screen.endswith("crayon") else "paper")
-    steps = ["wait:800"] + screen_steps(screen, ref) + ["wait:400", f"render:desk={png}"]
+    # (added 11-19, D-7911, a strengthening) the picture compared is the GPU frame the window shows (gpushot: what GTK
+    # holds from the GPU 2D renderer, rendered as GTK composites it), with every picture of the canvas drawn by the GPU;
+    # the app's own CPU picture (render:) is kept beside it as <screen>.cpu.png, a second report that can't pass
+    cpu_png = outdir / f"{screen}.cpu.png"
+    cpu_png.unlink(missing_ok=True)
+    steps = ["wait:800"] + screen_steps(screen, ref) + ["wait:400", f"gpushot:desk={png}", f"render:desk={cpu_png}"]
     cfg = outdir / f"cfg-{screen}"
     shutil.rmtree(cfg, ignore_errors=True)
     cfg.mkdir()
@@ -409,7 +414,10 @@ def native_shot(screen, ref, outdir, skin=None):
     log = r.stdout + r.stderr
     (outdir / f"{screen}.log").write_text(log)
     if not png.exists():
-        return f"{screen}: no picture (exit {r.returncode}): {tail(log, 400)}"
+        return f"{screen}: no GPU picture (exit {r.returncode}): {tail(log, 400)}"
+    gs = re.search(r"^GPUSHOT: \S+ (\d+)x(\d+) texture=(\S+) gpu_frames=(\d+) cpu_frames=(\d+)", log, re.M)
+    if not gs or int(gs.group(4)) == 0 or int(gs.group(5)) != 0 or not re.search(r"^PNOTE GPU: gpu2d", log, re.M):
+        return f"{screen}: the picture isn't all the GPU renderer's ({gs.group(0) if gs else 'no GPUSHOT line'}; {re.search(r'^PNOTE GPU: .*', log, re.M).group(0)[:60] if re.search(r'^PNOTE GPU: .*', log, re.M) else 'no PNOTE GPU line'})"
     if not boxes.exists():
         return f"{screen}: no boxes file"
     return png, json.loads(boxes.read_text()), log

@@ -2,11 +2,13 @@
 # kept, clips intersected, layer keys / versions / transforms carried), and the CPU executor of those runs draws what
 # SurfacePainter draws: each primitive alone and three scenes like the judged ones (whiteboard, canvas, mind map).
 #   pixi run mojo run -I . tests/test_gpu2d.mojo
+from mojoui.fonttext import TextStyle
+from mojoui.strokeicon import draw_icon
 from std.testing import assert_equal, assert_true
 from std.math import sin, cos
 from std.time import perf_counter_ns
 
-from mojoui.canvas import Surface
+from mojoui.canvas import Surface, rgba
 from mojoui.text import Font, REGULAR, MEDIUM, MONO, MONO_BOLD, LEFT, CENTRE, RIGHT
 from mojoui.scene import Scene, SurfacePainter, Painter
 from mojoui.gpu2d import (GlyphAtlas, Frame2D, build_batches, execute_cpu, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY,
@@ -467,6 +469,24 @@ def test_cpu(font: Font, atlas: GlyphAtlas) raises:
     check("mindmap (" + String(m.nodes()) + " topics)", mp, run_scene(ms, atlas, font, W, H))
     print("     ", counts(ms, atlas, font), "; build_batches", round(batch_ms(ms, atlas, font), 3), "ms")
     print("gpu2d cpu: ok")
+
+
+def text_scene(w: Int, h: Int, k: Float64, zoom: Float64) -> Scene:
+    """Goal 79: fonttext runs (several faces and scripts, colour emoji) and Lucide icons (see-through images), in a layer
+    scaled by k·zoom: the GPU must draw them from the device-pixel glyph atlas exactly as the CPU executor does."""
+    var sc = Scene(w, h, k)
+    sc.begin_layer("bg")
+    sc.fill(rgba(255, 253, 248))
+    sc.begin_layer("text")
+    sc.layer_transform(0, 0, k * zoom)
+    sc.run(TextStyle("Geist", 400, False, 14), "Quick note, Inbox and the shelves", 10, 24, rgba(31, 27, 22), 0)
+    sc.run(TextStyle("Literata", 700, False, 18), "Three days on the coast", 10, 52, rgba(31, 27, 22), 0)
+    sc.run(TextStyle("Bricolage Grotesque", 700, False, 26), "Lighthouse trip", 10, 86, rgba(74, 68, 59), 0)
+    sc.run(TextStyle("Geist", 400, False, 16), "नमस्ते 漢字 한국어 ✈️ 📚", 10, 114, rgba(31, 27, 22), 0)
+    sc.run(TextStyle("Source Serif 4", 600, True, 15), "Harbour — clipped", 10, 138, rgba(37, 99, 235, 200), 0)
+    draw_icon(sc, "panel-left", 220, 10, 20, k * zoom, rgba(74, 68, 59))
+    draw_icon(sc, "search", 250, 10, 20, k * zoom, rgba(74, 68, 59, 160))
+    return sc^
 
 
 def main() raises:

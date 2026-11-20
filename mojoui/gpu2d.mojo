@@ -74,7 +74,12 @@ from std.math import sqrt, ceil, floor
 from mojoui.canvas import Surface
 from mojoui.draw import blend
 from mojoui.text import Font, Face, LEFT, CENTRE, RIGHT
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
+from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_x, GlyphImage
+from mojoui.shared import get_shared, put_shared
+from std.memory import Pointer
+from std.memory.alloc import alloc, Layout
+from std.collections import Dict
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN
 
 comptime PIPE_QUAD = 0
 comptime PIPE_GLYPH = 1
@@ -97,6 +102,85 @@ comptime POLY_SUB = 4  # scan lines per pixel row for polygons (draw.polygon's)
 comptime FACES = 5  # Font.pick's faces: 0 regular, 1 medium, 2 display, 3 mono, 4 mono bold
 
 
+comptime DYN_ROWS = 2048  # rows of the atlas kept for mojoui.fonttext's glyphs (goal 79), packed as they're first drawn
+comptime SLOT_GLYPH_PAGES = 232  # mojoui.shared slot: the process's GlyphPages
+
+
+struct GlyphPages(Movable):
+    """fonttext's glyphs (coverage, rasterized at device px by the platform's engine) packed in shelves into the atlas's
+    dynamic rows, once per (face, instance, glyph, device size, subpixel x): keyed by fonttext's own image index. One per
+    process, shared by every canvas; a backend uploads rows [0, used) again whenever `version` moves (D-7910)."""
+    var width: Int
+    var bytes: List[UInt8]
+    var slot_of: Dict[Int, Int]
+    var sx: List[Int]
+    var sy: List[Int]
+    var shelf_x: Int
+    var shelf_y: Int
+    var shelf_h: Int
+    var used: Int  # rows holding glyphs
+    var version: Int
+    var resets: Int
+
+    def __init__(out self, width: Int):
+        self.width = width
+        self.bytes = List[UInt8](length=width * DYN_ROWS, fill=0)
+        self.slot_of = Dict[Int, Int]()
+        self.sx = List[Int]()
+        self.sy = List[Int]()
+        self.shelf_x = 1
+        self.shelf_y = 1
+        self.shelf_h = 0
+        self.used = 0
+        self.version = 0
+        self.resets = 0
+
+    def place(mut self, key: Int, img: GlyphImage) -> Int:
+        """The glyph's slot (packing it on first use, a column and a row of zeros around it)."""
+        if key in self.slot_of:
+            return self.slot_of.get(key, 0)
+        var w = img.w
+        var h = img.h
+        if self.shelf_x + w + 1 > self.width:
+            self.shelf_y += self.shelf_h + 1
+            self.shelf_x = 1
+            self.shelf_h = 0
+        if self.shelf_y + h + 1 > DYN_ROWS:  # full: start again (glyphs pack again as they're drawn)
+            for i in range(len(self.bytes)):
+                self.bytes[i] = 0
+            self.slot_of = Dict[Int, Int]()
+            self.sx.clear()
+            self.sy.clear()
+            self.shelf_x = 1
+            self.shelf_y = 1
+            self.shelf_h = 0
+            self.resets += 1
+        var x = self.shelf_x
+        var y = self.shelf_y
+        for yy in range(h):
+            for xx in range(w):
+                self.bytes[(y + yy) * self.width + x + xx] = img.cov[yy * w + xx]
+        self.shelf_x += w + 1
+        self.shelf_h = max(self.shelf_h, h)
+        self.used = max(self.used, y + h + 1)
+        self.sx.append(x)
+        self.sy.append(y)
+        self.slot_of[key] = len(self.sx) - 1
+        self.version += 1
+        return len(self.sx) - 1
+
+
+def glyph_pages(width: Int) -> Pointer[GlyphPages, MutUntrackedOrigin]:
+    var have = get_shared(SLOT_GLYPH_PAGES)
+    if have != 0:
+        return Pointer[GlyphPages, MutUntrackedOrigin](unsafe_from_address=have)
+    var a = alloc(Layout[GlyphPages].single())
+    var p = a^.unsafe_leak()
+    p.unsafe_write(GlyphPages(width))
+    put_shared(SLOT_GLYPH_PAGES, Int(p))
+    return Pointer[GlyphPages, MutUntrackedOrigin](unsafe_from_address=Int(p))
+
+
 def _rows(face: Face) -> Int:
     return (len(face.atlas) + face.width - 1) // face.width
 
@@ -112,6 +196,7 @@ struct GlyphAtlas(Movable):
     var bytes: List[UInt8]
     var face_x: List[Int]  # where face f's texel (0, 0) is
     var face_y: List[Int]
+    var dyn_y0: Int  # the first of the DYN_ROWS rows kept for fonttext's glyphs (GlyphPages)
 
     def __init__(out self, font: Font):
         var w = max(max(max(font.regular.width, font.medium.width), max(font.display.width, font.mono.width)), font.mono_bold.width)
@@ -122,7 +207,8 @@ struct GlyphAtlas(Movable):
             ys.append(y)
             y += rows[f] + 1
         self.width = w + 2
-        self.height = y
+        self.dyn_y0 = y
+        self.height = y + DYN_ROWS
         self.bytes = List[UInt8](length=self.width * self.height, fill=0)
         self.face_x = [1, 1, 1, 1, 1]
         self.face_y = ys^
@@ -143,6 +229,9 @@ struct GlyphAtlas(Movable):
     def at(self, x: Int, y: Int) -> Float64:
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return 0
+        if y >= self.dyn_y0:
+            var pg = glyph_pages(self.width)
+            return Float64(Int(pg[].bytes[(y - self.dyn_y0) * self.width + x])) / 255.0
         return Float64(Int(self.bytes[y * self.width + x])) / 255.0
 
     def coverage(self, x: Float64, y: Float64) -> Float64:
@@ -463,6 +552,86 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 else:
                     _glyphs(f.glyphs, font.mono_bold, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
                 added = len(f.glyphs) // GLYPH_FLOATS - before
+            elif kind == OP_RUN:  # (goal 79) fonttext's shaped run: coverage glyphs from GlyphPages, colour ones as images
+                var st = scene.run_style(op)
+                var r = ft_shape(st, scene.run_text(op))
+                var xl = run_x(r, a, scene.run_align(op))
+                var eng = font_engine()
+                var pg = glyph_pages(atlas.width)
+                var size_dev = st.size * tk
+                var bdev = b * tk + ty
+                var by = Int(bdev + 0.5) if bdev >= 0 else Int(bdev - 0.5)
+                var g0 = len(f.glyphs) // GLYPH_FLOATS
+                var i0 = len(f.images) // IMAGE_FLOATS
+                for ref g in r.glyphs:
+                    var gx = (xl + g.x) * tk + tx
+                    var px = Int(gx + 0.5) if gx >= 0 else Int(gx - 0.5)
+                    var gy = g.y * tk
+                    var py = by - (Int(gy + 0.5) if gy >= 0 else Int(gy - 0.5))
+                    var ii = eng[].image(g.inst, g.gid, size_dev, 0)
+                    if eng[].images[ii].w == 0:
+                        continue
+                    var iw = eng[].images[ii].w
+                    var ih = eng[].images[ii].h
+                    var x_l = (Float64(px + eng[].images[ii].left) - tx) * ik
+                    var y_l = (Float64(py - eng[].images[ii].top) - ty) * ik
+                    if eng[].images[ii].color:
+                        var pix = List[UInt32](capacity=iw * ih)
+                        var al = Int((color >> 24) & 0xFF)
+                        for q in eng[].images[ii].rgba:  # (premultiplied → straight alpha, times the run's alpha)
+                            var aa = Int((q >> 24) & 0xFF)
+                            if aa == 0:
+                                pix.append(0)
+                                continue
+                            var rr = min(255, Int(q & 0xFF) * 255 // aa)
+                            var gg = min(255, Int((q >> 8) & 0xFF) * 255 // aa)
+                            var bb = min(255, Int((q >> 16) & 0xFF) * 255 // aa)
+                            pix.append(UInt32(rr) | (UInt32(gg) << 8) | (UInt32(bb) << 16) | (UInt32(aa * al // 255) << 24))
+                        f.pixels.append(pix^)
+                        f.images.append(Float32(x_l))
+                        f.images.append(Float32(y_l))
+                        f.images.append(Float32(Float64(iw) * ik))
+                        f.images.append(Float32(Float64(ih) * ik))
+                        f.images.append(Float32(len(f.pixels) - 1))
+                        f.images.append(Float32(iw))
+                        f.images.append(Float32(ih))
+                        f.images.append(0)
+                        _clip4(f.images, c0, c1, c2, c3)
+                    else:
+                        var slot = pg[].place(ii, eng[].images[ii])
+                        var u0 = pg[].sx[slot]
+                        var v0 = atlas.dyn_y0 + pg[].sy[slot]
+                        f.glyphs.append(Float32(x_l))
+                        f.glyphs.append(Float32(y_l))
+                        f.glyphs.append(Float32(Float64(iw) * ik))
+                        f.glyphs.append(Float32(Float64(ih) * ik))
+                        f.glyphs.append(Float32(u0))
+                        f.glyphs.append(Float32(v0))
+                        f.glyphs.append(Float32(u0 + iw))
+                        f.glyphs.append(Float32(v0 + ih))
+                        _color(f.glyphs, color)
+                        f.glyphs.append(0)
+                        f.glyphs.append(Float32(b))
+                        f.glyphs.append(0)
+                        f.glyphs.append(0)
+                        _clip4(f.glyphs, c0, c1, c2, c3)
+                var ng = len(f.glyphs) // GLYPH_FLOATS - g0
+                var ni = len(f.images) // IMAGE_FLOATS - i0
+                if ng > 0:
+                    if cur_pipe == PIPE_GLYPH and cur_blend == BLEND_OVER:
+                        f.runs[len(f.runs) - 1].count += ng
+                    else:
+                        f.runs.append(Run(PIPE_GLYPH, g0, ng, BLEND_OVER))
+                        cur_pipe = PIPE_GLYPH
+                        cur_blend = BLEND_OVER
+                if ni > 0:
+                    if cur_pipe == PIPE_IMAGE and cur_blend == BLEND_OVER:
+                        f.runs[len(f.runs) - 1].count += ni
+                    else:
+                        f.runs.append(Run(PIPE_IMAGE, i0, ni, BLEND_OVER))
+                        cur_pipe = PIPE_IMAGE
+                        cur_blend = BLEND_OVER
+                continue
             elif kind == OP_POLY:
                 pipe = PIPE_POLY
                 before = len(f.polys) // POLY_FLOATS
@@ -542,6 +711,10 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 mode = BLEND_REPLACE
                 before = len(f.images) // IMAGE_FLOATS
                 var which = Int(e)
+                for ref px in scene.images[which]:  # (a picture with see-through pixels is blended over: icons, D-7910)
+                    if (px >> 24) != 255:
+                        mode = BLEND_OVER
+                        break
                 var pw = Int(scene.nums[base + 5])
                 f.images.append(Float32(a))
                 f.images.append(Float32(b))
@@ -710,7 +883,7 @@ def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx:
             dp[] = nr | (ng << 8) | (nb << 16) | (d & 0xFF000000)
 
 
-def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64):
+def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, mode: Int = BLEND_REPLACE):
     var x = Float64(q[at]) * tk + tx
     var y = Float64(q[at + 1]) * tk + ty
     var w = Float64(q[at + 2]) * tk
@@ -730,7 +903,12 @@ def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Fl
         var sy = min(ph - 1, Int(floor((Float64(py) + 0.5 - y) / h * Float64(ph))))
         for qx in range(max(x0, 0), min(x1, s.width)):
             var sx = min(pw - 1, Int(floor((Float64(qx) + 0.5 - x) / w * Float64(pw))))
-            p.unsafe_offset(py * s.width + qx)[] = px[sy * pw + sx]
+            var src = px[sy * pw + sx]
+            var dp = p.unsafe_offset(py * s.width + qx)
+            if mode == BLEND_REPLACE or (src >> 24) == 255:
+                dp[] = src
+            elif (src >> 24) != 0:
+                dp[] = blend(dp[], src, 1.0)
 
 
 def _span(mut cov: List[Float64], a: Float64, b: Float64, x0: Int, w: Int, share: Float64):
@@ -865,6 +1043,6 @@ def execute_cpu(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface):
                 elif run.pipe == PIPE_GLYPH:
                     _cpu_glyph(surface, atlas, frame.glyphs, i * GLYPH_FLOATS, tx, ty, tk)
                 elif run.pipe == PIPE_IMAGE:
-                    _cpu_image(surface, frame, frame.images, i * IMAGE_FLOATS, tx, ty, tk)
+                    _cpu_image(surface, frame, frame.images, i * IMAGE_FLOATS, tx, ty, tk, run.blend)
                 else:
                     _cpu_poly(surface, frame, i * POLY_FLOATS, tx, ty, tk, scratch)

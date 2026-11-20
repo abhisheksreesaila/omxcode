@@ -527,6 +527,8 @@ struct GtkCanvas(Copyable, Movable):
     var pending_h: Int
     var pending_blended: Bool
     var on_gpu: Bool  # the last frame went through the GPU 2D renderer (mojoui.gpu2d_gl), not GSK nodes
+    var gpu_hands: Int  # pictures handed to GTK that the GPU 2D renderer drew (goal 79: gpushot's gpu_frames)
+    var cpu_hands: Int  # and that something else drew (cpu_frames)
     # drawing ahead (D-7560): an animating GPU 2D canvas draws its next frame right after this frame's paint, while the
     # GPU is idle, sampled at the next frame's time; the next frame's tick shows it if nothing changed since, else drops it
     var ahead_slot: Int  # the GPU 2D ring slot drawn ahead, not shown yet (-1: none)
@@ -624,6 +626,8 @@ struct GtkCanvas(Copyable, Movable):
         self.pending_h = 0
         self.pending_blended = False
         self.on_gpu = False
+        self.gpu_hands = 0
+        self.cpu_hands = 0
         self.ahead_slot = -1
         self.ahead_changes = 0
         self.ahead_version = 0
@@ -3771,6 +3775,7 @@ struct GtkHost[A: App](Movable):
         c.drawn = c.ahead_version if not c.ahead_again else -1
         c.aheads += 1
         c.hands += 1
+        c.gpu_hands += 1
         c.shown_frame = frame
         c.shown_gpu = True
 
@@ -3878,6 +3883,10 @@ struct GtkHost[A: App](Movable):
         self.canvases[ci].drawn = version if not again else -1  # mid-animation: draw again next frame
         self.canvases[ci].draws += 1
         self.canvases[ci].hands += 1
+        if via_gpu2d:
+            self.canvases[ci].gpu_hands += 1
+        else:
+            self.canvases[ci].cpu_hands += 1
         self.canvases[ci].shown_frame = self.paints_done if self.in_paint else -1
         self.canvases[ci].shown_gpu = via_gpu2d
         self.canvases[ci].bench_draw_ms += self.canvases[ci].draw_ms
@@ -4858,6 +4867,66 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
         if x <= limit:
             n += 1
     return 100.0 * Float64(n) / Float64(len(xs))
+
+
+def gpu_shot[A: App](host_addr: Int, which: String, path: String):
+    """gpushot:K=path (goal 79, D-7911): the picture canvas K shows now, read from what GTK holds (the GPU 2D renderer's
+    dmabuf or GL texture), rendered by GTK's own renderer as it composites it, written as a PNG at device pixels.
+    Prints `GPUSHOT: <path> <w>x<h> texture=<type> gpu_frames=<n> cpu_frames=<n>` (pictures this canvas handed GTK by
+    each path so far): a check passes only a picture the GPU drew."""
+    var host = host_at[A](host_addr)
+    var node = canvas_node(host[], which)
+    var ci = -1
+    for k in range(len(host[].canvases)):
+        if host[].canvases[k].node == node:
+            ci = k
+    if ci < 0:
+        print("GPUSHOT: no canvas " + which, flush=True)
+        return
+    var still_by = perf_counter_ns() + 3_000_000_000  # (an animating canvas settles first)
+    while (host[].canvases[ci].prev.again or host[].canvases[ci].ahead_slot >= 0) and perf_counter_ns() < still_by:
+        pump()
+        external_call["g_usleep", NoneType](c_uint(1000))
+    for _ in range(30):
+        settle()
+        external_call["g_usleep", NoneType](c_uint(2000))
+    ref c = host[].canvases[ci]
+    var w = c.wpx
+    var h = c.hpx
+    var paintable = external_call["gtk_picture_get_paintable", Int](c.widget)
+    var renderer = external_call["gtk_native_get_renderer", Int](host[].window)
+    if paintable == 0 or renderer == 0 or w <= 0 or h <= 0:
+        print("GPUSHOT: " + path + " nothing shown", flush=True)
+        return
+    var tname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](paintable)))
+    var snap = external_call["gtk_snapshot_new", Int]()
+    external_call["gdk_paintable_snapshot", NoneType](paintable, snap, Float64(w), Float64(h))
+    var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+    var got = List[UInt32](length=w * h, fill=0)
+    var drew = False
+    if root != 0:
+        var tex = external_call["gsk_renderer_render_texture", Int](renderer, root, 0)
+        if tex != 0 and Int(external_call["gdk_texture_get_width", c_int](tex)) == w and Int(external_call["gdk_texture_get_height", c_int](tex)) == h:
+            external_call["gdk_texture_download", NoneType](tex, Int(got.unsafe_ptr()), w * 4)  # (B8G8R8A8 premultiplied)
+            drew = True
+        if tex != 0:
+            external_call["g_object_unref", NoneType](tex)
+        external_call["gsk_render_node_unref", NoneType](root)
+    if not drew:
+        print("GPUSHOT: " + path + " no picture", flush=True)
+        return
+    for i in range(w * h):
+        var b = got[i]
+        got[i] = ((b >> 16) & 0xFF) | (b & 0xFF00FF00) | ((b & 0xFF) << 16)
+    var png = encode_png(got, w, h)
+    try:
+        with open(path, "w") as f:
+            f.write_bytes(Span(png))
+    except:
+        print("GPUSHOT: can't write " + path, flush=True)
+        return
+    print("GPUSHOT: " + path + " " + String(w) + "x" + String(h) + " texture=" + tname + " gpu_frames=" + String(c.gpu_hands)
+          + " cpu_frames=" + String(c.cpu_hands), flush=True)
 
 
 def gl_check[A: App](host_addr: Int, which: String):
@@ -7128,6 +7197,9 @@ def run_step[A: App](host_addr: Int, step: String):
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
     elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
         frame_bench[A](host_addr, rest)
+    elif verb == "gpushot":  # gpushot:K=path: the GPU frame canvas K shows now (the picture GTK holds, rendered as GTK composites it), as a PNG (goal 79)
+        var kv = split_at(rest, "=")
+        gpu_shot[A](host_addr, kv[0], kv[1])
     elif verb == "gpucheck":  # gpucheck:K: canvas K's picture as GTK's renderer composites it vs gpu2d's CPU executor (D-7575)
         gl_check[A](host_addr, rest)
     elif verb == "webjs":  # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, printed as JS: <json>
@@ -8230,7 +8302,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["gtk_window_set_resizable", NoneType](host[].window, c_int(0))
         var title = String("mojoui test window (closes by itself)")
         external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
-    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0 or getenv("MOJOUI_TEST").find("render:") >= 0  # (render: a canvas draws only once shown, goal 79) (a picture mid-run, or frames to time (D-7425), need a shown window)
+    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0 or getenv("MOJOUI_TEST").find("framebench:") >= 0 or getenv("MOJOUI_TEST").find("render:") >= 0 or getenv("MOJOUI_TEST").find("gpushot:") >= 0  # (render:/gpushot: a canvas draws only once shown, goal 79) (a picture mid-run, or frames to time (D-7425), need a shown window)
     if not testing or shoots:
         external_call["gtk_window_present", NoneType](host[].window)
     if testing and shoots:

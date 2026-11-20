@@ -33,7 +33,7 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE
+from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
 from mojoui.gpu2d_merge import merge_runs, append_frame
 
 comptime RTLD_DEFAULT = -2
@@ -405,6 +405,10 @@ struct Metal2D(Movable):
     var p_quad_replace: Int
     var p_glyph: Int
     var p_image: Int
+    var p_image_over: Int  # images with see-through pixels, blended over (goal 79: icons, colour emoji)
+    var atlas_w: Int
+    var atlas_dyn: Int
+    var pages_version: Int  # the GlyphPages version last copied into the atlas's dynamic rows
     var p_tri: Int
     var p_cover: Int
     var atlas: Int  # the R8 texture
@@ -479,6 +483,10 @@ struct Metal2D(Movable):
         self.p_quad_replace = 0
         self.p_glyph = 0
         self.p_image = 0
+        self.p_image_over = 0
+        self.atlas_w = atlas.width
+        self.atlas_dyn = atlas.dyn_y0
+        self.pages_version = -1
         self.p_tri = 0
         self.p_cover = 0
         self.atlas = 0
@@ -576,6 +584,7 @@ struct Metal2D(Movable):
         self.p_quad_replace = self._pipeline("quad_v", "quad_replace_f", MODE_REPLACE)
         self.p_glyph = self._pipeline("glyph_v", "glyph_f", MODE_OVER)
         self.p_image = self._pipeline("image_v", "image_f", MODE_REPLACE)
+        self.p_image_over = self._pipeline("image_v", "image_f", MODE_OVER)
         self.p_tri = self._pipeline("tri_v", "tri_f", MODE_ACCUMULATE)
         self.p_cover = self._pipeline("cover_v", "cover_f", MODE_COVER)
         if self.p_quad_over == 0 or self.p_quad_replace == 0 or self.p_glyph == 0 or self.p_image == 0 or self.p_tri == 0 or self.p_cover == 0:
@@ -709,6 +718,7 @@ struct Metal2D(Movable):
         if not self.ok:
             return False
         self.drain()
+        self.sync_pages()
         var tex = _send(self.f, drawable, self.s_texture) if drawable != 0 else self.target_for(io, w, h)
         if tex == 0 or not self._acc_target(w, h):
             return False
@@ -738,6 +748,7 @@ struct Metal2D(Movable):
         uploads into one, resizes the accumulator or lets an IOSurface go calls drain() first. False: not drawn."""
         if not self.ok:
             return False
+        self.sync_pages()
         var tex = _send(self.f, drawable, self.s_texture) if drawable != 0 else self.target_for(io, w, h)
         if tex == 0 or not self._acc_target(w, h):
             return False
@@ -832,10 +843,25 @@ struct Metal2D(Movable):
             elif run.pipe == PIPE_GLYPH:
                 pipe = self.p_glyph
             else:
-                pipe = self.p_image
+                pipe = self.p_image_over if run.blend == BLEND_OVER else self.p_image
             self._use(enc, pipe)
             _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, run.count, run.first)
         _ = len(self.uniform)
+
+    def sync_pages(mut self):
+        """fonttext's glyphs packed since the last copy (GlyphPages' rows in use) into the atlas's dynamic rows. New
+        glyphs only ever take rows no frame in flight reads; a full restart of the pages drains first."""
+        var pg = glyph_pages(self.atlas_w)
+        if self.atlas == 0 or pg[].version == self.pages_version or pg[].used == 0:
+            return
+        var region = List[Int](length=6, fill=0)
+        region[1] = self.atlas_dyn
+        region[3] = self.atlas_w
+        region[4] = min(pg[].used, DYN_ROWS)
+        region[5] = 1
+        _ = msg[NoneType](self.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, Int(pg[].bytes.unsafe_ptr()), self.atlas_w)
+        _ = len(region)
+        self.pages_version = pg[].version
 
     def wake(mut self):
         """Input reached a GPU canvas: when the GPU has been idle (30 ms since the last frame went to it), a tiny blit

@@ -20,7 +20,7 @@ from mojoui.hosts.apple_canvas import io_surface, cfunc
 from mojoui.objectlayer import import_fabric
 from mojoui.mindmap import MapView
 from mojoui.ink import Stroke
-from tests.test_gpu2d import paint_case, case_name, gradient, whiteboard, mindmap_of, diff, counts
+from tests.test_gpu2d import text_scene, paint_case, case_name, gradient, whiteboard, mindmap_of, diff, counts
 from tests.test_objectlayer import seeded_note
 
 
@@ -71,6 +71,11 @@ def main() raises:
         var sc = Scene(200, 120, 1.0)
         paint_case(sc, which, font, img)
         gpu_vs_cpu(case_name(which), mtl, sc, atlas, font)
+
+    # goal 79: fonttext runs (CoreText-shaped on the Mac) and icons from the device-pixel glyph rows, colour emoji blended
+    for zoom in [1.0, 4.0]:
+        var big = 1 if zoom == 1.0 else 2
+        gpu_vs_cpu("fonttext runs and icons (zoom " + String(zoom) + ")", mtl, text_scene(560 * big, 300 * big, 2.0, zoom), atlas, font)
 
     var wb = Scene(1000, 700, 1.0)
     whiteboard(wb)

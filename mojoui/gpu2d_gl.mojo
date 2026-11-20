@@ -42,7 +42,7 @@ from std.time import perf_counter_ns
 from mojoui.present import fcall, dl_open, dl_sym, c_text
 from mojoui.text import Font
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import (Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
+from mojoui.gpu2d import (glyph_pages, DYN_ROWS, Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
                           IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
@@ -545,6 +545,9 @@ struct GL2D(Movable):
     var cur_prog: Int  # (within a frame: the program in use, the blend in force)
     var cur_blend: Int
     var atlas_tex: Int
+    var atlas_w: Int
+    var atlas_dyn: Int
+    var pages_version: Int  # the GlyphPages version last uploaded into the atlas's dynamic rows (goal 79)
     var img_tex: List[Int]
     var img_w: List[Int]
     var img_h: List[Int]
@@ -617,6 +620,9 @@ struct GL2D(Movable):
         self.cur_prog = -1
         self.cur_blend = -1
         self.atlas_tex = 0
+        self.pages_version = -1
+        self.atlas_w = 0
+        self.atlas_dyn = 0
         self.img_tex = List[Int]()
         self.img_w = List[Int]()
         self.img_h = List[Int]()
@@ -828,6 +834,8 @@ struct GL2D(Movable):
         """The glyph atlas as an R8 texture (once)."""
         if self.atlas_tex != 0:
             return
+        self.atlas_w = atlas.width
+        self.atlas_dyn = atlas.dyn_y0
         self.atlas_tex = self.gen(F_GEN_TEXTURES)
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
         self.tex_params(GL_NEAREST)
@@ -837,6 +845,21 @@ struct GL2D(Movable):
                         c_uint(GL_RED), c_uint(GL_UNSIGNED_BYTE), Int(atlas.bytes.unsafe_ptr()))
         fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+
+    def sync_pages(mut self):
+        """fonttext's glyphs packed since the last upload (GlyphPages' rows in use) into the atlas's dynamic rows."""
+        if self.atlas_tex == 0:
+            return
+        var pg = glyph_pages(self.atlas_w)
+        if pg[].version == self.pages_version or pg[].used == 0:
+            return
+        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
+        fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(1))
+        fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(0), c_int(self.atlas_dyn), c_int(self.atlas_w), c_int(min(pg[].used, DYN_ROWS)),
+                        c_uint(GL_RED), c_uint(GL_UNSIGNED_BYTE), Int(pg[].bytes.unsafe_ptr()))
+        fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
+        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+        self.pages_version = pg[].version
 
     def tex_params(self, filt: Int):
         fcall[NoneType](self.f(F_TEX_PARAMETERI), c_uint(GL_TEXTURE_2D), c_uint(GL_TEXTURE_MIN_FILTER), c_int(filt))
@@ -1073,6 +1096,7 @@ struct GL2D(Movable):
         """Draws the frame's runs (each layer through its transform) into the RGBA8 texture tex of w × h: cleared to
         transparent black first. Leaves the context's state at GL's defaults for what it touched (no program, vertex
         array, framebuffer, blend, stencil or scissor). (begin + layer + end, with everything uploaded.)"""
+        self.sync_pages()
         if not self.begin(tex, w, h):
             return False
         self.layer(frame, 0, True)
@@ -1824,6 +1848,7 @@ struct GPU2D(Movable):
         self.owner = owner
         self.built = n
         var t1 = perf_counter_ns()
+        self.gl.sync_pages()
         if not self.gl.begin(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0

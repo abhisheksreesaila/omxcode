@@ -20,7 +20,7 @@ from mojoui.gpu2d_merge import merge_runs
 from mojoui.ink import Stroke
 from mojoui.objectlayer import import_fabric
 from mojoui.mindmap import MapView
-from tests.test_gpu2d import paint_case, case_name, gradient, whiteboard, mindmap_of, diff, Rng
+from tests.test_gpu2d import text_scene, paint_case, case_name, gradient, whiteboard, mindmap_of, diff, Rng
 from tests.test_objectlayer import seeded_note
 
 
@@ -383,6 +383,12 @@ def main() raises:
     m.paint(ms, font, MapView(Float64(W) / 2, Float64(H) / 2, 0.8))
     compare("mindmap (" + String(m.nodes()) + " topics)", build_batches(ms, atlas, font), gl, atlas)
     compare_merged("mindmap (" + String(m.nodes()) + " topics)", ms, gl, atlas, font)
+
+    # goal 79: fonttext runs and icons on the GPU (the dynamic glyph rows, colour emoji and icons as blended images)
+    for zoom in [1.0, 4.0]:
+        var big = 1 if zoom == 1.0 else 2
+        var ts = text_scene(480 * big, 240 * big, 1.6, zoom)
+        compare("fonttext runs and icons (zoom " + String(zoom) + ")", build_batches(ts, atlas, font), gl, atlas)
 
     grown_page(gl, atlas, font)
     two_canvases(font, atlas)
