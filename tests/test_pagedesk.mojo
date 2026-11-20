@@ -9,6 +9,12 @@ from mojoui.notesshell import Boxes, draw_dock, dock_height, canvas_dock_items, 
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, shadow_bands, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CONNECTOR, STICKY, TEXT
 from mojoui.strokeicon import icon_segments
+from mojoui.pagedesk import BoardTools, page_view, clamp_axis
+from mojoui.objectlayer import export_json_canvas, INK
+from mojoui.buzanmap import BuzanMap, map_json
+from mojoui.pagesheet import PageSheet
+from mojoui.islandcard import IslandCard
+from mojoui.json import Json
 
 
 def check(ok: Bool, what: String) raises:
@@ -97,4 +103,84 @@ def main() raises:
           and near(box(d, "#zoom-fit"), [1381.0, 842.0, 36.0, 36.0]), "zoom island")
     # an app's own icon goes through the stroker like a Lucide one
     check(len(icon_segments("rect x=4 y=4 width=16 height=16 rx=3")) > 16 and len(icon_segments("path d=M5 6V4h14v2M12 4v16M9 20h6")) == 5 * 4, "inline icon specs")
+    # ---- the tools (goal 79 M4), against the web's numbers (steps.mjs probes at 1440 × 900)
+    var board = import_json_canvas(doc)
+    board.set_connector_gap(6)
+    var tools = BoardTools()
+    var view = opening_view(1440, 900, PAGE_W, PAGE_H)
+    # the Text tool at (700, 600): writing comes back to 100 % about the page origin, the line 16 px above the bottom
+    check(tools.tap(700, 600, board, view, 1440, 900), "text tap")
+    check(abs(view.scale - 1) < 1e-9 and abs(view.x - 478.72222222222223) < 1e-6 and abs(view.y - (-34.757)) < 0.01, "writing view (the web: editor top 849.203 for the page point 883.960): " + String(view.y))
+    check(abs(tools.edit_x - (700 - 478.72222222222223) / 0.5611111111111111) < 1e-6 and tools.edit_w == 410, "writing box (margin 56): " + String(tools.edit_w))
+    for ch in ["C", "o", "m", "p", "o", "s", "t"]:
+        _ = tools.key(ch, 0, board, view, 1440, 900, 1, 1)
+    _ = tools.key("Escape", 0, board, view, 1440, 900, 1, 1)
+    check(tools.tool == "select" and board.count_kind(TEXT) == 2 and tools.changed, "a text made on Escape")
+    # the Sticky tool opens the page (pageView: 57 %) and places a 240 × 200 sticky centred on the tap
+    tools.set_tool("sticky", board, view, 1440, 900, 1, 1)
+    check(abs(view.scale - 0.5703703703703704) < 1e-9 and abs(view.x - (140 + (1160 - 860 * 616.0 / 1080) / 2)) < 1e-6 and abs(view.y - 104) < 1e-9, "page view")
+    _ = tools.tap(860, 480, board, view, 1440, 900)
+    var sid = board.selected[0]
+    ref so = board.objs[board.index(sid)]
+    check(abs(so.x - 555.5) < 0.05 and abs(so.y - 559.2) < 0.05 and so.w == 240 and so.h == 200 and so.family == "Caveat", "sticky placed")
+    for ch in ["S", "e", "e", "d", "s"]:
+        _ = tools.key(ch, 0, board, view, 1440, 900, 1, 1)
+    _ = tools.key("Escape", 0, board, view, 1440, 900, 1, 1)
+    check(board.objs[board.index(sid)].text == "Seeds", "sticky words")
+    # undo takes the sticky and its words away in one step, redo brings both back
+    tools.undo(board)
+    check(not board.has(sid), "undo the sticky")
+    tools.redo(board)
+    check(board.has(sid) and board.objs[board.index(sid)].text == "Seeds", "redo the sticky with its words")
+    # connect: a drag from the new text to the sticky
+    _ = tools.key("c", 0, board, view, 1440, 900, 1, 1)
+    check(tools.press(720, 615, board, view) and tools.release(860, 480, board, view), "connect drag")
+    check(board.count_kind(CONNECTOR) == 2, "connector made")
+    # the zoom island's + (57 % → 71 %)
+    var zv = tools.zoom_step(view, 1, 1440, 900, 1, 1)
+    check(Int(zv.scale * 100 + 0.5) == 71, "zoom step")
+    # the document again: JSON Canvas the web's normalizer reads as the same objects
+    var out = export_json_canvas(board)
+    var j = Json.parse(out)
+    check(j.size(j.get(0, "nodes")) == 4 and j.size(j.get(0, "edges")) == 2, "export counts")
+    var again = import_json_canvas(out)
+    check(again.count_kind(STICKY) == 2 and again.count_kind(TEXT) == 2 and again.count_kind(CONNECTOR) == 2, "export → import")
+    # ---- the map's new ideas (model.js makeNode: the web saved Weather at (275, 190) #3d8fe8, Endings at (-275, 228) #8c67cf)
+    var m = BuzanMap()
+    var r = m.add(-1, "The book", 0, 0, hexc("#ef684b"), "root")
+    var cols: List[String] = ["#efad28", "#65ae4f", "#2d9c91", "#3d8fe8"]
+    var xy: List[Float64] = [280, -130, -280, -130, 280, 130, -280, 130]
+    for q in range(4):
+        _ = m.add(r, "k" + String(q), xy[2 * q], xy[2 * q + 1], hexc(cols[q]), "k" + String(q))
+    m.selected = r
+    var c1 = m.add_idea(False)
+    check(m.topics[c1].x == 275 and m.topics[c1].y == 190 and m.topics[c1].color == hexc("#3d8fe8") and m.editing == c1, "child idea")
+    for ch in ["W", "e", "a", "t", "h", "e", "r"]:
+        _ = m.edit_key(ch, 0)
+    check(m.edit_key("Enter", 0) == 2 and m.topics[c1].text == "Weather", "child named")
+    var c2 = m.add_idea(True)
+    check(m.topics[c2].x == -275 and m.topics[c2].y == 228 and m.topics[c2].color == hexc("#8c67cf") and m.topics[c2].font_size == 22, "sibling idea")
+    _ = m.edit_key("Escape", 0)
+    check(m.topics[c2].text == "New idea" and "Weather" in map_json(m, "Book", "root"), "map json")
+    # ---- a page: a tap types only on words (the web's onText), keys move the caret
+    var pg = PageSheet()
+    pg.set_markdown("- [ ] Binoculars\n\nend")
+    var bxs = Boxes()
+    pg.draw(sc, bxs, 4, 66, 1436, 888, 1.6, "", 0, 14)
+    check(not pg.tap(900, pg.line_top[0] + 5), "a tap far past the words starts a mark")
+    check(pg.tap(pg.text_x + 3, pg.line_top[0] + 5), "a tap on the words places the caret")
+    pg.caret_home()
+    pg.caret_right()
+    pg.caret_right()
+    pg.caret_right()
+    pg.delete_forward()
+    pg.insert("x")
+    check(pg.lines[0] == "- [x] Binoculars", "ticked: " + pg.lines[0])
+    # ---- the island card's name field
+    var card = IslandCard()
+    card.title = "Lighthouse trip"
+    card.editing = True
+    _ = card.title_key("a", 2)
+    _ = card.title_key("W", 0)
+    check(card.title == "W" and card.title_key("Enter", 0) == 2 and not card.editing, "name field")
     print("pagedesk: ok")

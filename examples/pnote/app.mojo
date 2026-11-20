@@ -33,6 +33,7 @@ from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
 from webshell import WebShell
+from mojoui.files import read_setting
 from mojoui.fonttext_check import fontcheck
 
 comptime NEW_PAGE = 1
@@ -269,7 +270,7 @@ struct Main(App):
         if pn_db != "":
             # (D-7907) the web look runs on a Personal Note database; goal 74/75's contract (PNOTE_DIR, its own store, the
             # judged scenes) keeps goal 74's look so their checks still prove the editors and the GPU path
-            self.web.append(WebShell(pn_db, environment("PNOTE_SKIN", "paper")))
+            self.web.append(WebShell(pn_db, read_setting("pnote", "skin", environment("PNOTE_SKIN", "paper"))))
             if len(self.web[0].notes) > 0:
                 self.web[0].open(self.web[0].notes[0].id)
             print("PNOTE WEB: " + String(len(self.web[0].notes)) + " notes from " + pn_db, flush=True)

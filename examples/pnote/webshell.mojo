@@ -10,9 +10,10 @@ from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
 from mojoui.pagesheet import PageSheet
-from mojoui.buzanmap import BuzanMap, draw_minimap
+from mojoui.buzanmap import BuzanMap, draw_minimap, map_json
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, word_match, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
+from mojoui.files import write_setting
 from mojoui.islandcard import IslandCard, CardTile
 from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
 from std.ffi import external_call
@@ -129,6 +130,8 @@ struct WebShell(Movable):
     var tool: String
     var card: IslandCard
     var tools: BoardTools
+    var map_root: String
+    var hits: List[Int]  # the omnibar's note rows, as note ids
     var win_w: Float64  # the window's size (layout px) at the last paint
     var win_h: Float64
 
@@ -160,6 +163,8 @@ struct WebShell(Movable):
         self.tool = "[Text]"
         self.card = IslandCard()
         self.tools = BoardTools()
+        self.map_root = "root"
+        self.hits = List[Int]()
         self.win_w = 1440
         self.win_h = 900
         try:
@@ -243,8 +248,14 @@ struct WebShell(Movable):
                     for r in range(len(ids)):
                         if ids[r] == pid:
                             par = r
-                    _ = self.map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")))
+                    _ = self.map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
+                                     ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")))
+                self.map_root = j.text(j.get(0, "rootId"), "root")
                 self.map.selected = 0
+                for r in range(len(ids)):
+                    if ids[r] == self.map_root:
+                        self.map.selected = r
+                self.map.freeze()
             except:
                 pass
 
@@ -252,6 +263,7 @@ struct WebShell(Movable):
         self.sk = skin_named(name)
         self.panel.skin_name = name
         self.sticky_look()
+        write_setting("pnote", "skin", name)  # (the web keeps it in localStorage: it survives a reload)
 
     def sticky_look(mut self):
         """New stickies in the skin's first colour, their words a deep shade of it (objects.js stickyInk: each channel × .16)."""
@@ -373,9 +385,11 @@ struct WebShell(Movable):
         """The omnibar's groups for the query: notes and actions with a word starting with it (the web's word search)."""
         var notes = List[OmniRow]()
         var first = -1
+        self.hits.clear()
         for i in range(len(self.notes)):
             ref n = self.notes[i]
             if self.omni.query == "" or word_match(n.title, self.omni.query):
+                self.hits.append(n.id)
                 if first < 0:
                     first = i
                 notes.append(OmniRow(n.emoji, "", self.sk.tint(n.tint), n.title, "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map"),
@@ -465,6 +479,20 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        var mi = self.note_index(self.current)
+        if mi >= 0 and self.notes[mi].kind == "mindmap" and not self.searching and not self.card_open and not self.settings_open:
+            if self.map.editing >= 0:
+                var r = self.map.edit_key(name, mods)
+                if r == 2:
+                    self.save_map()
+                return r != 0
+            if name == "Tab" or name == "Enter":
+                if self.map.add_idea(name == "Enter") >= 0:
+                    self.save_map()
+                return True
+            if name == "F2":
+                self.map.begin_edit(self.map.selected)
+                return True
         if self.on_canvas():
             var r = self.tools.key(name, mods, self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
             self.save_canvas()
@@ -522,6 +550,17 @@ struct WebShell(Movable):
             return True
         if not self.searching:
             return False
+        if name == "Enter":
+            if self.omni.selected >= 0 and self.omni.selected < len(self.hits):
+                var id = self.hits[self.omni.selected]
+                self.searching = False
+                self.open(id)
+            return True
+        if name == "ArrowDown" or name == "ArrowUp":
+            var n = len(self.hits)
+            if n > 0:
+                self.omni.selected = (self.omni.selected + (1 if name == "ArrowDown" else n - 1)) % n
+            return True
         if name == "Escape":
             self.searching = False
             self.card_open = False
@@ -678,6 +717,36 @@ struct WebShell(Movable):
             print("PNOTE ERROR: save canvas: " + String(e), flush=True)
         self.reload()
 
+    def save_map(mut self):
+        """The open map into Personal Note's schema (its nodes, a revision, the change log, the search index)."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "mindmap":
+            return
+        var content = map_json(self.map, self.notes[i].title, self.map_root)
+        var words = String("")
+        for ref t in self.map.topics:
+            words += t.text + "\n"
+        try:
+            var db = Database(self.db_path)
+            db.exec("BEGIN")
+            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            up.bind(1, content)
+            up.bind(2, self.notes[i].id)
+            _ = up.step()
+            self._log_change(db, self.notes[i].id)
+            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
+            del_.bind(1, self.notes[i].id)
+            _ = del_.step()
+            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
+            ins.bind(1, self.notes[i].id)
+            ins.bind(2, self.notes[i].title)
+            ins.bind(3, words)
+            _ = ins.step()
+            db.exec("COMMIT")
+        except e:
+            print("PNOTE ERROR: save map: " + String(e), flush=True)
+        self.reload()
+
     def rename(mut self, title: String):
         """The open note's new name, saved as the web's API saves one (title, revision, change log, search index); its
         guessed icon follows the new name."""
@@ -727,7 +796,7 @@ struct WebShell(Movable):
         """A tap at (x, y) layout px; True when it changed something."""
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button"])
         if self.settings_open:
-            var sh = self.boxes.hit_any(x, y, [".sw-skin:", "#close-properties"])
+            var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])
             if sh == "#close-properties":
                 self.settings_open = False
             elif sh.startswith(".sw-skin"):

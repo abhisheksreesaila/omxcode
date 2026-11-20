@@ -13,6 +13,7 @@ from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
+from mojoui.json import json_string
 
 comptime SERIF = "Source Serif 4"
 comptime SHEET: UInt32 = 0xFFEFF6F8  # #f8f6ef
@@ -28,6 +29,13 @@ struct Topic(Copyable, Movable):
     var x: Float64
     var y: Float64
     var color: UInt32
+    var id: String  # the document's id ("" for one made here before it is saved)
+    var font_size: Float64  # 0: the map's default for its depth
+    var bold: Bool
+    var font: String  # "hand" (Source Serif 4) | "clean" (IBM Plex Sans), "" none given
+
+
+comptime BRANCH_COLORS: List[String] = ["#ef684b", "#efad28", "#65ae4f", "#2d9c91", "#3d8fe8", "#8c67cf", "#d85da8", "#5e6570"]
 
 
 @fieldwise_init
@@ -41,14 +49,122 @@ struct Frame(ImplicitlyCopyable, Movable):
 struct BuzanMap(Movable):
     var topics: List[Topic]
     var selected: Int
+    var editing: Int  # the idea whose words are being written (-1: none)
+    var edit_text: String
+    var edit_all: Bool  # its words are all selected (typing replaces them), as the web's editor opens
+    var made: Int  # ideas made here (for their ids)
+    var frozen: Bool  # the view's bounds are the ones the map opened with (adding ideas never re-fits it)
+    var bounds: Tuple[Float64, Float64, Float64, Float64]
 
     def __init__(out self):
         self.topics = List[Topic]()
         self.selected = 0
+        self.editing = -1
+        self.edit_text = ""
+        self.edit_all = False
+        self.made = 0
+        self.frozen = False
+        self.bounds = (0.0, 0.0, 0.0, 0.0)
 
-    def add(mut self, parent: Int, text: String, x: Float64, y: Float64, color: UInt32) -> Int:
-        self.topics.append(Topic(parent, text, x, y, color))
+    def add(mut self, parent: Int, text: String, x: Float64, y: Float64, color: UInt32, id: String = "", font_size: Float64 = 0,
+            bold: Bool = False, font: String = "") -> Int:
+        self.topics.append(Topic(parent, text, x, y, color, id, font_size, bold, font))
         return len(self.topics) - 1
+
+    def children(self, i: Int) -> Int:
+        var n = 0
+        for ref t in self.topics:
+            if t.parent == i:
+                n += 1
+        return n
+
+    def add_idea(mut self, sibling: Bool) -> Int:
+        """A new idea from the selected one, as model.js makeNode places it: a child (or a sibling, beside it under its
+        parent), on the root's alternating sides or its parent's side, a step further out by depth, a row below the
+        others; a new main branch takes the next branch colour. It is selected and opens for writing ("New idea" selected).
+        Returns its index (-1: none)."""
+        if self.selected < 0 or self.selected >= len(self.topics):
+            return -1
+        var parent = self.selected
+        if sibling and self.topics[parent].parent >= 0:
+            parent = self.topics[parent].parent
+        var sibs = self.children(parent)
+        var root = self.topics[parent].parent < 0
+        var side = (-1.0 if sibs % 2 == 1 else 1.0) if root else (1.0 if self.topics[parent].x >= 0 else -1.0)
+        if not root and self.topics[parent].x == 0:
+            side = 1.0
+        var depth = self.depth(parent) + 1
+        var position = Float64(sibs) - Float64(sibs - 1) / 2
+        var color = hexc(materialize[BRANCH_COLORS]()[sibs % 8]) if root else self.topics[parent].color
+        self.made += 1
+        var font = self.topics[parent].font if self.topics[parent].font != "" else String("hand")
+        var i = self.add(parent, "New idea", self.topics[parent].x + side * max(190.0, 330.0 - Float64(depth) * 55),
+                         self.topics[parent].y + position * 76, color, "node-made-" + String(self.made), max(15.0, 25.0 - Float64(depth) * 3), depth == 1, font)
+        self.selected = i
+        self.begin_edit(i)
+        return i
+
+    def begin_edit(mut self, i: Int):
+        if i < 0 or i >= len(self.topics):
+            return
+        self.editing = i
+        self.edit_text = self.topics[i].text
+        self.edit_all = True
+
+    def edit_key(mut self, name: String, mods: Int) -> Int:
+        """A key while an idea is being written: 0 not its key, 1 the words changed, 2 Enter (kept), 3 Escape (dropped)."""
+        if self.editing < 0:
+            return 0
+        if name == "Enter":
+            var t = String(" ".join(self.edit_text.split()))
+            if t != "":
+                self.topics[self.editing].text = t
+            self.editing = -1
+            return 2
+        if name == "Escape":
+            self.editing = -1
+            return 3
+        if (mods & 2) != 0:
+            if name == "a" or name == "A":
+                self.edit_all = True
+                return 1
+            return 0
+        if name == "Backspace":
+            if self.edit_all:
+                self.edit_text = ""
+            else:
+                var b = self.edit_text.as_bytes()
+                var at = len(b) - 1
+                while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
+                    at -= 1
+                var cut = String(self.edit_text[byte=0:max(at, 0)])
+                self.edit_text = cut
+            self.edit_all = False
+            return 1
+        if name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
+            if self.edit_all:
+                self.edit_text = ""
+                self.edit_all = False
+            self.edit_text += name
+            return 1
+        return 0
+
+    def freeze(mut self):
+        """Keeps the bounds the map has now as the ones its view fits (the web fits a map once, as it opens)."""
+        var minx = 1e18
+        var miny = 1e18
+        var maxx = -1e18
+        var maxy = -1e18
+        for i in range(len(self.topics)):
+            var f = self.frame(i)
+            var rx = max(120.0, f.hw + 40)
+            var ry = max(120.0, f.hh + 40)
+            minx = min(minx, f.x - rx)
+            miny = min(miny, f.y - ry)
+            maxx = max(maxx, f.x + rx)
+            maxy = max(maxy, f.y + ry)
+        self.bounds = (minx, miny, maxx, maxy)
+        self.frozen = True
 
     def depth(self, i: Int) -> Int:
         var d = 0
@@ -73,7 +189,12 @@ struct BuzanMap(Movable):
         return Frame(self.topics[i].x, self.topics[i].y, s[0] / 2, s[1] / 2)
 
     def fit(self, w: Float64, h: Float64, padding: Float64) -> Tuple[Float64, Float64, Float64]:
-        """renderer.js fit(): (scale, x, y) showing every topic (each reaching at least 120 around it)."""
+        """renderer.js fit(): (scale, x, y) showing every topic (each reaching at least 120 around it); the bounds kept
+        by freeze() when there are some."""
+        if self.frozen:
+            var b = self.bounds
+            var sc0 = min(1.35, max(0.45, min((w - padding * 2) / (b[2] - b[0]), (h - padding * 2) / (b[3] - b[1]))))
+            return (sc0, w / 2 - (b[0] + b[2]) / 2 * sc0, h / 2 - (b[1] + b[3]) / 2 * sc0)
         var minx = 1e18
         var miny = 1e18
         var maxx = -1e18
@@ -154,7 +275,11 @@ struct BuzanMap(Movable):
                 draw_bordered(p, lx - 1, ly - 1, w2 + 2, h2 + 2, 6 * zoom + 1, CARD, t.color, 2)
                 var st = TextStyle(SERIF, 600, False, 20 * zoom)
                 st.exact = True
-                p.run(st, t.text, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, LABEL, ALIGN_CENTER)
+                var words = self.edit_text if i == self.editing else t.text
+                if i == self.editing and self.edit_all:
+                    var ww = measure(st, words)
+                    p.rect(cx + t.x * zoom - ww / 2, cy + (t.y - 11) * zoom, ww, 22 * zoom, with_alpha(hexc("#3d8fe8"), 0.25), 0)
+                p.run(st, words, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, LABEL, ALIGN_CENTER)
                 bx.add("[" + t.text + "]", lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
         # the selection: dashed ring and four add handles
         if self.selected >= 0 and self.selected < len(self.topics):
@@ -320,8 +445,12 @@ def ribbon_outline(g: Curve, start: Float64, end: Float64, samples: Int) -> List
 def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y: Float64, view_w: Float64, view_h: Float64, sk: Skin):
     """The map's overview (170 × 102, padded 6): every topic as a dot in its colour and the visible part as a teal frame,
     in a 220 × 130 box fitted into it (editor.js updateMinimap)."""
-    draw_shadows(p, x, y, 170, 102, 6, sk.shadow1)
-    p.rect(x, y, 170, 102, hexc("#fffffc"), 6)
+    if sk.dark:  # (a dark skin's controls: the surface, a line for an edge, no shadow: workspace-theme.css)
+        p.rect(x, y, 170, 102, sk.line, 6)
+        p.rect(x + 1, y + 1, 168, 100, sk.panel, 5)
+    else:
+        draw_shadows(p, x, y, 170, 102, 6, sk.shadow1)
+        p.rect(x, y, 170, 102, hexc("#fffffc"), 6)
     bx.add("[Map overview]", x, y, 170, 102)
     var vs = min(158.0 / 220, 90.0 / 130)
     var ox = x + 6 + (158 - 220 * vs) / 2
@@ -354,3 +483,36 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     for i in range(len(m.topics)):
         ref t = m.topics[i]
         p.circle(ox + (t.x * sc + offx) * vs, oy + (t.y * sc + offy) * vs, (4.0 if t.parent < 0 else 2.0) * vs, t.color)
+
+
+def map_json(m: BuzanMap, title: String, root_id: String) -> String:
+    """The map as Personal Note stores it ({version, title, rootId, nodes: [{id, parentId, text, x, y, color, …}]})."""
+    var out = '{"version":1,"title":' + json_string(title) + ',"rootId":' + json_string(root_id) + ',"nodes":['
+    for i in range(len(m.topics)):
+        ref t = m.topics[i]
+        if i > 0:
+            out += ","
+        var pid = String("null") if t.parent < 0 else json_string(m.topics[t.parent].id)
+        out += '{"id":' + json_string(t.id) + ',"parentId":' + pid + ',"text":' + json_string(t.text) + ',"x":' + _jnum(t.x) + ',"y":' + _jnum(t.y)
+        out += ',"color":"' + _hexs(t.color) + '"'
+        if t.font_size > 0:
+            out += ',"fontSize":' + _jnum(t.font_size) + ',"bold":' + ("true" if t.bold else "false")
+        if t.font != "":
+            out += ',"font":' + json_string(t.font) + ',"presentation":"box","curve":78'
+        out += "}"
+    return out + "]}"
+
+
+def _jnum(v: Float64) -> String:
+    if v == Float64(Int(v)):
+        return String(Int(v))
+    return String(v)
+
+
+def _hexs(c: UInt32) -> String:
+    var digits = "0123456789abcdef"
+    var out = String("#")
+    for sh in [0, 8, 16]:
+        var v = Int((c >> UInt32(sh)) & 0xFF)
+        out += String(digits[byte=v // 16:v // 16 + 1]) + String(digits[byte=v % 16:v % 16 + 1])
+    return out^

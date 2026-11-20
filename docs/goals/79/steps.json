@@ -1,0 +1,694 @@
+{
+ "steps": [
+  {
+   "name": "open the notes panel",
+   "covers": [
+    "toggle-panel"
+   ],
+   "web": [
+    {
+     "click": "#toggle-sidebar"
+    }
+   ],
+   "native": [
+    "tapat:desk=26,42",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "open the page from the panel",
+   "covers": [
+    "open-page"
+   ],
+   "web": [
+    {
+     "click": "[data-note-id=\"1\"]"
+    }
+   ],
+   "native": [
+    "tapat:desk=116,459",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "fold the Projects shelf",
+   "covers": [
+    "fold-shelf"
+   ],
+   "web": [
+    {
+     "at": [
+      156,
+      461
+     ]
+    }
+   ],
+   "native": [
+    "tapat:desk=108,512",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "close the panel",
+   "covers": [
+    "toggle-panel"
+   ],
+   "web": [
+    {
+     "click": "#toggle-sidebar"
+    }
+   ],
+   "native": [
+    "tapat:desk=26,42",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "tick a task",
+   "covers": [
+    "tick-task"
+   ],
+   "web": [
+    {
+     "at": [
+      470,
+      480
+     ]
+    },
+    {
+     "key": "Home"
+    },
+    {
+     "key": "ArrowRight"
+    },
+    {
+     "key": "ArrowRight"
+    },
+    {
+     "key": "ArrowRight"
+    },
+    {
+     "key": "Delete"
+    },
+    {
+     "type": "x"
+    }
+   ],
+   "native": [
+    "tapat:desk=326,533",
+    "wait:300",
+    "key:desk=Home",
+    "key:desk=ArrowRight",
+    "key:desk=ArrowRight",
+    "key:desk=ArrowRight",
+    "key:desk=Delete",
+    "typekeys:desk=x",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "type a paragraph",
+   "covers": [
+    "type-paragraph"
+   ],
+   "web": [
+    {
+     "at": [
+      1030,
+      320
+     ]
+    },
+    {
+     "key": "End"
+    },
+    {
+     "key": "Enter"
+    },
+    {
+     "key": "Enter"
+    },
+    {
+     "type": "We leave on Friday morning."
+    }
+   ],
+   "native": [
+    "tapat:desk=715,356",
+    "wait:300",
+    "key:desk=End",
+    "key:desk=Enter",
+    "key:desk=Enter",
+    "typekeys:desk=We leave on Friday morning.",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "type a heading",
+   "covers": [
+    "type-heading"
+   ],
+   "web": [
+    {
+     "key": "Enter"
+    },
+    {
+     "key": "Enter"
+    },
+    {
+     "type": "## Tide times"
+    }
+   ],
+   "native": [
+    "key:desk=Enter",
+    "key:desk=Enter",
+    "typekeys:desk=## Tide times",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "rename in the title island",
+   "covers": [
+    "rename"
+   ],
+   "web": [
+    {
+     "click": "#island-title"
+    },
+    {
+     "click": "#note-title"
+    },
+    {
+     "key": "Control+a"
+    },
+    {
+     "type": "Lighthouse weekend"
+    },
+    {
+     "key": "Enter"
+    }
+   ],
+   "native": [
+    "tapat:desk=500,42",
+    "wait:300",
+    "tapat:desk=500,56",
+    "wait:300",
+    "key:desk=ctrl+a",
+    "typekeys:desk=Lighthouse weekend",
+    "key:desk=Enter",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "switch to Draw",
+   "covers": [
+    "write-draw"
+   ],
+   "web": [
+    {
+     "at": [
+      478,
+      117
+     ]
+    }
+   ],
+   "native": [
+    "tapat:desk=332,130",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "draw a mark",
+   "covers": [
+    "draw-mark"
+   ],
+   "web": [
+    {
+     "drag": [
+      [
+       620,
+       650
+      ],
+      [
+       700,
+       690
+      ],
+      [
+       780,
+       650
+      ],
+      [
+       860,
+       700
+      ]
+     ]
+    }
+   ],
+   "native": [
+    "stroke:desk=620.0,650.0,0.5;633.3,656.7,0.5;646.7,663.3,0.5;660.0,670.0,0.5;673.3,676.7,0.5;686.7,683.3,0.5;700.0,690.0,0.5;713.3,683.3,0.5;726.7,676.7,0.5;740.0,670.0,0.5;753.3,663.3,0.5;766.7,656.7,0.5;780.0,650.0,0.5;793.3,658.3,0.5;806.7,666.7,0.5;820.0,675.0,0.5;833.3,683.3,0.5;846.7,691.7,0.5;860.0,700.0,0.5",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "back to Write",
+   "covers": [
+    "write-draw"
+   ],
+   "web": [
+    {
+     "at": [
+      412,
+      117
+     ]
+    }
+   ],
+   "native": [
+    "tapat:desk=286,130",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "open the canvas",
+   "covers": [
+    "open-canvas"
+   ],
+   "web": [
+    {
+     "click": "#toggle-sidebar"
+    },
+    {
+     "click": "[data-note-id=\"2\"]"
+    },
+    {
+     "click": "#toggle-sidebar"
+    }
+   ],
+   "native": [
+    "tapat:desk=26,42",
+    "wait:300",
+    "tapat:desk=116,459",
+    "wait:300",
+    "tapat:desk=26,42",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "a text box",
+   "covers": [
+    "canvas-text"
+   ],
+   "web": [
+    {
+     "at": [
+      700,
+      600
+     ]
+    },
+    {
+     "type": "Compost"
+    },
+    {
+     "key": "Escape"
+    }
+   ],
+   "native": [
+    "tapat:desk=486,667",
+    "wait:300",
+    "typekeys:desk=Compost",
+    "key:desk=Escape",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "a sticky",
+   "covers": [
+    "canvas-sticky"
+   ],
+   "web": [
+    {
+     "click": "[aria-label=\"Sticky note\"]"
+    },
+    {
+     "at": [
+      860,
+      480
+     ]
+    },
+    {
+     "type": "Seeds"
+    },
+    {
+     "key": "Escape"
+    }
+   ],
+   "native": [
+    "tapat:desk=969,534",
+    "wait:300",
+    "tapat:desk=597,533",
+    "wait:300",
+    "typekeys:desk=Seeds",
+    "key:desk=Escape",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "connect them",
+   "covers": [
+    "connect"
+   ],
+   "web": [
+    {
+     "key": "c"
+    },
+    {
+     "drag": [
+      [
+       720,
+       615
+      ],
+      [
+       860,
+       480
+      ]
+     ]
+    }
+   ],
+   "native": [
+    "key:desk=c",
+    "stroke:desk=720.0,615.0,0.5;743.3,592.5,0.5;766.7,570.0,0.5;790.0,547.5,0.5;813.3,525.0,0.5;836.7,502.5,0.5;860.0,480.0,0.5",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "a pen stroke",
+   "covers": [
+    "canvas-stroke"
+   ],
+   "web": [
+    {
+     "click": "[aria-label=\"Pen\"]"
+    },
+    {
+     "drag": [
+      [
+       560,
+       640
+      ],
+      [
+       600,
+       660
+      ],
+      [
+       650,
+       640
+      ],
+      [
+       700,
+       670
+      ]
+     ]
+    }
+   ],
+   "native": [
+    "tapat:desk=969,381",
+    "wait:300",
+    "stroke:desk=560.0,640.0,0.5;566.7,643.3,0.5;573.3,646.7,0.5;580.0,650.0,0.5;586.7,653.3,0.5;593.3,656.7,0.5;600.0,660.0,0.5;608.3,656.7,0.5;616.7,653.3,0.5;625.0,650.0,0.5;633.3,646.7,0.5;641.7,643.3,0.5;650.0,640.0,0.5;658.3,645.0,0.5;666.7,650.0,0.5;675.0,655.0,0.5;683.3,660.0,0.5;691.7,665.0,0.5;700.0,670.0,0.5",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "move a sticky",
+   "covers": [
+    "move-object"
+   ],
+   "web": [
+    {
+     "click": "[aria-label=\"Select\"]"
+    },
+    {
+     "drag": [
+      [
+       600,
+       315
+      ],
+      [
+       680,
+       355
+      ]
+     ]
+    }
+   ],
+   "native": [
+    "tapat:desk=969,279",
+    "wait:300",
+    "stroke:desk=600.0,315.0,0.5;613.3,321.7,0.5;626.7,328.3,0.5;640.0,335.0,0.5;653.3,341.7,0.5;666.7,348.3,0.5;680.0,355.0,0.5",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "delete the text box",
+   "covers": [
+    "delete-object"
+   ],
+   "web": [
+    {
+     "at": [
+      720,
+      615
+     ]
+    },
+    {
+     "key": "Delete"
+    }
+   ],
+   "native": [
+    "tapat:desk=500,683",
+    "wait:300",
+    "key:desk=Delete",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "undo",
+   "covers": [
+    "undo"
+   ],
+   "web": [
+    {
+     "click": "#undo"
+    }
+   ],
+   "native": [
+    "tapat:desk=31,956",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "redo",
+   "covers": [
+    "redo"
+   ],
+   "web": [
+    {
+     "click": "#redo"
+    }
+   ],
+   "native": [
+    "tapat:desk=63,956",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "zoom in with the island",
+   "covers": [
+    "zoom-island"
+   ],
+   "web": [
+    {
+     "click": "#zoom-in"
+    }
+   ],
+   "native": [
+    "tapat:desk=939,956",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "open the map",
+   "covers": [
+    "open-map"
+   ],
+   "web": [
+    {
+     "click": "#toggle-sidebar"
+    },
+    {
+     "click": "[data-note-id=\"3\"]"
+    },
+    {
+     "click": "#toggle-sidebar"
+    }
+   ],
+   "native": [
+    "tapat:desk=26,42",
+    "wait:300",
+    "tapat:desk=116,459",
+    "wait:300",
+    "tapat:desk=26,42",
+    "wait:300",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "add a child",
+   "covers": [
+    "map-child"
+   ],
+   "web": [
+    {
+     "key": "Tab"
+    },
+    {
+     "type": "Weather"
+    },
+    {
+     "key": "Enter"
+    }
+   ],
+   "native": [
+    "key:desk=Tab",
+    "typekeys:desk=Weather",
+    "key:desk=Enter",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "add a sibling",
+   "covers": [
+    "map-sibling"
+   ],
+   "web": [
+    {
+     "key": "Enter"
+    },
+    {
+     "type": "Ending"
+    },
+    {
+     "key": "Enter"
+    }
+   ],
+   "native": [
+    "key:desk=Enter",
+    "typekeys:desk=Ending",
+    "key:desk=Enter",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "rename an idea",
+   "covers": [
+    "map-rename"
+   ],
+   "web": [
+    {
+     "key": "F2"
+    },
+    {
+     "type": "Endings"
+    },
+    {
+     "key": "Enter"
+    }
+   ],
+   "native": [
+    "key:desk=F2",
+    "typekeys:desk=Endings",
+    "key:desk=Enter",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "search and open by keyboard",
+   "covers": [
+    "search-open-keyboard"
+   ],
+   "web": [
+    {
+     "click": "#search-button"
+    },
+    {
+     "type": "gar"
+    },
+    {
+     "key": "Enter"
+    }
+   ],
+   "native": [
+    "tapat:desk=974,42",
+    "wait:300",
+    "typekeys:desk=gar",
+    "key:desk=Enter",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "switch skin in settings",
+   "covers": [
+    "skin-settings"
+   ],
+   "web": [
+    {
+     "click": "#island-title"
+    },
+    {
+     "click": "#top-properties"
+    },
+    {
+     "at": [
+      1047,
+      320
+     ]
+    },
+    {
+     "key": "Escape"
+    }
+   ],
+   "native": [
+    "tapat:desk=500,42",
+    "wait:300",
+    "tapat:desk=396,361",
+    "wait:300",
+    "tapat:desk=727,356",
+    "wait:300",
+    "key:desk=Escape",
+    "wait:500"
+   ]
+  },
+  {
+   "name": "quit and reopen",
+   "covers": [
+    "quit-reopen"
+   ],
+   "web": [
+    "reload"
+   ],
+   "native": [
+    "relaunch",
+    "wait:500"
+   ]
+  }
+ ]
+}

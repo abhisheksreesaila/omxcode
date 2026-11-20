@@ -1574,3 +1574,14 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
   - pnote: +40 lines in webshell.mojo (open a canvas into an ObjectLayer, draw frame/board/chrome in order).
 - First shot: canvas SSIM 0.993, every box ≤ 2 px, fills ≤ 4. tests/test_pagedesk.mojo checks the rules against PN's own functions run on node (openingView 0.5611/478.72/104, shadowBands values and sum, connectorEndpoints to 1e-6) and the islands against the web's DOM boxes. `scripts/check M3`: PASS (canvas 0.993, mindmap 0.986, search 0.983, island-card 0.981, settings 0.982).
 - Next: M4 (editable canvas and map, steps.json/steps.mjs), then M6's open and cold-start rows.
+- M4, components first (D-7900). What the 26 covers needed and where each went:
+  - page editing (tap → caret by the web's onText rule, Home/End/arrows/Delete), Draw mode (hint, pen pressed, the sheet 27 px down), pen marks in PN's ink.marks form: `mojoui/pagesheet.mojo` 🔨 → ✅
+  - an editable name field on the island card (Ctrl+A, type, Enter, Escape): `mojoui/islandcard.mojo` ✅
+  - shelves that fold: `NotesPanel.toggle_shelf` ✅; a context bar over a selection: `notesshell.draw_selection_bar` ✅
+  - the board's tools (select/move, text and sticky written in place, pen, connect, delete, undo/redo, zoom step, the web's view moves) and the editor's selection look: `pagedesk.BoardTools` (new) ✅
+  - JSON Canvas out with PN's pn extras, ink in and out, `set_words`/`restyle` (one undo step for an object and its first words): `mojoui/objectlayer.mojo` ✅
+  - map ideas by makeNode, writing them (F2, Tab, Enter), a view fitted once: `mojoui/buzanmap.mojo` ✅; a dark skin's map controls ✅
+  - the CPU painter honours clips (D-7922): `mojoui/scene.mojo`, `canvas.mojo`, `draw.mojo` ✅
+  - pnote: search Enter/arrows, the skin remembered through `mojoui.files` settings, start with the panel closed (D-7921), saves of all three kinds in PN's schema.
+- The web side first: steps.mjs plays the draft and a --probe=<js> prints DOM state per step. Found by playing: the first click 28 px past a task line's words never focused the editor (it was a pen press: ink.js onText), Ctrl+A before the name field had focus selected the whole document, the Text tool on a zoomed-out canvas jumps to 100 % about the page origin and scrolls the line 16 px above the bottom, ink is saved as a file node with pn.path (file: "" is a valid derived form).
+- Dev loop: build/g79/m4probe/{web.sh, native.py}; first native run 26/28 (skin cards were never tappable natively: the hit prefix was ".sw-skin:" but the boxes are ".sw-skin", fixed; the map's radial background spilled over the title island on the CPU path: D-7922), then 28/28 (worst SSIM 0.964, the Draw-mode steps) and the six notes equal through the web API.

@@ -184,10 +184,20 @@ struct SurfacePainter(Painter, Movable):
             ref o = self.clips[len(self.clips) - 1]
             c = Clip(max(c.x0, o.x0), max(c.y0, o.y0), min(c.x1, o.x1), min(c.y1, o.y1))
         self.clips.append(c)
+        self._cut()
 
     def pop_clip(mut self):
         if len(self.clips) > 0:
             _ = self.clips.pop()
+        self._cut()
+
+    def _cut(mut self):
+        """Every primitive honours the innermost clip (the GPU renderer's scissor does the same)."""
+        var c = self.clip()
+        self.s.clip_x0 = c.x0
+        self.s.clip_y0 = c.y0
+        self.s.clip_x1 = c.x1
+        self.s.clip_y1 = c.y1
 
     def clip(self) -> Clip:
         if len(self.clips) > 0:

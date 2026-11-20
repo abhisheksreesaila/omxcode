@@ -39,7 +39,7 @@ def with_alpha(color: UInt32, alpha: Float64) -> UInt32:
 
 
 def plot(mut s: Surface, x: Int, y: Int, color: UInt32, cov: Float64):
-    if 0 <= x < s.width and 0 <= y < s.height and cov > 0.0:
+    if cov > 0.0 and s.inside(x, y):
         var p = s.pixels().unsafe_offset(y * s.width + x)
         p[] = blend(p[], color, min(cov, 1.0))
 
@@ -88,7 +88,7 @@ def line(mut s: Surface, x0: Float64, y0: Float64, x1: Float64, y1: Float64, wid
             var cov = hw + 0.5 - sqrt(ex * ex + ey * ey)
             if cov > 0:
                 if clear:
-                    if 0 <= px < s.width and 0 <= py < s.height:
+                    if s.inside(px, py):
                         var p = s.pixels().unsafe_offset(py * s.width + px)
                         p[] = over(p[], color, min(cov, 1.0))
                 else:

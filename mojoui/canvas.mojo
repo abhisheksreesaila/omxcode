@@ -39,6 +39,11 @@ struct Surface(Movable):
     var shared_bytes: Int
     var shared_row: Int
     var shared_id: Int
+    # where drawing may land (device px, x0 ≤ x < x1): the whole surface unless a painter cuts it (push_clip, goal 79)
+    var clip_x0: Int
+    var clip_y0: Int
+    var clip_x1: Int
+    var clip_y1: Int
 
     def __init__(out self, address: Int, width: Int, height: Int, scale: Float64):
         self.address = address
@@ -57,12 +62,20 @@ struct Surface(Movable):
         self.shared_bytes = 0
         self.shared_row = 0
         self.shared_id = 0
+        self.clip_x0 = 0
+        self.clip_y0 = 0
+        self.clip_x1 = width
+        self.clip_y1 = height
+
+    def inside(self, x: Int, y: Int) -> Bool:
+        """(x, y) is on the surface and inside its clip."""
+        return self.clip_x0 <= x < self.clip_x1 and self.clip_y0 <= y < self.clip_y1 and 0 <= x < self.width and 0 <= y < self.height
 
     def pixels(self) -> Pointer[UInt32, MutUntrackedOrigin]:
         return Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=self.address)
 
     def set(self, x: Int, y: Int, rgba: UInt32):
-        if 0 <= x < self.width and 0 <= y < self.height:
+        if self.inside(x, y):
             self.pixels().unsafe_offset(y * self.width + x)[] = rgba
 
     def get(self, x: Int, y: Int) -> UInt32:

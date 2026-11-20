@@ -478,7 +478,7 @@ def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64
     draw_icon(p, "minus", x + 4 + 9, y + 4 + 9, 16, k, sk.muted)
     bx.add("[Zoom out]", x + 4, y + 4, 34, 34)
     var st = TextStyle(UI, 400, False, 11)
-    text_normal(p, st, String(percent) + "%", x + 40 + 26, y + 4 + (34 - 14) / 2, 0xFF656F74, ALIGN_CENTER)
+    text_normal(p, st, String(percent) + "%", x + 40 + 26, y + 4 + (34 - 14) / 2, sk.muted if sk.dark else 0xFF656F74, ALIGN_CENTER)
     bx.add(".mindmap-zoom-label:" + String(percent) + "%", x + 40, y + 4, 52, 34)
     draw_icon(p, "plus", x + 94 + 9, y + 4 + 9, 16, k, sk.muted)
     bx.add("[Zoom in]", x + 94, y + 4, 34, 34)
@@ -490,9 +490,14 @@ def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, word
     var st = TextStyle(UI, 400, False, 11)
     var w = measure(st, words) + 20
     var x = Float64(Int((cx - w / 2) * 2 + 0.5)) / 2
-    draw_shadows(p, x, y, w, 28, 5, sk.shadow1)
-    p.rect(x, y, w, 28, bg, 5)
-    text_normal(p, st, words, x + 10, y + 7, ink)
+    if sk.dark:  # (workspace-theme.css: the surface, the ink, a line, no shadow)
+        p.rect(x, y, w, 28, sk.line, 5)
+        p.rect(x + 1, y + 1, w - 2, 26, sk.panel, 4)
+        text_normal(p, st, words, x + 10, y + 7, sk.ink)
+    else:
+        draw_shadows(p, x, y, w, 28, 5, sk.shadow1)
+        p.rect(x, y, w, 28, bg, 5)
+        text_normal(p, st, words, x + 10, y + 7, ink)
     var cut = String("")
     var n = 0
     for c in words.codepoints():

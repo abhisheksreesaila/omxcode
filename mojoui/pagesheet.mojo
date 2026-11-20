@@ -187,21 +187,26 @@ struct PageSheet(Movable):
         if len(self.wet) < 4:
             self.wet.clear()
             return False
+        # (ink-state.js: points from the stroke's own top-left; (dx, dy) puts that corner relative to the box of the first
+        # character of the word under the mark)
         var x0 = self.wet[0]
         var y0 = self.wet[1]
+        for i in range(0, len(self.wet), 2):
+            x0 = min(x0, self.wet[i])
+            y0 = min(y0, self.wet[i + 1])
         var pts = List[Float64]()
         for i in range(0, len(self.wet), 2):
             pts.append(Float64(Int((self.wet[i] - x0) * 10 + (0.5 if self.wet[i] >= x0 else -0.5))) / 10)
             pts.append(Float64(Int((self.wet[i + 1] - y0) * 10 + (0.5 if self.wet[i + 1] >= y0 else -0.5))) / 10)
-        var anchor = self._nearest_word(x0, y0)
+        var anchor = self._nearest_word(self.wet[0], self.wet[1], x0, y0)
         self.marks.append(PageMark(x0 - self.paper_x, y0 - self.paper_y, pts^, hexc("#1d3f9e"), 2.4, "pen", anchor[0], anchor[1],
                                    anchor[2], anchor[3]))
         self.wet.clear()
         return True
 
-    def _nearest_word(self, x: Float64, y: Float64) -> Tuple[Int, Int, Float64, Float64]:
-        """(start, end) of the word whose box is nearest (x, y), as offsets into the Markdown, and (x, y) from the word's
-        end on its line's baseline."""
+    def _nearest_word(self, x: Float64, y: Float64, cx: Float64, cy: Float64) -> Tuple[Int, Int, Float64, Float64]:
+        """(start, end) of the word whose box is nearest (x, y), as offsets into the Markdown, and (cx, cy) from the box of
+        its first character (its left, its line's top)."""
         var best = (0, 0, 0.0, 0.0)
         var best_d = 1e300
         var base = 0
@@ -224,7 +229,7 @@ struct PageSheet(Movable):
                         var d = (x - cx) * (x - cx) + (y - ly) * (y - ly)
                         if d < best_d:
                             best_d = d
-                            best = (base + woff, base + woff + w.byte_length(), x - (wx + ww), y - ly)
+                            best = (base + woff, base + woff + w.byte_length(), cx - wx, cy - self.line_top[li])
                     wx += ww + measure(sg.style, " ")
                     woff += w.byte_length() + 1
                 px += measure(sg.style, sg.text)
