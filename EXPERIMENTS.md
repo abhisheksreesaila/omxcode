@@ -4,6 +4,21 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, review round 2: honest opens, OpenBoard, cold start like with like (2026-11-20, morning)
+- **Setup:** a fresh reviewer's NEEDS WORK at 256035e0; Linux only (the Mac unreachable). Final M6 08:05–08:2x on a quiet
+  machine (waited 15 min for another session's GPU program to stop; load 1.3–1.5).
+- **What changed:** cold opens now drop the board's tiles and the process's first open is timed (they had found the tiles
+  kept); every open frame counts its GPU time and own paint; a press during the open is timed; `OpenBoard` owns the board
+  and its open; launched programs no longer inherit GDK_DISABLE / GSK_RENDERER; nine more tile-damage cases pass.
+- **What it showed:** first frames of an open are 25.7 ms (600 note) and 105.9 ms (stress) once nothing is kept; stress
+  frames during the open 9.2 / 10.2, a press during it 11.1; completion 50 / 96 ms (web ~1,200). Cold start judged against
+  PN's own desktop launcher (736 ms) and a fresh Chromium (559 ms): native 270 ms wins both; the warm page load (239 ms)
+  is printed, not judged.
+- **M6 still FAILS** on the open's first frames, stress open frames and press, stress zoom max (21.3) and stress undo/redo
+  (10.1 / 10.7). M2–M4 PASS on this build; M1, M5, M7 wait for the Mac.
+- **Next small step:** a fresh layer's missing visible tiles drawn directly in its first frame, tiles rastered over the
+  following frames under the budget; then partial rasters with fewer ops.
+
 ## Goal 79, continuation 5: the progressive open, zoom, cold start (2026-11-20, morning)
 - **Setup:** worktree ../mojo-ui-g79, Linux on the hidden 1.6× test screen; the Mac unreachable all round. Final run
   06:34–06:53 (load under 2.5 at the start, 3.0–4.3 during; GPUs idle).

@@ -1622,3 +1622,9 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Undo/redo: per frame ~5 ms of GPU time for 2–5 partial tile rasters (~1,000 ops) while pan frames use 0.3 ms (the GPU stays at its idle clock between such bursts, D-7940); no framework fix found this round. Next lever: fewer ops per partial raster (exact op boxes for strokes and shapes), or rastering a damaged rect once across the tiles it meets.
 - Cold start (D-7948): GDK's Vulkan dmabuf probe was 194 ms of it; skipped for GPU 2D apps: 400–510 → 260–310 ms. Left: process + GTK/libadwaita start ~105 ms, apply_design ~30 ms, gtk_window_present ~100–140 ms (window GL realize).
 - Metal tile drawing: not written this round (the open took the round); still debt.
+
+## 2026-11-20 goal 79 (review round 2)
+- Every finding checked in the code first; all held. Fixes D-7950–D-7955 (see the report's table). Two mistakes of mine caught by the runs: testscreen run by a relative path from PN's folder (M6 crashed), and the first-open run opening the page it started on (2.9 ms; the race note is now picked as the newest canvas).
+- With tiles dropped, the stress note's first open draws ~113 ms of tiles and glyphs: the open's next lever is drawing a fresh layer directly in its first frame, not more parsing.
+- A run under load 5–6 doubled stress undo/redo; the same build at load 2.8 gave 6 ms. The final run waited 15 min for a quiet machine.
+- Hyprland's client list shows only one window in this locked session, so the hidden-screen placement of the web cold-start windows couldn't be read back; they launch only through scripts/testscreen, like every test window.

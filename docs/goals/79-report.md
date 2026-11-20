@@ -1,12 +1,85 @@
 # Goal 79 report: Personal Note, native, the exact look of the web app, faster
 
-Worktree ../mojo-ui-g79, branch `goal-79-pnote-lookalike` (base 654d9471). Not merged, not pushed. Decisions D-7900–D-7937
+Worktree ../mojo-ui-g79, branch `goal-79-pnote-lookalike` (base 654d9471). Not merged, not pushed. Decisions D-7900–D-7955
 (docs/decisions.md), attempts in docs/journal.md. Checker: `scripts/check` → `docs/goals/79-check.py`, committed before
 any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fixed where its own bugs blocked a comparison
 (D-7906, D-7908, D-7915, D-7917–D-7919: each logged with why it is not a weakening).
 
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
+
+**Review round 2 (11-20, 07:0x–08:2x): a fresh reviewer's NEEDS WORK at 256035e0, and the main session's cold-start
+decision.** Every number here comes from the final M6 run (08:05–08:2x, build/g79/final-check5.log; docs/goals/79/race.md),
+started after waiting 15 minutes for a quiet machine (load 1.3 at the start, 1.5 at the end; no program over 1 GB on
+either GPU: another session's goal 77 app had been holding 19 GB on GPU 0 on and off). M2, M3 and M4 were rerun on this
+round's build (07:23–07:40): PASS (0.974/0.984/0.972/0.974; canvas 0.992; 28 steps, notes equal). The Mac stayed
+unreachable (port 22 timed out each time).
+
+## Review 2: each finding
+| # | Finding | Outcome | Proof |
+|---|---|---|---|
+| Must 1 | "cold" opens found the note's tiles kept | **held, fixed (D-7951)**: tiles dropped before each cold open, the first timed open comes from another note, the process's first open timed too (PNOTE_FIRST) and judged | race.md: first frame 600 **25.7** ms, stress **105.9** ms (were 7.9 / 25.4 with kept tiles) |
+| Must 2 | open frames lacked GPU time | **held, fixed (D-7953)**: each frame's draw + own GPU + own paint + raster when composited + sync | race.md: frames during 600 3.4 / 4.7, stress 9.2 / 10.2 |
+| Should 3 | an edit during the open blocks, unmeasured; finish before the chrome hit-test | **held, fixed (D-7952)**: chrome hit-tested first; framebench `openpress` times the frame showing a press made during the open, judged under (b) | race.md: 600 3.2 ms, stress **11.1** ms |
+| Should 4 | the gate was 9 pnote call sites | **held, fixed (D-7952)**: `mojoui.canvasload.OpenBoard` (layer / edit() / take() / step()), `pagedesk.board_rect` | tests/test_canvasload case 7 (edit mid-open through OpenBoard, undo) |
+| Should 5 | tile damage tests missed edit kinds | **fixed (D-7955)**: resize, z-order, ink added/erased, connector re-routed, rotation, zoom out over kept tiles, 10 open slices over kept tiles | tests/test_boardraster: all tiled == direct (worst 6 levels) |
+| Should 6 | "shown" always 0.0 / 0.0 (0) | **fixed (D-7955)**: printed "shown: not measured" when n = 0 (reading presentation times on the hidden screen not fixed) | race.md |
+| Should 7 | GDK_DISABLE / GSK_RENDERER leaked to launched programs | **held, fixed (D-7954)**: taken back once GTK read them | test step `env:` prints both empty after start; cold start unchanged |
+| Nits | hash, duplicate ids, header, web open label, SIGBUS note, dead line, PNOTE WEB on start runs | **all fixed (D-7955)** | test_canvasload case 6 (duplicate id), checker |
+| Decision | cold start like with like | **logged (D-7950), checker changed**: judged against PN's desktop launcher cold and a fresh Chromium; warm page load printed, not judged | race.md: native 270 ms vs launcher 736 ms and fresh Chromium 559 ms: **✓ ✓** (warm load 239 ms, not judged) |
+
+Mistakes caught on the way and fixed: the first M6 run of this round crashed on the checker running testscreen by a
+relative path (500f180d); the next ran the "process's first open" on the page the app started on (2.9 ms, a page; fixed in
+8cbefc34, that run's race.md kept as its record). A run in between, with the load average at 5–6, showed stress
+undo/redo at 18–20 ms; probes of the same build at load 2.8 gave 6.1 / 5.9.
+
+## Milestones (this round)
+| # | Result |
+|---|---|
+| M0 | PASS (earlier this session; nothing it reads changed) |
+| M1 | BLOCKED (Mac); Linux half passes |
+| M2, M3, M4 | **PASS** (rerun on this round's build) |
+| M5 | BLOCKED (Mac); Linux half passes |
+| M6 | **FAIL** (below) |
+| M7 | FAIL/BLOCKED: the Mac is unreachable; goal 75's M4 needs that goal's build (not in this worktree) |
+
+## The race (final run, docs/goals/79/race.md only)
+| note | row | web | native work p95 / max | |
+|---|---|---|---|---|
+| 600 | open: first frame (cold opens and the process's first open) | 1,271 (page load) | **25.7** (first open) | ✗ |
+| 600 | open: frames during / a press during it / complete | — / — / 1,271 | 3.4 / 4.7 · 3.2 · 50 ms | ✓ ✓ ✓ |
+| 600 | pan, zoom, drags, undo, redo, pen, typing | 16.7–17.1 | p95 3.6–7.5, max ≤ 10.6 | ✓ (all 9) |
+| stress | open: first frame | 1,167 | **105.9** (first open) | ✗ |
+| stress | open: frames during | — | **9.2** / 10.2 | ✗ |
+| stress | open: a press during it | — | **11.1** / 11.1 | ✗ |
+| stress | open: complete | 1,167 | 96 ms | ✓ |
+| stress | pan 30 % / 100 % | 16.7 / 16.8, 16.8 / 33.2 | 5.0 / 5.1, 4.5 / 5.1 | ✓ ✓ |
+| stress | zoom from 30 % | 16.8 / 299.9 | 5.4 / **21.3** | ✗ |
+| stress | drag one / drag 40 | 16.8 / 16.8, 16.7 / 66.7 | 6.5 / 16.7, 6.0 / 7.7 | ✓ ✓ |
+| stress | undo / redo | 17.1 / 17.1, 17.1 / 17.3 | **10.1 / 10.1, 10.7 / 10.7** | ✗ ✗ |
+| stress | pen / typing | 16.8 / 150, 16.8 / 16.8 | 4.5 / 6.9, 5.5 / 6.9 | ✓ ✓ |
+| | cold start vs PN's desktop launcher / fresh Chromium | 736 / 559 ms | 270 ms | ✓ ✓ |
+| | warm page load (not judged) | 239 ms | 270 ms | — |
+| | RSS | 814 MB | 202 MB | ✓ |
+| | note switch / omnibar p95 | — | 6.55 / 7.35 | ✓ ✓ |
+
+**Read it honestly:** with the measurement fixed, the open is far from rule (a): a first open rasters every visible tile
+and, in a new process, the glyphs at that zoom (600: 22 ms of draw; stress: ~113). Stress undo/redo (GPU time of partial
+tile rasters, varying with the GPU's clock) and the zoom's worst frame flip between runs: 5.9–10.7 and 14–21 ms across
+this session's quiet runs. The next framework lever for (a) and the open's frames: draw a fresh layer's missing visible
+tiles directly in the first frame and raster tiles over the following frames under the budget.
+
+## What the framework gained this round
+- `mojoui.canvasload.OpenBoard`: a board and its progressive open as one value; edits and whole-board reads finish first.
+- `pagedesk.board_rect` (the paint's cull rect), `BoardLook.forget()` (a new picture: the renderer drops the layer's tiles),
+  an FNV-style `_obj_key`.
+- canvasload binds duplicate ids as the whole import does.
+- GTK host: framebench open frames with GPU, own paint and raster; `openpress`; `env:` step; GDK_DISABLE / GSK_RENDERER
+  taken back after GTK reads them.
+- Tests: test_canvasload cases 6–7, test_boardraster's nine new edit/open cases.
+- The race: docs/goals/79/webcold.mjs + desktop_cold.py (web cold starts, like with like).
+
+---
 
 **Continuation 5 (11-20, 05:2x–06:5x): the progressive open, zoom, cold start.** Everything below comes from the final
 run (`scripts/check`, 06:34–06:53, log build/g79/final-check.log; docs/goals/79/race.md generated by it). Conditions,
