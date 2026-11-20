@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 77 M7f: the final review's fixes (2026-11-19, unattended)
+- **Setup:** ../mojo-ui-g77, no model and no GPU work (a GPU rerun owned the cards); GTK on headless Xvfb.
+- **Built:** wall-clock names and a tested clock (D-7880); omx's stage logic lifted into mojoui.agentui/stagetv with tests (D-7881, D-7882); view containers keep an empty Grid/Table/Board cell's place (D-7883); the checkers parse test counts (D-7884).
+- **Worked:** the unit tests (clock, stage 8, stagetv 10, tiles_agent with the stage logic, stagefeed, livetiles, vector, assistant, and the grid/table/board tests); lints; components.md; omx and stage build for Linux and the web.
+- **Broke:** the intermittent crash (D-7876) is a heap corruption seen in three apps (stage, agenttiles, omx), always as tcmalloc's free on a fresh theme's List[Surface]; caught with full stacks and under ASan but not found (D-7885). It failed M7C and M7E in one 77-check run.
+- **Next:** a malloc-checking build (glibc malloc with MALLOC_CHECK_, or tcmalloc's debug allocator) to fault at the corrupting write; the owner's call on the ring measure; the model runs redone after.
+
 ## Goal 77 M7f: omx on the Stage (2026-11-19, unattended)
 - **Setup:** ../mojo-ui-g77 (goal-77-show-and-point), both RTX 3090s, `CUDA_DEVICE_ORDER=PCI_BUS_ID`; the real Qwen3.8-27B for goal 72's and 77's checks.
 - **Built:** examples/omx now composes mojoui.stage in omxqua's Counter family: top bar (avatars, Settings popover, what she's doing, the lane chip), left (local clock, Today, Pinned), right (Live rows), centre LiveTiles from one Screens card `stage` (Screens.show/keep: the assistant's to-do/job/news tiles, sample tiles marked "sample", the agent's LiveTiles and the tiles tool), a voice-first chat bar (orb, her subtitles or the text box behind a "Type" keyboard, Stop, the mic as mute), the TV for every card (one at a time, conversation beside it, Recent), the pointer over the whole page with only the TV's card and visible tiles pointable. Framework: StageChat/StageTool, press_with, Screens.show/keep, tile_json, Assistant.tiles, local_time, tint_hue, StageTV size guess and stacked layout, view._container skipping empty views, the web host's htmx settle 0 (D-7840).
