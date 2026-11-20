@@ -195,7 +195,8 @@ COMPOSITES = [
     ("GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)", "mojoui/gpu2d.mojo", ["Canvas", "Canvas frames (animation)"], "backend_name("),  # (apps opt in with Canvas(…).gpu(); backend_name( names the ones that report the renderer, since a bare gpu( matches other APIs)
     # goal 79: Personal Note's web look, as framework pieces (D-7900)
     ("Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule; CoreText on the Mac to come)", "mojoui/fonttext.mojo", ["Canvas"], "mojoui.fonttext"),
-    ("Skins as themes (Paper, Night, Crayon tokens, color-mix, shadow scale)", "mojoui/skin.mojo", ["Canvas"], "skin_named("),
+    ("Skins as themes (a token set an app fills: desk, panel, ink, accent, tints, faces, radii, shadow scale, locked colours; color-mix; Personal Note's Paper, Night and Crayon live in pnote, D-7928)", "mojoui/skin.mojo", ["Canvas"], "Skin("),
+    ("Document store (rows with a revision: a save debounce, saves written only on the revision the editor read with conflicts reported, parsed documents kept by revision; D-7927, D-7934)", "mojoui/docstore.mojo", [], "RowSave("),
     ("Stroke icons (Lucide geometry rasterized natively at device px)", "mojoui/strokeicon.mojo", ["Canvas"], "draw_icon("),
     ("Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)", "mojoui/notesshell.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "NotesPanel("),
     ("Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)", "mojoui/pagesheet.mojo", ["Canvas"], "PageSheet("),
