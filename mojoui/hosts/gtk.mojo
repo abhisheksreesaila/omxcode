@@ -558,6 +558,8 @@ struct GtkCanvas(Copyable, Movable):
     var frame_sent_us: Int  # the frame event for this frame time went out early, with the drawing ahead (0: none)
     var bench_scene_ms: Float64  # (framebench, D-7929) the app's own painting of the Scene, and the GPU 2D renderer's batch building
     var bench_batch_ms: Float64
+    var draw_log: List[Float64]  # (framebench open, D-7944) each draw's own CPU time, in order, while logging
+    var draw_logging: Bool
     var bench_draw_ms: Float64  # (framebench) CPU time of this canvas's draws since the step's gesture, and of those that
     var bench_inframe_ms: Float64  # ran inside a frame's paint (already in that frame's paint time)
     # graphics offload (D-7570): a .gpu() canvas's picture inside a GtkGraphicsOffload (0: none), itself inside a box
@@ -663,6 +665,8 @@ struct GtkCanvas(Copyable, Movable):
         self.ahead_still = False
         self.frame_sent_us = 0
         self.bench_draw_ms = 0
+        self.draw_log = List[Float64]()
+        self.draw_logging = False
         self.bench_scene_ms = 0
         self.bench_batch_ms = 0
         self.bench_inframe_ms = 0
@@ -3793,6 +3797,8 @@ struct GtkHost[A: App](Movable):
         c.paint_ms = took
         c.upload_ms = 0
         c.bench_draw_ms += took
+        if c.draw_logging:
+            c.draw_log.append(took)
         if in_paint:
             c.bench_inframe_ms += took
         if self.rt.trace:
@@ -3935,6 +3941,8 @@ struct GtkHost[A: App](Movable):
         self.canvases[ci].shown_frame = self.paints_done if self.in_paint else -1
         self.canvases[ci].shown_gpu = via_gpu2d
         self.canvases[ci].bench_draw_ms += self.canvases[ci].draw_ms
+        if self.canvases[ci].draw_logging:
+            self.canvases[ci].draw_log.append(self.canvases[ci].draw_ms)
         if self.scene_mode:
             if via_gpu2d:
                 self.canvases[ci].bench_batch_ms += Float64(self.gpu2d()[].batch_ns) / 1e6
@@ -5232,6 +5240,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             bench_wait[A](host_addr, ci, 200_000_000)
     var syncs = List[Float64]()
     var rasters = List[Float64]()
+    var during = List[Float64]()  # (open, D-7944) the frames after an open's first, while it is still coming in
+    var completes = List[Float64]()  # (open) request → the frame that completes it (ms, wall clock)
     var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
     var shown_wait = List[Int]()  # (frame counter, paint end µs) pairs whose presentation time hasn't come back yet
     var clock_fb = external_call["gtk_widget_get_frame_clock", Int](host[].window)
@@ -5391,6 +5401,42 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             releases.append(works[len(works) - 1])
         elif prev_kind == RELEASE:
             afters.append(works[len(works) - 1])
+        if what == "open":  # (D-7944) an open that comes in a slice a frame: every frame until App.bench("bench:loading")
+            # says it's complete is timed, each by its own draw (a frame drawn ahead is drawn in the interval before it
+            # is shown: each draw is logged by itself, D-7560), plus GTK's paint and a display round trip; and the time
+            # from the open request to the paint after the draw that completed it
+            var last_done = perf_counter_ns()
+            var guard = perf_counter_ns() + 5_000_000_000
+            host[].canvases[ci].draw_log.clear()
+            host[].canvases[ci].draw_logging = True
+            var paint_ms = List[Float64]()
+            var pd_seen = host[].paints_done
+            var done_at = -1  # (paints_done when the app first said it's complete)
+            var inframe_seen = host[].canvases[ci].bench_inframe_ms
+            while perf_counter_ns() < guard:
+                if done_at < 0 and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
+                    done_at = host[].paints_done
+                    if len(paint_ms) == 0 and len(host[].canvases[ci].draw_log) == 0:
+                        break  # (complete in the open's own frame)
+                _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+                if host[].paints_done != pd_seen:
+                    pd_seen = host[].paints_done
+                    var inf = host[].canvases[ci].bench_inframe_ms  # (a draw inside the paint is the draw's, not the paint's)
+                    paint_ms.append(max(host[].paint_ring[(pd_seen - 1) % 64] - (inf - inframe_seen), 0.0))
+                    inframe_seen = inf
+                    last_done = perf_counter_ns()
+                    if done_at >= 0 and pd_seen > done_at:
+                        break
+            host[].canvases[ci].draw_logging = False
+            var fts = perf_counter_ns()
+            external_call["gdk_display_sync", NoneType](display)
+            var fsm = Float64(Int(perf_counter_ns()) - Int(fts)) / 1e6
+            var pmed = pct(paint_ms, 0.5)
+            for ref dm_ in host[].canvases[ci].draw_log:
+                during.append(dm_ + pmed + fsm)
+                if getenv("MOJOUI_TRACE_FRAMES") == "1":
+                    print("TRACE: open frame: draw " + one_decimal(Float32(dm_)) + " paint " + one_decimal(Float32(pmed)) + " sync " + one_decimal(Float32(fsm)), flush=True)
+            completes.append(Float64(Int(last_done) - Int(t0)) / 1e6)
     if what == "pan" or what == "erase" or what == "dragone" or what == "drag40":
         host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
         settle()
@@ -5428,6 +5474,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if len(gpus) > 0:
         counts += " gpu_p95=" + one_decimal(Float32(pct(gpus, 0.95))) + " gpu_max=" + one_decimal(Float32(pct(gpus, 1.0))) + (
             " gpu_by=timer" if g2d_timed else " gpu_by=wait")
+    if what == "open":
+        counts += " during_n=" + String(len(during)) + " during_p95=" + one_decimal(Float32(pct(during, 0.95))) + " during_max=" + one_decimal(Float32(pct(during, 1.0)))
+        counts += " complete_p50=" + one_decimal(Float32(pct(completes, 0.5))) + " complete_max=" + one_decimal(Float32(pct(completes, 1.0)))
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
           + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))

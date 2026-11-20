@@ -1,0 +1,603 @@
+# mojoui.canvasload: a JSON Canvas document opened a part at a time into an ObjectLayer (goal 79, D-7944).
+#
+#   var ld = CanvasLoad(text)                         # skimmed: every node's bytes and box, nothing parsed yet
+#   var pn = ld.member("pn")                          # a top-level member parsed on its own (Json; -1 root when absent)
+#   ld.take(layer, x0, y0, x1, y1)                    # the nodes meeting a rect (page units): parsed on every core, adopted
+#   ld.step(layer, x0, y0, x1, y1, budget_us)         # the next slice: nodes meeting the rect first, then file order
+#   ld.finish(layer)                                  # everything now: a reader that needs the whole document calls it
+#   ld.done()                                         # nothing left
+#
+# Why: parsing Personal Note's 12 MB stress canvas whole takes ~100 ms, and the window shows a part of it. The skim
+# finds where every node is without parsing: the bytes go by in 64-byte blocks, each turned into bit masks (quotes,
+# backslashes, brackets), strings found by a prefix XOR of the unescaped quotes (simdjson's stage 1), and only blocks
+# where the depth can come back to a node's level are walked bit by bit. Then the first frame parses only the nodes it
+# shows. Edges join once both their ends are there. Stacking is the file's order throughout (a node's z and id are its
+# index), so what's drawn early is drawn in its final order, and after finish() the layer is what import_json_canvas_doc
+# makes of the same text (the same objects, ids, z and order; tests/test_canvasload).
+# Adopting objects isn't an edit: a layer saved before a slice is still saved after it (ObjectLayer.unsaved()).
+
+from std.bit import pop_count, count_trailing_zeros
+from std.memory import pack_bits
+from std.sys.info import num_logical_cores
+from max.algorithm import parallelize
+from mojoui.json import Json, c_locale, c_float, pow5_table
+from mojoui.objectlayer import ObjectLayer, Obj, canvas_node_obj, canvas_edge_obj, CONNECTOR
+from mojoui.docstore import clock_us
+from std.os import getenv
+
+comptime _EVEN = UInt64(0x5555555555555555)
+
+
+def _prefix_xor(x: UInt64) -> UInt64:
+    """Bit i of the result is the XOR of bits 0..i (a string's inside, from its quotes)."""
+    var y = x ^ (x << 1)
+    y = y ^ (y << 2)
+    y = y ^ (y << 4)
+    y = y ^ (y << 8)
+    y = y ^ (y << 16)
+    y = y ^ (y << 32)
+    return y
+
+
+@fieldwise_init
+struct Member(Copyable, Movable):
+    var key: String
+    var start: Int  # its value's first byte ('{' or '[')
+    var end: Int  # one past its last
+
+
+struct Skim(Movable):
+    """Where a JSON document's top-level members are, and every container element of its top-level arrays."""
+
+    var members: List[Member]
+    var el_member: List[Int]  # per element: the member (index in members) it belongs to
+    var el_start: List[Int]
+    var el_end: List[Int]
+    var ok: Bool  # the brackets and strings balanced to the end
+
+    def __init__(out self):
+        self.members = List[Member]()
+        self.el_member = List[Int]()
+        self.el_start = List[Int]()
+        self.el_end = List[Int]()
+        self.ok = False
+
+
+def _key_before(p: Pointer[UInt8, MutUntrackedOrigin], at: Int) -> String:
+    """The key of the member whose value starts at `at` (back over spaces and the colon to the key's quotes)."""
+    var i = at - 1
+    while i >= 0 and (p.unsafe_offset(i)[] == 32 or p.unsafe_offset(i)[] == 9 or p.unsafe_offset(i)[] == 10 or p.unsafe_offset(i)[] == 13 or p.unsafe_offset(i)[] == 58):
+        i -= 1
+    if i < 0 or p.unsafe_offset(i)[] != 34:
+        return ""
+    var end = i
+    i -= 1
+    while i >= 0:
+        if p.unsafe_offset(i)[] == 34:
+            var bs = 0
+            var k = i - 1
+            while k >= 0 and p.unsafe_offset(k)[] == 92:
+                bs += 1
+                k -= 1
+            if bs % 2 == 0:
+                break
+        i -= 1
+    if i < 0:
+        return ""
+    var out = List[UInt8](capacity=end - i - 1)
+    for k in range(i + 1, end):
+        out.append(p.unsafe_offset(k)[])
+    return String(from_utf8_lossy=Span(out))
+
+
+def skim(addr: Int, n: Int) -> Skim:
+    """The structure of the JSON object in bytes [addr, addr + n): its top-level members and the containers in its
+    top-level arrays (their byte ranges). Nothing is parsed; nothing past the end is read."""
+    var s = Skim()
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var depth = 0
+    var prev_escaped = UInt64(0)
+    var prev_in = UInt64(0)  # all ones when the previous block ended inside a string
+    var member = -1
+    var member_array = False
+    var el_open = -1
+    var b = 0
+    while b < n:
+        var v = SIMD[DType.uint8, 64](32)
+        if b + 64 <= n:
+            v = p.unsafe_offset(b).unsafe_load[width=64]()
+        else:  # (the last block: read byte by byte, nothing past the end; the rest count as spaces)
+            for k in range(n - b):
+                v[k] = p.unsafe_offset(b + k)[]
+        var quote = pack_bits(v.eq(34))
+        var bslash = pack_bits(v.eq(92))
+        var opens = pack_bits(v.eq(123) | v.eq(91))
+        var closes = pack_bits(v.eq(125) | v.eq(93))
+        var escaped = UInt64(0)
+        if bslash != 0 or prev_escaped != 0:  # (simdjson's find_escaped: bytes after an odd run of backslashes)
+            var bsl = bslash & ~prev_escaped
+            var follows = (bsl << 1) | prev_escaped
+            var odd_starts = bsl & ~_EVEN & ~follows
+            var seq = odd_starts + bsl
+            prev_escaped = UInt64(1) if seq < bsl else UInt64(0)
+            escaped = (_EVEN ^ (seq << 1)) & follows
+        quote = quote & ~escaped
+        var inside = _prefix_xor(quote) ^ prev_in
+        prev_in = UInt64(0) - (inside >> 63)
+        opens = opens & ~inside
+        closes = closes & ~inside
+        if depth - pop_count(closes).cast[DType.int64]().__int__() >= 3:  # (the depth can't reach an element's level here)
+            depth += pop_count(opens).cast[DType.int64]().__int__() - pop_count(closes).cast[DType.int64]().__int__()
+            b += 64
+            continue
+        var m = opens | closes
+        while m != 0:
+            var bit = count_trailing_zeros(m).cast[DType.int64]().__int__()
+            m = m & (m - 1)
+            var at = b + bit
+            if (opens >> UInt64(bit)) & 1 == 1:
+                if depth == 1:
+                    member = len(s.members)
+                    member_array = p.unsafe_offset(at)[] == 91
+                    s.members.append(Member(_key_before(p, at), at, -1))
+                elif depth == 2 and member_array:
+                    el_open = at
+                depth += 1
+            else:
+                depth -= 1
+                if depth < 0:
+                    return s^
+                if depth == 2 and member_array and el_open >= 0:
+                    s.el_member.append(member)
+                    s.el_start.append(el_open)
+                    s.el_end.append(at + 1)
+                    el_open = -1
+                elif depth == 1 and member >= 0:
+                    s.members[member].end = at + 1
+                    member = -1
+                    member_array = False
+        b += 64
+    s.ok = depth == 0 and prev_in == 0
+    return s^
+
+
+def _skip_ws(p: Pointer[UInt8, MutUntrackedOrigin], var i: Int, end: Int) -> Int:
+    while i < end and (p.unsafe_offset(i)[] == 32 or p.unsafe_offset(i)[] == 9 or p.unsafe_offset(i)[] == 10 or p.unsafe_offset(i)[] == 13):
+        i += 1
+    return i
+
+
+def _skip_string(p: Pointer[UInt8, MutUntrackedOrigin], var i: Int, end: Int) -> Int:
+    """i at an opening quote: one past the closing one."""
+    i += 1
+    while i < end:
+        var c = p.unsafe_offset(i)[]
+        if c == 92:
+            i += 2
+            continue
+        if c == 34:
+            return i + 1
+        i += 1
+    return end
+
+
+def _skip_value(p: Pointer[UInt8, MutUntrackedOrigin], var i: Int, end: Int) -> Int:
+    """One past the JSON value starting at i (a container walked bracket by bracket, strings skipped)."""
+    var c = p.unsafe_offset(i)[]
+    if c == 34:
+        return _skip_string(p, i, end)
+    if c == 123 or c == 91:
+        var d = 0
+        while i < end:
+            c = p.unsafe_offset(i)[]
+            if c == 34:
+                i = _skip_string(p, i, end)
+                continue
+            if c == 123 or c == 91:
+                d += 1
+            elif c == 125 or c == 93:
+                d -= 1
+                if d == 0:
+                    return i + 1
+            i += 1
+        return end
+    while i < end and p.unsafe_offset(i)[] != 44 and p.unsafe_offset(i)[] != 125 and p.unsafe_offset(i)[] != 93:
+        i += 1
+    return i
+
+
+def read_keys(addr: Int, start: Int, end: Int, names: List[String]) -> List[Int]:
+    """The values of an object's own keys `names` (the object's bytes [start, end)): for each name its value's byte range
+    as two entries (start, end), (-1, -1) when absent. Keys are read in order until every name is found; a nested value
+    is skipped whole, nothing is parsed."""
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var out = List[Int](length=2 * len(names), fill=-1)
+    var found = 0
+    var i = _skip_ws(p, start + 1, end)
+    while i < end and found < len(names):
+        if p.unsafe_offset(i)[] != 34:
+            break
+        var k0 = i + 1
+        i = _skip_string(p, i, end)
+        var klen = i - 1 - k0
+        i = _skip_ws(p, i, end)
+        if i >= end or p.unsafe_offset(i)[] != 58:
+            break
+        i = _skip_ws(p, i + 1, end)
+        var v0 = i
+        i = _skip_value(p, i, end)
+        for n in range(len(names)):
+            if out[2 * n] >= 0 or names[n].byte_length() != klen:
+                continue
+            var same = True
+            var nb = names[n].as_bytes()
+            for c in range(klen):
+                if p.unsafe_offset(k0 + c)[] != nb[c]:
+                    same = False
+                    break
+            if same:
+                out[2 * n] = v0
+                out[2 * n + 1] = i
+                found += 1
+                break
+        i = _skip_ws(p, i, end)
+        if i < end and p.unsafe_offset(i)[] == 44:
+            i = _skip_ws(p, i + 1, end)
+    return out^
+
+
+def _number_at(addr: Int, a: Int, b: Int, default: Float64) -> Float64:
+    """The JSON number in bytes [a, b) (`default` when it isn't one)."""
+    if a < 0:
+        return default
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var c = p.unsafe_offset(a)[]
+    if not (c == 45 or (c >= 48 and c <= 57)):
+        return default
+    var t = List[UInt8](capacity=b - a)
+    for k in range(a, b):
+        var ch = p.unsafe_offset(k)[]
+        if ch == 32 or ch == 9 or ch == 10 or ch == 13:
+            break
+        t.append(ch)
+    return c_float(String(from_utf8_lossy=Span(t)))
+
+
+def _string_at(addr: Int, a: Int, b: Int) -> String:
+    """The JSON string in bytes [a, b) as text ("" when it isn't one); escapes decoded as the reader decodes them."""
+    if a < 0:
+        return ""
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    if p.unsafe_offset(a)[] != 34:
+        return ""
+    var plain = True
+    for k in range(a + 1, b - 1):
+        if p.unsafe_offset(k)[] == 92:
+            plain = False
+            break
+    if plain:
+        var t = List[UInt8](capacity=b - a)
+        for k in range(a + 1, b - 1):
+            t.append(p.unsafe_offset(k)[])
+        return String(from_utf8_lossy=Span(t))
+    try:
+        var j = Json.parse_bytes(addr + a, b - a)
+        return j.text(0)
+    except:
+        return ""
+
+
+def node_box(addr: Int, start: Int, end: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+    """A JSON Canvas node's x, y, width, height from its own keys (width 200 and height 100 when absent, as the
+    importer), nothing else parsed."""
+    var v = read_keys(addr, start, end, ["x", "y", "width", "height"])
+    return (_number_at(addr, v[0], v[1], 0), _number_at(addr, v[2], v[3], 0), _number_at(addr, v[4], v[5], 200), _number_at(addr, v[6], v[7], 100))
+
+
+comptime _PENDING = 0
+comptime _ADOPTED = 1
+comptime _NOTHING = 2  # parsed: the importer makes no object of it (or it isn't JSON)
+
+
+struct CanvasLoad(Movable):
+    """A JSON Canvas document being opened into an ObjectLayer a part at a time (see the top of the file)."""
+
+    var text: String
+    var ok: Bool  # skimmed: an object with a "nodes" array (else open it whole: import_json_canvas_doc raises the why)
+    var members: List[Member]
+    var ns: List[Int]  # per node: its bytes [ns, ne)
+    var ne: List[Int]
+    var bx0: List[Float64]  # per node: its box, from its own keys
+    var by0: List[Float64]
+    var bx1: List[Float64]
+    var by1: List[Float64]
+    var state: List[UInt8]
+    var left: Int  # nodes not parsed yet
+    var cursor: Int  # the next node in file order a slice looks at
+    var es: List[Int]  # per edge: its bytes
+    var ee: List[Int]
+    var e_from: List[Int]  # per edge: the node (index) it starts and ends at, -1 when no node has that id
+    var e_to: List[Int]
+    var e_left: List[Int]  # edges not adopted yet (indices)
+    var at_key: Dict[String, Int]  # a node's id in the document → its index (the last with that id, as the importer)
+    var rate: Float64  # bytes parsed per µs, all cores together (measured by every slice)
+    var skim_us: Int
+    var bad: Int  # nodes that weren't JSON (made nothing)
+    var trace: Bool  # MOJOUI_LOAD_TRACE=1: each slice's parse and adopt times (diagnosis)
+    var cores: Int  # workers for a slice (the machine's logical cores: 12 → 24 measured 6.5 → 4.8 ms; MOJOUI_LOAD_CORES=n for an A/B)
+
+    def __init__(out self, var text: String):
+        self.text = text^
+        self.ok = False
+        self.members = List[Member]()
+        self.ns = List[Int]()
+        self.ne = List[Int]()
+        self.bx0 = List[Float64]()
+        self.by0 = List[Float64]()
+        self.bx1 = List[Float64]()
+        self.by1 = List[Float64]()
+        self.state = List[UInt8]()
+        self.left = 0
+        self.cursor = 0
+        self.es = List[Int]()
+        self.ee = List[Int]()
+        self.e_from = List[Int]()
+        self.e_to = List[Int]()
+        self.e_left = List[Int]()
+        self.at_key = Dict[String, Int]()
+        self.rate = 0
+        self.skim_us = 0
+        self.bad = 0
+        self.trace = getenv("MOJOUI_LOAD_TRACE") == "1"
+        self.cores = num_logical_cores()
+        try:
+            if getenv("MOJOUI_LOAD_CORES") != "":
+                self.cores = max(1, Int(getenv("MOJOUI_LOAD_CORES")))
+        except:
+            pass
+        var t0 = clock_us()
+        var addr = Int(self.text.unsafe_ptr())
+        var sk = skim(addr, self.text.byte_length())
+        if not sk.ok:
+            return
+        var nodes_m = -1
+        var edges_m = -1
+        for i in range(len(sk.members)):
+            if sk.members[i].key == "nodes" and sk.members[i].end > 0 and self.text.as_bytes()[sk.members[i].start] == 91:
+                nodes_m = i
+            elif sk.members[i].key == "edges" and sk.members[i].end > 0 and self.text.as_bytes()[sk.members[i].start] == 91:
+                edges_m = i
+        if nodes_m < 0:
+            return
+        for k in range(len(sk.el_start)):
+            if sk.el_member[k] == nodes_m:
+                var a = sk.el_start[k]
+                var b = sk.el_end[k]
+                var v = read_keys(addr, a, b, ["x", "y", "width", "height", "id"])
+                var x = _number_at(addr, v[0], v[1], 0)
+                var y = _number_at(addr, v[2], v[3], 0)
+                self.at_key[_string_at(addr, v[8], v[9])] = len(self.ns)
+                self.ns.append(a)
+                self.ne.append(b)
+                self.bx0.append(x)
+                self.by0.append(y)
+                self.bx1.append(x + max(_number_at(addr, v[4], v[5], 200), 0.0))
+                self.by1.append(y + max(_number_at(addr, v[6], v[7], 100), 0.0))
+            elif sk.el_member[k] == edges_m:
+                self.es.append(sk.el_start[k])
+                self.ee.append(sk.el_end[k])
+        for e in range(len(self.es)):  # (an edge's ends, read without parsing it: a slice that shows it loads both)
+            var v = read_keys(addr, self.es[e], self.ee[e], ["fromNode", "toNode"])
+            self.e_from.append(self.at_key.get(_string_at(addr, v[0], v[1]), -1))
+            self.e_to.append(self.at_key.get(_string_at(addr, v[2], v[3]), -1))
+            self.e_left.append(e)
+        self.state = List[UInt8](length=len(self.ns), fill=_PENDING)
+        self.left = len(self.ns)
+        self.members = sk.members.copy()
+        self.ok = True
+        self.skim_us = clock_us() - t0
+
+    def nodes(self) -> Int:
+        return len(self.ns)
+
+    def done(self) -> Bool:
+        return self.left == 0 and len(self.e_left) == 0
+
+    def member(self, key: String) -> Json:
+        """A top-level member (an object or an array) parsed on its own; an empty object's Json when it isn't there."""
+        for ref m in self.members:
+            if m.key == key and m.end > m.start:
+                try:
+                    return Json.parse_bytes(Int(self.text.unsafe_ptr()) + m.start, m.end - m.start)
+                except:
+                    pass
+        try:
+            return Json.parse("{}")
+        except:
+            return Json()
+
+    def _meets(self, i: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
+        return self.bx1[i] >= x0 and self.bx0[i] <= x1 and self.by1[i] >= y0 and self.by0[i] <= y1
+
+    def _parse(mut self, mut layer: ObjectLayer, idx: List[Int], stepping: Bool = False):
+        """Nodes idx (pending, in file order) parsed on every core and adopted with their file ids, then the edges whose
+        ends are both there."""
+        var count = len(idx)
+        if count > 0:
+            var t0 = clock_us()
+            _ = c_locale()  # (made once, here, before any worker reads it)
+            _ = pow5_table()
+            var made = List[Bool](length=count, fill=False)
+            var objs = List[Obj](capacity=count)
+            for _ in range(count):
+                objs.append(Obj(0, 0, 0, 0, 0, 0, 0))
+            var total = 0
+            for i in idx:
+                total += self.ne[i] - self.ns[i]
+            var workers = self.cores
+            var tasks = max(1, min(4 * workers, count, total // 16384 + 1))  # (more pieces than cores: they even out)
+            var cut = List[Int](length=tasks + 1, fill=count)  # (tasks split by bytes, not by count)
+            cut[0] = 0
+            var acc = 0
+            var t = 1
+            for k in range(count):
+                if t < tasks and acc * tasks >= total * t:
+                    cut[t] = k
+                    t += 1
+                acc += self.ne[idx[k]] - self.ns[idx[k]]
+            var base = Int(self.text.unsafe_ptr())
+            var ip = Int(idx.unsafe_ptr())
+            var sp = Int(self.ns.unsafe_ptr())
+            var ep = Int(self.ne.unsafe_ptr())
+            var mp = Int(made.unsafe_ptr())
+            var op = Int(objs.unsafe_ptr())
+            var cp = Int(cut.unsafe_ptr())
+
+            def work(w: Int) {imm}:
+                var ids_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=ip)
+                var st = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=sp)
+                var en = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=ep)
+                var mk = Pointer[Bool, MutUntrackedOrigin](unsafe_from_address=mp)
+                var ob = Pointer[Obj, MutUntrackedOrigin](unsafe_from_address=op)
+                var ct = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=cp)
+                var j = Json()  # (one reader per piece, made over for each node: no allocation per node)
+                for k in range(ct.unsafe_offset(w)[], ct.unsafe_offset(w + 1)[]):
+                    var i = ids_.unsafe_offset(k)[]
+                    var a = st.unsafe_offset(i)[]
+                    try:
+                        j.reparse(base + a, en.unsafe_offset(i)[] - a)
+                        if canvas_node_obj(j, 0, ob.unsafe_offset(k)[]):
+                            mk.unsafe_offset(k)[] = True
+                    except:
+                        pass
+
+            if tasks == 1:
+                work(0)
+            else:
+                parallelize(work, tasks, min(tasks, workers))
+            _ = len(cut)
+            _ = len(idx)
+            var t_par = clock_us()
+            var r = Float64(total) / Float64(max(clock_us() - t0, 1))  # (the slice's own rate, adopting included)
+            var was_saved = not layer.unsaved()
+            for k in range(count):
+                var i = idx[k]
+                self.left -= 1
+                if not made[k]:
+                    self.state[i] = _NOTHING
+                    continue
+                self.state[i] = _ADOPTED
+                var o = Obj(0, 0, 0, 0, 0, 0, 0)
+                swap(o, objs[k])
+                _ = layer.adopt_as(o^, i + 1, i + 1)
+            if was_saved:
+                layer.mark_saved()
+            r = Float64(total) / Float64(max(clock_us() - t0, 1))
+            if stepping:  # (a slice's rate sets the next slice's size; the first, big and on every core, runs faster)
+                self.rate = r if self.rate == 0 else min(r, 0.5 * self.rate + 0.5 * r)
+            if self.trace:
+                print("CANVASLOAD: " + String(count) + " nodes, " + String(total) + " bytes on " + String(tasks) + " cores: parse " + String(t_par - t0) + " us, adopt " + String(clock_us() - t_par) + " us", flush=True)
+        var te = clock_us()
+        self._edges(layer)
+        if self.trace:
+            print("CANVASLOAD: edges " + String(clock_us() - te) + " us, " + String(len(self.e_left)) + " waiting", flush=True)
+
+    def _edges(mut self, mut layer: ObjectLayer):
+        """The edges whose ends are both adopted, parsed and adopted (an end that made nothing, or no node with its id:
+        dropped, as the importer drops it)."""
+        var was_saved = not layer.unsaved()
+        var count = len(self.ns)
+        var still = List[Int]()
+        var j = Json()
+        for e in self.e_left:
+            var a = self.e_from[e]
+            var b = self.e_to[e]
+            if a < 0 or b < 0 or self.state[a] == _NOTHING or self.state[b] == _NOTHING:
+                continue
+            if self.state[a] == _PENDING or self.state[b] == _PENDING:
+                still.append(e)
+                continue
+            if a == b:
+                continue
+            try:
+                j.reparse(Int(self.text.unsafe_ptr()) + self.es[e], self.ee[e] - self.es[e])
+                var r = canvas_edge_obj(j, 0)
+                var c = r[2].copy()
+                c.from_id = a + 1
+                c.to_id = b + 1
+                _ = layer.adopt_as(c^, count + e + 1, count + e + 1)
+            except:
+                pass
+        self.e_left = still^
+        if was_saved:
+            layer.mark_saved()
+
+    def take(mut self, mut layer: ObjectLayer, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        """Every pending node whose box meets the rect (page units), parsed and adopted now."""
+        var mark = List[Bool](length=len(self.ns), fill=False)
+        for i in range(len(self.ns)):
+            if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
+                mark[i] = True
+        for e in self.e_left:  # (a connector crossing the rect needs both its ends, wherever they are)
+            var a = self.e_from[e]
+            var b = self.e_to[e]
+            if a < 0 or b < 0:
+                continue
+            # (its line lies within its two ends' boxes, whichever rule routes it)
+            if max(self.bx1[a], self.bx1[b]) >= x0 and min(self.bx0[a], self.bx0[b]) <= x1 and max(self.by1[a], self.by1[b]) >= y0 and min(self.by0[a], self.by0[b]) <= y1:
+                mark[a] = self.state[a] == _PENDING
+                mark[b] = self.state[b] == _PENDING
+        var idx = List[Int]()
+        for i in range(len(self.ns)):
+            if mark[i]:
+                idx.append(i)
+        self._parse(layer, idx)
+        self._settle(layer)
+
+    def step(mut self, mut layer: ObjectLayer, x0: Float64, y0: Float64, x1: Float64, y1: Float64, budget_us: Int):
+        """One slice: pending nodes meeting the rect first (the view moved), then file order, as many bytes as the
+        measured rate parses in budget_us (at least one node)."""
+        if self.done():
+            return
+        var budget = Int((self.rate if self.rate > 0 else 400.0) * Float64(budget_us))
+        var idx = List[Int]()
+        var taken = 0
+        for i in range(len(self.ns)):
+            if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
+                idx.append(i)
+                taken += self.ne[i] - self.ns[i]
+                if taken >= budget:
+                    break
+        var mark = List[Bool]()
+        if len(idx) > 0:
+            mark = List[Bool](length=len(self.ns), fill=False)
+            for i in idx:
+                mark[i] = True
+        while self.cursor < len(self.ns) and taken < budget:
+            var i = self.cursor
+            self.cursor += 1
+            if self.state[i] == _PENDING and (len(mark) == 0 or not mark[i]):
+                idx.append(i)
+                taken += self.ne[i] - self.ns[i]
+        sort(idx)
+        self._parse(layer, idx, True)
+        self._settle(layer)
+
+    def finish(mut self, mut layer: ObjectLayer):
+        """Everything left, now (a save, an export, an edit, anything that reads the whole document calls this first)."""
+        if self.done():
+            return
+        var idx = List[Int]()
+        for i in range(len(self.ns)):
+            if self.state[i] == _PENDING:
+                idx.append(i)
+        self._parse(layer, idx)
+        self._settle(layer)
+
+    def _settle(mut self, mut layer: ObjectLayer):
+        if self.done():
+            var was_saved = not layer.unsaved()
+            layer.order_by_z()
+            layer.history.clear()
+            if was_saved:
+                layer.mark_saved()

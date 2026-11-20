@@ -1917,6 +1917,54 @@ struct ObjectLayer(Movable):
         return id
 
 
+    def adopt_as(mut self, var o: Obj, id: Int, z: Int) -> Int:
+        """An object as it is with the id and z its document gives it (an importer's: a JSON Canvas node's index), no
+        undo step; later objects get ids and z above every one given so far."""
+        o.id = id
+        o.z = z
+        self.next_id = max(self.next_id, id + 1)
+        self.z_top = max(self.z_top, z)
+        if o.kind == TEXT or o.kind == STICKY:
+            o.rev = self._next_rev()
+        self.pos_of[id] = len(self.objs)
+        self.objs.append(o^)
+        if self.objs[len(self.objs) - 1].kind == CONNECTOR:
+            self._route(len(self.objs) - 1)
+        self._changed()
+        return id
+
+    def order_by_z(mut self):
+        """objs in stacking order (bottom first), as a layer built in that order has them (a progressive open adopts
+        out of order)."""
+        var keys = List[Int](capacity=len(self.objs))
+        var zmin = 0
+        for ref o in self.objs:
+            zmin = min(zmin, o.z)
+        var n = len(self.objs)
+        for i in range(n):
+            keys.append((self.objs[i].z - zmin) * (n + 1) + i)
+        sort(keys)
+        var sorted_in = True
+        for r in range(n):
+            if keys[r] % (n + 1) != r:
+                sorted_in = False
+                break
+        if sorted_in:
+            return
+        var dest = List[Int](length=n, fill=0)  # (objs[i] goes to dest[i]: cycles of swaps, nothing copied)
+        for r in range(n):
+            dest[keys[r] % (n + 1)] = r
+        for i in range(n):
+            while dest[i] != i:
+                var d = dest[i]
+                self.objs.swap_elements(i, d)
+                dest[i] = dest[d]
+                dest[d] = d
+        self.pos_of = Dict[Int, Int]()
+        for i in range(n):
+            self.pos_of[self.objs[i].id] = i
+        self.dirty = True
+
 def text_box(font: Font, text: String, size: Float64) -> Tuple[Float64, Float64]:
     """A text box that fits `text` unwrapped at `size`: width, height (with TEXT_PAD all round)."""
     var w = 0.0
@@ -2034,68 +2082,100 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
     return import_json_canvas_doc(j)
 
 
+def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
+    """One JSON Canvas node (j's node n) as the object import_json_canvas makes of it, written into `o`, not yet in a
+    layer (no id, z or text revision: ObjectLayer.adopt gives them). False for a node it makes nothing of. Touches nothing shared: a
+    progressive open (mojoui.canvasload) builds objects on every core with it."""
+    var kind = j.text(j.get(n, "type"))
+    var x = j.real(j.get(n, "x"))
+    var y = j.real(j.get(n, "y"))
+    var w = j.real(j.get(n, "width"), 200)
+    var h = j.real(j.get(n, "height"), 100)
+    var pn = j.get(n, "pn")
+    var color = j.text(j.get(n, "color"))
+    var made = False
+    if kind == "text":
+        var style = j.get(pn, "style")
+        var size = j.real(j.get(style, "fontSize"), 16)
+        var ink = _canvas_color(j.text(j.get(style, "color")), 0xFF222222)
+        if color != "" or j.text(j.get(pn, "type")) == "sticky":
+            o = Obj(0, STICKY, x, y, w, w, _canvas_color(color, 0xFF9DE8FF))  # (as add_sticky: a square, then its height)
+            o.radius = 4
+            o.h = h
+            o.ink = ink
+        else:
+            o = Obj(0, TEXT, x, y, w, h, ink)  # (as add_text)
+        o.text = j.text(j.get(n, "text"))
+        o.size = size
+        o.line_width = 0
+        o.family = j.text(j.get(style, "fontFamily"))
+        o.line_height = j.real(j.get(style, "lineHeight"), 0)
+        o.weight = Int(j.real(j.get(style, "fontWeight"), 400))
+        o.markdown = j.text(j.get(pn, "format")) == "markdown"
+        made = True
+    elif kind == "file" and j.text(j.get(pn, "type")) == "ink" and j.text(j.get(pn, "kind"), "stroke") == "stroke":
+        # a pen stroke: Personal Note keeps its path (M/L/Q commands, relative to the box) in pn
+        var g = j.get(pn, "geometry")
+        var gx = j.real(j.get(g, "x"), x)
+        var gy = j.real(j.get(g, "y"), y)
+        var st = Stroke(j.real(j.get(pn, "width"), 3), _canvas_color(j.text(j.get(pn, "color")), 0xFF1E2020))
+        var path = j.get(pn, "path")
+        for c in range(j.size(path)):
+            var cmd = j.at(path, c)
+            var k = j.size(cmd)
+            if k >= 3:
+                st.add(gx + j.real(j.at(cmd, k - 2)), gy + j.real(j.at(cmd, k - 1)), 0.5)
+        if st.points() > 0:  # (as add_ink: its box is its points' bounds, the outline sealed once)
+            o = Obj(0, INK, st.x0, st.y0, max(st.x1 - st.x0, 0.0), max(st.y1 - st.y0, 0.0), st.color)
+            o.stroke = st.copy()
+            o.stroke.seal()
+            o.line_width = 0
+            made = True
+    elif kind == "file" or kind == "link" or kind == "group":
+        o = Obj(0, RECT, x, y, w, h, 0xFFF0F2F4)  # (as add_rect: a placeholder card)
+        o.line = 0xFFD4D8DC
+        o.line_width = 1
+        o.radius = 6
+        made = True
+    if made:
+        o.key = j.text(j.get(n, "id"))
+    return made
+
+
+def canvas_edge_obj(j: Json, e: Int) -> Tuple[String, String, Obj]:
+    """One JSON Canvas edge: the node ids it joins and its connector (ends unset: the layer's ids go in from_id, to_id)."""
+    var o = Obj(0, CONNECTOR, 0, 0, 0, 0, _canvas_color(j.text(j.get(e, "color")), 0xFF332222))
+    o.line_width = j.real(j.get(j.get(e, "pn"), "lineWidth"), 2)
+    var heads = j.get(j.get(e, "pn"), "arrowheads")
+    if heads >= 0:
+        o.head_end = j.flag(j.get(heads, "end"), True)
+    o.key = j.text(j.get(e, "id"))
+    return (j.text(j.get(e, "fromNode")), j.text(j.get(e, "toNode")), o^)
+
+
 def import_json_canvas_doc(j: Json) raises -> ObjectLayer:
-    """import_json_canvas from a document already parsed (an app reading other fields of it parses it once)."""
+    """import_json_canvas from a document already parsed (an app reading other fields of it parses it once). A node's
+    id and z are its index + 1 and an edge's come after every node's (mojoui.canvasload opens the same text a part at a
+    time to the same layer)."""
     var ol = ObjectLayer()
     var nodes = j.get(0, "nodes")
+    var count = j.size(nodes)
     var ids = Dict[String, Int]()
-    for i in range(j.size(nodes)):
-        var n = j.at(nodes, i)
-        var kind = j.text(j.get(n, "type"))
-        var x = j.real(j.get(n, "x"))
-        var y = j.real(j.get(n, "y"))
-        var w = j.real(j.get(n, "width"), 200)
-        var h = j.real(j.get(n, "height"), 100)
-        var pn = j.get(n, "pn")
-        var color = j.text(j.get(n, "color"))
-        var oid = -1
-        if kind == "text":
-            var style = j.get(pn, "style")
-            var size = j.real(j.get(style, "fontSize"), 16)
-            var ink = _canvas_color(j.text(j.get(style, "color")), 0xFF222222)
-            if color != "" or j.text(j.get(pn, "type")) == "sticky":
-                oid = ol.add_sticky(x, y, w, j.text(j.get(n, "text")), _canvas_color(color, 0xFF9DE8FF), size)
-                var p = ol.index(oid)
-                ol.objs[p].h = h
-                ol.objs[p].ink = ink
-            else:
-                oid = ol.add_text(x, y, w, h, j.text(j.get(n, "text")), size, ink)
-            var q = ol.index(oid)
-            ol.objs[q].family = j.text(j.get(style, "fontFamily"))
-            ol.objs[q].line_height = j.real(j.get(style, "lineHeight"), 0)
-            ol.objs[q].weight = Int(j.real(j.get(style, "fontWeight"), 400))
-            ol.objs[q].markdown = j.text(j.get(pn, "format")) == "markdown"
-        elif kind == "file" and j.text(j.get(pn, "type")) == "ink" and j.text(j.get(pn, "kind"), "stroke") == "stroke":
-            # a pen stroke: Personal Note keeps its path (M/L/Q commands, relative to the box) in pn
-            var g = j.get(pn, "geometry")
-            var gx = j.real(j.get(g, "x"), x)
-            var gy = j.real(j.get(g, "y"), y)
-            var st = Stroke(j.real(j.get(pn, "width"), 3), _canvas_color(j.text(j.get(pn, "color")), 0xFF1E2020))
-            var path = j.get(pn, "path")
-            for c in range(j.size(path)):
-                var cmd = j.at(path, c)
-                var n = j.size(cmd)
-                if n >= 3:
-                    st.add(gx + j.real(j.at(cmd, n - 2)), gy + j.real(j.at(cmd, n - 1)), 0.5)
-            if st.points() > 0:
-                oid = ol.add_ink(st)
-        elif kind == "file" or kind == "link" or kind == "group":
-            oid = ol.add_rect(x, y, w, h, 0xFFF0F2F4, 0xFFD4D8DC, 1, 6)
-        if oid >= 0:
-            ids[j.text(j.get(n, "id"))] = oid
-            ol.objs[ol.index(oid)].key = j.text(j.get(n, "id"))
+    for i in range(count):
+        var o = Obj(0, RECT, 0, 0, 0, 0, 0)
+        if canvas_node_obj(j, j.at(nodes, i), o):
+            var key = o.key
+            ids[key] = ol.adopt_as(o^, i + 1, i + 1)
     var edges = j.get(0, "edges")
     for i in range(j.size(edges)):
-        var e = j.at(edges, i)
-        var a = ids.get(j.text(j.get(e, "fromNode")), -1)
-        var b = ids.get(j.text(j.get(e, "toNode")), -1)
-        if a >= 0 and b >= 0:
-            var cid = ol.add_connector(a, b, _canvas_color(j.text(j.get(e, "color")), 0xFF332222), j.real(j.get(j.get(e, "pn"), "lineWidth"), 2))
-            var heads = j.get(j.get(e, "pn"), "arrowheads")
-            if cid >= 0 and heads >= 0:
-                ol.objs[ol.index(cid)].head_end = j.flag(j.get(heads, "end"), True)
-            if cid >= 0:
-                ol.objs[ol.index(cid)].key = j.text(j.get(e, "id"))
+        var r = canvas_edge_obj(j, j.at(edges, i))
+        var a = ids.get(r[0], -1)
+        var b = ids.get(r[1], -1)
+        if a >= 0 and b >= 0 and a != b:
+            var c = r[2].copy()
+            c.from_id = a
+            c.to_id = b
+            _ = ol.adopt_as(c^, count + i + 1, count + i + 1)
     ol.history.clear()
     return ol^
 

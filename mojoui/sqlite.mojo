@@ -289,10 +289,8 @@ struct Statement(Movable):
         var n = Int(_fn[_F_PI](self.lib.column_bytes)(self.st, c_int(col)))
         if addr == 0 or n <= 0:
             return String("")
-        var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
-        var out = List[UInt8](capacity=n)
-        for i in range(n):
-            out.append(p.unsafe_offset(i)[])
+        var out = List[UInt8](unsafe_uninit_length=n)
+        _ = external_call["memcpy", Int](Int(out.unsafe_ptr()), addr, n)  # (one copy: a 12 MB canvas byte by byte was 8 ms)
         try:
             return String(from_utf8=Span(out))
         except:
@@ -305,9 +303,8 @@ struct Statement(Movable):
         var out = List[UInt8](capacity=max(n, 0))
         if addr == 0 or n <= 0:
             return out^
-        var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
-        for i in range(n):
-            out.append(p.unsafe_offset(i)[])
+        out.resize(n, 0)
+        _ = external_call["memcpy", Int](Int(out.unsafe_ptr()), addr, n)
         return out^
 
 
@@ -341,6 +338,11 @@ struct Database(Copyable, Movable):
     def error(self) -> String:
         """SQLite's message for the last thing that failed on this connection."""
         return _c_text(_fn[_F_PP](self.lib.errmsg)(self.db))
+
+    def map_reads(self, max_bytes: Int = 1 << 30) raises:
+        """Reads through a memory map of the file (PRAGMA mmap_size): a big row (a 12 MB document) is copied from the
+        mapped pages instead of a read() per 4 KB page (Personal Note's stress canvas: 10 → ~3 ms). Writes unchanged."""
+        self.exec("PRAGMA mmap_size = " + String(max_bytes))
 
     def exec(self, sql: String) raises:
         """Runs one or more statements with no values to bind (CREATE, PRAGMA, BEGIN)."""

@@ -12,8 +12,75 @@ from std.ffi import external_call
 from std.sys import CompilationTarget
 from mojoui import libc
 from mojoui.shared import get_shared, put_shared
+from std.memory.alloc import alloc, Layout
+from std.bit import count_leading_zeros
+from mojoui.pow5 import POW5, POW5_MIN, POW5_COUNT
 
 comptime SLOT_C_LOCALE = 233  # mojoui.shared slot: the process's "C" numeric locale (newlocale once, D-7941)
+comptime SLOT_POW5 = 234  # mojoui.shared slot: mojoui.pow5's table, on the heap once (D-7945)
+
+
+struct _Pow5(Movable):
+    var words: List[UInt64]
+
+    def __init__(out self):
+        self.words = materialize[POW5]()
+
+
+def pow5_table() -> Int:
+    """The address of mojoui.pow5's words (made once per process; any thread may read them after)."""
+    var have = get_shared(SLOT_POW5)
+    if have != 0:
+        return have
+    var a = alloc(Layout[_Pow5].single())
+    var p = a^.unsafe_leak()
+    p.unsafe_write(_Pow5())
+    var addr = Int(p[].words.unsafe_ptr())
+    put_shared(SLOT_POW5, addr)
+    return addr
+
+
+def eisel_lemire(w: UInt64, q: Int, neg: Bool, table: Int) -> Tuple[Bool, Float64]:
+    """w × 10^q (w ≤ 19 digits, exact) as the nearest Float64, by Lemire's algorithm (fast_float's compute_float: one or
+    two 64×64 products with the 128-bit 5^q): (False, 0) when it can't decide (subnormal, infinite, out of the table),
+    and the caller asks strtod_l. Gives the same bits as strtod for every case it answers (tests/test_json's million)."""
+    if w == 0:
+        return (True, -Float64(0.0) if neg else Float64(0.0))
+    if q < POW5_MIN or q >= POW5_MIN + POW5_COUNT:
+        return (False, Float64(0))
+    var tp = Pointer[UInt64, MutUntrackedOrigin](unsafe_from_address=table)
+    var lz = Int(count_leading_zeros(w))
+    var m = w << UInt64(lz)
+    var index = 2 * (q - POW5_MIN)
+    var prod = m.cast[DType.uint128]() * tp.unsafe_offset(index)[].cast[DType.uint128]()
+    var hi = (prod >> 64).cast[DType.uint64]()
+    var lo = prod.cast[DType.uint64]()
+    if hi & 0x1FF == 0x1FF:
+        var second = m.cast[DType.uint128]() * tp.unsafe_offset(index + 1)[].cast[DType.uint128]()
+        var shi = (second >> 64).cast[DType.uint64]()
+        lo = lo + shi
+        if shi > lo:
+            hi += 1
+    var upper = Int(hi >> 63)
+    var shift = upper + 9
+    var mant = hi >> UInt64(shift)
+    var power2 = (((152170 + 65536) * q) >> 16) + 63 + upper - lz + 1023
+    if power2 <= 0:
+        return (False, Float64(0))
+    if lo <= 1 and q >= -4 and q <= 23 and mant & 3 == 1 and (mant << UInt64(shift)) == hi:
+        mant &= ~UInt64(1)  # (exactly halfway: round to even)
+    mant += mant & 1
+    mant >>= 1
+    if mant >= (UInt64(2) << 52):
+        mant = UInt64(1) << 52
+        power2 += 1
+    mant &= ~(UInt64(1) << 52)
+    if power2 >= 0x7FF:
+        return (False, Float64(0))
+    var bits = mant | (UInt64(power2) << 52)
+    if neg:
+        bits |= UInt64(1) << 63
+    return (True, Float64(from_bits=bits))
 
 
 def c_locale() -> Int:
@@ -147,6 +214,8 @@ struct Json(Movable):
     var stack: List[Int]  # (parsing) children of the containers still open, and their keys
     var kstack: List[Int]
     var loc: Int  # (parsing) the "C" locale for strtod_l
+    var p5: Int  # (parsing) mojoui.pow5's table (eisel_lemire)
+    var lemire_value: Float64  # (parsing) long_decimal's answer
     var end: Int  # (parsing) the text's length (src holds a NUL after it)
 
     def __init__(out self):
@@ -164,28 +233,55 @@ struct Json(Movable):
         self.stack = List[Int]()
         self.kstack = List[Int]()
         self.loc = 0
+        self.p5 = 0
+        self.lemire_value = 0
         self.end = 0
 
     @staticmethod
     def parse(text: String) raises -> Json:
+        return Json.parse_bytes(Int(text.unsafe_ptr()), text.byte_length())
+
+    @staticmethod
+    def parse_bytes(addr: Int, n: Int) raises -> Json:
+        """The JSON text in bytes [addr, addr + n) (a slice of a bigger document: mojoui.canvasload parses one node
+        at a time, on any thread once c_locale() has run on one)."""
         var j = Json()
-        var n = text.byte_length()
-        j.src = List[UInt8](capacity=n + 1)
-        j.src.extend(text.as_bytes())
-        j.src.append(0)  # (a NUL past the end: strtod_l reads a number in place and stops there at the latest)
-        j.end = n
-        j.loc = c_locale()
         j.kinds = List[UInt8](capacity=n // 8 + 16)
         j.val = List[Int](capacity=n // 8 + 16)
         j.cnt = List[Int](capacity=n // 8 + 16)
-        _ = j.value(0)
-        j.skip()
-        if j.pos != j.end:
-            raise j.fail("something after the end")
+        j.reparse(addr, n)
         j.src = List[UInt8]()  # (the text isn't needed once parsed)
         j.stack = List[Int]()
         j.kstack = List[Int]()
         return j^
+
+    def reparse(mut self, addr: Int, n: Int) raises:
+        """This reader made over for the JSON text in bytes [addr, addr + n), keeping its lists' memory: one reader
+        per thread parses many small documents (mojoui.canvasload's nodes) without allocating for each."""
+        self.kinds.clear()
+        self.val.clear()
+        self.cnt.clear()
+        self.texts.clear()
+        self.numbers.clear()
+        self.reals.clear()
+        self.whole.clear()
+        self.slots.clear()
+        self.slot_keys.clear()
+        self.stack.clear()
+        self.kstack.clear()
+        self.pos = 0
+        self.src.resize(n + 1, 0)
+        _ = external_call["memcpy", Int](Int(self.src.unsafe_ptr()), addr, n)
+        self.src[n] = 0  # (a NUL past the end: strtod_l reads a number in place and stops there at the latest)
+        self.end = n
+        if self.loc == 0:
+            self.loc = c_locale()
+        if self.p5 == 0:
+            self.p5 = pow5_table()
+        _ = self.value(0)
+        self.skip()
+        if self.pos != self.end:
+            raise self.fail("something after the end")
 
     # ---- reading the tree ----
 
@@ -437,6 +533,8 @@ struct Json(Movable):
                 f = Float64(w) / pow10(frac_n)
                 if neg:
                     f = -f
+        elif self.long_decimal(int_at, n, frac_at, frac_n, has_exp, neg):  # (D-7945: Eisel–Lemire, most long decimals)
+            f = self.lemire_value
         elif self.loc != 0:  # (a long decimal: libc's correctly rounded reader, in place: the grammar was checked, the
             # byte after the number isn't part of one)
             f = external_call["strtod_l", Float64](Int(self.src.unsafe_ptr()) + start, Int(0), self.loc)
@@ -448,6 +546,47 @@ struct Json(Movable):
         self.reals.append(f)
         self.numbers.append(Int(f) if f > -9.2e18 and f < 9.2e18 else (0 if f != f else (-9_223_372_036_854_775_807 if f < 0 else 9_223_372_036_854_775_807)))
         return node
+
+    def long_decimal(mut self, int_at: Int, n: Int, frac_at: Int, frac_n: Int, has_exp: Bool, neg: Bool) -> Bool:
+        """A decimal (its grammar already checked) read by eisel_lemire into lemire_value; False when it has more than
+        19 significant digits or the algorithm can't decide (then strtod_l reads it)."""
+        if self.p5 == 0:
+            return False
+        var sp = self.src.unsafe_ptr()
+        var w = UInt64(0)
+        var sig = 0
+        for k in range(int_at, int_at + n):
+            var d = UInt64(Int(sp[k]) - 48)
+            if sig > 0 or d != 0:
+                sig += 1
+            w = w * 10 + d
+        if frac_at >= 0:
+            for k in range(frac_at, frac_at + frac_n):
+                var d = UInt64(Int(sp[k]) - 48)
+                if sig > 0 or d != 0:
+                    sig += 1
+                w = w * 10 + d
+                if sig > 19:
+                    return False
+        if sig > 19:
+            return False
+        var e = 0
+        if has_exp:
+            var k = frac_at + frac_n if frac_at >= 0 else int_at + n
+            k += 1  # (the 'e')
+            var eneg = False
+            if Int(sp[k]) == 43 or Int(sp[k]) == 45:
+                eneg = Int(sp[k]) == 45
+                k += 1
+            while k < self.pos:
+                if e < 100000:
+                    e = e * 10 + Int(sp[k]) - 48
+                k += 1
+            if eneg:
+                e = -e
+        var r = eisel_lemire(w, e - frac_n, neg, self.p5)
+        self.lemire_value = r[1]
+        return r[0]
 
     def hex4(mut self) raises -> Int:
         if self.pos + 4 > self.end:

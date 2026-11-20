@@ -1,7 +1,8 @@
 # mojoui.json: the reader and the writer round-trip what the .omx metadata holds.
 #   pixi run mojo run -I . tests/test_json.mojo
 from std.testing import assert_equal, assert_true, assert_false
-from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT
+from mojoui.json import Json, json_string, J_ARRAY, J_OBJECT, c_locale
+from std.ffi import external_call
 
 
 def main() raises:
@@ -87,4 +88,41 @@ def main() raises:
             assert_true(String(e).startswith("not JSON: "), String(e))
             refused += 1
     assert_true(parsed > 100 and refused > 100, "the fuzz reached both outcomes")
-    print("JSON TESTS PASSED · fuzz " + String(parsed) + " parsed, " + String(refused) + " refused")
+    # (D-7945) long decimals read by Eisel–Lemire give strtod_l's bits: a million of the forms documents hold (JS
+    # doubles' 16–17 digits, short ones, exponents both ways, 19 digits, halfway cases near the round-to-even range)
+    var loc = c_locale()
+    var checked = 0
+    seed = UInt64(987654321)
+    var digits = String("0123456789")
+    for i in range(1_000_000):
+        seed = seed * 6364136223846793005 + 1442695040888963407
+        var r = seed >> 11
+        var nd = Int(r % 19) + 1
+        var t = String("-" if (r >> 20) & 1 == 1 else "")
+        var ip = Int((r >> 21) % 6)
+        var body = String("")
+        var s2 = seed
+        for k in range(nd):
+            s2 = s2 * 6364136223846793005 + 1442695040888963407
+            var dg = Int((s2 >> 33) % 10)
+            if k == 0 and dg == 0:
+                dg = 1 + Int((s2 >> 40) % 9)
+            body += String(digits[byte=dg:dg + 1])
+        if i % 7 == 0:
+            body = String("9007199254740993") if i % 2 == 0 else String("4503599627370497")  # (2^53 + 1, 2^52 + 1: halfway)
+        var int_len = min(ip, body.byte_length())
+        if int_len == 0:
+            t += "0." + body
+        elif int_len >= body.byte_length():
+            t += body + ".5"
+        else:
+            t += String(body[byte=0:int_len]) + "." + String(body[byte=int_len:])
+        if i % 3 == 0:
+            var ex = Int((r >> 30) % 640) - 330
+            t += "e" + String(ex)
+        var want = external_call["strtod_l", Float64](Int(t.as_c_string_span().unsafe_ptr()), Int(0), loc)
+        var got = Json.parse(t).real(0)
+        if want.to_bits() != got.to_bits():
+            raise Error("Eisel–Lemire differs from strtod_l on " + t + ": " + String(got) + " vs " + String(want))
+        checked += 1
+    print("JSON TESTS PASSED · fuzz " + String(parsed) + " parsed, " + String(refused) + " refused · " + String(checked) + " long decimals as strtod_l")
