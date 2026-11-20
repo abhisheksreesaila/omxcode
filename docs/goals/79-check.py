@@ -886,7 +886,7 @@ def m6():
     # (D-7950, set by the main session) cold start, like with like: Personal Note's own desktop launcher cold, and a
     # fresh Chromium process on the built app, each from its process's start to the title island painted
     for mode in ("desktop", "chromium"):
-        r = run(["scripts/testscreen", "node", str(ROOT / "docs/goals/79/webcold.mjs"), str(REF / "pn.db"), mode, "5"], 900, cwd=PN)
+        r = run([str(ROOT / "scripts/testscreen"), "node", str(ROOT / "docs/goals/79/webcold.mjs"), str(REF / "pn.db"), mode, "5"], 900, cwd=PN)
         (race / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
         m = re.search(rf"WEBCOLD {mode} median: ([\d.]+)", r.stdout)
         web[f"cold_{mode}_ms"] = float(m.group(1)) if m else None
