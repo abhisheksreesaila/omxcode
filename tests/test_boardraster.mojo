@@ -1,7 +1,9 @@
 # Goal 79, D-7940: a whole board kept as raster tiles, end to end. mojoui.pagedesk's BoardLook paints Personal Note's
 # stress note (5,296 objects, build/g79/race/note-stress.json; or the 600-object note, or a generated board) into a
 # tiled layer whose damage comes from mojoui.damage; mojoui.objectlayer edits it (a move, new words, a colour, a delete,
-# undo and redo, a drag whose objects are lifted out of the tiles and dropped back, a pan, a zoom that settles). After
+# undo and redo, a drag whose objects are lifted out of the tiles and dropped back, a pan, a zoom that settles; review 2:
+# a resize, a z-order change, ink added and erased, a connector re-routed by its end moving, a rotation, a zoom out over
+# kept tiles (D-7947's strips), and a progressive open's slices landing over kept tiles). After
 # each, the frame GPU2D draws from its tiles must equal a direct render of the same scene (goal 75's M1 bounds, and at
 # most 64 pixels more than 8 levels off), and the tiles re-rastered after an edit must be few (partial: the damage only).
 # Prints each step's tiles and the time of the frame (paint + draw, CPU + GPU, glFinish). `boardraster: ok`.
@@ -11,7 +13,9 @@ from std.time import perf_counter_ns
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, PAGE_W, PAGE_H
-from mojoui.objectlayer import ObjectLayer, import_json_canvas, TEXT, STICKY, CONNECTOR, INK, CH_MOVE
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, TEXT, STICKY, CONNECTOR, INK, CH_MOVE, CH_GESTURE, H_SE
+from mojoui.ink import Stroke
+from mojoui.canvasload import OpenBoard
 
 comptime W = 2304
 comptime H = 1440
@@ -200,5 +204,92 @@ def main() raises:
     sc = scene_of(look, layer, v)
     check("zoom to 62 %, settled", g, sc, prev)
     prev = sc^
+    # (review 2) more edit kinds, each against a direct render
+    g.tiles.settle_ns = 120_000_000
+    v = DeskView(-300, -200, 1.0)
+    sc = scene_of(look, layer, v)
+    check("back at 100 %", g, sc, prev)
+    prev = sc^
+    var c = pick(layer, STICKY, v)
+    layer.clear_selection()
+    layer.select(c)
+    var q = layer.index(c)
+    var hp = layer.handle_point(q, H_SE)
+    layer.begin_gesture(CH_GESTURE)
+    layer.resize_handle(H_SE, hp[0] + 60, hp[1] + 45)
+    layer.end_gesture()
+    sc = scene_of(look, layer, v)
+    check("resize a sticky", g, sc, prev, 8)
+    prev = sc^
+    layer.bring_to_front()
+    sc = scene_of(look, layer, v)
+    check("bring it to the front", g, sc, prev, 8)
+    prev = sc^
+    var st = Stroke(3, 0xFF203040)
+    for k in range(40):
+        st.add(400 + Float64(k) * 9, 300 + Float64(k % 7) * 11, 0.5)
+    var ink = layer.add_ink(st)
+    sc = scene_of(look, layer, v)
+    check("ink added", g, sc, prev, 8)
+    prev = sc^
+    layer.delete(ink)
+    sc = scene_of(look, layer, v)
+    check("ink erased", g, sc, prev, 8)
+    prev = sc^
+    var moved_end = -1
+    for ref o in layer.objs:  # (a connector with an end in the window: that end moves, the line re-routes)
+        if o.kind == CONNECTOR and layer.has(o.from_id):
+            var f = layer.objs[layer.index(o.from_id)].copy()
+            var sc0 = v.to_screen(f.x, f.y)
+            if sc0[0] > 100 and sc0[0] < 1300 and sc0[1] > 100 and sc0[1] < 800:
+                moved_end = o.from_id
+                break
+    assert_true(moved_end >= 0, "a connector with an end in the window")
+    layer.clear_selection()
+    layer.select(moved_end)
+    layer.begin_gesture(CH_MOVE)
+    layer.move_by(-70, 55)
+    layer.end_gesture()
+    sc = scene_of(look, layer, v)
+    check("a connector re-routed by its end moving", g, sc, prev, 12)
+    prev = sc^
+    layer.set_rotation(c, 0.35)
+    sc = scene_of(look, layer, v)
+    check("rotate the sticky", g, sc, prev, 8)
+    prev = sc^
+    g.tiles.settle_ns = 10_000_000_000  # (the zoom never settles: kept tiles drawn scaled, the view growing past them)
+    for z in range(3):
+        v = v.zoomed_at(0.93, 720, 450)
+        sc = scene_of(look, layer, v)
+        check("zoom out " + String(z + 1) + " over kept tiles", g, sc, prev)
+        prev = sc^
     g.gl.close()
+    # (review 2) a progressive open's slices landing over kept tiles: each frame tiled == direct
+    var text = String("")
+    try:
+        var f = open("build/g79/race/note-stress.json", "r")
+        text = f.read()
+        f.close()
+    except:
+        print("   (no build/g79/race/note-stress.json: the open-slices case needs M6's race notes; skipped)")
+    if text != "":
+        var g2 = GPU2D()
+        assert_true(g2.start(False), "start")
+        var look2 = BoardLook()
+        var ob = OpenBoard()
+        var v2 = DeskView(-300, -200, 1.0)
+        assert_true(ob.open(text, -900, -700, 2300, 1500, 6) == "", "opens progressively")
+        var p2 = Scene(0, 0, 1.0)
+        var frames = 0
+        while True:
+            var s2 = scene_of(look2, ob.layer, v2)
+            check("open slice " + String(frames), g2, s2, p2)
+            p2 = s2^
+            frames += 1
+            if not ob.step(-900, -700, 2300, 1500, 1500):
+                break
+        var s3 = scene_of(look2, ob.layer, v2)
+        check("open complete", g2, s3, p2)
+        g2.gl.close()
+        assert_true(frames >= 2, "the open came in over several frames")
     print("boardraster: ok")

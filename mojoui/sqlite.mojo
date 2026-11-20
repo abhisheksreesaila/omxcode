@@ -341,7 +341,10 @@ struct Database(Copyable, Movable):
 
     def map_reads(self, max_bytes: Int = 1 << 30) raises:
         """Reads through a memory map of the file (PRAGMA mmap_size): a big row (a 12 MB document) is copied from the
-        mapped pages instead of a read() per 4 KB page (Personal Note's stress canvas: 10 → ~3 ms). Writes unchanged."""
+        mapped pages instead of a read() per 4 KB page (Personal Note's stress canvas: 10 → ~3 ms). Writes unchanged.
+        The risk SQLite documents for memory-mapped I/O: an I/O error on the disk, or the file truncated by a program that
+        isn't SQLite while it's mapped, arrives as SIGBUS (the process dies) instead of an error code. Use it on files
+        only SQLite writes, on local disks (not a network share)."""
         self.exec("PRAGMA mmap_size = " + String(max_bytes))
 
     def exec(self, sql: String) raises:

@@ -5,12 +5,14 @@
 #    import_json_canvas_doc: the same ids, z, order and the same exported document; stays "saved";
 # 3. a pan during the open (the slices follow a moved rect) ends the same;
 # 4. an edit during the open waits for the whole board (finish), lands, and undoes back to the document;
-# 5. the first slice holds every node meeting its rect and both ends of every edge crossing it.
+# 5. the first slice holds every node meeting its rect and both ends of every edge crossing it;
+# 6. duplicate node ids (the later one making nothing) bind edges as the whole import binds them (review 2);
+# 7. OpenBoard: an edit mid-open through edit() finishes the load first, lands, and undoes (review 2, D-7952).
 from std.testing import assert_equal, assert_true, assert_false
 from std.collections import Dict
 from mojoui.json import Json, json_string
 from mojoui.objectlayer import ObjectLayer, import_json_canvas_doc, export_json_canvas, CH_MOVE, CONNECTOR
-from mojoui.canvasload import CanvasLoad, skim
+from mojoui.canvasload import CanvasLoad, skim, OpenBoard
 
 
 def rnd(mut seed: UInt64) -> Int:
@@ -176,4 +178,43 @@ def main() raises:
         crossing += 1
         assert_true(o.key in have, "an edge crossing the rect is drawn in the first slice: " + o.key)
     assert_true(crossing > 0, "the case has crossing edges")
+    # 6. duplicate ids: "d" twice, the later a kind the importer makes nothing of; edges to it bind to the earlier one
+    var dup = String('{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":100,"height":40,"text":"a"},'
+                     + '{"id":"d","type":"text","x":4000,"y":4000,"width":100,"height":40,"text":"first d"},'
+                     + '{"id":"b","type":"text","x":300,"y":0,"width":100,"height":40,"text":"b"},'
+                     + '{"id":"d","type":"weird","x":10,"y":10,"width":50,"height":50},'
+                     + '{"id":"b","type":"text","x":600,"y":0,"width":100,"height":40,"text":"second b"}],'
+                     + '"edges":[{"id":"e1","fromNode":"a","toNode":"d"},{"id":"e2","fromNode":"a","toNode":"b"},{"id":"e3","fromNode":"d","toNode":"zz"}]}')
+    var wd = import_json_canvas_doc(Json.parse(dup))
+    var ldd = CanvasLoad(dup)
+    var ld_layer = ObjectLayer()
+    ldd.take(ld_layer, -50, -50, 150, 150)  # (only "a" and what its edges need)
+    while not ldd.done():
+        ldd.step(ld_layer, -50, -50, 150, 150, 50)
+    same_layers(ld_layer, wd)
+    var conns = 0
+    for ref o in wd.objs:
+        if o.kind == CONNECTOR:
+            conns += 1
+    assert_equal(conns, 2, "e1 binds to the first d, e2 to the second b, e3 has no end")
+
+    # 7. OpenBoard: painting reads part of the board; edit() finishes it first; the edit is undoable after the open
+    var ob = OpenBoard()
+    assert_equal(ob.open(text, 0, 0, 1500, 1000), "")
+    assert_true(ob.loading() and ob.left() > 0, "still coming in")
+    _ = ob.step(0, 0, 1500, 1000, 200)  # (the open's own frame: no slice)
+    _ = ob.step(0, 0, 1500, 1000, 200)
+    var partial = len(ob.layer.objs)
+    assert_true(partial < len(whole.objs))
+    ref lay = ob.edit()
+    assert_false(ob.loading(), "edit() finished the open")
+    assert_equal(len(lay.objs), len(whole.objs))
+    lay.select(target, False)
+    lay.begin_gesture(CH_MOVE)
+    lay.move_by(37, -21)
+    lay.end_gesture()
+    assert_equal(export_json_canvas(ob.layer, 4, 3), export_json_canvas(w2, 4, 3))
+    assert_true(ob.edit().undo())
+    assert_equal(export_json_canvas(ob.layer, 4, 3), export_json_canvas(whole, 4, 3))
+    assert_true(ob.open("{not a canvas", 0, 0, 1, 1) != "", "a text the skim can't open comes back")
     print("canvasload: ok · " + String(len(whole.objs)) + " objects, first slice " + String(first) + ", " + String(slices) + " slices, " + String(crossing) + " crossing edges")

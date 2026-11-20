@@ -5241,11 +5241,11 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         bench_wait[A](host_addr, ci, 200_000_000)
     var drag_x0 = x
     var drag_y0 = y
-    if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open" or what == "undo" or what == "redo":
+    if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open" or what == "openpress" or what == "undo" or what == "redo":
         # (goal 79: Personal Note's benchmark steps) the app says where: App.spot(canvas, "bench:<what>") — an object to
         # drag (dragone), the lead of 40 it has selected (drag40), or, for undoredo and open, it prepares the step (App.bench)
         # (a history to walk; open: drops what it keeps of the note so each step opens it again) and answers (-1, -1)
-        var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
         bench_wait[A](host_addr, ci, 500_000_000)
         if what == "dragone" or what == "drag40":
             if sp[0] < 0:
@@ -5262,6 +5262,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var rasters = List[Float64]()
     var during = List[Float64]()  # (open, D-7944) the frames after an open's first, while it is still coming in
     var completes = List[Float64]()  # (open) request → the frame that completes it (ms, wall clock)
+    var presses = List[Float64]()  # (openpress) the frame showing a press made during the open
     var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
     var shown_wait = List[Int]()  # (frame counter, paint end µs) pairs whose presentation time hasn't come back yet
     var clock_fb = external_call["gtk_widget_get_frame_clock", Int](host[].window)
@@ -5325,8 +5326,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             host[].canvas_send(ci, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
             x = tx
             y = ty
-        elif what == "undoredo" or what == "open" or what == "undo" or what == "redo":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; undo / redo: one way each frame; open: the app reopens)
-            if what == "open":
+        elif what == "undoredo" or what == "open" or what == "openpress" or what == "undo" or what == "redo":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; undo / redo: one way each frame; open: the app reopens)
+            if what == "open" or what == "openpress":
                 _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
                 var d = host[].rt.refresh()
                 host[].apply(d, host_addr)
@@ -5421,29 +5422,57 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             releases.append(works[len(works) - 1])
         elif prev_kind == RELEASE:
             afters.append(works[len(works) - 1])
-        if what == "open":  # (D-7944) an open that comes in a slice a frame: every frame until App.bench("bench:loading")
-            # says it's complete is timed, each by its own draw (a frame drawn ahead is drawn in the interval before it
-            # is shown: each draw is logged by itself, D-7560), plus GTK's paint and a display round trip; and the time
-            # from the open request to the paint after the draw that completed it
+        if what == "open" or what == "openpress":  # (D-7944) an open that comes in a slice a frame: every frame until
+            # App.bench("bench:loading") says it's complete is timed as the other rows time theirs (review 2, D-7953): its
+            # own draw (a frame drawn ahead is drawn in the interval before it shows, so each draw is logged by itself,
+            # D-7560), that draw's GPU time, the paint that shows it (without a draw inside it), GTK compositing the picture
+            # when it wasn't offloaded (the raster), and a display round trip; and the time from the open request to the
+            # paint after the draw that completed it. openpress: on the first frame after the open's own, a press (and
+            # release) where the app says (App.bench "bench:openspot": an object the partial board shows), timed from the
+            # press to the frame that shows it: an edit during an open (the app finishes the load first)
             var last_done = perf_counter_ns()
             var guard = perf_counter_ns() + 5_000_000_000
             host[].canvases[ci].draw_log.clear()
             host[].canvases[ci].draw_logging = True
-            var paint_ms = List[Float64]()
+            if g2d_timed:
+                _ = host[].gpu2d_gpu_ms(True)  # (the first frame's GPU time went into its own row above)
+            var frame_gpu = List[Float64]()  # per logged draw: its GPU time
+            var frame_paint = List[Float64]()  # per paint: its own time, plus GTK's raster when GTK composited it
             var pd_seen = host[].paints_done
             var done_at = -1  # (paints_done when the app first said it's complete)
             var inframe_seen = host[].canvases[ci].bench_inframe_ms
+            var press_draw = -1  # (openpress) the draw that shows the press, and the press's own event time
+            var press_ev = 0.0
             while perf_counter_ns() < guard:
+                if what == "openpress" and press_draw < 0 and len(host[].canvases[ci].draw_log) >= 1:
+                    var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:openspot")
+                    if sp[0] >= 0:
+                        press_draw = len(host[].canvases[ci].draw_log)
+                        var tp = perf_counter_ns()
+                        host[].canvas_send(ci, PRESS, sp[0], sp[1], 0, 0, 1, host_addr)
+                        host[].canvas_send(ci, RELEASE, sp[0], sp[1], 0, 0, 1, host_addr)
+                        press_ev = Float64(Int(perf_counter_ns()) - Int(tp)) / 1e6
                 if done_at < 0 and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
                     done_at = host[].paints_done
-                    if len(paint_ms) == 0 and len(host[].canvases[ci].draw_log) == 0:
+                    if len(frame_paint) == 0 and len(host[].canvases[ci].draw_log) == 0 and press_draw < 0:
                         break  # (complete in the open's own frame)
+                var drawn0 = len(host[].canvases[ci].draw_log)
                 _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+                var drawn1 = len(host[].canvases[ci].draw_log)
+                if drawn1 > drawn0:
+                    var g = host[].gpu2d_gpu_ms(True) if g2d_timed else 0.0
+                    for q in range(drawn0, drawn1):
+                        frame_gpu.append(max(g, 0.0) if q == drawn1 - 1 else 0.0)
                 if host[].paints_done != pd_seen:
                     pd_seen = host[].paints_done
                     var inf = host[].canvases[ci].bench_inframe_ms  # (a draw inside the paint is the draw's, not the paint's)
-                    paint_ms.append(max(host[].paint_ring[(pd_seen - 1) % 64] - (inf - inframe_seen), 0.0))
+                    var pm_ = max(host[].paint_ring[(pd_seen - 1) % 64] - (inf - inframe_seen), 0.0)
                     inframe_seen = inf
+                    if host[].canvases[ci].offload_paint != pd_seen - 1 and not no_raster:  # (GTK composited this one)
+                        var tr_ = perf_counter_ns()
+                        raster_once(host[].canvases[ci].widget, renderer)
+                        pm_ += Float64(Int(perf_counter_ns()) - Int(tr_)) / 1e6
+                    frame_paint.append(pm_)
                     last_done = perf_counter_ns()
                     if done_at >= 0 and pd_seen > done_at:
                         break
@@ -5451,11 +5480,17 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             var fts = perf_counter_ns()
             external_call["gdk_display_sync", NoneType](display)
             var fsm = Float64(Int(perf_counter_ns()) - Int(fts)) / 1e6
-            var pmed = pct(paint_ms, 0.5)
-            for ref dm_ in host[].canvases[ci].draw_log:
-                during.append(dm_ + pmed + fsm)
+            for q in range(len(host[].canvases[ci].draw_log)):
+                var work = host[].canvases[ci].draw_log[q] + (frame_gpu[q] if q < len(frame_gpu) else 0.0) + (frame_paint[q] if q < len(frame_paint) else pct(frame_paint, 0.5)) + fsm
+                if q == press_draw:
+                    presses.append(work + press_ev)
+                else:
+                    during.append(work)
                 if getenv("MOJOUI_TRACE_FRAMES") == "1":
-                    print("TRACE: open frame: draw " + one_decimal(Float32(dm_)) + " paint " + one_decimal(Float32(pmed)) + " sync " + one_decimal(Float32(fsm)), flush=True)
+                    print("TRACE: open frame " + String(q) + ": draw " + one_decimal(Float32(host[].canvases[ci].draw_log[q])) + " gpu " + one_decimal(Float32(frame_gpu[q] if q < len(frame_gpu) else 0.0))
+                          + " paint " + one_decimal(Float32(frame_paint[q] if q < len(frame_paint) else -1.0)) + (" press event " + one_decimal(Float32(press_ev)) if q == press_draw else String("")), flush=True)
+            if what == "openpress" and press_draw >= 0 and press_draw >= len(host[].canvases[ci].draw_log):
+                presses.append(-1)  # (the press never reached a frame: reported, and the row fails)
             completes.append(Float64(Int(last_done) - Int(t0)) / 1e6)
     if what == "pan" or what == "erase" or what == "dragone" or what == "drag40":
         host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
@@ -5494,7 +5529,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if len(gpus) > 0:
         counts += " gpu_p95=" + one_decimal(Float32(pct(gpus, 0.95))) + " gpu_max=" + one_decimal(Float32(pct(gpus, 1.0))) + (
             " gpu_by=timer" if g2d_timed else " gpu_by=wait")
-    if what == "open":
+    if what == "open" or what == "openpress":
+        counts += " press_n=" + String(len(presses)) + " press_p95=" + one_decimal(Float32(pct(presses, 0.95))) + " press_max=" + one_decimal(Float32(pct(presses, 1.0)))
         counts += " during_n=" + String(len(during)) + " during_p95=" + one_decimal(Float32(pct(during, 0.95))) + " during_max=" + one_decimal(Float32(pct(during, 1.0)))
         counts += " complete_p50=" + one_decimal(Float32(pct(completes, 0.5))) + " complete_max=" + one_decimal(Float32(pct(completes, 1.0)))
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
@@ -5880,6 +5916,7 @@ def on_ahead_idle[A: App](host_addr: Int) abi("C") -> c_int:
 
 
 def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
+    env_taken_back("GSK_RENDERER")  # (GTK picked the window's renderer when it was realized)
     var clock = external_call["gtk_widget_get_frame_clock", Int](window)
     if clock != 0 and host_at[A](host_addr)[].rt.trace:  # (MOJOUI_TRACE: the paint phase of every frame, for bench steps)
         connect(clock, "before-paint", on_before_paint[A], host_addr)
@@ -7542,6 +7579,8 @@ def run_step[A: App](host_addr: Int, step: String):
         _ = t
         for _ in range(10):
             settle()
+    elif verb == "env":  # env:NAME: prints `ENV NAME=<value>` as this process (and so a program it launches) has it now
+        print("ENV " + rest + "=" + getenv(rest), flush=True)
     elif verb == "firstscreen":  # firstscreen: how long after the process started its first canvas picture was handed to GTK (goal 79's race)
         print("FIRSTSCREEN: " + String(round(host[].first_hand_age_ms, 1)), flush=True)
     elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its painted frame
@@ -8605,6 +8644,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         on_tray_activate[A](host_addr)
         return
     startup_mark("activate")
+    env_taken_back("GDK_DISABLE")  # (GDK read it when the display opened)
     host[].window = external_call["gtk_application_window_new", Int](gapp)
     var title = host[].rt.app.title()
     external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
@@ -8736,6 +8776,18 @@ def gdk_skip_vulkan(declared: Bool):
     if not declared or getenv("GDK_DISABLE") != "" or getenv("GSK_RENDERER") != "" or getenv("MOJOUI_GPU2D") == "0":
         return
     _ = os_setenv("GDK_DISABLE", "vulkan", True)  # (set but empty counts as unset)
+    _ = os_setenv("MOJOUI_SET_GDK_DISABLE", "1", True)  # (ours: taken back once GDK has read it, review 2: launched programs
+    # don't inherit it: env_taken_back)
+
+
+def env_taken_back(name: String):
+    """(review 2, D-7954) A variable the host set for GTK (GDK_DISABLE, GSK_RENDERER) unset once GTK has read it, so
+    programs the app launches (xdg-open, a browser) start with the person's own environment."""
+    if getenv("MOJOUI_SET_" + name) == "1":
+        var n = name
+        _ = external_call["unsetenv", c_int](n.as_c_string_span())
+        var mark = String("MOJOUI_SET_") + name
+        _ = external_call["unsetenv", c_int](mark.as_c_string_span())
 
 
 def gpu2d_renderer(nodes: List[Node], declared: Bool):
@@ -8750,12 +8802,14 @@ def gpu2d_renderer(nodes: List[Node], declared: Bool):
         var k = String("GSK_RENDERER")
         var v = String("gl")
         _ = external_call["setenv", c_int](k.as_c_string_span(), v.as_c_string_span(), c_int(0))
+        _ = os_setenv("MOJOUI_SET_GSK_RENDERER", "1", True)
         return
     for ref n in nodes:
         if n.kind == CANVAS and n.hint == "gpu":
             var k = String("GSK_RENDERER")
             var v = String("gl")
             _ = external_call["setenv", c_int](k.as_c_string_span(), v.as_c_string_span(), c_int(0))
+            _ = os_setenv("MOJOUI_SET_GSK_RENDERER", "1", True)
             return
 
 

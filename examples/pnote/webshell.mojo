@@ -31,13 +31,28 @@ from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome,
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.objectlayer import reading_text
-from mojoui.canvasload import CanvasLoad
-from mojoui.pagedesk import BOARD_TILE
+from mojoui.canvasload import OpenBoard, skim
+from mojoui.pagedesk import board_rect
 from mojoui.buzanmap import map_text, node_extra
 
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
 comptime S_MAP = 2
+
+
+def read_page_grid(text: String) -> Tuple[Int, Int]:
+    """A JSON Canvas's pn.page grid (columns, rows), read from its top-level "pn" member alone (mojoui.canvasload's skim):
+    the whole document isn't parsed. (1, 1) when absent."""
+    var sk = skim(Int(text.unsafe_ptr()), text.byte_length())
+    for ref m in sk.members:
+        if m.key == "pn" and m.end > m.start:
+            try:
+                var pn = Json.parse_bytes(Int(text.unsafe_ptr()) + m.start, m.end - m.start)
+                var pg = pn.get(0, "page")
+                return (max(1, Int(pn.real(pn.get(pg, "columns"), 1))), max(1, Int(pn.real(pn.get(pg, "rows"), 1))))
+            except:
+                pass
+    return (1, 1)
 
 
 comptime LOAD_SLICE_US = 1500  # a progressive open's slice per frame (D-7944): the frame keeps its silky budget
@@ -136,7 +151,7 @@ struct WebShell(Movable):
     var title_focus: Bool  # the title island's button has the keyboard focus (a rename just ended by Enter)
     var px: Float64  # where the pointer is (HOVER), -1: away
     var py: Float64
-    var board: ObjectLayer  # the open canvas note's objects
+    var board: OpenBoard  # the open canvas and its progressive open (D-7952): .layer to paint, .edit() to change  # the open canvas note's objects
     var look: BoardLook
     var view: DeskView
     var view_set: Bool
@@ -157,8 +172,7 @@ struct WebShell(Movable):
     var kept: KeptDocs[ObjectLayer]  # canvases already parsed, by (note, revision) (D-7934)
     var kept_pages: Dict[Int, Int]  # a kept canvas's page grid (columns × 1000 + rows), by note
     var cold_opens: Bool  # (the race's cold-open row: nothing kept is reused)
-    var loading: List[CanvasLoad]  # the open canvas still coming in a slice a frame (0 or 1; D-7944)
-    var load_fresh: Bool  # the frame right after an open: it shows what the open took, no slice in it
+    var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -181,7 +195,7 @@ struct WebShell(Movable):
         self.card_open = False
         self.settings_open = False
         self.omni = Omnibar()
-        self.board = ObjectLayer()
+        self.board = OpenBoard()
         self.look = BoardLook()
         self.view = DeskView(0, 0, 1)
         self.view_set = False
@@ -202,8 +216,7 @@ struct WebShell(Movable):
         self.kept = KeptDocs[ObjectLayer](4)
         self.kept_pages = Dict[Int, Int]()
         self.cold_opens = False
-        self.loading = List[CanvasLoad]()
-        self.load_fresh = False
+        self.bench_note = -1
         try:
             self.dbs.append(Database(db_path))
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
@@ -268,19 +281,8 @@ struct WebShell(Movable):
                 return i
         return -1
 
-    def whole(mut self):
-        """The open canvas complete now (D-7944): every reader of the whole board (a save, an edit, a search, a bench
-        spot) calls this first, so nothing acts on part of a document."""
-        if len(self.loading) > 0:
-            self.loading[0].finish(self.board)
-            self.loading.clear()
-
     def view_rect(self) -> Tuple[Float64, Float64, Float64, Float64]:
-        """The page rect the board draws for this view (BoardLook.paint's query: the window snapped out to whole tiles)."""
-        var tl = self.view.to_page(0, 0)
-        var br = self.view.to_page(self.win_w, self.win_h)
-        return (floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE, floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE,
-                ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE, ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE)
+        return board_rect(self.view, self.win_w, self.win_h)
 
     def open(mut self, id: Int):
         var i = self.note_index(id)
@@ -288,12 +290,10 @@ struct WebShell(Movable):
             return
         var t_open = clock_us()
         var trace = getenv("MOJOUI_LOAD_TRACE") == "1"
-        self.whole()  # (the outgoing canvas complete before it's saved or kept)
         self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote)
         var out_i = self.note_index(self.current)
-        if out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.board.unsaved() == False:
-            var moving = ObjectLayer()
-            swap(moving, self.board)
+        if out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.board.edit().unsaved() == False:
+            var moving = self.board.take()  # (the outgoing canvas, whole, kept parsed)
             self.kept.keep(self.notes[out_i].id, self.notes[out_i].revision, moving^)  # (the canvas just left, kept parsed)
             self.kept_pages[self.notes[out_i].id] = self.cols * 1000 + self.rows
         i = self.note_index(id)
@@ -303,10 +303,9 @@ struct WebShell(Movable):
         var at = -1 if self.cold_opens else self.kept.find(id, self.notes[i].revision)
         if self.notes[i].kind == "canvas" and not self.notes[i].secure and at >= 0:
             # the file still holds the revision this canvas was parsed at: reuse it (D-7934), nothing read or parsed
-            self.loading.clear()
             self.current = id
             self.panel.active = id
-            self.board = self.kept.take(at)
+            self.board.set(self.kept.take(at))
             var grid = self.kept_pages.get(id, 1001)
             self.cols = grid // 1000
             self.rows = grid % 1000
@@ -317,13 +316,12 @@ struct WebShell(Movable):
         self.read_row(i, True)
         if trace:
             print("OPEN: rows read " + String(clock_us() - t_open) + " us", flush=True)
-        self.loading.clear()
         self.current = id
         self.panel.active = id
         ref n = self.notes[i]
         if n.secure:  # (its content column is a placeholder: never shown, never edited, never saved)
             self.page.set_markdown("")
-            self.board = ObjectLayer()
+            self.board.set(ObjectLayer())
             self.map = BuzanMap()
             return
         if n.kind == "page":
@@ -339,41 +337,30 @@ struct WebShell(Movable):
             self.cols = 1
             self.rows = 1
             # (D-7944) the progressive open: the document skimmed, the page grid read, the nodes the opening view shows
-            # parsed now (every core), the rest a slice a frame (paint); whatever needs the whole board calls whole()
+            # parsed now (every core), the rest a slice a frame (paint); anything that changes or reads all of it goes through OpenBoard.edit()
             var text = String("")
             swap(text, self.notes[i].content)  # (the loader keeps the text; the note's copy isn't read for a canvas)
-            var ld = CanvasLoad(text^)
+            # (the page grid first: the opening view, and so the first slice, depend on it)
+            var grid = read_page_grid(text)
+            self.cols = grid[0]
+            self.rows = grid[1]
+            self.tools = BoardTools()
+            self.sticky_look()
+            self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+            self.view_set = True
+            var r = self.view_rect()
+            var back = self.board.open(text^, r[0], r[1], r[2], r[3], 6)
             if trace:
-                print("OPEN: skimmed " + String(clock_us() - t_open) + " us", flush=True)
-            if ld.ok:
-                var pn = ld.member("pn")
-                var pg = pn.get(0, "page")
-                self.cols = max(1, Int(pn.real(pn.get(pg, "columns"), 1)))
-                self.rows = max(1, Int(pn.real(pn.get(pg, "rows"), 1)))
-                self.board = ObjectLayer()
-                self.board.set_connector_gap(6)
-                self.board.mark_saved()  # (what the file holds: unchanged until edited; slices keep it so)
-                self.tools = BoardTools()
-                self.sticky_look()
-                self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
-                self.view_set = True
-                var r = self.view_rect()
-                ld.take(self.board, r[0], r[1], r[2], r[3])
-                if trace:
-                    print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
-                self.loading.append(ld^)
-                self.load_fresh = True
-                if self.loading[0].done():
-                    self.loading.clear()
+                print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
+            if back == "":
                 return
-            var back = String("")
-            swap(back, ld.text)
+            self.view_set = False
             self.notes[i].content = back^
             try:
-                var j = Json.parse(n.content)  # (parsed once: the objects and the page grid, D-7941)
-                self.board = import_json_canvas_doc(j)
-                self.board.set_connector_gap(6)
-                self.board.mark_saved()  # (what the file holds: unchanged until edited)
+                var j = Json.parse(self.notes[i].content)  # (parsed once: the objects and the page grid, D-7941)
+                self.board.set(import_json_canvas_doc(j))
+                self.board.layer.set_connector_gap(6)
+                self.board.layer.mark_saved()  # (what the file holds: unchanged until edited)
                 self.tools = BoardTools()
                 self.sticky_look()
                 var pg = j.get(j.get(0, "pn"), "page")
@@ -381,7 +368,7 @@ struct WebShell(Movable):
                 self.rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
             except e:
                 print("PNOTE ERROR: canvas: " + String(e), flush=True)
-                self.board = ObjectLayer()
+                self.board.set(ObjectLayer())
         elif n.kind == "mindmap":
             self.map = BuzanMap()
             try:
@@ -441,25 +428,12 @@ struct WebShell(Movable):
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
                 self.view_set = True
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
-            if len(self.loading) > 0:  # (D-7944: a slice of the rest of the board this frame, the view's part first)
-                if self.load_fresh:
-                    self.load_fresh = False
-                else:
-                    var r = self.view_rect()
-                    var ts = clock_us()
-                    self.loading[0].step(self.board, r[0], r[1], r[2], r[3], LOAD_SLICE_US)
-                    if self.loading[0].trace:
-                        print("CANVASLOAD: slice in the frame " + String(clock_us() - ts) + " us", flush=True)
-                if self.loading[0].done():
-                    self.loading.clear()
-                else:
+            if self.board.loading():  # (D-7944: a slice of the rest of the board this frame, the view's part first)
+                var r = self.view_rect()
+                if self.board.step(r[0], r[1], r[2], r[3], LOAD_SLICE_US):
                     p.set_again()
-            var tl0 = clock_us()
-            var tracing = len(self.loading) > 0 and self.loading[0].trace
-            self.look.paint(p, self.board, self.view, w, h, k, self.tools.lifted(self.board))
-            if tracing:
-                print("BOARD: look.paint " + String(clock_us() - tl0) + " us", flush=True)
-            self.tools.paint_overlay(p, self.look, self.board, self.view, k)
+            self.look.paint(p, self.board.layer, self.view, w, h, k, self.tools.lifted(self.board.layer))
+            self.tools.paint_overlay(p, self.look, self.board.layer, self.view, k)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
@@ -494,7 +468,7 @@ struct WebShell(Movable):
                 if active == "#dock-more":  # (a tool from the flyout shows in its place)
                     items[8].icon = "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9"
                 draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, active, k, self.sk, "#dock-canvas")
-                if len(self.board.selected) > 0 and self.tools.editing == -1:
+                if len(self.board.layer.selected) > 0 and self.tools.editing == -1:
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
@@ -610,7 +584,6 @@ struct WebShell(Movable):
         """Writes the pending save now (a due timer, another note opening, the app closing)."""
         if not self.saver.pending():
             return
-        self.whole()
         self.saver.done()
         var kind = self.save_kind
         self.save_kind = ""
@@ -632,9 +605,9 @@ struct WebShell(Movable):
             # (page_note.page_text: a page's search body is its Markdown itself)
             self.save_note(i, '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}", md)
         elif kind == "canvas":
-            self.save_note(i, export_json_canvas(self.board, self.cols, self.rows), reading_text(self.board))
+            self.save_note(i, export_json_canvas(self.board.edit(), self.cols, self.rows), reading_text(self.board.edit()))
             if self.save_state == "":
-                self.board.mark_saved()
+                self.board.edit().mark_saved()
         elif kind == "mindmap":
             self.save_note(i, map_json(self.map, self.notes[i].title, self.map_root), map_text(self.map))
 
@@ -723,10 +696,9 @@ struct WebShell(Movable):
                 self.map.begin_edit(self.map.selected)
                 return True
         if self.on_canvas():
-            self.whole()  # (an edit waits for the whole board: D-7944)
-            var r = self.tools.key(name, mods, self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
+            var r = self.tools.key(name, mods, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
             if r and (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y"):  # (an undo or redo by key, as by the island)
-                self.tools.hug_routes(self.board, self.look)
+                self.tools.hug_routes(self.board.edit(), self.look)
             self.save_canvas()
             if r:
                 return True
@@ -823,11 +795,9 @@ struct WebShell(Movable):
         window, an object (or 40 selected) to drag, thirty moves to undo and redo, and a fresh open of the note.
         bench:loading answers (1, nodes left) while an open is still coming in, else (0, 0)."""
         if name == "bench:loading":
-            if len(self.loading) > 0:
-                return (1.0, Float64(self.loading[0].left))
+            if self.board.loading():
+                return (1.0, Float64(self.board.left()))
             return (0.0, 0.0)
-        if name != "bench:reopen" and name != "bench:coldopens" and name != "bench:keptopens":
-            self.whole()
         if name == "bench:switch":
             var i = self.note_index(self.current)
             self.open(self.notes[(i + 1) % len(self.notes)].id)
@@ -844,53 +814,74 @@ struct WebShell(Movable):
                 if n.kind == kinds[at] and not n.secure:
                     self.open(n.id)
                     break
+        if name == "bench:reopen":
+            if self.cold_opens:  # (D-7951, review 2: a cold open finds nothing of the note: no kept parse, no tiles)
+                self.look.forget()
+            self.open(self.bench_note if self.bench_note >= 0 else self.current)
+            return (-1.0, -1.0)
+        if name == "bench:coldopens" or name == "bench:keptopens":  # (the race's two open rows)
+            self.cold_opens = name == "bench:coldopens"
+            self.kept.clear()
+            if self.bench_note < 0:
+                self.bench_note = self.current
+            if self.cold_opens:  # (the first timed open comes from another note, as a person switching to it)
+                for ref n in self.notes:
+                    if n.kind != "canvas" and not n.secure:
+                        self.open(n.id)
+                        break
+            return (-1.0, -1.0)
         if not self.on_canvas():
             return (-1.0, -1.0)
+        if name == "bench:openspot":  # (framebench openpress: an object the board shows while it is still coming in, read
+            # without finishing it; the press then goes through the app's own route, which does)
+            var vis = self.tools.visible_objects(self.board.layer, self.view, self.win_w, self.win_h)
+            if len(vis) == 0:
+                return (-1.0, -1.0)
+            ref o = self.board.layer.objs[vis[len(vis) // 2]]
+            var c = self.view.to_screen(o.x + o.w / 2, o.y + o.h / 2)
+            return (c[0], c[1])
+        if name != "bench:reopen" and name != "bench:coldopens" and name != "bench:keptopens" and name != "bench:open":
+            self.board.finish()  # (every other step reads or changes the whole board)
         var w = self.win_w
         var h = self.win_h
         if name == "bench:pan" or name == "bench:zoom":
-            self.tools.set_tool("hand", self.board, self.view, w, h, self.cols, self.rows)
+            self.tools.set_tool("hand", self.board.layer, self.view, w, h, self.cols, self.rows)
         elif name == "bench:zoom30" or name == "bench:zoom100":  # (benchmark-f034's "zoomed out to 30%" and "at 100%"; the
             # host presses before it readies a pan, so the hand is picked here)
-            self.tools.set_tool("hand", self.board, self.view, w, h, self.cols, self.rows)
+            self.tools.set_tool("hand", self.board.layer, self.view, w, h, self.cols, self.rows)
             self.view = self.view.zoomed_at(0.3 if name == "bench:zoom30" else 1.0, w / 2, h / 2)
         elif name == "bench:redo":  # (the undos before it made the history)
             pass
         elif name == "bench:draw" or name == "bench:finish":
-            self.board.clear_selection()
-            self.tools.set_tool("pen", self.board, self.view, w, h, self.cols, self.rows)
+            self.board.layer.clear_selection()
+            self.tools.set_tool("pen", self.board.layer, self.view, w, h, self.cols, self.rows)
         elif name == "bench:type":
-            self.tools.set_tool("text", self.board, self.view, w, h, self.cols, self.rows)
-            _ = self.tools.tap(w / 2, h / 2, self.board, self.view, w, h)
-        elif name == "bench:reopen":
-            self.open(self.current)
-        elif name == "bench:coldopens" or name == "bench:keptopens":  # (the race's two open rows)
-            self.cold_opens = name == "bench:coldopens"
-            self.kept.clear()
+            self.tools.set_tool("text", self.board.layer, self.view, w, h, self.cols, self.rows)
+            _ = self.tools.tap(w / 2, h / 2, self.board.layer, self.view, w, h)
         elif name == "bench:dragone" or name == "bench:undoredo" or name == "bench:undo" or name == "bench:drag40":
-            self.tools.set_tool("select", self.board, self.view, w, h, self.cols, self.rows)
-            var vis = self.tools.visible_objects(self.board, self.view, w, h)
+            self.tools.set_tool("select", self.board.layer, self.view, w, h, self.cols, self.rows)
+            var vis = self.tools.visible_objects(self.board.layer, self.view, w, h)
             if len(vis) == 0:
                 return (-1.0, -1.0)
-            self.board.clear_selection()
+            self.board.layer.clear_selection()
             if name == "bench:drag40":
                 for m in range(min(40, len(vis))):
-                    self.board.select(self.board.objs[vis[m]].id, True)
-                var o0 = self.board.objs[vis[0]].copy()
+                    self.board.layer.select(self.board.layer.objs[vis[m]].id, True)
+                var o0 = self.board.layer.objs[vis[0]].copy()
                 var c0 = self.view.to_screen(o0.x + o0.w / 2, o0.y + o0.h / 2)
                 return (c0[0], c0[1])
             var k = len(vis) // 2
             if name == "bench:undoredo" or name == "bench:undo":  # (thirty separate moves, each its own undo step, to walk back and forth)
                 for m in range(min(30, len(vis))):
-                    self.board.select(self.board.objs[vis[m]].id, False)
-                    self.board.begin_gesture(CH_MOVE)
-                    self.board.move_by(6, 4)
-                    self.board.end_gesture()
+                    self.board.layer.select(self.board.layer.objs[vis[m]].id, False)
+                    self.board.layer.begin_gesture(CH_MOVE)
+                    self.board.layer.move_by(6, 4)
+                    self.board.layer.end_gesture()
                 self.tools.changed = True
                 self.save_canvas()
                 return (-1.0, -1.0)
-            var o = self.board.objs[vis[k]].copy()
-            self.board.select(o.id, False)
+            var o = self.board.layer.objs[vis[k]].copy()
+            self.board.layer.select(o.id, False)
             var c = self.view.to_screen(o.x + o.w / 2, o.y + o.h / 2)
             return (c[0], c[1])
         return (-1.0, -1.0)
@@ -914,12 +905,12 @@ struct WebShell(Movable):
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
         self.title_focus = False  # (a click moves the focus: the ring goes)
-        if self.on_canvas() and self.tools.tool != "hand":
-            self.whole()  # (a press that may edit waits for the whole board; the hand only moves the view: D-7944)
         if self.on_canvas():
             if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button"]) != "":
-                return False
-            return self.tools.press(x, y, self.board, self.view)
+                return False  # (the chrome: nothing of the board read, an open keeps coming in)
+            if self.tools.tool == "hand":  # (the hand only moves the view)
+                return self.tools.press(x, y, self.board.layer, self.view)
+            return self.tools.press(x, y, self.board.edit(), self.view)  # (may edit: waits for the whole board, D-7952)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
@@ -929,17 +920,17 @@ struct WebShell(Movable):
 
     def pan(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
-            return self.tools.pan(x, y, self.board, self.view)  # (the hand tool moves self.view)
+            if self.tools.tool == "hand":
+                return self.tools.pan(x, y, self.board.layer, self.view)  # (the hand tool moves self.view)
+            return self.tools.pan(x, y, self.board.edit(), self.view)
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True
         return False
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
-        if self.on_canvas() and self.tools.tool != "hand":
-            self.whole()
         if self.on_canvas():
-            var r = self.tools.release(x, y, self.board, self.view)
+            var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.edit(), self.view)
             self.save_canvas()
             return r
         if len(self.page.wet) > 0:
@@ -969,8 +960,8 @@ struct WebShell(Movable):
         return i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open
 
     def canvas_tap(mut self, x: Float64, y: Float64) -> Bool:
-        """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool."""
-        self.whole()
+        """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool (an edit: the whole board
+        first, D-7952)."""
         var hit = self.boxes.hit_any(x, y, ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]", "#undo", "#redo",
                                             "#zoom-in", "#zoom-out", "#zoom-fit", "#zoom-value", "#dock-more", "#ink-options-trigger", "#voice-button",
                                             "#selection-bar", "[Canvas tools]", "#history-island", "#zoom-control"])
@@ -978,20 +969,20 @@ struct WebShell(Movable):
         var tools: List[String] = ["select", "text", "pen", "eraser", "shape", "sticky"]
         for t in range(len(names)):
             if hit == names[t]:
-                self.tools.set_tool(tools[t], self.board, self.view, self.win_w, self.win_h, self.cols, self.rows)
+                self.tools.set_tool(tools[t], self.board.layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
                 return True
         if hit == "#undo":
-            self.tools.undo(self.board)
-            self.tools.hug_routes(self.board, self.look)
+            self.tools.undo(self.board.edit())
+            self.tools.hug_routes(self.board.edit(), self.look)
         elif hit == "#redo":
-            self.tools.redo(self.board)
-            self.tools.hug_routes(self.board, self.look)
+            self.tools.redo(self.board.edit())
+            self.tools.hug_routes(self.board.edit(), self.look)
         elif hit == "#zoom-in" or hit == "#zoom-out":
             self.view = self.tools.zoom_step(self.view, 1 if hit == "#zoom-in" else -1, self.win_w, self.win_h, self.cols, self.rows)
         elif hit == "#zoom-fit":
             self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
         elif hit == "":
-            if not self.tools.tap(x, y, self.board, self.view, self.win_w, self.win_h):
+            if not self.tools.tap(x, y, self.board.edit(), self.view, self.win_w, self.win_h):
                 return False
         self.save_canvas()
         return True

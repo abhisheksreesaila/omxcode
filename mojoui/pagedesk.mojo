@@ -205,19 +205,52 @@ def _dashed[P: Painter](mut p: P, x0: Float64, y0: Float64, x1: Float64, y1: Flo
         t += 11
 
 
+def board_rect(v: DeskView, view_w: Float64, view_h: Float64) -> Tuple[Float64, Float64, Float64, Float64]:
+    """The page rect BoardLook.paint draws objects from for this view: the window, 64 px more, snapped out to whole
+    BOARD_TILEs (a progressive open's first slice takes exactly this: mojoui.canvasload.OpenBoard)."""
+    var tl = v.to_page(0, 0)
+    var br = v.to_page(view_w, view_h)
+    return (floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE, floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE,
+            ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE, ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE)
+
+
 @fieldwise_init
 struct WrapKey(Copyable, Movable):
     var rev: Int
     var width: Float64
 
 
+def _mix(h: UInt64, v: UInt64) -> UInt64:
+    """One FNV-1a-style step over a 64-bit value (each field mixed in, so two fields can't cancel each other out)."""
+    var x = (h ^ v) * 0x100000001B3
+    return x ^ (x >> 29)
+
+
 def _obj_key(ref o: Obj) -> Int:
-    """What an object's picture depends on beyond its box (its text's revision, colours, type, stacking, ink length)."""
-    var h = o.kind * 1000003 + o.rev * 7919 + Int(o.color) * 31 + Int(o.line) * 131 + Int(o.ink) * 17 + o.z * 104729
-    h = h * 31 + Int(o.size * 100) + o.weight * 7 + Int(o.line_height * 1000) * 13 + Int(o.pad * 100) * 3 + (1 if o.markdown else 0) * 5
-    h = h * 31 + (1 if o.head_end else 0) + o.text.byte_length() * 11 + len(o.stroke.xs) * 23 + Int(o.rot * 10000) + Int(o.line_width * 100) * 29
-    h = h * 31 + Int(o.radius * 100) + o.family.byte_length() * 37 + len(o.pixels)
-    return h
+    """What an object's picture depends on beyond its box (its text's revision, colours, type, stacking, ink length):
+    a hash over every field (review 2: a weighted sum let changes cancel out)."""
+    var h = UInt64(0xCBF29CE484222325)
+    h = _mix(h, UInt64(o.kind))
+    h = _mix(h, UInt64(o.rev))
+    h = _mix(h, UInt64(o.color))
+    h = _mix(h, UInt64(o.line))
+    h = _mix(h, UInt64(o.ink))
+    h = _mix(h, UInt64(o.z))
+    h = _mix(h, o.size.to_bits().cast[DType.uint64]())
+    h = _mix(h, UInt64(o.weight))
+    h = _mix(h, o.line_height.to_bits().cast[DType.uint64]())
+    h = _mix(h, o.pad.to_bits().cast[DType.uint64]())
+    h = _mix(h, UInt64(1 if o.markdown else 0))
+    h = _mix(h, UInt64(1 if o.head_end else 0))
+    h = _mix(h, UInt64(o.text.byte_length()))
+    h = _mix(h, UInt64(len(o.stroke.xs)))
+    h = _mix(h, o.rot.to_bits().cast[DType.uint64]())
+    h = _mix(h, o.line_width.to_bits().cast[DType.uint64]())
+    h = _mix(h, o.radius.to_bits().cast[DType.uint64]())
+    for b in o.family.as_bytes():
+        h = _mix(h, UInt64(b))
+    h = _mix(h, UInt64(len(o.pixels)))
+    return Int(h >> 1)
 
 
 struct BoardLook(Movable):
@@ -304,12 +337,11 @@ struct BoardLook(Movable):
         its damage meets. `lifted` (ids: what a drag is moving) is drawn in a layer of its own above the board, with the
         connectors that end at it, so the board's tiles stay as they are until the drag lets go."""
         # culled to the window snapped out to whole tiles of page px (D-7929): the layer's extent, its ops complete there
-        var tl = v.to_page(0, 0)
-        var br = v.to_page(view_w, view_h)
-        var tx0 = floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE
-        var ty0 = floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE
-        var tx1 = ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE
-        var ty1 = ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE
+        var cull = board_rect(v, view_w, view_h)
+        var tx0 = cull[0]
+        var ty0 = cull[1]
+        var tx1 = cull[2]
+        var ty1 = cull[3]
         self._lift(layer, lifted)
         self._track(layer, len(lifted) > 0)
         p.begin_layer("board")
@@ -400,6 +432,11 @@ struct BoardLook(Movable):
         self.since = self.board_version
         self.board_version += 1
         self.dmg = rects^
+
+    def forget(mut self):
+        """The next paint is a new picture of the board (another document, or a cold open measured as one): no damage
+        from the last, so the renderer drops the board layer's kept tiles."""
+        self.generation += 1
 
     def paint_box(mut self, ref o: Obj) -> Tuple[Float64, Float64, Float64, Float64]:
         """Where the object paints, in page px, generously: its box, a sticky's shadow, a text's lines past its box."""

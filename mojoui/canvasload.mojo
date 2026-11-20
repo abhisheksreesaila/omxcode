@@ -319,7 +319,8 @@ struct CanvasLoad(Movable):
     var e_from: List[Int]  # per edge: the node (index) it starts and ends at, -1 when no node has that id
     var e_to: List[Int]
     var e_left: List[Int]  # edges not adopted yet (indices)
-    var at_key: Dict[String, Int]  # a node's id in the document → its index (the last with that id, as the importer)
+    var at_key: Dict[String, Int]  # a node's id in the document → its last node's index
+    var dup_prev: List[Int]  # per node: the previous node with the same id (-1): an edge binds to the last that made an object
     var rate: Float64  # bytes parsed per µs, all cores together (measured by every slice)
     var skim_us: Int
     var bad: Int  # nodes that weren't JSON (made nothing)
@@ -345,6 +346,7 @@ struct CanvasLoad(Movable):
         self.e_to = List[Int]()
         self.e_left = List[Int]()
         self.at_key = Dict[String, Int]()
+        self.dup_prev = List[Int]()
         self.rate = 0
         self.skim_us = 0
         self.bad = 0
@@ -376,7 +378,9 @@ struct CanvasLoad(Movable):
                 var v = read_keys(addr, a, b, ["x", "y", "width", "height", "id"])
                 var x = _number_at(addr, v[0], v[1], 0)
                 var y = _number_at(addr, v[2], v[3], 0)
-                self.at_key[_string_at(addr, v[8], v[9])] = len(self.ns)
+                var key = _string_at(addr, v[8], v[9])
+                self.dup_prev.append(self.at_key.get(key, -1))
+                self.at_key[key] = len(self.ns)
                 self.ns.append(a)
                 self.ne.append(b)
                 self.bx0.append(x)
@@ -478,7 +482,6 @@ struct CanvasLoad(Movable):
             _ = len(cut)
             _ = len(idx)
             var t_par = clock_us()
-            var r = Float64(total) / Float64(max(clock_us() - t0, 1))  # (the slice's own rate, adopting included)
             var was_saved = not layer.unsaved()
             for k in range(count):
                 var i = idx[k]
@@ -492,7 +495,7 @@ struct CanvasLoad(Movable):
                 _ = layer.adopt_as(o^, i + 1, i + 1)
             if was_saved:
                 layer.mark_saved()
-            r = Float64(total) / Float64(max(clock_us() - t0, 1))
+            var r = Float64(total) / Float64(max(clock_us() - t0, 1))  # (the slice's own rate, adopting included)
             if stepping:  # (a slice's rate sets the next slice's size; the first, big and on every core, runs faster)
                 self.rate = r if self.rate == 0 else min(r, 0.5 * self.rate + 0.5 * r)
             if self.trace:
@@ -510,11 +513,11 @@ struct CanvasLoad(Movable):
         var still = List[Int]()
         var j = Json()
         for e in self.e_left:
-            var a = self.e_from[e]
-            var b = self.e_to[e]
-            if a < 0 or b < 0 or self.state[a] == _NOTHING or self.state[b] == _NOTHING:
+            var a = self._end(self.e_from[e])
+            var b = self._end(self.e_to[e])
+            if a == -1 or b == -1:  # (no node with that id made an object: the importer drops the edge too)
                 continue
-            if self.state[a] == _PENDING or self.state[b] == _PENDING:
+            if a == -2 or b == -2:  # (a node it may bind to isn't parsed yet)
                 still.append(e)
                 continue
             if a == b:
@@ -532,6 +535,18 @@ struct CanvasLoad(Movable):
         if was_saved:
             layer.mark_saved()
 
+    def _end(self, last: Int) -> Int:
+        """The node an edge end binds to, as import_json_canvas_doc binds it: the last node with that id that made an
+        object (-1: none did; -2: one that may is still pending)."""
+        var i = last
+        while i >= 0:
+            if self.state[i] == _PENDING:
+                return -2
+            if self.state[i] == _ADOPTED:
+                return i
+            i = self.dup_prev[i]
+        return -1
+
     def take(mut self, mut layer: ObjectLayer, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         """Every pending node whose box meets the rect (page units), parsed and adopted now."""
         var mark = List[Bool](length=len(self.ns), fill=False)
@@ -545,8 +560,12 @@ struct CanvasLoad(Movable):
                 continue
             # (its line lies within its two ends' boxes, whichever rule routes it)
             if max(self.bx1[a], self.bx1[b]) >= x0 and min(self.bx0[a], self.bx0[b]) <= x1 and max(self.by1[a], self.by1[b]) >= y0 and min(self.by0[a], self.by0[b]) <= y1:
-                mark[a] = self.state[a] == _PENDING
-                mark[b] = self.state[b] == _PENDING
+                for end in [a, b]:  # (the whole chain of nodes with that id: the edge binds to the last that makes one)
+                    var q = end
+                    while q >= 0:
+                        if self.state[q] == _PENDING:
+                            mark[q] = True
+                        q = self.dup_prev[q]
         var idx = List[Int]()
         for i in range(len(self.ns)):
             if mark[i]:
@@ -601,3 +620,93 @@ struct CanvasLoad(Movable):
             layer.history.clear()
             if was_saved:
                 layer.mark_saved()
+
+
+struct OpenBoard(Movable):
+    """(D-7952) A board and the progressive open still filling it, as one value, so an app can't act on part of a
+    document: painting and panning read `layer` as it is (the visible part is there from the first frame); edit() and
+    take() finish the load first, then hand the whole board over (an edit during an open waits for the rest, measured by
+    the GTK framebench's `openpress`). step() runs one slice per frame, skipping the open's own frame."""
+
+    var layer: ObjectLayer
+    var load: List[CanvasLoad]
+    var fresh: Bool  # the open's own frame: it shows what open() took, no slice in it
+
+    def __init__(out self):
+        self.layer = ObjectLayer()
+        self.load = List[CanvasLoad]()
+        self.fresh = False
+
+    def set(mut self, var layer: ObjectLayer):
+        """A board made whole elsewhere (a kept parse, a whole import, an empty one): any open in progress is dropped."""
+        self.load.clear()
+        self.fresh = False
+        self.layer = layer^
+
+    def open(mut self, var text: String, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1) -> String:
+        """A JSON Canvas opened progressively: the nodes meeting the rect (page units) now, the rest by step(). Returns
+        "" when it opened, else the text back (not a document the skim can open: the caller imports it whole and gets
+        the reader's error)."""
+        var ld = CanvasLoad(text^)
+        if not ld.ok:
+            var back = String("")
+            swap(back, ld.text)
+            return back^
+        self.layer = ObjectLayer()
+        if connector_gap >= 0:
+            self.layer.set_connector_gap(connector_gap)
+        self.layer.mark_saved()  # (what the file holds: unchanged until edited; slices keep it so)
+        ld.take(self.layer, x0, y0, x1, y1)
+        self.load.clear()
+        self.fresh = True
+        if not ld.done():
+            self.load.append(ld^)
+        return ""
+
+    def member(self, key: String) -> Json:
+        """A top-level member of the document being opened (its page grid); an empty object when none is opening."""
+        if len(self.load) > 0:
+            return self.load[0].member(key)
+        try:
+            return Json.parse("{}")
+        except:
+            return Json()
+
+    def loading(self) -> Bool:
+        return len(self.load) > 0
+
+    def left(self) -> Int:
+        """Nodes not parsed yet (0 when whole)."""
+        return self.load[0].left if len(self.load) > 0 else 0
+
+    def step(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, budget_us: Int) -> Bool:
+        """One slice (the rect's nodes first); True while more is left (the app asks for another frame)."""
+        if len(self.load) == 0:
+            return False
+        if self.fresh:
+            self.fresh = False
+            return True
+        self.load[0].step(self.layer, x0, y0, x1, y1, budget_us)
+        if self.load[0].done():
+            self.load.clear()
+            return False
+        return True
+
+    def finish(mut self):
+        """Everything left, now."""
+        if len(self.load) > 0:
+            self.load[0].finish(self.layer)
+            self.load.clear()
+        self.fresh = False
+
+    def edit(mut self) -> ref [self.layer] ObjectLayer:
+        """The whole board, to change or to read all of (a save, a search, a selection): the load is finished first."""
+        self.finish()
+        return self.layer
+
+    def take(mut self) -> ObjectLayer:
+        """The whole board moved out (kept for later), an empty one left."""
+        self.finish()
+        var out = ObjectLayer()
+        swap(out, self.layer)
+        return out^

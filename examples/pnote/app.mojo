@@ -274,7 +274,14 @@ struct Main(App):
             # judged scenes) keeps goal 74's look so their checks still prove the editors and the GPU path
             self.web.append(WebShell(pn_db, read_setting("pnote", "skin", environment("PNOTE_SKIN", "paper"))))
             if len(self.web[0].notes) > 0:
-                self.web[0].open(self.web[0].notes[0].id)
+                var first = environment("PNOTE_FIRST", "")  # (the race: start on another note, D-7951)
+                var start_id = self.web[0].notes[0].id
+                try:
+                    if first != "" and self.web[0].note_index(Int(first)) >= 0:
+                        start_id = Int(first)
+                except:
+                    pass
+                self.web[0].open(start_id)
             print("PNOTE WEB: " + String(len(self.web[0].notes)) + " notes from " + pn_db, flush=True)
             return
         var dir = environment("PNOTE_DIR", "")
