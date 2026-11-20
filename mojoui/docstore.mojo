@@ -200,3 +200,47 @@ def row_revision(mut db: Database, table: String, key: String, id: Int, rev: Str
     except:
         pass
     return -1
+
+
+struct KeptDocs[T: Movable & Deinitable](Movable):
+    """Documents an app already parsed, kept by (id, revision): opening one again whose row still has that revision
+    reuses it instead of reading and parsing its text again (D-7934). Least recently kept goes first beyond `cap`."""
+
+    var ids: List[Int]
+    var revs: List[Int]
+    var docs: List[Self.T]
+    var cap: Int
+
+    def __init__(out self, cap: Int = 4):
+        self.ids = List[Int]()
+        self.revs = List[Int]()
+        self.docs = List[Self.T]()
+        self.cap = cap
+
+    def find(self, id: Int, revision: Int) -> Int:
+        for i in range(len(self.ids)):
+            if self.ids[i] == id and self.revs[i] == revision:
+                return i
+        return -1
+
+    def take(mut self, at: Int) -> Self.T:
+        """Hands back kept document `at` (it leaves the store)."""
+        _ = self.ids.pop(at)
+        _ = self.revs.pop(at)
+        return self.docs.pop(at)
+
+    def keep(mut self, id: Int, revision: Int, var doc: Self.T):
+        for i in range(len(self.ids)):
+            if self.ids[i] == id:
+                _ = self.take(i)
+                break
+        if len(self.ids) >= self.cap:
+            _ = self.take(0)
+        self.ids.append(id)
+        self.revs.append(revision)
+        self.docs.append(doc^)
+
+    def clear(mut self):
+        self.ids.clear()
+        self.revs.clear()
+        self.docs.clear()

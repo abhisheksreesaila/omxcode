@@ -308,6 +308,8 @@ struct FontEngine(Movable):
     var runs: Dict[String, Run]  # shaped runs by (style, text): text redrawn each frame is shaped once (D-7916)
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
+    var kern_round: String  # FONTTEXT_KERN_ROUND, read once (not per glyph)
+    var debug: Bool  # FONTTEXT_DEBUG, read once
     # the Mac: CoreText, CoreGraphics, CoreFoundation (by address, dlopen'd as on Linux)
     var mac: List[Int]  # function addresses, by the _M_* indices below
     var k_font_attr: Int  # kCTFontAttributeName's value
@@ -369,6 +371,8 @@ struct FontEngine(Movable):
         self.image_of = Dict[Int, Int]()
         var h = getenv("FONTTEXT_HINT", "light")
         self.hint = FT_LOAD_NO_HINTING if h == "none" else (0 if h == "full" else FT_LOAD_TARGET_LIGHT)
+        self.kern_round = getenv("FONTTEXT_KERN_ROUND", "D")
+        self.debug = getenv("FONTTEXT_DEBUG") != ""
         self.error = ""
         self.mac = List[Int]()
         self.k_font_attr = 0
@@ -702,7 +706,7 @@ struct FontEngine(Movable):
             var kern = (xa - base) * k
             var fa = Float64(self.advance_units(inst, gid)) * k
             var adv = Float64(Int(fa + 0.5)) if fa > 0 else 0.0
-            var mode = getenv("FONTTEXT_KERN_ROUND", "D")
+            var mode = self.kern_round.copy()
             if st.exact:
                 adv = fa
                 mode = "exact"
@@ -774,7 +778,7 @@ struct FontEngine(Movable):
             self._use(inst)
             if self.faces[fi].size_set != s64:
                 var rs = _fn[def(Int, Int, Int, c_uint, c_uint) thin abi("C") -> c_int](self.FT_Set_Char_Size)(ft, 0, s64, c_uint(72), c_uint(72))
-                if getenv("FONTTEXT_DEBUG") != "":
+                if self.debug:
                     print("size", rs, s64)
                 self.faces[fi].size_set = s64
         var delta = List[Int](length=2, fill=0)
@@ -783,7 +787,7 @@ struct FontEngine(Movable):
         _ = delta
         var flags = FT_LOAD_RENDER | (FT_LOAD_COLOR if self.faces[fi].color else self.hint)
         var rc = Int(_fn[def(Int, c_uint, Int32) thin abi("C") -> c_int](self.FT_Load_Glyph)(ft, c_uint(gid), Int32(flags)))
-        if getenv("FONTTEXT_DEBUG") != "":
+        if self.debug:
             print("FT_Load_Glyph", gid, rc, "slot", _peek(ft + 152), "rows", _peek_u32(_peek(ft + 152) + 152), "w", _peek_u32(_peek(ft + 152) + 156), "mode", _peek_u8(_peek(ft + 152) + 178))
         if rc == 0:
             var slot = _peek(ft + 152)

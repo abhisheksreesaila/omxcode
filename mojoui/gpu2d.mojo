@@ -121,6 +121,8 @@ struct GlyphPages(Movable):
     var used: Int  # rows holding glyphs
     var version: Int
     var resets: Int
+    var straight_of: Dict[Int, Int]  # a colour glyph (engine image × 256 + the run's alpha) → its straight-alpha pixels
+    var straight_px: List[List[UInt32]]
 
     def __init__(out self, width: Int):
         self.width = width
@@ -134,6 +136,32 @@ struct GlyphPages(Movable):
         self.used = 0
         self.version = 0
         self.resets = 0
+        self.straight_of = Dict[Int, Int]()
+        self.straight_px = List[List[UInt32]]()
+
+    def straight(mut self, image: Int, alpha: Int, rgba: List[UInt32]) -> List[UInt32]:
+        """A colour glyph's premultiplied pixels as straight alpha times the run's alpha, converted once and kept
+        (bounded: 2,048 kept, then started again), not on every frame (D-7932)."""
+        var key = image * 256 + alpha
+        var at = self.straight_of.get(key, -1)
+        if at < 0:
+            if len(self.straight_px) >= 2048:
+                self.straight_of = Dict[Int, Int]()
+                self.straight_px.clear()
+            var pix = List[UInt32](capacity=len(rgba))
+            for q in rgba:
+                var aa = Int((q >> 24) & 0xFF)
+                if aa == 0:
+                    pix.append(0)
+                    continue
+                var rr = min(255, Int(q & 0xFF) * 255 // aa)
+                var gg = min(255, Int((q >> 8) & 0xFF) * 255 // aa)
+                var bb = min(255, Int((q >> 16) & 0xFF) * 255 // aa)
+                pix.append(UInt32(rr) | (UInt32(gg) << 8) | (UInt32(bb) << 16) | (UInt32(aa * alpha // 255) << 24))
+            self.straight_px.append(pix^)
+            at = len(self.straight_px) - 1
+            self.straight_of[key] = at
+        return self.straight_px[at].copy()
 
     def place(mut self, key: Int, img: GlyphImage) -> Int:
         """The glyph's slot (packing it on first use, a column and a row of zeros around it)."""
@@ -619,18 +647,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     var x_l = (Float64(px + eng[].images[ii].left) - tx) * ik
                     var y_l = (Float64(py - eng[].images[ii].top) - ty) * ik
                     if eng[].images[ii].color:
-                        var pix = List[UInt32](capacity=iw * ih)
                         var al = Int((color >> 24) & 0xFF)
-                        for q in eng[].images[ii].rgba:  # (premultiplied → straight alpha, times the run's alpha)
-                            var aa = Int((q >> 24) & 0xFF)
-                            if aa == 0:
-                                pix.append(0)
-                                continue
-                            var rr = min(255, Int(q & 0xFF) * 255 // aa)
-                            var gg = min(255, Int((q >> 8) & 0xFF) * 255 // aa)
-                            var bb = min(255, Int((q >> 16) & 0xFF) * 255 // aa)
-                            pix.append(UInt32(rr) | (UInt32(gg) << 8) | (UInt32(bb) << 16) | (UInt32(aa * al // 255) << 24))
-                        f.pixels.append(pix^)
+                        f.pixels.append(pg[].straight(ii, al, eng[].images[ii].rgba))
                         f.images.append(Float32(x_l))
                         f.images.append(Float32(y_l))
                         f.images.append(Float32(Float64(iw) * ik))

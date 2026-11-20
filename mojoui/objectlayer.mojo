@@ -384,6 +384,7 @@ struct ObjectLayer(Movable):
     # how connectors meet their ends: -1 at the nearest side midpoints (goal 74), ≥ 0 where the line between the two
     # centres leaves each box, pulled back by this gap (Fabric's and Personal Note's rule: connectorEndpoints)
     var connector_gap: Float64
+    var select_on_undo: Bool  # an undo or redo selects what it changed (D-7935; off: goal 74's editors keep their selection rule)
     var saved_version: Int  # the version the document had when it was last loaded or saved (-1: never): unchanged since, no save is needed
 
     def __init__(out self):
@@ -428,6 +429,7 @@ struct ObjectLayer(Movable):
         self.stamp_now = 0
         self.connector_gap = -1
         self.saved_version = -1
+        self.select_on_undo = False
 
     # ------------------------------------------------ looking up
 
@@ -553,8 +555,7 @@ struct ObjectLayer(Movable):
         ref ch = s.value()
         for k in range(len(ch.ids) - 1, -1, -1):
             self._put(ch.ids[k], ch.before[k])
-        self._changed()
-        self._prune_selection()
+        self._after_history(ch.ids)
         return True
 
     def redo(mut self) -> Bool:
@@ -566,8 +567,7 @@ struct ObjectLayer(Movable):
         ref ch = s.value()
         for k in range(len(ch.ids)):
             self._put(ch.ids[k], ch.after[k])
-        self._changed()
-        self._prune_selection()
+        self._after_history(ch.ids)
         return True
 
     def can_undo(self) -> Bool:
@@ -575,6 +575,22 @@ struct ObjectLayer(Movable):
 
     def can_redo(self) -> Bool:
         return self.history.can_redo()
+
+    def _after_history(mut self, ids: List[Int]):
+        """After an undo or redo: connectors follow the objects they join again (one brought back by the step included,
+        D-7935); with select_on_undo, what the step changed and still exists is selected (a whiteboard's rule: you
+        see what came back)."""
+        for c in range(len(self.objs)):
+            if self.objs[c].kind == CONNECTOR:
+                self._route(c)
+        self._changed()
+        self._prune_selection()
+        if self.select_on_undo:
+            self.selected.clear()
+            for id in ids:
+                var q = self.index(id)
+                if q >= 0 and self.objs[q].kind != CONNECTOR:
+                    self.selected.append(id)
 
     def _changed(mut self):
         self.version += 1

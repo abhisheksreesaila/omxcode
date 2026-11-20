@@ -663,14 +663,15 @@ def m4():
         worst.append((sc, i))
         if sc < SSIM_MIN:
             probs.append(f"step {i} ({s['name']}): SSIM {sc:.3f}")
-    for i, prob, detail in region_verdicts(steps, out / "web", out / "native"):
+    verdicts = region_verdicts(steps, out / "web", out / "native")
+    for i, prob, detail in verdicts:
         if prob:
             probs.append(prob)
-    regions = [d for _, _, d in region_verdicts(steps, out / "web", out / "native")]
+    regions = [d for _, _, d in verdicts]
     (out / "regions.txt").write_text("\n".join(f"{i:02d} {steps[i]['name']}: {d}" for i, d in enumerate(regions)) + "\n")
     # (D-7931) the self-test: native played again with one step left out must be caught by the region check
     skip = next((i for i, st in enumerate(steps) if st["name"] == "tick a task"), None)
-    if skip is not None and not probs:
+    if skip is not None:  # (run whatever the other steps found: it proves the check, not the app)
         sk = out / "skipped"
         shutil.rmtree(sk, ignore_errors=True)
         sk.mkdir()
@@ -884,7 +885,9 @@ fs.writeFileSync(out + '/note-600.json', JSON.stringify(generateNote()));
 const s = generateStressNote(5400, { columns: 4, rows: 4 });
 fs.writeFileSync(out + '/note-stress.json', JSON.stringify(s.content));
 """.replace("const [out] = process.argv.slice(1);", "const out = process.argv[1];")
-NATIVE_RACE = ["framebench:desk=open,20", "appbench:desk=zoom30", "framebench:desk=pan,120", "framebench:desk=zoom,60", "appbench:desk=zoom100",
+# (D-7934) "open" is judged cold (nothing kept: the row read and parsed every time); the reopen of a canvas kept parsed at
+# the revision the file still holds is measured after it and printed beside, not judged
+NATIVE_RACE = ["appbench:desk=coldopens", "framebench:desk=open,20", "appbench:desk=keptopens", "framebench:desk=open,20", "appbench:desk=zoom30", "framebench:desk=pan,120", "framebench:desk=zoom,60", "appbench:desk=zoom100",
                "framebench:desk=pan,120", "framebench:desk=dragone,60", "framebench:desk=drag40,60", "framebench:desk=undo,25", "framebench:desk=redo,25",
                "framebench:desk=draw,300", "framebench:desk=typing,80"]
 NATIVE_NAMES = {"open": "open", "zoom": "zoom from 30%", "dragone": "drag one", "drag40": "drag 40", "undo": "undo", "redo": "redo",
@@ -894,9 +897,14 @@ NATIVE_NAMES = {"open": "open", "zoom": "zoom from 30%", "dragone": "drag one", 
 def native_race(out):
     res = {}
     zoom = "30%"
+    opens = "open"
     for line in out.splitlines():
         if line.startswith("APPBENCH: zoom"):
             zoom = "30%" if "zoom30" in line else "100%"
+        if line.startswith("APPBENCH: coldopens"):
+            opens = "open"
+        if line.startswith("APPBENCH: keptopens"):
+            opens = "open (kept)"
         if not line.startswith("FRAMEBENCH:"):
             continue
         kv = dict(re.findall(r"(\w+)=([^\s]+)", line))
@@ -905,7 +913,7 @@ def native_race(out):
         what = re.match(r"FRAMEBENCH: (\w+) ", line)
         if not what:
             continue
-        name = "pan " + zoom if what.group(1) == "pan" else NATIVE_NAMES.get(what.group(1), what.group(1))
+        name = "pan " + zoom if what.group(1) == "pan" else (opens if what.group(1) == "open" else NATIVE_NAMES.get(what.group(1), what.group(1)))
         try:
             n = int(kv["n"])
             cpu = int(kv["cpu_frames"]) if "cpu_frames" in kv else n - int(kv.get("gpu_frames", "0"))
@@ -989,7 +997,10 @@ def race_table(web, nat, start, shown=None):
              "composites it and presentation is not in this number.",
              "- *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, "
              "the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after "
-             "its work plus its shown time; read the web column against that sum, not against the work alone.", "",
+             "its work plus its shown time; read the web column against that sum, not against the work alone.",
+             "- *open*: native, cold: the note's row read from the file and its JSON Canvas parsed each time (nothing kept), timed to "
+             "the frame that shows it; a reopen of a canvas kept parsed at the revision the file still holds is printed after the "
+             "table, not judged.", "",
              "| note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |",
              "|---|---|---|---|---|---|"]
     for note in RACE_NOTES:
@@ -1001,6 +1012,10 @@ def race_table(web, nat, start, shown=None):
             ok = ok and good
             vis = f"{v['p95']} / {v['max']} · {v['shown_p95']} / {v['shown_max']} ({v['shown_n']})" if v else "—"
             lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {vis} | {'✓' if good else '✗'} |")
+    for note in RACE_NOTES:
+        kept = nat.get(note, {}).get("open (kept)")
+        if kept:
+            lines.append(f"| {note} | open again, kept parsed (not judged) | — | {kept['p95']} / {kept['max']} | | |")
     lines += ["", "| | web | native | |", "|---|---|---|---|"]
     for k, wk, unit in [("first", "first_screen_ms", "ms"), ("rss", "rss_mb", "MB")]:
         w, n = web.get(wk), start.get(k)

@@ -137,6 +137,23 @@ def main() raises:
     _ = tools.key("c", 0, board, view, 1440, 900, 1, 1)
     check(tools.press(720, 615, board, view) and tools.release(860, 480, board, view), "connect drag")
     check(board.count_kind(CONNECTOR) == 2, "connector made")
+    # (D-7935) delete the sticky the new connector ends at, then undo: it comes back selected, and the connector ends at
+    # it again (as the web's undo shows it), not where it was left
+    var cq = -1
+    for q in range(len(board.objs)):
+        if board.objs[q].kind == CONNECTOR:
+            cq = q
+    var end_before = (board.objs[cq].bx, board.objs[cq].by)
+    board.clear_selection()
+    board.select(sid)
+    _ = tools.key("Delete", 0, board, view, 1440, 900, 1, 1)
+    check(not board.has(sid), "the sticky deleted")
+    tools.undo(board)
+    check(board.has(sid) and len(board.selected) == 1 and board.selected[0] == sid, "undo brings the sticky back selected")
+    for q in range(len(board.objs)):
+        if board.objs[q].kind == CONNECTOR:
+            cq = q
+    check(abs(board.objs[cq].bx - end_before[0]) < 0.01 and abs(board.objs[cq].by - end_before[1]) < 0.01, "the connector ends at the sticky again")
     # the zoom island's + (57 % → 71 %)
     var zv = tools.zoom_step(view, 1, 1440, 900, 1, 1)
     check(Int(zv.scale * 100 + 0.5) == 71, "zoom step")

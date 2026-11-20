@@ -616,6 +616,7 @@ struct BoardTools(Movable):
                 layer.set_words(self.editing, self.edit_words)
             return True
         if (mods & 2) != 0 and (name == "z" or name == "Z"):
+            layer.select_on_undo = True  # (the web selects what an undo brings back)
             if (mods & 1) != 0:
                 _ = layer.redo()
             else:
@@ -639,11 +640,13 @@ struct BoardTools(Movable):
 
     def undo(mut self, mut layer: ObjectLayer):
         self.finish(layer)
+        layer.select_on_undo = True
         if layer.undo():
             self.changed = True
 
     def redo(mut self, mut layer: ObjectLayer):
         self.finish(layer)
+        layer.select_on_undo = True
         if layer.redo():
             self.changed = True
 

@@ -556,6 +556,8 @@ struct GtkCanvas(Copyable, Movable):
     var ahead_opaque: Bool  # the frame drawn ahead is opaque everywhere (GPU2D.opaque when it was drawn)
     var ahead_still: Bool  # less motion was on when it was drawn
     var frame_sent_us: Int  # the frame event for this frame time went out early, with the drawing ahead (0: none)
+    var bench_scene_ms: Float64  # (framebench, D-7929) the app's own painting of the Scene, and the GPU 2D renderer's batch building
+    var bench_batch_ms: Float64
     var bench_draw_ms: Float64  # (framebench) CPU time of this canvas's draws since the step's gesture, and of those that
     var bench_inframe_ms: Float64  # ran inside a frame's paint (already in that frame's paint time)
     # graphics offload (D-7570): a .gpu() canvas's picture inside a GtkGraphicsOffload (0: none), itself inside a box
@@ -661,6 +663,8 @@ struct GtkCanvas(Copyable, Movable):
         self.ahead_still = False
         self.frame_sent_us = 0
         self.bench_draw_ms = 0
+        self.bench_scene_ms = 0
+        self.bench_batch_ms = 0
         self.bench_inframe_ms = 0
         self.offload = 0
         self.snap = 0
@@ -3758,7 +3762,10 @@ struct GtkHost[A: App](Movable):
             swap(sc, self.canvases[ci].spare)
             return
         var again = sc.again
+        self.canvases[ci].bench_scene_ms += Float64(Int(perf_counter_ns() - t0)) / 1e6
         var slot = self.gpu2d_draw(ci, widget, sc, wpx, hpx)
+        if slot >= 0:
+            self.canvases[ci].bench_batch_ms += Float64(self.gpu2d()[].batch_ns) / 1e6
         if slot < 0:  # (every texture held, or GL failed: the tick draws it as usual)
             swap(sc, self.canvases[ci].spare)
             self.apply(r[1], self_addr)
@@ -3864,6 +3871,7 @@ struct GtkHost[A: App](Movable):
                 d = r[1].copy()
                 again = sc.again
                 t1 = perf_counter_ns()
+                self.canvases[ci].bench_scene_ms += Float64(Int(t1 - t0)) / 1e6
                 if on_gpu and self.gpu2d_show(ci, widget, sc, wpx, hpx):
                     via_gpu2d = True
                     if self.rt.trace:
@@ -3925,6 +3933,9 @@ struct GtkHost[A: App](Movable):
         self.canvases[ci].shown_frame = self.paints_done if self.in_paint else -1
         self.canvases[ci].shown_gpu = via_gpu2d
         self.canvases[ci].bench_draw_ms += self.canvases[ci].draw_ms
+        if self.scene_mode:
+            if via_gpu2d:
+                self.canvases[ci].bench_batch_ms += Float64(self.gpu2d()[].batch_ns) / 1e6
         if self.in_paint:
             self.canvases[ci].bench_inframe_ms += self.canvases[ci].draw_ms
         if self.rt.trace:
@@ -5125,6 +5136,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if g2d_timed:
         host[].gpu2d()[].gl.timing = True
     var gpus = List[Float64]()
+    var scenes = List[Float64]()  # (D-7929) per timed frame: the app's Scene painting, the GPU 2D batch building (both inside draw)
+    var batches = List[Float64]()
     var gpu_frames = 0  # timed frames whose picture the GPU 2D renderer drew (D-7564)
     var aheads0 = host[].canvases[ci].aheads
     var dropped0 = host[].canvases[ci].ahead_dropped
@@ -5219,6 +5232,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         var draws0 = host[].canvases[ci].draws
         var hands0 = host[].canvases[ci].hands
         host[].canvases[ci].bench_draw_ms = 0
+        host[].canvases[ci].bench_scene_ms = 0
+        host[].canvases[ci].bench_batch_ms = 0
         host[].canvases[ci].bench_inframe_ms = 0
         var t0 = perf_counter_ns()
         var kind = PAN
@@ -5311,6 +5326,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                     missed_suspended += 1  # (GDK_TOPLEVEL_STATE_SUSPENDED: the compositor isn't showing the window)
             continue
         var dm = host[].canvases[ci].bench_draw_ms
+        scenes.append(host[].canvases[ci].bench_scene_ms)
+        batches.append(host[].canvases[ci].bench_batch_ms)
         var pm = max(host[].paint_ring[shown_in % 64] - host[].canvases[ci].bench_inframe_ms, 0.0)
         if host[].canvases[ci].shown_gpu:
             gpu_frames += 1
@@ -5398,6 +5415,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
           + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
+          + " scene_p95=" + one_decimal(Float32(pct(scenes, 0.95))) + " batch_p95=" + one_decimal(Float32(pct(batches, 0.95)))
           + " paint_p95=" + one_decimal(Float32(pct(paints, 0.95))) + " sync_p95=" + one_decimal(Float32(pct(syncs, 0.95))) + " raster_p95=" + one_decimal(Float32(pct(rasters, 0.95)))
           + " draw_max=" + one_decimal(Float32(pct(draws, 1.0))) + " raster_max=" + one_decimal(Float32(pct(rasters, 1.0)))
           + " release_p95=" + one_decimal(Float32(pct(releases, 0.95))) + " release_max=" + one_decimal(Float32(pct(releases, 1.0)))

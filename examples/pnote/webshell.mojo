@@ -2,6 +2,7 @@
 # app's chrome from mojoui's generic pieces (mojoui.notesshell, mojoui.pagesheet, mojoui.skin, mojoui.fonttext). This
 # file only composes them: which note is open, whether the notes panel shows, where the islands sit, what a tap hits.
 
+from std.collections import Dict
 from mojoui.scene import Painter
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
@@ -26,7 +27,7 @@ from mojoui.pagedesk import BoardTools
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
-from mojoui.docstore import SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
+from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.objectlayer import reading_text
 from mojoui.buzanmap import map_text, node_extra
 
@@ -145,6 +146,9 @@ struct WebShell(Movable):
     var save_state: String  # "" saved, else the island's error ("Couldn’t save")
     var save_detail: String
     var save_kind: String  # what the pending save writes: page | canvas | mindmap ("" nothing)
+    var kept: KeptDocs[ObjectLayer]  # canvases already parsed, by (note, revision) (D-7934)
+    var kept_pages: Dict[Int, Int]  # a kept canvas's page grid (columns × 1000 + rows), by note
+    var cold_opens: Bool  # (the race's cold-open row: nothing kept is reused)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -184,6 +188,9 @@ struct WebShell(Movable):
         self.save_state = ""
         self.save_detail = ""
         self.save_kind = ""
+        self.kept = KeptDocs[ObjectLayer](4)
+        self.kept_pages = Dict[Int, Int]()
+        self.cold_opens = False
         try:
             self.dbs.append(Database(db_path))
             self.load()
@@ -218,17 +225,18 @@ struct WebShell(Movable):
         for ref n in self.notes:
             self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
 
-    def read_row(mut self, i: Int):
+    def read_row(mut self, i: Int, with_content: Bool = True):
         """One note's row from the file again (the web fetches a note when it opens it): its content, revision and
         secure flag, so an edit another app saved is what opens and what the next save builds on."""
         if len(self.dbs) == 0:
             return
         try:
-            var q = self.dbs[0].prepare("SELECT content, revision, secure, title, updated_at FROM notes WHERE id = ?")
+            var q = self.dbs[0].prepare("SELECT " + ("content" if with_content else "''") + ", revision, secure, title, updated_at FROM notes WHERE id = ?")
             q.bind(1, self.notes[i].id)
             if q.step():
                 self.notes[i].secure = q.int(2) != 0
-                self.notes[i].content = "" if self.notes[i].secure else q.text(0)
+                if with_content:
+                    self.notes[i].content = "" if self.notes[i].secure else q.text(0)
                 self.notes[i].revision = q.int(1)
                 self.notes[i].title = q.text(3)
                 self.notes[i].updated = q.text(4)
@@ -251,8 +259,28 @@ struct WebShell(Movable):
         if i < 0:
             return
         self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote)
+        var out_i = self.note_index(self.current)
+        if out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.board.unsaved() == False:
+            var moving = ObjectLayer()
+            swap(moving, self.board)
+            self.kept.keep(self.notes[out_i].id, self.notes[out_i].revision, moving^)  # (the canvas just left, kept parsed)
+            self.kept_pages[self.notes[out_i].id] = self.cols * 1000 + self.rows
         i = self.note_index(id)
-        self.read_row(i)
+        self.read_row(i, False)
+        var at = -1 if self.cold_opens else self.kept.find(id, self.notes[i].revision)
+        if self.notes[i].kind == "canvas" and not self.notes[i].secure and at >= 0:
+            # the file still holds the revision this canvas was parsed at: reuse it (D-7934), nothing read or parsed
+            self.current = id
+            self.panel.active = id
+            self.board = self.kept.take(at)
+            var grid = self.kept_pages.get(id, 1001)
+            self.cols = grid // 1000
+            self.rows = grid % 1000
+            self.view_set = False
+            self.tools = BoardTools()
+            self.sticky_look()
+            return
+        self.read_row(i, True)
         self.current = id
         self.panel.active = id
         ref n = self.notes[i]
@@ -277,6 +305,7 @@ struct WebShell(Movable):
                 var text = n.content.copy()
                 self.board = import_json_canvas(text)
                 self.board.set_connector_gap(6)
+                self.board.mark_saved()  # (what the file holds: unchanged until edited)
                 self.tools = BoardTools()
                 self.sticky_look()
                 var j = Json.parse(text)
@@ -519,6 +548,8 @@ struct WebShell(Movable):
             self.save_note(i, '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}", md)
         elif kind == "canvas":
             self.save_note(i, export_json_canvas(self.board, self.cols, self.rows), reading_text(self.board))
+            if self.save_state == "":
+                self.board.mark_saved()
         elif kind == "mindmap":
             self.save_note(i, map_json(self.map, self.notes[i].title, self.map_root), map_text(self.map))
 
@@ -737,6 +768,9 @@ struct WebShell(Movable):
             _ = self.tools.tap(w / 2, h / 2, self.board, self.view, w, h)
         elif name == "bench:reopen":
             self.open(self.current)
+        elif name == "bench:coldopens" or name == "bench:keptopens":  # (the race's two open rows)
+            self.cold_opens = name == "bench:coldopens"
+            self.kept.clear()
         elif name == "bench:dragone" or name == "bench:undoredo" or name == "bench:undo" or name == "bench:drag40":
             self.tools.set_tool("select", self.board, self.view, w, h, self.cols, self.rows)
             var vis = self.tools.visible_objects(self.board, self.view, w, h)

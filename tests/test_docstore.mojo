@@ -2,7 +2,7 @@
 # (nothing written, the follow-ups not run), the debounce's timing. Not tied to any app: a made-up "docs" table.
 #   pixi run mojo run -I . tests/test_docstore.mojo        → "docstore: ok"
 from mojoui.sqlite import Database
-from mojoui.docstore import SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
+from mojoui.docstore import KeptDocs, SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
 from std.os import remove
 from std.os.path import exists
 
@@ -59,4 +59,16 @@ def main() raises:
     t.done()
     check(not t.pending(), "done")
     check(t.tick_ms() == 65 and SaveTimer(50).tick_ms() == 10, "tick")
+    # kept documents: reused only at the revision they were parsed at; the oldest goes beyond the cap
+    var kept = KeptDocs[String](2)
+    kept.keep(1, 5, "doc one at 5")
+    kept.keep(2, 3, "doc two at 3")
+    check(kept.find(1, 5) == 0 and kept.find(1, 6) == -1, "found only at its revision")
+    var d = kept.take(kept.find(1, 5))
+    check(d == "doc one at 5" and kept.find(1, 5) == -1, "taken out")
+    kept.keep(1, 6, "doc one at 6")
+    kept.keep(3, 1, "doc three")
+    check(kept.find(2, 3) == -1 and kept.find(1, 6) >= 0 and kept.find(3, 1) >= 0, "the oldest went beyond the cap")
+    kept.keep(1, 7, "doc one at 7")
+    check(kept.find(1, 6) == -1 and kept.find(1, 7) >= 0, "a newer revision replaces the older one")
     print("docstore: ok")
