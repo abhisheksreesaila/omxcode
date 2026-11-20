@@ -382,6 +382,9 @@ struct BoardLook(Movable):
         for ref o in layer.objs:
             if len(self.lift_set) > 0 and o.id in self.lift_set:
                 continue
+            if o.kind == CONNECTOR:  # (along the line: its arrowhead, width and antialiasing within 24 px)
+                self.snap.feed_line(o.id, _obj_key(o), o.ax, o.ay, o.bx, o.by, o.line_width + CONNECTOR_HEAD + 9)
+                continue
             var b = self.paint_box(o)
             self.snap.feed(o.id, _obj_key(o), b[0], b[1], b[2], b[3])
         var rects = self.snap.finish()

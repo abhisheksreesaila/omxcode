@@ -293,6 +293,7 @@ struct TileSet(Movable):
     var tiles: Dict[Int, Int]  # packed (i, j) → slot
     var good: Dict[Int, Int]  # packed (i, j) → index into good_r: the part (layer units) the tile was rastered for
     var good_r: List[Float64]
+    var empty: Dict[Int, Bool]  # packed (i, j) → its last whole raster drew nothing (not drawn: nothing to blend)
     var dirty: Dict[Int, Int]  # packed (i, j) → index into dirty_r: the part a damage made stale (texture px)
     var dirty_r: List[Int]
     var fb_k: Float64
@@ -312,6 +313,7 @@ struct TileSet(Movable):
         self.good_r = List[Float64]()
         self.dirty = Dict[Int, Int]()
         self.dirty_r = List[Int]()
+        self.empty = Dict[Int, Bool]()
         self.fb_k = 0
         self.fb = Dict[Int, Int]()
         self.k_seen = 0
@@ -526,8 +528,9 @@ struct Tiles(Movable):
                 if has_fb:
                     missing.append(key)
                 continue
-        # the ring round the view (within the budget, the current zoom only, once nothing on screen is missing)
-        if len(missing) == 0 and tk == k:
+        # the ring round the view (within the budget, once nothing on screen is missing; while a zoom moves too, at the
+        # tiles' zoom: zooming out finds its edges ready)
+        if len(missing) == 0:
             for jj in range(j0 - 1, j1 + 2):
                 for ii in range(i0 - 1, i1 + 2):
                     if jj >= j0 and jj <= j1 and ii >= i0 and ii <= i1:
@@ -567,7 +570,7 @@ struct Tiles(Movable):
         for jj in range(j0, j1 + 1):
             for ii in range(i0, i1 + 1):
                 var key = _pack(ii, jj)
-                if key in self.sets[s].tiles and not self._in(missing, key):
+                if key in self.sets[s].tiles and not self._in(missing, key) and not (key in self.sets[s].empty):
                     out.draws.append(TileDraw(self.sets[s].tiles.get(key, -1), ii, jj, sc, tx, ty, 0, 0, Float64(w), Float64(h)))
         if tk != k:
             self.more = True
@@ -646,6 +649,19 @@ struct Tiles(Movable):
         var ly1 = (oy + Float64(qy1) + TILE_PAD_PX) / tk
         var ops = self.sets[s].bins.query(lx0, ly0, lx1, ly1)
         self.planned_ops += len(ops) + 50
+        if whole:
+            if len(ops) == 0:
+                self.sets[s].empty[key] = True
+            elif key in self.sets[s].empty:
+                try:
+                    _ = self.sets[s].empty.pop(key)
+                except:
+                    pass
+        elif len(ops) > 0 and key in self.sets[s].empty:  # (something drawn into an empty tile's part: not empty now)
+            try:
+                _ = self.sets[s].empty.pop(key)
+            except:
+                pass
         out.rasters.append(TileRaster(layer, slot, ii, jj, tk, ops^, qx0, qy0, qx1, qy1))
         if not whole:  # (a partial raster: the tile is good for what it was)
             self.rastered += 1

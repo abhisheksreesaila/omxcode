@@ -1911,6 +1911,10 @@ struct GPU2D(Movable):
     var more: Bool  # the last frame left tile work for later frames: a host draws again
     var tile_trace: Bool  # MOJOUI_TILE_TRACE=1: each frame's tile work printed
     var tile_merge: Bool  # tiles' runs regrouped before rasterizing (MOJOUI_TILE_MERGE=1)
+    var layer_times: Bool  # MOJOUI_GPU2D_LAYER_TIMES=1 (diagnosis): GPU timestamps between layers, printed each frame
+    var qc: Int  # glQueryCounter
+    var ts_q: List[Int]
+    var ts_frames: Int
     var t_plan: Int  # (trace) last frame's tile planning, batch building, merging, raster submission (ns), ops built
     var t_fill: Int
     var t_merge: Int
@@ -1951,6 +1955,10 @@ struct GPU2D(Movable):
         self.more = False
         self.tile_trace = getenv("MOJOUI_TILE_TRACE") == "1"
         self.tile_merge = getenv("MOJOUI_TILE_MERGE") == "1"
+        self.layer_times = getenv("MOJOUI_GPU2D_LAYER_TIMES") == "1"
+        self.qc = 0
+        self.ts_q = List[Int]()
+        self.ts_frames = 0
         self.t_plan = 0
         self.t_fill = 0
         self.t_merge = 0
@@ -2015,6 +2023,30 @@ struct GPU2D(Movable):
             self.gl.why = "the glyph atlas didn't upload"
             return False
         return True
+
+    def _stamp(mut self, at: Int):
+        """(diagnosis) a GPU timestamp query after layer `at`."""
+        if self.qc == 0:
+            self.qc = gl_proc("glQueryCounter")
+        while len(self.ts_q) <= at:
+            self.gl.out[0] = 0
+            fcall[NoneType](self.gl.timer[0], c_int(1), self.gl.at(0))
+            self.ts_q.append(self.gl.out[0] & 0xFFFFFFFF)
+        fcall[NoneType](self.qc, c_uint(self.ts_q[at]), c_uint(0x8E28))  # GL_TIMESTAMP
+
+    def _stamps(mut self, scene: Scene, n: Int):
+        """(diagnosis) each layer's GPU time this frame (waits for the GPU)."""
+        self.ts_frames += 1
+        var line = String("LAYERTIMES:")
+        var prev = 0
+        for i in range(n + 1):
+            self.gl.out[0] = 0
+            fcall[NoneType](self.gl.timer[3], c_uint(self.ts_q[i]), c_uint(0x8866), self.gl.at(0))
+            var t = self.gl.out[0]
+            if i > 0:
+                line += " " + scene.layer_keys[i - 1] + "=" + String(Float64(t - prev) / 1e6)
+            prev = t
+        print(line, flush=True)
 
     def _raster_plan(mut self, scene: Scene, mut plan: TilePlan) -> Bool:
         """plan's tiles: every tile's batches built (content px at its zoom), the glyph pages uploaded once, then each
@@ -2214,11 +2246,17 @@ struct GPU2D(Movable):
             self.gl.ok = False
             self.built = 0
             return -1
+        if self.layer_times:
+            self._stamp(0)
         for i in range(n):
             if tiled[i]:
                 self.gl.draw_tiles(tile_draws[i])
-                continue
-            self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
+            else:
+                self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
+            if self.layer_times:
+                self._stamp(i + 1)
+        if self.layer_times:
+            self._stamps(scene, n)
         if not self.gl.end(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0
