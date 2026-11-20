@@ -97,6 +97,9 @@ struct Skin(Copyable, Movable):
     var shelf: UInt32  # an open shelf's wash: ink at 3.5 %
     var toggle_on: UInt32  # the panel toggle while the panel is open
     var scrim: UInt32
+    var locked: UInt32  # a locked (secure) document's colour, its soft wash, its line (0: derived from the accent)
+    var locked_soft: UInt32
+    var locked_line: UInt32
 
     def __init__(out self, name: String):
         self.name = name
@@ -140,8 +143,17 @@ struct Skin(Copyable, Movable):
         self.shelf = 0
         self.toggle_on = 0
         self.scrim = 0
+        self.locked = 0
+        self.locked_soft = 0
+        self.locked_line = 0
 
     def derive(mut self):
+        if self.locked == 0:
+            self.locked = self.accent
+        if self.locked_soft == 0:
+            self.locked_soft = mix(self.locked, 12, self.panel)
+        if self.locked_line == 0:
+            self.locked_line = mix(self.locked, 30, self.panel)
         self.ui_muted = mix(self.muted, 70, self.ink)
         if self.name == "night":
             self.accent_fill = self.accent
@@ -214,6 +226,9 @@ def paper_skin() -> Skin:
     s.shadow2 = sh[1].copy()
     s.shadow3 = sh[2].copy()
     s.scrim = rgba(12, 10, 8, 82)
+    s.locked = hexc("#6a46c9")  # (skins.css --sk-secure, -soft, -line)
+    s.locked_soft = hexc("#efe9fb")
+    s.locked_line = hexc("#d9cdf6")
     s.derive()
     return s^
 
@@ -250,6 +265,9 @@ def crayon_skin() -> Skin:
     s.shadow2 = sh[1].copy()
     s.shadow3 = sh[2].copy()
     s.scrim = rgba(12, 10, 8, 82)
+    s.locked = hexc("#6a46c9")  # (skins.css --sk-secure, -soft, -line)
+    s.locked_soft = hexc("#efe9fb")
+    s.locked_line = hexc("#d9cdf6")
     s.derive()
     return s^
 
@@ -289,6 +307,9 @@ def night_skin() -> Skin:
     s.shadow3.append(Shadow(0, 18, 48, 0, rgba(0, 0, 0, 153)))
     s.shadow3.append(Shadow(0, 0, 0, 1, rgba(236, 239, 244, 15)))
     s.scrim = rgba(0, 0, 0, 140)
+    s.locked = hexc("#c3a8ff")
+    s.locked_soft = rgba(195, 168, 255, 33)
+    s.locked_line = rgba(195, 168, 255, 82)
     s.derive()
     return s^
 

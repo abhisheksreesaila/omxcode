@@ -17,6 +17,7 @@ from mojoui import (
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
 from mojoui.overlays import Clipboard
 from mojoui.canvas import rgba
+from mojoui.effects import Every
 from mojoui.scene import Scene, SurfacePainter, Painter
 from mojoui.text import Font
 from mojoui.sqlite import Database, fts_prefix_query
@@ -46,6 +47,7 @@ comptime PALETTE_TYPE = 6
 comptime PALETTE_GO = 7
 comptime PALETTE_CANCEL = 8
 comptime DELETE_NOTE = 9
+comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
 
 comptime PAGE = 0
 comptime CANVAS = 1
@@ -517,7 +519,16 @@ struct Main(App):
             self.map_cam.reset()
         self.version += 1
 
+    def every(self) -> List[Every]:
+        if len(self.web) > 0 and self.web[0].saver.pending():
+            return [Every(self.web[0].saver.tick_ms(), SAVE_TICK)]
+        return List[Every]()
+
     def closing(mut self):
+        if len(self.web) > 0:
+            self.web[0].flush()
+            print("PNOTE QUIT: saved", flush=True)
+            return
         self.save()
         print("PNOTE QUIT: saved; " + String(len(self.rows)) + " notes", flush=True)
 
@@ -760,6 +771,10 @@ struct Main(App):
     def update(mut self, event: Event):
         var m = event.message
         if len(self.web) > 0:
+            if m == SAVE_TICK:
+                if self.web[0].tick():
+                    self.version += 1
+                return
             if m == GESTURE and event.number == HOVER:
                 if self.web[0].hover(event.x, event.y):
                     self.version += 1

@@ -690,3 +690,26 @@ def draw_selection_bar[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Floa
         bx.add(".selection-bar:" + l, bxx, y + 4, bw, 26)
         bxx += bw + 2
     return w
+
+
+def draw_locked_cover[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w: Float64, h: Float64, title: String, heading: String,
+                                  sub: String, k: Float64, sk: Skin):
+    """A locked document's cover over its area (the words are not shown): a soft wash in the skin's locked colour, a 3 px
+    edge on top, the title with a lock at the top left, a heading and a line centred (D-7927). Boxes: locked-cover,
+    locked-title:<title>, locked-heading:<heading>."""
+    p.rect(x, y, w, h, sk.locked_soft, 0)
+    p.rect(x, y, w, 3, sk.locked, 0)
+    bx.add("locked-cover", x, y, w, h)
+    var left = x + max(20.0, min(56.0, w * 0.06))
+    var tst = TextStyle(sk.display, sk.display_weight, sk.display_italic, 30)
+    tst.letter_spacing = sk.title_track * 30
+    draw_icon(p, "lock", left, y + 76 + 6, 22, k, sk.locked)
+    var t = title if title != "" else String("Untitled note")
+    text_at(p, tst, t, left + 22 + 10, y + 76, 34.5, sk.ink)
+    bx.add("locked-title:" + t, left, y + 76, w - (left - x) - 20, 34.5)
+    var hst = TextStyle(sk.display, sk.display_weight, sk.display_italic, 19)
+    var cy = y + 72 + (h - 72 - 24) / 2 - 24
+    text_at(p, hst, heading, x + w / 2, cy, 22, sk.ink, ALIGN_CENTER)
+    bx.add("locked-heading:" + heading, x + w / 2 - measure(hst, heading) / 2, cy, measure(hst, heading), 22)
+    var sst = TextStyle(UI, 400, False, 13)
+    text_at(p, sst, sub, x + w / 2, cy + 22 + 10, 18, sk.muted, ALIGN_CENTER)

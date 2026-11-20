@@ -24,7 +24,10 @@ from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canv
 from mojoui.pagedesk import BoardTools
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
-from mojoui.notesshell import draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom
+from mojoui.notesshell import draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom, draw_locked_cover
+from mojoui.docstore import SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
+from mojoui.objectlayer import reading_text
+from mojoui.buzanmap import map_text, node_extra
 
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
@@ -101,6 +104,8 @@ struct NoteRec(Copyable, Movable):
     var emoji: String
     var tint: Int
     var icon_set: Bool  # the note has its own icon (else it is guessed from the title, as note_icon.py does)
+    var revision: Int  # the revision this copy was read or last saved at (saves carry it: D-7927)
+    var secure: Bool  # a secure note: its words are only sealed; the native app shows it locked and never writes it
 
 
 struct WebShell(Movable):
@@ -134,6 +139,11 @@ struct WebShell(Movable):
     var hits: List[Int]  # the omnibar's note rows, as note ids
     var win_w: Float64  # the window's size (layout px) at the last paint
     var win_h: Float64
+    var dbs: List[Database]  # the open connection (one, kept)
+    var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
+    var save_state: String  # "" saved, else the island's error ("Couldn’t save")
+    var save_detail: String
+    var save_kind: String  # what the pending save writes: page | canvas | mindmap ("" nothing)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -167,16 +177,22 @@ struct WebShell(Movable):
         self.hits = List[Int]()
         self.win_w = 1440
         self.win_h = 900
+        self.dbs = List[Database]()
+        self.saver = SaveTimer(650)
+        self.save_state = ""
+        self.save_detail = ""
+        self.save_kind = ""
         try:
+            self.dbs.append(Database(db_path))
             self.load()
         except e:
             self.problem = String(e)
             print("PNOTE ERROR: " + self.problem, flush=True)
 
     def load(mut self) raises:
-        var db = Database(self.db_path)
+        var db = self.dbs[0].copy()  # (a copy shares the connection)
         self.notes.clear()
-        var st = db.prepare("SELECT id, title, note_type, content, IFNULL(notebook_id, 0), icon, icon_tint, created_at, updated_at FROM notes ORDER BY updated_at DESC, id DESC")
+        var st = db.prepare("SELECT id, title, note_type, content, IFNULL(notebook_id, 0), icon, icon_tint, created_at, updated_at, revision, secure FROM notes ORDER BY updated_at DESC, id DESC")
         while st.step():
             var title = st.text(1)
             var kind = st.text(2)
@@ -186,14 +202,24 @@ struct WebShell(Movable):
             if emoji == "":
                 emoji = guess_emoji(title, kind)
                 tint = tint_of(emoji)
-            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, st.text(3), st.int(4), emoji, tint, own))
-        self.panel.notes.clear()
-        for ref n in self.notes:
-            self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
+            var secure = st.int(10) != 0
+            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, "" if secure else st.text(3), st.int(4), emoji, tint, own, st.int(9), secure))
+        self.list_notes()
         self.panel.notebooks.clear()
         var nb = db.prepare("SELECT id, name, color, category, (SELECT COUNT(*) FROM notes WHERE notebook_id = notebooks.id) FROM notebooks ORDER BY updated_at DESC, id ASC")
         while nb.step():
             self.panel.notebooks.append(PanelNotebook(nb.int(0), nb.text(1), hexc(nb.text(2)), nb.text(3), notebook_icon(nb.text(1)), nb.int(4)))
+
+    def list_notes(mut self):
+        """The panel's rows from the notes in memory (newest first)."""
+        self.panel.notes.clear()
+        for ref n in self.notes:
+            self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
+
+    def locked(self) -> Bool:
+        """The open note is a secure one (shown locked: nothing here reads or writes its words)."""
+        var i = self.note_index(self.current)
+        return i >= 0 and self.notes[i].secure
 
     def note_index(self, id: Int) -> Int:
         for i in range(len(self.notes)):
@@ -205,9 +231,16 @@ struct WebShell(Movable):
         var i = self.note_index(id)
         if i < 0:
             return
+        self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote)
+        i = self.note_index(id)
         self.current = id
         self.panel.active = id
         ref n = self.notes[i]
+        if n.secure:  # (its content column is a placeholder: never shown, never edited, never saved)
+            self.page.set_markdown("")
+            self.board = ObjectLayer()
+            self.map = BuzanMap()
+            return
         if n.kind == "page":
             var md = String("")
             try:
@@ -249,7 +282,7 @@ struct WebShell(Movable):
                         if ids[r] == pid:
                             par = r
                     _ = self.map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
-                                     ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")))
+                                     ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
                 self.map_root = j.text(j.get(0, "rootId"), "root")
                 self.map.selected = 0
                 for r in range(len(ids)):
@@ -286,7 +319,7 @@ struct WebShell(Movable):
         self.win_h = h
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
-        if i >= 0 and self.notes[i].kind == "canvas":
+        if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure:
             # the board under every island: the page frame (screen px), the objects (a layer in page px), then the chrome
             if not self.view_set:
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
@@ -296,6 +329,8 @@ struct WebShell(Movable):
             self.tools.paint_overlay(p, self.look, self.board, self.view, k)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)
+        if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
+            draw_locked_cover(p, self.boxes, left, 0, w - left, h, self.notes[i].title, "Locked note", "Secure note · not in the native app yet", k, self.sk)
         if self.sidebar:
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
@@ -307,7 +342,7 @@ struct WebShell(Movable):
             if not self.card_open:
                 draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji)
             self.boxes.add("#workspace", left, 0, w - left, h)
-            if n.kind == "mindmap":
+            if n.kind == "mindmap" and not n.secure:
                 var mw = w - left - 4 - 12
                 var mh = h - 66 - 12
                 self.map.draw(p, self.boxes, left + 4, 66, mw, mh, 0, self.sk, n.title)
@@ -317,7 +352,7 @@ struct WebShell(Movable):
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
                 draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
                 draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
-            if n.kind == "canvas":
+            if n.kind == "canvas" and not n.secure:
                 self.boxes.add("#paper", left, 0, w - left, h)
                 self.boxes.add("#leafer-host", left, 0, w - left, h)
                 self.boxes.add("#note-input", left, 0, w - left, h)
@@ -330,15 +365,17 @@ struct WebShell(Movable):
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
-            if n.kind == "page" and not False:
+            if n.kind == "page" and not n.secure:
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
+        if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
+            draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk)
         self.paint_overlays(p, w, h, k)
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
         if self.card_open and i >= 0:
             ref c = self.card
-            c.status = "Saved on this device"
+            c.status = "Saved on this device" if self.save_state == "" else self.save_state
             c.status_dot = self.sk.c2
             c.place = "Inbox"
             c.wide_id = "#share-focus"
@@ -416,53 +453,108 @@ struct WebShell(Movable):
             self.omni.preview_created = short_date(n.created)
 
     def save_page(mut self):
-        """The open page's Markdown into Personal Note's own schema, as its API saves a note: the content JSON (ink kept),
-        a new revision, updated_at, the workspace change log, and the search index."""
+        """An edit on the open page: saved later, as the web does (queueSave: 650 ms after the last edit)."""
+        self.queue_save("page")
+
+    def queue_save(mut self, kind: String):
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page":
+        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure:
             return
-        var md = self.page.markdown()
-        var ink = String('{"marks":[],"drawings":[]}')
-        try:
-            var j = Json.parse(self.notes[i].content)
-            var node = j.get(0, "ink")
-            if node >= 0:
-                ink = j.dump(node)
-        except:
-            pass
-        if len(self.page.marks) > 0:
-            ink = self.page.ink_json()
-        var content = '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}"
-        try:
-            var db = Database(self.db_path)
-            db.exec("BEGIN")
-            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            up.bind(1, content)
-            up.bind(2, self.notes[i].id)
-            _ = up.step()
-            var seq = db.prepare("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
-            _ = seq.step()
-            var ch = db.prepare("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?")
-            ch.bind(1, self.notes[i].id)
-            _ = ch.step()
-            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
-            del_.bind(1, self.notes[i].id)
-            _ = del_.step()
-            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
-            ins.bind(1, self.notes[i].id)
-            ins.bind(2, self.notes[i].title)
-            ins.bind(3, md)
-            _ = ins.step()
-            db.exec("COMMIT")
+        self.save_kind = kind
+        self.saver.touch(clock_us())
+
+    def tick(mut self) -> Bool:
+        """The save timer's tick (App.every while a save is pending): writes it once it is due. True when the screen
+        changes (a failed save shows)."""
+        if not self.saver.due(clock_us()):
+            return False
+        var before = self.save_state
+        self.flush()
+        return self.save_state != before
+
+    def flush(mut self):
+        """Writes the pending save now (a due timer, another note opening, the app closing)."""
+        if not self.saver.pending():
+            return
+        self.saver.done()
+        var kind = self.save_kind
+        self.save_kind = ""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != kind:
+            return
+        if kind == "page":
+            var md = self.page.markdown()
+            var ink = String('{"marks":[],"drawings":[]}')
+            try:
+                var j = Json.parse(self.notes[i].content)
+                var node = j.get(0, "ink")
+                if node >= 0:
+                    ink = j.dump(node)
+            except:
+                pass
+            if len(self.page.marks) > 0:
+                ink = self.page.ink_json()
+            # (page_note.page_text: a page's search body is its Markdown itself)
+            self.save_note(i, '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}", md)
+        elif kind == "canvas":
+            self.save_note(i, export_json_canvas(self.board, self.cols, self.rows), reading_text(self.board))
+        elif kind == "mindmap":
+            self.save_note(i, map_json(self.map, self.notes[i].title, self.map_root), map_text(self.map))
+
+    def save_note(mut self, i: Int, content: String, body: String):
+        """One note's new content into Personal Note's schema as its API saves it (services.save_note): only on the
+        revision this copy holds (another app saved first: nothing is written and the island says so), with the change
+        log, the search index and, for a map, its reminders kept in step, in one transaction. Then that one row is
+        updated in memory and moves to the top of the list; nothing else is read again."""
+        if self.notes[i].secure or len(self.dbs) == 0:
+            print("PNOTE SAVE: refused (secure note " + String(self.notes[i].id) + ")", flush=True)
+            return
+        var id = self.notes[i].id
+        var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
+        s.set("content", text_arg(content))
+        s.stamp("updated_at")
+        s.read_back("updated_at")
+        self.log_change(s, id)
+        s.then("DELETE FROM note_search WHERE note_id = ?", [int_arg(id)])
+        s.then("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)", [int_arg(id), text_arg(self.notes[i].title), text_arg(body)])
+        if self.notes[i].kind == "mindmap":
+            # (services.sync_reminders: the native app never changes a due time, so an idea deleted here loses its
+            # reminder and a renamed one carries its new words; fired marks stay, as the web keeps them for an unchanged time)
+            s.then("DELETE FROM mindmap_reminders WHERE note_id = ?1 AND node_id NOT IN (SELECT json_extract(value, '$.id') FROM json_each(?2, '$.nodes'))",
+                   [int_arg(id), text_arg(content)])
+            s.then("UPDATE mindmap_reminders SET label = COALESCE((SELECT substr(trim(COALESCE(json_extract(value, '$.text'), ''), ' ' || char(9, 10, 13)), 1, 200) FROM json_each(?2, '$.nodes') WHERE json_extract(value, '$.id') = mindmap_reminders.node_id), label) WHERE note_id = ?1",
+                   [int_arg(id), text_arg(content)])
+        var r = save_row(self.dbs[0], s)
+        self.landed(i, r.status, r.revision, r.value, r.message)
+        if r.status == SAVED:
             self.notes[i].content = content
-        except e:
-            print("PNOTE ERROR: save: " + String(e), flush=True)
-        self.reload()
+
+    def landed(mut self, i: Int, status: Int, revision: Int, stamp: String, message: String):
+        """A save's outcome: saved → this copy takes the new revision and time and goes to the top; a conflict or a
+        failure → the island says "Couldn’t save" with why (the web's setSaveState), the edits stay on screen."""
+        if status == SAVED:
+            self.notes[i].revision = revision
+            self.notes[i].updated = stamp
+            self.save_state = ""
+            self.save_detail = ""
+            var rec = self.notes.pop(i)
+            self.notes.insert(0, rec^)
+            self.list_notes()
+        else:
+            self.save_state = "Couldn’t save"
+            self.save_detail = message
+            print("PNOTE SAVE: " + ("conflict" if status == CONFLICT else "failed") + " note " + String(self.notes[i].id) + " at revision " + String(self.notes[i].revision) + ": " + message, flush=True)
+
+    def log_change(self, mut s: RowSave, id: Int):
+        """Personal Note's workspace change feed (record_change): the sequence moves on, a row for this revision."""
+        s.then("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1", List[SqlArg]())
+        s.then("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?",
+               [int_arg(id)])
 
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste into the open page."""
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page" or self.searching or self.card_open or self.settings_open:
+        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or self.searching or self.card_open or self.settings_open:
             return False
         self.page.insert(text)
         self.save_page()
@@ -470,7 +562,7 @@ struct WebShell(Movable):
 
     def preedit(mut self, text: String, cx: Float64, cy: Float64, cw: Float64, ch: Float64) -> Bool:
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page":
+        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure:
             return False
         self.page.preedit = text
         if text != "":
@@ -480,7 +572,7 @@ struct WebShell(Movable):
 
     def key(mut self, name: String, mods: Int) -> Bool:
         var mi = self.note_index(self.current)
-        if mi >= 0 and self.notes[mi].kind == "mindmap" and not self.searching and not self.card_open and not self.settings_open:
+        if mi >= 0 and self.notes[mi].kind == "mindmap" and not self.notes[mi].secure and not self.searching and not self.card_open and not self.settings_open:
             if self.map.editing >= 0:
                 var r = self.map.edit_key(name, mods)
                 if r == 2:
@@ -499,7 +591,7 @@ struct WebShell(Movable):
             if r:
                 return True
         var ni = self.note_index(self.current)
-        if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page":
+        if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure:
             if self.page.draw_mode:
                 if name == "Escape":
                     self.page.draw_mode = False
@@ -612,7 +704,7 @@ struct WebShell(Movable):
                 return False
             return self.tools.press(x, y, self.board, self.view)
         var ni = self.note_index(self.current)
-        if ni >= 0 and self.notes[ni].kind == "page" and self.page.draw_mode and not self.searching and not self.card_open:
+        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
                 self.page.mark_press(x, y)
                 return True
@@ -655,7 +747,7 @@ struct WebShell(Movable):
 
     def on_canvas(self) -> Bool:
         var i = self.note_index(self.current)
-        return i >= 0 and self.notes[i].kind == "canvas" and not self.searching and not self.card_open and not self.settings_open
+        return i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open
 
     def canvas_tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool."""
@@ -683,107 +775,41 @@ struct WebShell(Movable):
         return True
 
     def save_canvas(mut self):
-        """The open canvas into Personal Note's schema when the board changed: JSON Canvas with its pn extras, a revision,
-        the change log, the search index (the words of its texts and stickies)."""
+        """The board changed: a save queued (JSON Canvas with its pn extras, written by flush)."""
         if not self.tools.changed:
             return
         self.tools.changed = False
-        var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "canvas":
-            return
-        var content = export_json_canvas(self.board, self.cols, self.rows)
-        var words = String("")
-        for ref o in self.board.objs:
-            if (o.kind == TEXT or o.kind == STICKY) and o.text != "":
-                words += o.text + "\n"
-        try:
-            var db = Database(self.db_path)
-            db.exec("BEGIN")
-            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            up.bind(1, content)
-            up.bind(2, self.notes[i].id)
-            _ = up.step()
-            self._log_change(db, self.notes[i].id)
-            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
-            del_.bind(1, self.notes[i].id)
-            _ = del_.step()
-            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
-            ins.bind(1, self.notes[i].id)
-            ins.bind(2, self.notes[i].title)
-            ins.bind(3, words)
-            _ = ins.step()
-            db.exec("COMMIT")
-        except e:
-            print("PNOTE ERROR: save canvas: " + String(e), flush=True)
-        self.reload()
+        self.queue_save("canvas")
 
     def save_map(mut self):
-        """The open map into Personal Note's schema (its nodes, a revision, the change log, the search index)."""
-        var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "mindmap":
-            return
-        var content = map_json(self.map, self.notes[i].title, self.map_root)
-        var words = String("")
-        for ref t in self.map.topics:
-            words += t.text + "\n"
-        try:
-            var db = Database(self.db_path)
-            db.exec("BEGIN")
-            var up = db.prepare("UPDATE notes SET content = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            up.bind(1, content)
-            up.bind(2, self.notes[i].id)
-            _ = up.step()
-            self._log_change(db, self.notes[i].id)
-            var del_ = db.prepare("DELETE FROM note_search WHERE note_id = ?")
-            del_.bind(1, self.notes[i].id)
-            _ = del_.step()
-            var ins = db.prepare("INSERT INTO note_search (note_id, title, body) VALUES (?, ?, ?)")
-            ins.bind(1, self.notes[i].id)
-            ins.bind(2, self.notes[i].title)
-            ins.bind(3, words)
-            _ = ins.step()
-            db.exec("COMMIT")
-        except e:
-            print("PNOTE ERROR: save map: " + String(e), flush=True)
-        self.reload()
+        self.queue_save("mindmap")
 
     def rename(mut self, title: String):
-        """The open note's new name, saved as the web's API saves one (title, revision, change log, search index); its
-        guessed icon follows the new name."""
+        """The open note's new name, saved as the web's API saves one (title on its revision, change log, search
+        index); its guessed icon follows the new name. Pending edits land first. A secure note is never renamed here."""
         var i = self.note_index(self.current)
         var t = String(title.strip())
         if i < 0 or t == "" or t == self.notes[i].title:
             return
-        try:
-            var db = Database(self.db_path)
-            db.exec("BEGIN")
-            var up = db.prepare("UPDATE notes SET title = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            up.bind(1, t)
-            up.bind(2, self.notes[i].id)
-            _ = up.step()
-            self._log_change(db, self.notes[i].id)
-            var fts = db.prepare("UPDATE note_search SET title = ? WHERE note_id = ?")
-            fts.bind(1, t)
-            fts.bind(2, self.notes[i].id)
-            _ = fts.step()
-            db.exec("COMMIT")
-        except e:
-            print("PNOTE ERROR: rename: " + String(e), flush=True)
-        self.reload()
-
-    def _log_change(self, mut db: Database, id: Int) raises:
-        var seq = db.prepare("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
-        _ = seq.step()
-        var ch = db.prepare("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?")
-        ch.bind(1, id)
-        _ = ch.step()
-
-    def reload(mut self):
-        """The notes again from the database (newest first, as the panel lists them), the open note kept."""
-        try:
-            self.load()
-        except e:
-            print("PNOTE ERROR: reload: " + String(e), flush=True)
+        if self.notes[i].secure:
+            print("PNOTE SAVE: refused (secure note " + String(self.notes[i].id) + ")", flush=True)
+            return
+        self.flush()
+        i = self.note_index(self.current)
+        var id = self.notes[i].id
+        var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
+        s.set("title", text_arg(t))
+        s.stamp("updated_at")
+        s.read_back("updated_at")
+        self.log_change(s, id)
+        s.then("UPDATE note_search SET title = ? WHERE note_id = ?", [text_arg(t), int_arg(id)])
+        var r = save_row(self.dbs[0], s)
+        if r.status == SAVED:
+            self.notes[i].title = t
+            if not self.notes[i].icon_set:
+                self.notes[i].emoji = guess_emoji(t, self.notes[i].kind)
+                self.notes[i].tint = tint_of(self.notes[i].emoji)
+        self.landed(i, r.status, r.revision, r.value, r.message)
 
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
@@ -845,7 +871,7 @@ struct WebShell(Movable):
         if self.on_canvas() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
             return self.canvas_tap(x, y)
         var ni = self.note_index(self.current)
-        if ni >= 0 and self.notes[ni].kind == "page" and not self.searching:
+        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and not self.searching:
             var tool = self.boxes.hit_any(x, y, [".page-tool:"])
             if tool == ".page-tool:Draw" or tool == ".page-tool:Pen":
                 self.page.draw_mode = True

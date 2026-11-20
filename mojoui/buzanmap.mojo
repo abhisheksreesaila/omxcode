@@ -13,7 +13,7 @@ from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
-from mojoui.json import json_string
+from mojoui.json import Json, json_string
 
 comptime SERIF = "Source Serif 4"
 comptime SHEET: UInt32 = 0xFFEFF6F8  # #f8f6ef
@@ -33,6 +33,7 @@ struct Topic(Copyable, Movable):
     var font_size: Float64  # 0: the map's default for its depth
     var bold: Bool
     var font: String  # "hand" (Source Serif 4) | "clean" (IBM Plex Sans), "" none given
+    var extra: String  # the document's other members of this idea ("due":…,"done":…), written back as they came (D-7927)
 
 
 comptime BRANCH_COLORS: List[String] = ["#ef684b", "#efad28", "#65ae4f", "#2d9c91", "#3d8fe8", "#8c67cf", "#d85da8", "#5e6570"]
@@ -67,8 +68,8 @@ struct BuzanMap(Movable):
         self.bounds = (0.0, 0.0, 0.0, 0.0)
 
     def add(mut self, parent: Int, text: String, x: Float64, y: Float64, color: UInt32, id: String = "", font_size: Float64 = 0,
-            bold: Bool = False, font: String = "") -> Int:
-        self.topics.append(Topic(parent, text, x, y, color, id, font_size, bold, font))
+            bold: Bool = False, font: String = "", extra: String = "") -> Int:
+        self.topics.append(Topic(parent, text, x, y, color, id, font_size, bold, font, extra))
         return len(self.topics) - 1
 
     def children(self, i: Int) -> Int:
@@ -498,9 +499,32 @@ def map_json(m: BuzanMap, title: String, root_id: String) -> String:
         if t.font_size > 0:
             out += ',"fontSize":' + _jnum(t.font_size) + ',"bold":' + ("true" if t.bold else "false")
         if t.font != "":
-            out += ',"font":' + json_string(t.font) + ',"presentation":"box","curve":78'
+            out += ',"font":' + json_string(t.font)
+            if t.extra.find('"presentation":') < 0:
+                out += ',"presentation":"box","curve":78'
+        if t.extra != "":
+            out += "," + t.extra
         out += "}"
     return out + "]}"
+
+
+def node_extra(j: Json, node: Int) -> String:
+    """The members of a stored idea that BuzanMap doesn't model (due, done, image, presentation, …) as `"k":v,…`, so a
+    save writes back what another app put there instead of dropping it."""
+    var out = String("")
+    var known_keys: List[String] = ["id", "parentId", "text", "x", "y", "color", "fontSize", "bold", "font"]
+    for i in range(j.size(node)):
+        var k = j.key(node, i)
+        var known = False
+        for ref kk in known_keys:
+            if kk == k:
+                known = True
+        if known:
+            continue
+        if out != "":
+            out += ","
+        out += json_string(k) + ":" + j.dump(j.at(node, i))
+    return out^
 
 
 def _jnum(v: Float64) -> String:
@@ -515,4 +539,14 @@ def _hexs(c: UInt32) -> String:
     for sh in [0, 8, 16]:
         var v = Int((c >> UInt32(sh)) & 0xFF)
         out += String(digits[byte=v // 16:v // 16 + 1]) + String(digits[byte=v % 16:v % 16 + 1])
+    return out^
+
+
+def map_text(m: BuzanMap) -> String:
+    """What a search index should hold for a map: every idea's words, space-joined, in stored order (D-7927)."""
+    var out = String("")
+    for i in range(len(m.topics)):
+        if i > 0:
+            out += " "
+        out += m.topics[i].text
     return out^

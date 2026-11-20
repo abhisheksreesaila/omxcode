@@ -54,7 +54,7 @@ struct IslandCard(Movable):
         3 Escape (leave it). mods: SHIFT 1, CTRL 2, ALT 4."""
         if not self.editing:
             return 0
-        if name == "Enter":
+        if name == "Enter" or name == "Return":  # (GTK's name for it)
             self.editing = False
             self.all_selected = False
             return 2
@@ -67,7 +67,7 @@ struct IslandCard(Movable):
                 self.all_selected = True
                 return 1
             return 0
-        if name == "Backspace":
+        if name == "Backspace" or name == "BackSpace":
             if self.all_selected:
                 self.title = ""
             else:

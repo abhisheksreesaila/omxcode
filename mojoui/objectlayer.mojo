@@ -2082,3 +2082,27 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
                          + ',"reverseY":' + ("true" if o.by < o.ay else "false") + ',"arrowheads":{"start":false,"end":' + ("true" if o.head_end else "false") + '},"extras":{}}}')
     return ('{"nodes":[' + ",".join(nodes) + '],"edges":[' + ",".join(edges) + '],"pn":{"schemaVersion":1,"page":{"columns":' + String(columns)
             + ',"rows":' + String(rows) + '},"grid":{"width":' + _jn(page_w) + ',"height":' + _jn(page_h) + "}}}")
+
+
+def reading_text(layer: ObjectLayer) -> String:
+    """What a search index should hold for a board: the words of its text boxes and stickies in reading order (top edge
+    first, then left edge; ties keep stacking order), each stripped, blank-line separated (D-7927)."""
+    var idx = List[Int]()
+    for i in range(len(layer.objs)):
+        ref o = layer.objs[i]
+        if (o.kind == TEXT or o.kind == STICKY) and String(o.text.strip()) != "":
+            idx.append(i)
+    # a stable insertion sort by (y, x): boards hold hundreds of words at most where this runs (a save)
+    for a in range(1, len(idx)):
+        var v = idx[a]
+        var b = a - 1
+        while b >= 0 and (layer.objs[idx[b]].y > layer.objs[v].y or (layer.objs[idx[b]].y == layer.objs[v].y and layer.objs[idx[b]].x > layer.objs[v].x)):
+            idx[b + 1] = idx[b]
+            b -= 1
+        idx[b + 1] = v
+    var out = String("")
+    for a in range(len(idx)):
+        if a > 0:
+            out += "\n\n"
+        out += String(layer.objs[idx[a]].text.strip())
+    return out^
