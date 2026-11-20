@@ -62,6 +62,7 @@ REGION_MIN_AREA = 150
 REGION_MARGIN = 0.10
 STEPS_MIN = 25        # M4
 P95 = 8.3             # M6: silky
+OPEN_TEST_OK = [False]  # (D-7946 (d)) tests/test_canvasload passed in this M6 run
 MAX = 16.7
 LINUX_DPR = 1.6
 MAC_DPR = 2.0
@@ -795,6 +796,11 @@ def m6():
         return "FAIL", err
     race = OUT / "race"
     race.mkdir(parents=True, exist_ok=True)
+    # (D-7946 (d)) the progressive open's contract: a pan and an edit during the open end as the whole import does
+    rt = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", "-o", str(race / "test_canvasload"), "tests/test_canvasload.mojo"], 900)
+    rt2 = run([str(race / "test_canvasload")], 300) if rt.returncode == 0 else rt
+    OPEN_TEST_OK[0] = rt2.returncode == 0 and "canvasload: ok" in rt2.stdout
+    (race / "test_canvasload.log").write_text(rt.stdout + rt.stderr + rt2.stdout + rt2.stderr)
     probs = []
     # the web at its best: PN's own benchmarks, Chromium with the GPU, at the native run's device scale
     print("(running Personal Note's own benchmarks: several minutes)", flush=True)
@@ -923,6 +929,10 @@ def native_race(out):
                 continue
             res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
                          "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
+            if "complete_max" in kv:  # (D-7944: the progressive open's frames after its first, and its completion)
+                res[name].update(during_n=int(kv.get("during_n", "0")), during_p95=float(kv.get("during_p95", "0")),
+                                 during_max=float(kv.get("during_max", "0")), complete_p50=float(kv.get("complete_p50", "0")),
+                                 complete_max=float(kv["complete_max"]))
         except (KeyError, ValueError):
             pass
     return res
@@ -1000,9 +1010,14 @@ def race_table(web, nat, start, shown=None):
              "- *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, "
              "the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after "
              "its work plus its shown time; read the web column against that sum, not against the work alone.",
-             "- *open*: native, cold: the note's row read from the file and its JSON Canvas parsed each time (nothing kept), timed to "
-             "the frame that shows it; a reopen of a canvas kept parsed at the revision the file still holds is printed after the "
-             "table, not judged.", "",
+             "- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), "
+             "progressively (mojoui.canvasload, D-7944). Judged by D-7946: (a) the first frame, showing the chrome and the visible "
+             "board, within 8.3 ms (its max over 20 cold opens); (b) every frame after it until the board is complete silky; (c) "
+             "complete (wall clock, to the frame that shows it) sooner than the web's open; (d) tests/test_canvasload (a pan and an "
+             "edit during the open) passes: " + ("yes" if OPEN_TEST_OK[0] else "NO") + ". The renderer keeps raster tiles across "
+             "opens when the picture is the same (its damage diff), so a repeated open finds the visible tiles; the process's "
+             "first open rasters them. A reopen of a canvas kept parsed at the revision the file still holds is printed after "
+             "the table, not judged.", "",
              "| note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |",
              "|---|---|---|---|---|---|"]
     for note in RACE_NOTES:
@@ -1011,8 +1026,20 @@ def race_table(web, nat, start, shown=None):
             n = nat.get(note, {}).get(step)
             v = shown.get(note, {}).get(step)
             good = bool(w and n and n["p95"] < w["p95"] and n["max"] < w["max"] and n["p95"] <= P95 and n["max"] <= MAX and n.get("cpu", 0) == 0)
+            if step == "open" and n:
+                # (D-7946, set by the main session as contract author: stricter than one latency) (a) the first frame after
+                # the open request, showing the chrome and the visible board, within 8.3 ms (its max over the cold opens);
+                # (b) every frame during the open silky (p95 ≤ 8.3, max ≤ 16.7); (c) complete sooner than the web's open;
+                # (d) a gesture or edit during the open behaves (tests/test_canvasload, run by m6)
+                good = bool(w and n["max"] <= P95 and n.get("cpu", 0) == 0 and "complete_max" in n and n["during_p95"] <= P95
+                            and n["during_max"] <= MAX and n["complete_max"] < w["p95"] and OPEN_TEST_OK[0])
             ok = ok and good
             vis = f"{v['p95']} / {v['max']} · {v['shown_p95']} / {v['shown_max']} ({v['shown_n']})" if v else "—"
+            if step == "open" and n and "complete_max" in n:
+                lines.append(f"| {note} | open (cold): first frame | {f'{w['p95']} / {w['max']}' if w else '—'} | {n['p95']} / {n['max']} | {vis} | {'✓' if n['max'] <= P95 else '✗'} |")
+                lines.append(f"| {note} | open: frames during (n {n['during_n']}) | — | {n['during_p95']} / {n['during_max']} | | {'✓' if n['during_p95'] <= P95 and n['during_max'] <= MAX else '✗'} |")
+                lines.append(f"| {note} | open: complete (wall) | {f'{w['p95']}' if w else '—'} | {n['complete_p50']} / {n['complete_max']} | | {'✓' if w and n['complete_max'] < w['p95'] else '✗'} |")
+                continue
             lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {vis} | {'✓' if good else '✗'} |")
     for note in RACE_NOTES:
         kept = nat.get(note, {}).get("open (kept)")
