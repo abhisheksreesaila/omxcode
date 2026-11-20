@@ -536,3 +536,124 @@ def draw_radial_steps[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, 
             c |= UInt32(Int(a + (b - a) * tt + 0.5)) << UInt32(8 * ch)
         p.circle(cx, cy, t * r_end, c)
     p.pop_clip()
+
+
+# ------------------------------------------------ the tool island, generalized (goal 79, the canvas screen)
+
+comptime DOCK_TOOL = 0
+comptime DOCK_DIVIDER = 1
+comptime DOCK_DOT = 2  # a colour dot in a tool button (the ink options)
+comptime DOCK_ACCENT = 3  # the accent round button (the voice button)
+
+
+@fieldwise_init
+struct DockItem(Copyable, Movable):
+    """One child of a tool island: its name in the Boxes ("[Select]", "#dock-more", ".dock-divider"), its icon (a Lucide
+    name or an icon spec, see strokeicon), its kind, and for a dot its colour."""
+    var name: String
+    var icon: String
+    var kind: Int
+    var color: UInt32
+
+
+def dock_height(items: List[DockItem]) -> Float64:
+    """The island's height: children 2 apart (a column with gap 2), a divider 1 tall with 6 above and below, padded 6, a
+    1 px border."""
+    var inner = 0.0
+    for i in range(len(items)):
+        inner += 13.0 if items[i].kind == DOCK_DIVIDER else 44.0
+        if i + 1 < len(items):
+            inner += 2
+    return inner + 14
+
+
+def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items: List[DockItem], active: String, k: Float64, sk: Skin,
+                         group: String = "", stroke: Float64 = 1.7):
+    """A vertical island of 44 px round buttons (the web's .tool-dock): the active tool filled with the ink and its icon in
+    the panel's colour, a colour dot ringed in the panel and the edge, the accent button with its glow. Its box is
+    [Canvas tools]; `group` names the column of children."""
+    var h = dock_height(items)
+    draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
+    p.rect(x, y, 56, h, sk.panel, sk.radius)
+    bx.add("[Canvas tools]", x, y, 56, h)
+    if group != "":
+        bx.add(group, x + 6, y + 7, 44, h - 14)
+    var by = y + 7
+    for i in range(len(items)):
+        ref it = items[i]
+        if it.kind == DOCK_DIVIDER:
+            p.rect(x + 14, by + 6, 28, 1, sk.line, 0)
+            bx.add(it.name, x + 14, by + 6, 28, 1)
+            by += 13
+        else:
+            var cx = x + 28
+            var cy = by + 22
+            if it.kind == DOCK_ACCENT:
+                draw_shadows(p, x + 6, by, 44, 44, 22, [Shadow(0, 6, 16, -6, sk.accent)])
+                p.circle(cx, cy, 22, sk.accent)
+                draw_icon(p, it.icon, x + 18, by + 12, 20, k, sk.accent_ink, 2.0)
+            elif it.kind == DOCK_DOT:
+                p.circle(cx, cy, 17, sk.edge)
+                p.circle(cx, cy, 16, sk.panel)
+                p.circle(cx, cy, 14, mix(rgba(0, 0, 0), 14, it.color))
+                p.circle(cx, cy, 13, it.color)
+                var dot_name = it.name + "-dot"
+                if it.name.endswith("-trigger"):
+                    dot_name = String(it.name[byte=:it.name.byte_length() - 8]) + "-dot"
+                bx.add(dot_name, cx - 14, cy - 14, 28, 28)
+            elif it.name == active:
+                p.circle(cx, cy, 22, sk.ink)
+                draw_icon(p, it.icon, x + 18, by + 12, 20, k, sk.panel, stroke)
+            else:
+                draw_icon(p, it.icon, x + 18, by + 12, 20, k, sk.ink_soft, stroke)
+            bx.add(it.name, x + 6, by, 44, 44)
+            by += 44
+        if i + 1 < len(items):
+            by += 2
+
+
+def canvas_dock_items(ink: UInt32) -> List[DockItem]:
+    """A canvas note's tool island as Personal Note draws it (its own 24 px dock icons, stroke 1.7)."""
+    var out = List[DockItem]()
+    out.append(DockItem("[Select]", "path d=M5 3l6 16 2.2-6.8L20 10 5 3z", DOCK_TOOL, 0))
+    out.append(DockItem("[Text]", "path d=M5 6V4h14v2M12 4v16M9 20h6", DOCK_TOOL, 0))
+    out.append(DockItem("[Pen]", "path d=M4 20l4-1 11-11-3-3L5 16l-1 4z|path d=M14 6l3 3", DOCK_TOOL, 0))
+    out.append(DockItem("[Stroke eraser]", "path d=M8 20h12|path d=M4.5 15.5l9-9a2 2 0 012.8 0l2.2 2.2a2 2 0 010 2.8L12 18H7l-2.5-2.5z", DOCK_TOOL, 0))
+    out.append(DockItem("[Shape]", "rect x=4 y=4 width=16 height=16 rx=3", DOCK_TOOL, 0))
+    out.append(DockItem("[Sticky note]", "path d=M5 4h14v10l-5 6H5z|path d=M14 20v-6h5", DOCK_TOOL, 0))
+    out.append(DockItem(".dock-divider", "", DOCK_DIVIDER, 0))
+    out.append(DockItem("#ink-options-trigger", "", DOCK_DOT, ink))
+    out.append(DockItem("#dock-more", "plus", DOCK_TOOL, 0))
+    out.append(DockItem("#voice-divider", "", DOCK_DIVIDER, 0))
+    out.append(DockItem("#voice-button", "rect x=9 y=3 width=6 height=11 rx=3|path d=M5.5 11a6.5 6.5 0 0013 0M12 17.5V21", DOCK_ACCENT, 0))
+    return out^
+
+
+def draw_history_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, k: Float64, sk: Skin):
+    """Undo and redo in a pill (the web's .history-island: 48 tall, padded 0 6, 44 px buttons 2 apart)."""
+    draw_shadows(p, x, y, 104, 48, 24, sk.shadow2)
+    p.rect(x, y, 104, 48, sk.panel, 24)
+    bx.add("#history-island", x, y, 104, 48)
+    draw_icon(p, "path d=M9 7L4.5 11.5 9 16|path d=M5 11.5h9a5 5 0 010 10h-2", x + 7 + 12, y + 2 + 12, 20, k, sk.ink_soft, 1.7)
+    bx.add("#undo", x + 7, y + 2, 44, 44)
+    draw_icon(p, "path d=M15 7l4.5 4.5L15 16|path d=M19 11.5h-9a5 5 0 000 10h2", x + 53 + 12, y + 2 + 12, 20, k, sk.ink_soft, 1.7)
+    bx.add("#redo", x + 53, y + 2, 44, 44)
+
+
+def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
+    """The canvas's zoom island ending at `right` (the web's .zoom-control): minus, the zoom (a press resets it), plus, a
+    divider, fit all pages."""
+    var x = right - 185
+    draw_shadows(p, x, y, 185, 48, 24, sk.shadow2)
+    p.rect(x, y, 185, 48, sk.panel, 24)
+    bx.add("#zoom-control", x, y, 185, 48)
+    draw_icon(p, "minus", x + 7 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    bx.add("#zoom-out", x + 7, y + 6, 36, 36)
+    var st = TextStyle(MONO, 400, False, 11.5)
+    text_at(p, st, String(percent) + "%", x + 45 + 24, y + 8, 32, sk.ink_soft, ALIGN_CENTER)
+    bx.add("#zoom-value", x + 45, y + 8, 48, 32)
+    draw_icon(p, "plus", x + 95 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    bx.add("#zoom-in", x + 95, y + 6, 36, 36)
+    p.rect(x + 136, y + 15, 1, 18, sk.line, 0)
+    draw_icon(p, "maximize-2", x + 142 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    bx.add("#zoom-fit", x + 142, y + 6, 36, 36)

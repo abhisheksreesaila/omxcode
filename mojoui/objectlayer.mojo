@@ -212,6 +212,13 @@ struct Obj(Copyable, Movable):
     var ay: Float64
     var bx: Float64
     var by: Float64
+    # type (TEXT, STICKY), as a document stores it (goal 79): a face, a line height (× size, 0: the painter's own),
+    # padding inside the box, and a sticky's word colour; a painter that has no faces (goal 74's) ignores them
+    var family: String
+    var line_height: Float64
+    var pad: Float64
+    var ink: UInt32
+    var head_end: Bool  # CONNECTOR: an arrowhead at its end (the default) or none
 
     def __init__(out self, id: Int, kind: Int, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32):
         self.id = id
@@ -242,6 +249,11 @@ struct Obj(Copyable, Movable):
         self.ay = 0
         self.bx = 0
         self.by = 0
+        self.family = ""
+        self.line_height = 0
+        self.pad = 0
+        self.ink = 0xFF222222
+        self.head_end = True
 
     def cx(self) -> Float64:
         return self.x + self.w / 2
@@ -363,6 +375,9 @@ struct ObjectLayer(Movable):
     var cell_items: List[Int]
     var stamp: List[Int]
     var stamp_now: Int
+    # how connectors meet their ends: -1 at the nearest side midpoints (goal 74), ≥ 0 where the line between the two
+    # centres leaves each box, pulled back by this gap (Fabric's and Personal Note's rule: connectorEndpoints)
+    var connector_gap: Float64
 
     def __init__(out self):
         self.objs = List[Obj]()
@@ -404,6 +419,7 @@ struct ObjectLayer(Movable):
         self.cell_items = List[Int]()
         self.stamp = List[Int]()
         self.stamp_now = 0
+        self.connector_gap = -1
 
     # ------------------------------------------------ looking up
 
@@ -700,6 +716,9 @@ struct ObjectLayer(Movable):
         var tp = self.index(self.objs[c].to_id)
         if fp < 0:
             return
+        if self.connector_gap >= 0 and tp >= 0:
+            self._route_centres(c, fp, tp)
+            return
         var best = 1e300
         var ax = 0.0
         var ay = 0.0
@@ -732,6 +751,56 @@ struct ObjectLayer(Movable):
         o.y = min(ay, by)
         o.w = abs(bx - ax)
         o.h = abs(by - ay)
+
+    def _route_centres(mut self, c: Int, fp: Int, tp: Int):
+        """The centre-ray rule: each end where the line between the two boxes' centres leaves that box (its bounds as
+        turned), pulled back along the line by connector_gap; too short (< 6) or overlapping: no line (ends equal)."""
+        var a = self.objs[fp].bounds()
+        var b = self.objs[tp].bounds()
+        var acx = (a[0] + a[2]) / 2
+        var acy = (a[1] + a[3]) / 2
+        var bcx = (b[0] + b[2]) / 2
+        var bcy = (b[1] + b[3]) / 2
+        var dx = bcx - acx
+        var dy = bcy - acy
+        var dist = sqrt(dx * dx + dy * dy)
+        ref o = self.objs[c]
+        if dist < 1e-6:
+            o.ax = acx
+            o.ay = acy
+            o.bx = acx
+            o.by = acy
+            return
+        var ux = dx / dist
+        var uy = dy / dist
+        var sa = 1.0 / max(abs(dx) / max((a[2] - a[0]) / 2, 1e-6), abs(dy) / max((a[3] - a[1]) / 2, 1e-6), 1e-9)
+        var sb = 1.0 / max(abs(dx) / max((b[2] - b[0]) / 2, 1e-6), abs(dy) / max((b[3] - b[1]) / 2, 1e-6), 1e-9)
+        var g = self.connector_gap
+        var sx = acx + dx * sa + ux * g
+        var sy = acy + dy * sa + uy * g
+        var ex = bcx - dx * sb - ux * g
+        var ey = bcy - dy * sb - uy * g
+        if (ex - sx) * ux + (ey - sy) * uy < 6:
+            ex = sx
+            ey = sy
+        o.ax = sx
+        o.ay = sy
+        o.bx = ex
+        o.by = ey
+        o.x = min(sx, ex)
+        o.y = min(sy, ey)
+        o.w = abs(ex - sx)
+        o.h = abs(ey - sy)
+
+    def set_connector_gap(mut self, gap: Float64):
+        """Chooses how connectors meet their ends (see connector_gap) and routes every connector again (no undo step:
+        a document's rule, set as it opens)."""
+        self.connector_gap = gap
+        for c in range(len(self.objs)):
+            if self.objs[c].kind == CONNECTOR:
+                self._route(c)
+        self.version += 1
+        self.dirty = True
 
     def _reroute(mut self, moved: List[Int]):
         """Every connector with an end among `moved` (touched first, so the step keeps its route before)."""
@@ -1451,6 +1520,31 @@ struct ObjectLayer(Movable):
         return self._poly_box(o, pts^)
 
     def _paint_obj[P: Painter, S: Styler](mut self, mut p: P, font: Font, i: Int, styler: S, own_style: Bool):
+        if self.paint_shape(p, i):
+            return
+        var kind = self.objs[i].kind
+        var id = self.objs[i].id
+        if kind == TEXT or kind == STICKY:
+            if kind == STICKY:
+                ref o = self.objs[i]
+                if o.rot == 0:
+                    p.rect(o.x + 2, o.y + 3, o.w, o.h, 0x18000000, o.radius)  # (a soft shadow)
+                    p.rect(o.x, o.y, o.w, o.h, o.color, o.radius)
+                else:
+                    p.polygon(self._corners(o), o.color)
+            var s = self._editor(i)
+            var x = self.objs[i].x
+            var y = self.objs[i].y
+            if own_style:
+                var ps = PlainStyler(self.objs[i].size, self.objs[i].color if kind == TEXT else 0xFF222222)
+                self.editors[s].paint(p, font, x, y, ps)
+            else:
+                self.editors[s].paint(p, font, x, y, styler)
+            p.note("object " + kind_name(kind) + " " + String(id))
+
+    def paint_shape[P: Painter](mut self, mut p: P, i: Int) -> Bool:
+        """objs[i] in page points when it is a shape, a picture, ink or a connector (anything without words); False
+        for a text or a sticky, which a painter with its own type draws (mojoui.pagedesk)."""
         var kind = self.objs[i].kind
         var id = self.objs[i].id
         if kind == RECT:
@@ -1506,23 +1600,9 @@ struct ObjectLayer(Movable):
                 var bx = o.bx - ux * head
                 var by = o.by - uy * head
                 p.polygon([o.bx, o.by, bx - uy * head * 0.5, by + ux * head * 0.5, bx + uy * head * 0.5, by - ux * head * 0.5], o.color)
-        elif kind == TEXT or kind == STICKY:
-            if kind == STICKY:
-                ref o = self.objs[i]
-                if o.rot == 0:
-                    p.rect(o.x + 2, o.y + 3, o.w, o.h, 0x18000000, o.radius)  # (a soft shadow)
-                    p.rect(o.x, o.y, o.w, o.h, o.color, o.radius)
-                else:
-                    p.polygon(self._corners(o), o.color)
-            var s = self._editor(i)
-            var x = self.objs[i].x
-            var y = self.objs[i].y
-            if own_style:
-                var ps = PlainStyler(self.objs[i].size, self.objs[i].color if kind == TEXT else 0xFF222222)
-                self.editors[s].paint(p, font, x, y, ps)
-            else:
-                self.editors[s].paint(p, font, x, y, styler)
-            p.note("object " + kind_name(kind) + " " + String(id))
+        else:
+            return False
+        return True
 
     def _paint_all[P: Painter, S: Styler](mut self, mut p: P, font: Font, vx: Float64, vy: Float64, vw: Float64, vh: Float64, k: Float64,
                                           styler: S, own_style: Bool):
@@ -1829,13 +1909,19 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
         var color = j.text(j.get(n, "color"))
         var oid = -1
         if kind == "text":
-            var size = j.real(j.get(j.get(pn, "style"), "fontSize"), 16)
+            var style = j.get(pn, "style")
+            var size = j.real(j.get(style, "fontSize"), 16)
+            var ink = _canvas_color(j.text(j.get(style, "color")), 0xFF222222)
             if color != "" or j.text(j.get(pn, "type")) == "sticky":
                 oid = ol.add_sticky(x, y, w, j.text(j.get(n, "text")), _canvas_color(color, 0xFF9DE8FF), size)
                 var p = ol.index(oid)
                 ol.objs[p].h = h
+                ol.objs[p].ink = ink
             else:
-                oid = ol.add_text(x, y, w, h, j.text(j.get(n, "text")), size)
+                oid = ol.add_text(x, y, w, h, j.text(j.get(n, "text")), size, ink)
+            var q = ol.index(oid)
+            ol.objs[q].family = j.text(j.get(style, "fontFamily"))
+            ol.objs[q].line_height = j.real(j.get(style, "lineHeight"), 0)
         elif kind == "file" or kind == "link" or kind == "group":
             oid = ol.add_rect(x, y, w, h, 0xFFF0F2F4, 0xFFD4D8DC, 1, 6)
         if oid >= 0:
@@ -1846,6 +1932,9 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
         var a = ids.get(j.text(j.get(e, "fromNode")), -1)
         var b = ids.get(j.text(j.get(e, "toNode")), -1)
         if a >= 0 and b >= 0:
-            _ = ol.add_connector(a, b, _canvas_color(j.text(j.get(e, "color")), 0xFF332222), j.real(j.get(j.get(e, "pn"), "lineWidth"), 2))
+            var cid = ol.add_connector(a, b, _canvas_color(j.text(j.get(e, "color")), 0xFF332222), j.real(j.get(j.get(e, "pn"), "lineWidth"), 2))
+            var heads = j.get(j.get(e, "pn"), "arrowheads")
+            if cid >= 0 and heads >= 0:
+                ol.objs[ol.index(cid)].head_end = j.flag(j.get(heads, "end"), True)
     ol.history.clear()
     return ol^

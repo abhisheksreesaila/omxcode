@@ -200,6 +200,7 @@ COMPOSITES = [
     ("Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)", "mojoui/notesshell.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "NotesPanel("),
     ("Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)", "mojoui/pagesheet.mojo", ["Canvas"], "PageSheet("),
     ("Buzan map view (the web map's geometry: one-bend ribbons, idea cards, root card, fit, minimap)", "mojoui/buzanmap.mojo", ["Canvas"], "BuzanMap("),
+    ("Page desk (a whiteboard on pages: opening view, page frame with shadow bands, folds and labels, the board in the paper look: text boxes and stickies in real faces, arrows; over the object layer)", "mojoui/pagedesk.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "BoardLook("),
     ("Omnibar (search and jump: field, pills, grouped rows with marks, preview, key hints; the web's time words)", "mojoui/omnibar.mojo", ["Canvas"], "Omnibar("),
     ("Island card (a title island opened into a card of actions)", "mojoui/islandcard.mojo", ["Canvas"], "IslandCard("),
     ("Settings window (sectioned nav, search, pane; skin cards)", "mojoui/settingswin.mojo", ["Canvas"], "SettingsWindow("),

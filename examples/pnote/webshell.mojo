@@ -19,6 +19,9 @@ from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
+from mojoui.objectlayer import ObjectLayer, import_json_canvas
+from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
+from mojoui.notesshell import draw_dock, dock_height, canvas_dock_items, draw_history_island, draw_page_zoom
 
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
@@ -114,6 +117,13 @@ struct WebShell(Movable):
     var bench_kind: Int
     var px: Float64  # where the pointer is (HOVER), -1: away
     var py: Float64
+    var board: ObjectLayer  # the open canvas note's objects
+    var look: BoardLook
+    var view: DeskView
+    var view_set: Bool
+    var cols: Int
+    var rows: Int
+    var tool: String
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -134,6 +144,13 @@ struct WebShell(Movable):
         self.card_open = False
         self.settings_open = False
         self.omni = Omnibar()
+        self.board = ObjectLayer()
+        self.look = BoardLook()
+        self.view = DeskView(0, 0, 1)
+        self.view_set = False
+        self.cols = 1
+        self.rows = 1
+        self.tool = "[Text]"
         try:
             self.load()
         except e:
@@ -182,6 +199,20 @@ struct WebShell(Movable):
             except:
                 md = ""
             self.page.set_markdown(md)
+        elif n.kind == "canvas":
+            self.view_set = False
+            self.cols = 1
+            self.rows = 1
+            try:
+                self.board = import_json_canvas(n.content)
+                self.board.set_connector_gap(6)
+                var j = Json.parse(n.content)
+                var pg = j.get(j.get(0, "pn"), "page")
+                self.cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
+                self.rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
+            except e:
+                print("PNOTE ERROR: canvas: " + String(e), flush=True)
+                self.board = ObjectLayer()
         elif n.kind == "mindmap":
             self.map = BuzanMap()
             try:
@@ -216,6 +247,15 @@ struct WebShell(Movable):
         draw_desk(p, w, h, k, self.sk)
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
+        if i >= 0 and self.notes[i].kind == "canvas":
+            # the board under every island: the page frame (screen px), the objects (a layer in page px), then the chrome
+            if not self.view_set:
+                self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+                self.view_set = True
+            draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
+            self.look.paint(p, self.board, self.view, w, h, k)
+            p.begin_layer("chrome")
+            p.layer_transform(0, 0, k)
         if self.sidebar:
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
@@ -237,6 +277,14 @@ struct WebShell(Movable):
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
                 draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
                 draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
+            if n.kind == "canvas":
+                self.boxes.add("#paper", left, 0, w - left, h)
+                self.boxes.add("#leafer-host", left, 0, w - left, h)
+                self.boxes.add("#note-input", left, 0, w - left, h)
+                var items = canvas_dock_items(hexc("#20201e"))
+                draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, self.tool, k, self.sk, "#dock-canvas")
+                draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
+                draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
             if n.kind == "page" and not False:
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
         self.paint_overlays(p, w, h, k)

@@ -295,6 +295,8 @@ def sampled_fill(img, box, dpr):
     """An element's fill: the most common colour inside its box, inset by up to 3 logical px (text and edges vote less
     than the fill they sit on)."""
     x, y, w, h = box
+    if min(w, h) * dpr < 2:
+        return hairline_color(img, box, dpr)
     inset = min(3.0, w / 4, h / 4)
     x0, y0 = int(round((x + inset) * dpr)), int(round((y + inset) * dpr))
     x1, y1 = int(round((x + w - inset) * dpr)), int(round((y + h - inset) * dpr))
@@ -307,6 +309,34 @@ def sampled_fill(img, box, dpr):
     vals, counts = np.unique(keys, return_counts=True)
     k = int(vals[counts.argmax()])
     return (k >> 16) & 255, (k >> 8) & 255, k & 255
+
+
+def hairline_color(img, box, dpr):
+    """(D-7920) A line thinner than 2 device px has no pixel of its own colour at a fractional device scale: its colour is
+    recovered from the ink it lays down across the rows (or columns) it touches, ink / (thickness in device px), measured
+    against the background on both sides. The same rule reads the web and the native picture; a missing line reads as
+    the background, a wrong colour or a line of the wrong thickness reads as a different colour."""
+    x, y, w, h = box
+    H, W = img.shape[:2]
+    horizontal = h <= w
+    if horizontal:
+        a0, a1 = int(round((x + min(3.0, w / 4)) * dpr)), int(round((x + w - min(3.0, w / 4)) * dpr))
+        b0, b1 = int(np.floor(y * dpr)) - 2, int(np.ceil((y + h) * dpr)) + 2
+        if b0 < 0 or b1 > H or a1 <= a0:
+            return None
+        reg = img[b0:b1, a0:a1].astype(float)
+        thick = h * dpr
+    else:
+        a0, a1 = int(round((y + min(3.0, h / 4)) * dpr)), int(round((y + h - min(3.0, h / 4)) * dpr))
+        b0, b1 = int(np.floor(x * dpr)) - 2, int(np.ceil((x + w) * dpr)) + 2
+        if b0 < 0 or b1 > W or a1 <= a0:
+            return None
+        reg = img[a0:a1, b0:b1].astype(float).transpose(1, 0, 2)
+        thick = w * dpr
+    bg = (reg[0] + reg[-1]) / 2
+    col = bg - (bg[None] - reg).sum(axis=0) / thick
+    m = np.clip(np.median(col, axis=0), 0, 255)
+    return tuple(int(round(v)) for v in m)
 
 
 def compare_screen(name, web_png, web_boxes, nat_png, nat_boxes, dpr, out_png):

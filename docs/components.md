@@ -206,6 +206,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)` | `mojoui/notesshell.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
 | `Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)` | `mojoui/pagesheet.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Buzan map view (the web map's geometry: one-bend ribbons, idea cards, root card, fit, minimap)` | `mojoui/buzanmap.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Page desk (a whiteboard on pages: opening view, page frame with shadow bands, folds and labels, the board in the paper look: text boxes and stickies in real faces, arrows; over the object layer)` | `mojoui/pagedesk.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
 | `Omnibar (search and jump: field, pills, grouped rows with marks, preview, key hints; the web's time words)` | `mojoui/omnibar.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Island card (a title island opened into a card of actions)` | `mojoui/islandcard.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Settings window (sectioned nav, search, pane; skin cards)` | `mojoui/settingswin.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -292,12 +293,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 204 | 11 | 0 |
-| Web | 174 | 24 | 17 |
-| Android | 19 | 75 | 121 |
-| Mac (AppKit) | 8 | 180 | 27 |
-| iPhone (UIKit) | 0 | 146 | 69 |
-| Agent (MCP) | 66 | 54 | 95 |
+| Linux (GTK) | 205 | 11 | 0 |
+| Web | 174 | 25 | 17 |
+| Android | 19 | 76 | 121 |
+| Mac (AppKit) | 8 | 181 | 27 |
+| iPhone (UIKit) | 0 | 147 | 69 |
+| Agent (MCP) | 66 | 54 | 96 |
 
 ## Inside one app, not components yet (the debt)
 

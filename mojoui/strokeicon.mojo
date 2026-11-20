@@ -300,8 +300,11 @@ def _attr_text(el: String, key: String) -> String:
 
 
 def icon_segments(name: String) -> List[Float64]:
+    """An icon's outline as line segments: a Lucide name, or an icon's own elements in the same form (a name holding
+    "=": `path d=M5 3l6 16…|rect x=4 …`, a 24 × 24 box), so an app's own icons go through the same stroker."""
     var out = List[Float64]()
-    for el in lucide_node(name).split("|"):
+    var spec = name if "=" in name else lucide_node(name)
+    for el in spec.split("|"):
         var e = String(el)
         if e.startswith("path "):
             out.extend(path_segments(_attr_text(e, "d")))
