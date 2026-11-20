@@ -48,7 +48,7 @@ struct IslandCard(Movable):
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, slot_x0: Float64, slot_x1: Float64, k: Float64, sk: Skin):
         var rows = (len(self.tiles) + 3) // 4
         var w = 422.0
-        var inner_h = 38 + 8 + 15.59 + 10 + 44 + Float64(rows) * 70 + 14 * 2
+        var inner_h = 14 + 38 + 8 + 15.59 + 10 + 44 + Float64(rows) * 70 + 12  # (padding 14 above, 12 below)
         var h = inner_h + 2
         var x = Float64(Int(((slot_x0 + slot_x1) / 2 - w / 2) * 2 + 0.5)) / 2
         var y = 16.0
