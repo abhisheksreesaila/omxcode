@@ -4,7 +4,9 @@
 # tag: revision or skin; the zoom (device scale); the view; the size; the renderer; the build) doesn't match;
 # (4) on the real GL renderer (headless): a board's frame drawn by a fresh renderer from the snapshot alone (its layer
 # holding: no ops yet) is pixel-identical to the frame the renderer that kept it drew, and the real tiles that replace
-# it are too; a snapshot whose key differs is never shown. `viewsnap: ok`.
+# it are too; a snapshot whose key differs is never shown; the app's note comes back from the head for its tag only;
+# (5) a renderer already showing the board's real tiles, given a new picture of it (BoardLook.forget(), a cold open)
+# that holds, shows the snapshot in that same frame, identical, nothing rastered. `viewsnap: ok`.
 #   pixi run mojo run -I . -I vendor tests/test_viewsnap.mojo
 from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
@@ -12,8 +14,8 @@ from std.os import getenv
 from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, SnapWriter, snap_read, snap_dir_ready, build_id
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
-from mojoui.pagedesk import DeskView, BoardLook
-from mojoui.objectlayer import ObjectLayer, import_json_canvas
+from mojoui.pagedesk import DeskView, BoardLook, BoardTools
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, CH_MOVE
 from mojoui.libc import unlink
 
 comptime W = 2304
@@ -74,6 +76,7 @@ def gl_identity() raises:
     var look = BoardLook()
     look.keep_path = path
     look.keep_tag = "note=1;rev=5;skin=paper"
+    look.keep_note = "grid=4x4"
     var g = GPU2D()
     assert_true(g.start(False), "start")
     var a = frame(g, look, layer, v)
@@ -90,6 +93,8 @@ def gl_identity() raises:
     look2.keep_tag = "note=1;rev=5;skin=paper"
     look2.keep_hold = True
     assert_true(look2.kept_view(path, look2.keep_tag, v, 1440, 900, K), "the app's check agrees with the renderer's")
+    assert_equal(look2.kept_note(path, look2.keep_tag), "grid=4x4")
+    assert_equal(look2.kept_note(path, "note=1;rev=6;skin=paper"), "")
     var g2 = GPU2D()
     assert_true(g2.start(False), "start 2")
     var b = frame(g2, look2, empty, v)
@@ -106,7 +111,45 @@ def gl_identity() raises:
         assert_equal(differ(a, c), 0)
         frames += 1
     assert_true(not g2.tiles.has_snap("board", 1), "replaced")
-    print("   replaced by real tiles over", frames, "frames, each identical")
+    print("   became the layer's tiles after", frames, "frames, each identical")
+    # (D-7956) promoted tiles are good for the part they hold: a pan rasters only the strips the view newly reaches, and
+    # the frame equals a fresh renderer's raster of the same view; so does a zoom's settled frame
+    var pans = [DeskView(-340, -230, 1.0), DeskView(-200, -120, 1.0)]
+    for pv in pans:
+        var pl = BoardLook()
+        var gr = GPU2D()
+        assert_true(gr.start(False), "start ref")
+        var want = frame(gr, pl, layer, pv)
+        for _ in range(3):
+            want = frame(gr, pl, layer, pv)
+        gr.gl.close()
+        var got = frame(g2, look2, layer, pv)
+        for _ in range(3):
+            got = frame(g2, look2, layer, pv)
+        var dp = differ(want, got)
+        print("   panned over promoted tiles:", dp, "pixels differ from a fresh raster")
+        assert_equal(dp, 0)
+    # an edit over promoted tiles: its stale part rastered again, the frame equals a fresh raster of the edited board
+    var pv2 = DeskView(-200, -120, 1.0)
+    var vis = BoardTools().visible_objects(layer, pv2, 1440, 900)
+    layer.select(layer.objs[vis[len(vis) // 2]].id, False)
+    layer.begin_gesture(CH_MOVE)
+    layer.move_by(41, 23)
+    layer.end_gesture()
+    var got2 = frame(g2, look2, layer, pv2)
+    for _ in range(3):
+        got2 = frame(g2, look2, layer, pv2)
+    var gr2 = GPU2D()
+    assert_true(gr2.start(False), "start ref 2")
+    var pl2 = BoardLook()
+    var want2 = frame(gr2, pl2, layer, pv2)
+    for _ in range(3):
+        want2 = frame(gr2, pl2, layer, pv2)
+    gr2.gl.close()
+    var de = differ(want2, got2)
+    print("   an edit over promoted tiles:", de, "pixels differ from a fresh raster")
+    assert_equal(de, 0)
+    _ = layer.undo()
     # stale: another revision, skin, zoom, view or size is never shown
     var stale_tags: List[String] = ["note=1;rev=6;skin=paper", "note=1;rev=5;skin=night"]
     for t in stale_tags:
@@ -131,6 +174,14 @@ def gl_identity() raises:
         g4.gl.close()
     assert_true(not look2.kept_view(path, look2.keep_tag, v, 1440, 900, 2.0), "another device scale")
     assert_true(not look2.kept_view(path, look2.keep_tag, v, 1441, 900, K), "another size")
+    # (5) the renderer that kept it, its real tiles on screen, then a new picture (a cold open) holding: the snapshot now
+    look.forget()
+    look.keep_hold = True
+    var e = frame(g, look, empty, v)
+    assert_true(g.tiles.has_snap("board", 1), "a new picture restores the snapshot in its own frame")
+    assert_equal(g.tiles.rastered, 0)
+    assert_equal(differ(a, e), 0)
+    print("   a cold open on a live renderer: shown from the snapshot in its first frame, identical")
     g.gl.close()
     g2.gl.close()
     print("gl: ok")

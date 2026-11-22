@@ -31,7 +31,9 @@ from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome,
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.objectlayer import reading_text
-from mojoui.canvasload import OpenBoard, skim
+from mojoui.canvasload import OpenBoard, SqlText, skim
+from mojoui.files import config_dir
+from mojoui.viewsnap import snap_dir_ready
 from mojoui.pagedesk import board_rect
 from mojoui.buzanmap import map_text, node_extra
 
@@ -53,6 +55,24 @@ def read_page_grid(text: String) -> Tuple[Int, Int]:
             except:
                 pass
     return (1, 1)
+
+
+def grid_note(cols: Int, rows: Int) -> String:
+    """A canvas's page grid as kept in its view snapshot's note (D-7956)."""
+    return "grid=" + String(cols) + "x" + String(rows)
+
+
+def parse_grid(note: String) -> Tuple[Int, Int]:
+    """grid_note's (columns, rows); (0, 0) when the note isn't one."""
+    if not note.startswith("grid="):
+        return (0, 0)
+    var parts = String(note[byte=5:]).split("x")
+    if len(parts) != 2:
+        return (0, 0)
+    try:
+        return (max(1, Int(String(parts[0]))), max(1, Int(String(parts[1]))))
+    except:
+        return (0, 0)
 
 
 comptime LOAD_SLICE_US = 1500  # a progressive open's slice per frame (D-7944): the frame keeps its silky budget
@@ -164,6 +184,8 @@ struct WebShell(Movable):
     var hits: List[Int]  # the omnibar's note rows, as note ids
     var win_w: Float64  # the window's size (layout px) at the last paint
     var win_h: Float64
+    var win_k: Float64  # the device scale at the last paint (0: not painted yet)
+    var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
     var save_state: String  # "" saved, else the island's error ("Couldn’t save")
@@ -208,6 +230,12 @@ struct WebShell(Movable):
         self.hits = List[Int]()
         self.win_w = 1440
         self.win_h = 900
+        self.win_k = 0
+        self.snap_dir = ""
+        if getenv("MOJOUI_SNAP") != "0":
+            var d = environment("PNOTE_SNAPS", config_dir("pnote") + "/snaps")
+            if snap_dir_ready(d):
+                self.snap_dir = d
         self.dbs = List[Database]()
         self.saver = SaveTimer(650)
         self.save_state = ""
@@ -300,6 +328,10 @@ struct WebShell(Movable):
         if trace:
             print("OPEN: outgoing " + String(clock_us() - t_open) + " us", flush=True)
         self.read_row(i, False)
+        self.look.keep_path = ""  # (D-7956: the note's own file below, a canvas only)
+        self.look.keep_tag = ""
+        self.look.keep_hold = False
+        self.look.keep_note = ""
         var at = -1 if self.cold_opens else self.kept.find(id, self.notes[i].revision)
         if self.notes[i].kind == "canvas" and not self.notes[i].secure and at >= 0:
             # the file still holds the revision this canvas was parsed at: reuse it (D-7934), nothing read or parsed
@@ -313,6 +345,32 @@ struct WebShell(Movable):
             self.tools = BoardTools()
             self.sticky_look()
             return
+        if self.notes[i].kind == "canvas" and not self.notes[i].secure and self.snap_dir != "":
+            var path = self.snap_path(id)
+            var tag = self.snap_tag(i)
+            var grid = parse_grid(self.look.kept_note(path, tag))
+            if grid[0] > 0:  # (its last view is kept: the page grid from it, the view laid out, the key asked)
+                var view = opening_view(self.win_w, self.win_h, Float64(grid[0]) * PAGE_W, Float64(grid[1]) * PAGE_H)
+                if self.win_k > 0 and self.look.kept_view(path, tag, view, self.win_w, self.win_h, self.win_k):
+                    # the deferred open: the kept view shows this frame, the row is read, skimmed and the view's nodes
+                    # parsed on a job thread (OpenBoard.open_later); the board loads underneath, held until they're in
+                    self.current = id
+                    self.panel.active = id
+                    self.cols = grid[0]
+                    self.rows = grid[1]
+                    self.view = view
+                    self.view_set = True
+                    self.tools = BoardTools()
+                    self.sticky_look()
+                    self.look.keep_path = path
+                    self.look.keep_tag = tag
+                    self.look.keep_note = grid_note(grid[0], grid[1])
+                    self.look.keep_hold = True
+                    var r = self.view_rect()
+                    self.board.open_later(SqlText(self.db_path, "SELECT content FROM notes WHERE id = ? AND secure = 0", id), r[0], r[1], r[2], r[3], 6)
+                    if trace:
+                        print("OPEN: deferred (kept view) " + String(clock_us() - t_open) + " us", flush=True)
+                    return
         self.read_row(i, True)
         if trace:
             print("OPEN: rows read " + String(clock_us() - t_open) + " us", flush=True)
@@ -349,6 +407,10 @@ struct WebShell(Movable):
             self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
             self.view_set = True
             var r = self.view_rect()
+            if self.snap_dir != "":  # (its view kept once it settles, for the next open: D-7956)
+                self.look.keep_path = self.snap_path(id)
+                self.look.keep_tag = self.snap_tag(i)
+                self.look.keep_note = grid_note(self.cols, self.rows)
             var back = self.board.open(text^, r[0], r[1], r[2], r[3], 6)
             if trace:
                 print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
@@ -395,6 +457,13 @@ struct WebShell(Movable):
             except:
                 pass
 
+    def snap_path(self, id: Int) -> String:
+        return self.snap_dir + "/note-" + String(id) + ".snap"
+
+    def snap_tag(self, i: Int) -> String:
+        """What a canvas's kept view depends on besides the view (the renderer adds zoom, view, size, GPU, build)."""
+        return "pnote;note=" + String(self.notes[i].id) + ";rev=" + String(self.notes[i].revision) + ";skin=" + self.panel.skin_name
+
     def set_skin(mut self, name: String):
         self.sk = skin_named(name)
         self.panel.skin_name = name
@@ -420,6 +489,7 @@ struct WebShell(Movable):
         draw_desk(p, w, h, k, self.sk)
         self.win_w = w
         self.win_h = h
+        self.win_k = k
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
         if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure:
@@ -428,10 +498,20 @@ struct WebShell(Movable):
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
                 self.view_set = True
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
+            var r = self.view_rect()
             if self.board.loading():  # (D-7944: a slice of the rest of the board this frame, the view's part first)
-                var r = self.view_rect()
                 if self.board.step(r[0], r[1], r[2], r[3], LOAD_SLICE_US):
                     p.set_again()
+                if self.board.problem != "":
+                    print("PNOTE ERROR: canvas: " + self.board.problem, flush=True)
+                    self.board.problem = ""
+            if self.look.keep_path != "":  # (D-7956) the kept view: shown while the view's nodes load, kept again when settled
+                self.look.keep_hold = self.board.holding(r[0], r[1], r[2], r[3])
+                var still = len(self.board.layer.selected) == 0 and len(self.tools.lifted(self.board.layer)) == 0 and not self.board.layer.unsaved() and self.save_kind == ""
+                if still and self.look.keep_tag == "" and not self.board.loading():
+                    self.look.keep_tag = self.snap_tag(i)  # (saved again: its revision moved on)
+                elif not still:
+                    self.look.keep_tag = ""
             self.look.paint(p, self.board.layer, self.view, w, h, k, self.tools.lifted(self.board.layer))
             self.tools.paint_overlay(p, self.look, self.board.layer, self.view, k)
             p.begin_layer("chrome")

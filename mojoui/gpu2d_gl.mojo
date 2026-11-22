@@ -47,7 +47,9 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
 from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TileRead, TILE, TILE_TEX, _pack
-from mojoui.viewsnap import snap_read, set_renderer_id, fnv
+from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode
+from max.algorithm import parallelize
+from std.sys.info import num_logical_cores
 
 comptime RING = 6  # textures in the ring: one on screen, one being drawn, the rest waiting for the toolkit to let go
 
@@ -186,7 +188,13 @@ comptime F_FINISH = 68
 comptime F_READ_PIXELS = 69
 comptime F_BUFFER_SUB_DATA = 70
 comptime F_GET_STRINGI = 71
-comptime F_COUNT = 72
+comptime F_MAP_BUFFER_RANGE = 72
+comptime F_UNMAP_BUFFER = 73
+comptime F_COUNT = 74
+comptime GL_PIXEL_UNPACK_BUFFER = 0x88EC
+comptime GL_MAP_WRITE_BIT = 0x0002
+comptime GL_MAP_INVALIDATE_BUFFER_BIT = 0x0008
+comptime GL_MAP_UNSYNCHRONIZED_BIT = 0x0020
 
 
 def _gl_names() -> List[String]:
@@ -202,7 +210,7 @@ def _gl_names() -> List[String]:
             "glGetShaderInfoLog", "glAttachShader", "glDeleteShader", "glLinkProgram", "glGetProgramiv", "glDeleteProgram",
             "glUseProgram", "glGetUniformLocation", "glUniform2f", "glUniform3f", "glUniform4f", "glUniform1i", "glDrawArrays",
             "glDrawArraysInstanced", "glFenceSync", "glDeleteSync", "glClientWaitSync", "glFlush", "glFinish", "glReadPixels",
-            "glBufferSubData", "glGetStringi"]
+            "glBufferSubData", "glGetStringi", "glMapBufferRange", "glUnmapBuffer"]
 
 
 # ---- the shaders (one body; GLSL 3.30 core or ES 3.00 first lines) ----
@@ -631,6 +639,9 @@ struct GL2D(Movable):
     var tile_ds: Int
     var tile_color: Int
     var tile_tex: List[Int]  # by tile slot (0: not made yet)
+    var unpack_buf: Int  # (D-7956) the pixel-unpack buffer a snapshot's tiles are decoded into (0: not made yet)
+    var unpack_cap: Int  # its storage's size (kept between restores: new storage cost ~2.7 ms each time, measured)
+    var unpack_sync: Int  # a fence after the last uploads from it (0: none)
     var timing_open: Bool  # this frame's time-elapsed query already begun (tile rasters before the frame are in it)
     var lim: List[Int]  # (D-7940) a partial tile raster's scissor (x0, y0, x1, y1), every draw kept inside it; empty: none
 
@@ -720,6 +731,9 @@ struct GL2D(Movable):
         self.tile_ds = 0
         self.tile_color = 0
         self.tile_tex = List[Int]()
+        self.unpack_buf = 0
+        self.unpack_cap = 0
+        self.unpack_sync = 0
         self.timing_open = False
         self.lim = List[Int]()
 
@@ -1438,6 +1452,64 @@ struct GL2D(Movable):
             fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
         return self.error() == 0
 
+    def unpack_map(mut self, n: Int) -> Int:
+        """(D-7956) A pixel-unpack buffer of at least n bytes, left bound and mapped for writing (its storage kept between
+        restores, fenced: a map waits for the last uploads from it): its address, 0 when it can't be. Fill it, unpack_unmap(), then upload_tile_unpacked
+        from offsets in it: the copies to the textures are the GPU's (DMA), not this thread's."""
+        if not self.ok or n <= 0:
+            return 0
+        if self.unpack_buf == 0:
+            self.unpack_buf = self.gen(F_GEN_BUFFERS)
+        fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_PIXEL_UNPACK_BUFFER), c_uint(self.unpack_buf))
+        var access = GL_MAP_WRITE_BIT
+        if n > self.unpack_cap:
+            fcall[NoneType](self.f(F_BUFFER_DATA), c_uint(GL_PIXEL_UNPACK_BUFFER), n, 0, c_uint(GL_STREAM_DRAW))
+            self.unpack_cap = n
+            if self.unpack_sync != 0:
+                fcall[NoneType](self.f(F_DELETE_SYNC), self.unpack_sync)
+                self.unpack_sync = 0
+        else:
+            # the storage kept: the last uploads from it must have read it first (long done: a restore is once an open)
+            if self.unpack_sync != 0:
+                _ = fcall[c_uint](self.f(F_CLIENT_WAIT_SYNC), self.unpack_sync, c_uint(1), UInt64(1000000000))
+                fcall[NoneType](self.f(F_DELETE_SYNC), self.unpack_sync)
+                self.unpack_sync = 0
+            access |= GL_MAP_UNSYNCHRONIZED_BIT
+        var addr = fcall[Int](self.f(F_MAP_BUFFER_RANGE), c_uint(GL_PIXEL_UNPACK_BUFFER), 0, n, c_uint(access))
+        if addr == 0:
+            fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_PIXEL_UNPACK_BUFFER), c_uint(0))
+            _ = self.error()
+        return addr
+
+    def unpack_unmap(mut self) -> Bool:
+        """The mapped unpack buffer handed back (still bound for the uploads); False: its contents were lost."""
+        return fcall[UInt8](self.f(F_UNMAP_BUFFER), c_uint(GL_PIXEL_UNPACK_BUFFER)) != 0
+
+    def unpack_done(mut self):
+        """The uploads issued: fenced (the next map waits for them to have read it), the buffer unbound."""
+        if self.unpack_sync == 0:
+            self.unpack_sync = fcall[Int](self.f(F_FENCE_SYNC), c_uint(GL_SYNC_GPU_COMMANDS_COMPLETE), c_uint(0))
+        fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_PIXEL_UNPACK_BUFFER), c_uint(0))
+
+    def upload_tile_unpacked(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, offset: Int, clear: Bool) -> Bool:
+        """(D-7956) As upload_tile_part, the pixels at `offset` in the bound unpack buffer; the texture cleared to
+        transparent first only when `clear` (the part doesn't cover it)."""
+        if not self.ok:
+            return False
+        var tex = self._tile_fb(slot) if clear else self.tile_texture(slot)
+        if clear:
+            fcall[NoneType](self.f(F_VIEWPORT), c_int(0), c_int(0), c_int(TILE_TEX), c_int(TILE_TEX))
+            fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
+            fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT))
+            fcall[NoneType](self.f(F_BIND_FRAMEBUFFER), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        if w > 0 and h > 0:
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(tex))
+            fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(1))
+            fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(x0), c_int(y0), c_int(w), c_int(h), c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), offset)
+            fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
+            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+        return True
+
     def read_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, dst: Int) -> Bool:
         """(D-7956) w × h pixels of slot's texture from texture px (x0, y0) into dst (rows packed)."""
         if not self.ok:
@@ -1827,6 +1899,13 @@ struct GL2D(Movable):
             self.img_tex[i] = 0
         self.delete(F_DELETE_TEXTURES, self.atlas_tex)
         self.atlas_tex = 0
+        if self.unpack_sync != 0:
+            fcall[NoneType](self.f(F_DELETE_SYNC), self.unpack_sync)
+            self.unpack_sync = 0
+        if self.unpack_buf != 0:
+            self.delete(F_DELETE_BUFFERS, self.unpack_buf)
+            self.unpack_buf = 0
+            self.unpack_cap = 0
         for i in range(len(self.lvbo)):
             self.delete(F_DELETE_BUFFERS, self.lvbo[i])
             self.lvbo[i] = 0
@@ -2134,6 +2213,7 @@ struct GPU2D(Movable):
         layer's fallback tiling (mojoui.viewsnap, gpu2d_tiles.Tiles.snap_restored)."""
         var t0 = perf_counter_ns()
         var snap = snap_read(path)
+        var tr = perf_counter_ns()
         if not snap.ok:
             if self.tiles.snap_log:
                 print("SNAP: none at " + path, flush=True)
@@ -2143,37 +2223,115 @@ struct GPU2D(Movable):
             if self.tiles.snap_log:
                 print("SNAP: refused (" + snap.key.why_not(want) + " differs) " + path, flush=True)
             return
+        # every tile's pixels decoded at once (a piece of the tiles per core) straight into a mapped pixel-unpack
+        # buffer, then each uploaded from its offset there: the copies are the GPU's, this thread only issues them
         var keys = List[Int]()
         var slots = List[Int]()
-        var px = List[UInt32](length=TILE_TEX * TILE_TEX, fill=0)
-        var t1 = perf_counter_ns()
-        var dec_ns = 0
-        for t in snap.tiles:
+        var at = List[Int]()  # per tile kept: its RLE in the file, its bytes, its pixel count, its offset in the buffer
+        var nb = List[Int]()
+        var npx = List[Int]()
+        var off = List[Int]()
+        var which = List[Int]()
+        var total = 0
+        for q in range(len(snap.tiles)):
+            ref t = snap.tiles[q]
             if t.w == 0 or t.h == 0:
                 continue
-            var d0 = perf_counter_ns()
-            var good = t.x0 >= 0 and t.y0 >= 0 and t.x0 + t.w <= TILE_TEX and t.y0 + t.h <= TILE_TEX and snap.decode(t, Int(px.unsafe_ptr()))
-            dec_ns += Int(perf_counter_ns() - d0)
-            if not good:
+            if t.x0 < 0 or t.y0 < 0 or t.x0 + t.w > TILE_TEX or t.y0 + t.h > TILE_TEX:
                 if self.tiles.snap_log:
-                    print("SNAP: refused (a tile doesn't decode) " + path, flush=True)
+                    print("SNAP: refused (a tile outside its texture) " + path, flush=True)
+                return
+            at.append(t.at)
+            nb.append(t.n)
+            npx.append(t.w * t.h)
+            off.append(total)
+            which.append(q)
+            total += 4 * t.w * t.h
+        for _ in range(len(which)):
+            var slot = self.tiles.snap_slot(scene, i, owner)
+            if slot < 0:
                 for sl in slots:
                     self.tiles.free.append(sl)
                 return
-            var slot = self.tiles.snap_slot(scene, i, owner)
-            if slot < 0 or not self.gl.upload_tile_part(slot, t.x0, t.y0, t.w, t.h, Int(px.unsafe_ptr())):
-                if slot >= 0:
-                    self.tiles.free.append(slot)
+            slots.append(slot)
+        var t1 = perf_counter_ns()
+        var dec_ns = 0
+        var count = len(which)
+        var m0 = perf_counter_ns()
+        var base = self.gl.unpack_map(total)
+        var map_ns = Int(perf_counter_ns() - m0)
+        var mapped = base != 0
+        var px = List[UInt8]()
+        if not mapped:  # (no mapping: decoded into memory here, uploaded from it)
+            px = List[UInt8](unsafe_uninit_length=max(total, 4))
+            base = Int(px.unsafe_ptr())
+        var good = List[Bool](length=max(count, 1), fill=False)
+        var src = Int(snap.bytes.unsafe_ptr())
+        var ap = Int(at.unsafe_ptr())
+        var bp = Int(nb.unsafe_ptr())
+        var pp = Int(npx.unsafe_ptr())
+        var op = Int(off.unsafe_ptr())
+        var gp = Int(good.unsafe_ptr())
+
+        def work(k: Int) {imm}:
+            var a_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=ap)
+            var b_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=bp)
+            var p_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pp)
+            var o_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=op)
+            var g_ = Pointer[Bool, MutUntrackedOrigin](unsafe_from_address=gp)
+            g_.unsafe_offset(k)[] = rle_decode(src + a_.unsafe_offset(k)[], b_.unsafe_offset(k)[], base + o_.unsafe_offset(k)[], p_.unsafe_offset(k)[])
+
+        var d0 = perf_counter_ns()
+        if count > 0:
+            parallelize(work, count, min(count, num_logical_cores()))
+        dec_ns = Int(perf_counter_ns() - d0)
+        _ = len(at)
+        _ = len(nb)
+        _ = len(npx)
+        _ = len(px)
+        var all_good = True
+        for k in range(count):
+            all_good = all_good and good[k]
+        if mapped and not self.gl.unpack_unmap():
+            all_good = False
+        if not all_good:
+            if mapped:
+                self.gl.unpack_done()
+            if self.tiles.snap_log:
+                print("SNAP: refused (a tile doesn't decode) " + path, flush=True)
+            for sl in slots:
+                self.tiles.free.append(sl)
+            return
+        var u0 = perf_counter_ns()
+        for k in range(count):
+            ref t = snap.tiles[which[k]]
+            var covers = t.x0 == 0 and t.y0 == 0 and t.w == TILE_TEX and t.h == TILE_TEX
+            var ok = self.gl.upload_tile_unpacked(slots[k], t.x0, t.y0, t.w, t.h, off[k], not covers) if mapped else self.gl.upload_tile_part(slots[k], t.x0, t.y0, t.w, t.h, base + off[k])
+            if not ok:
+                if mapped:
+                    self.gl.unpack_done()
                 for sl in slots:
                     self.tiles.free.append(sl)
                 return
             keys.append(_pack(t.i, t.j))
-            slots.append(slot)
-        _ = len(px)
-        self.tiles.snap_restored(scene, i, owner, w, h, keys, slots)
+        if mapped:
+            self.gl.unpack_done()
+        if self.gl.error() != 0:
+            for sl in slots:
+                self.tiles.free.append(sl)
+            return
+        var up_ns = Int(perf_counter_ns() - u0)
+        _ = len(snap.bytes)
+        var e0 = perf_counter_ns()
+        var parts = List[Int]()
+        for k in range(count):
+            ref t = snap.tiles[which[k]]
+            parts += [t.x0, t.y0, t.w, t.h]
+        self.tiles.snap_restored(scene, i, owner, w, h, keys, slots, parts)
         if self.tiles.snap_log:
-            print("SNAP: restore took " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms (read " + String(Float64(Int(t1 - t0)) / 1e6)
-                  + ", decode " + String(Float64(dec_ns) / 1e6) + ", " + String(len(snap.bytes)) + " bytes)", flush=True)
+            print("SNAP: restore took " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms (read " + String(Float64(Int(tr - t0)) / 1e6)
+                  + ", slots " + String(Float64(Int(t1 - tr)) / 1e6) + ", map " + String(Float64(map_ns) / 1e6) + ", decode " + String(Float64(dec_ns) / 1e6) + ", restored " + String(Float64(Int(perf_counter_ns() - e0)) / 1e6) + ", upload " + String(Float64(up_ns) / 1e6) + (" from a mapped buffer" if mapped else "")
+                  + ", " + String(len(snap.bytes)) + " bytes)", flush=True)
 
     def draw(mut self, scene: Scene, prev: Scene, owner: Int, w: Int, h: Int) -> Int:
         """The scene into a free ring texture of w × h, fenced: its slot, or -1 (every texture still held, or GL

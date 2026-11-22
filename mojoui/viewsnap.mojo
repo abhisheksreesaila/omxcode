@@ -23,6 +23,7 @@ from std.memory import Pointer, bitcast
 from std.sys import argv
 from mojoui.shared import get_shared, put_shared
 from mojoui.libc import rename, unlink
+from mojoui import libc
 
 comptime SLOT_SNAP_RENDERER = 235  # mojoui.shared slot: the GPU 2D renderer's id (0: none yet: no snapshot is used)
 comptime SNAP_MAGIC = "MOJOSNP1"
@@ -235,13 +236,30 @@ struct ViewSnap(Movable):
 
 
 def _read_all(path: String, limit: Int = -1) -> List[UInt8]:
+    """The file's bytes (at most `limit`), in one buffer of its size and as few read() calls as it takes (std's
+    read_bytes grew its buffer as it went: a 5 MB snapshot took 3–8 ms, measured)."""
+    var size = 0
     try:
-        var f = open(path, "r")
-        var b = f.read_bytes(limit) if limit > 0 else f.read_bytes()
-        f.close()
-        return b^
+        size = Int(stat(path).st_size)
     except:
         return List[UInt8]()
+    var n = min(size, limit) if limit > 0 else size
+    if n <= 0:
+        return List[UInt8]()
+    var fd = libc.open_read(path)
+    if fd < 0:
+        return List[UInt8]()
+    var b = List[UInt8](unsafe_uninit_length=n)
+    var got = 0
+    while got < n:
+        var r = libc.read_fd(fd, Int(b.unsafe_ptr()) + got, n - got)
+        if r <= 0:
+            break
+        got += r
+    _ = libc.close(fd)
+    if got < n:
+        b.resize(got, 0)
+    return b^
 
 
 def snap_read(path: String, head_only: Bool = False) -> ViewSnap:

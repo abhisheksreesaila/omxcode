@@ -291,6 +291,16 @@ def pthread_setspecific(key: Int, value: Int) -> Int:
 
 # files by address (mojoui.log): std's FileDescriptor and Flare declare write() their own ways, so these are looked up ---
 
+def open_read(var path: String) -> Int:
+    """The file opened for reading (O_RDONLY | O_CLOEXEC): the fd, or -1."""
+    var flags = 0x1000000 if CompilationTarget.is_macos() else 0x80000
+    var f = _sym("open")
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, c_int) thin abi("C") -> c_int]()[]
+    var fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags)))
+    _ = path.byte_length()
+    return fd
+
+
 def open_append(var path: String) -> Int:
     """The file opened for appending (O_WRONLY | O_APPEND | O_CLOEXEC), made with mode 0600 when missing: the fd, or -1.
     open() is variadic, and on Apple's arm64 a variadic mode travels on the stack, where a fixed-argument call never

@@ -279,6 +279,7 @@ struct BoardLook(Movable):
     var keep_path: String  # (D-7956) the file the board's last view is kept in ("": none), the app's tag for what it
     var keep_tag: String  # shows ("": being edited: nothing kept or shown), and whether its objects are still loading
     var keep_hold: Bool
+    var keep_note: String  # the app's words kept in the file's head (kept_note() reads them back first)
     var build: Int
 
     def __init__(out self, family: String = "Source Serif 4", line_height: Float64 = 1.16):
@@ -302,6 +303,7 @@ struct BoardLook(Movable):
         self.keep_path = ""
         self.keep_tag = ""
         self.keep_hold = False
+        self.keep_note = ""
         self.build = build_id()
 
     def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
@@ -315,6 +317,16 @@ struct BoardLook(Movable):
             return False
         var want = SnapKey(tag, renderer_id(), self.build, v.scale * k, snap_px(v.x * k), snap_px(v.y * k), Int(view_w * k + 0.5), Int(view_h * k + 0.5))
         return h.key.same(want)
+
+    def kept_note(self, path: String, tag: String) -> String:
+        """(D-7956) The note kept with the board's last view at path when it was kept for this tag ("" otherwise): what
+        the app needs to lay the view out (its page grid) before the document is read, to ask kept_view() with."""
+        if path == "" or tag == "" or renderer_id() == 0:
+            return ""
+        var h = snap_read(path, True)
+        if not h.ok or h.key.tag != tag:
+            return ""
+        return h.note
 
     def style_of(self, ref o: Obj) -> TextStyle:
         var st = TextStyle(o.family if o.family != "" else self.family, o.weight, False, o.size)
@@ -372,7 +384,7 @@ struct BoardLook(Movable):
         # only a margin inside the culled rect: that is the extent. The window stays inside it: 64 px were added first)
         p.layer_tiles(tx0 + 64, ty0 + 64, tx1 - 64, ty1 - 64)
         if self.keep_path != "":
-            p.layer_snapshot(self.keep_path, self.keep_tag, self.keep_hold)
+            p.layer_snapshot(self.keep_path, self.keep_tag, self.keep_hold, self.keep_note)
         for d in range(len(self.dmg) // 4):
             p.layer_damage(self.since, self.dmg[4 * d], self.dmg[4 * d + 1], self.dmg[4 * d + 2], self.dmg[4 * d + 3])
         var any_lift = len(self.lift_ids) > 0

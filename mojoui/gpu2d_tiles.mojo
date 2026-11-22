@@ -322,6 +322,8 @@ struct TileSet(Movable):
     var bins: OpBins
     var snap: Bool  # (D-7956) the fallback tiling is a restored snapshot (kept through damage until replaced)
     var snap_tried: String  # the snapshot key last looked for (restore once per key)
+    var snap_good: Dict[Int, Int]  # a restored tile → index into snap_good_r: the part it holds (layer units)
+    var snap_good_r: List[Float64]
     var saved: String  # the key of the snapshot on disk (saved or restored here): not saved again
     var save_list: List[Int]  # tiles still to read back for the snapshot being written, and its key and version
     var save_key: String
@@ -347,6 +349,8 @@ struct TileSet(Movable):
         self.bins = OpBins()
         self.snap = False
         self.snap_tried = ""
+        self.snap_good = Dict[Int, Int]()
+        self.snap_good_r = List[Float64]()
         self.saved = ""
         self.save_list = List[Int]()
         self.save_key = ""
@@ -378,6 +382,7 @@ struct Tiles(Movable):
     var budget_ops: Int
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
+    var promote_off: Bool
     var trace: Bool  # MOJOUI_TILE_TRACE=1: why each tile is rastered (diagnosis)
     var build: Int  # (D-7956) this program's build id, for snapshot keys (once)
     var snaps_on: Bool  # MOJOUI_SNAP=0 turns snapshots off (the race prints the open without them)
@@ -398,6 +403,7 @@ struct Tiles(Movable):
         self.trace = getenv("MOJOUI_TILE_TRACE") == "1"
         self.build = build_id()
         self.snaps_on = getenv("MOJOUI_SNAP") != "0"
+        self.promote_off = getenv("MOJOUI_SNAP_PROMOTE") == "0"  # (A/B: the snapshot replaced by rasters, as before)
         self.snap_log = getenv("MOJOUI_SNAP_LOG") == "1"
 
     def begin_frame(mut self):
@@ -463,6 +469,16 @@ struct Tiles(Movable):
         if not self.snap_wanted(scene, i):
             return ""
         var s = self._set(scene.layer_keys[i], owner)
+        var v = scene.layer_versions[i]
+        if not self.sets[s].snap and (self.sets[s].version != v or v < 0):
+            var since = scene.layer_since[i]
+            if not (since >= 0 and since == self.sets[s].version and v >= 0):
+                # a new picture (no damage from the one shown: another document, a cold open): what's kept goes now,
+                # as plan() would drop it, so a snapshot of it shows in this frame, not the next
+                self.damaged += len(self.sets[s].tiles)
+                self._drop_all(s)
+                self.sets[s].version = v
+                self.sets[s].snap_tried = ""
         if len(self.sets[s].tiles) > 0 or len(self.sets[s].fb) > 0:
             return ""
         var kt = self.snap_key(scene, i, w, h).text()
@@ -475,13 +491,26 @@ struct Tiles(Movable):
         """A texture slot for a restored tile of layer i (-1: none free)."""
         return self._slot(self._set(scene.layer_keys[i], owner))
 
-    def snap_restored(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, keys: List[Int], slots: List[Int]):
-        """The backend uploaded a matching snapshot's tiles (packed keys → slots): they are the fallback tiling at the
-        layer's zoom until its real tiles are rastered."""
+    def snap_restored(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, keys: List[Int], slots: List[Int], parts: List[Int]):
+        """The backend uploaded a matching snapshot's tiles (packed keys → slots; parts: each one's x0, y0, w, h kept,
+        texture px): they are the fallback tiling at the layer's zoom while the layer holds; once it stops holding
+        (its ops in the view are the document's) they become its tiles, each good for the part it holds (_promote)."""
         var s = self._set(scene.layer_keys[i], owner)
         self._drop_fb(s)
+        self.sets[s].snap_good = Dict[Int, Int]()
+        self.sets[s].snap_good_r = List[Float64]()
+        var tk = scene.layer_tk[i]
         for q in range(len(keys)):
             self.sets[s].fb[keys[q]] = slots[q]
+            var ij = _unpack(keys[q])
+            var ox = Float64(ij[0] * TILE - TILE_BORDER)
+            var oy = Float64(ij[1] * TILE - TILE_BORDER)
+            self.sets[s].snap_good[keys[q]] = len(self.sets[s].snap_good_r) // 4
+            # (the part kept, inside the tile's own content px: its border holds a neighbour's pixels)
+            self.sets[s].snap_good_r.append(max(ox + Float64(parts[4 * q]), Float64(ij[0] * TILE)) / tk)
+            self.sets[s].snap_good_r.append(max(oy + Float64(parts[4 * q + 1]), Float64(ij[1] * TILE)) / tk)
+            self.sets[s].snap_good_r.append(min(ox + Float64(parts[4 * q] + parts[4 * q + 2]), Float64((ij[0] + 1) * TILE)) / tk)
+            self.sets[s].snap_good_r.append(min(oy + Float64(parts[4 * q + 1] + parts[4 * q + 3]), Float64((ij[1] + 1) * TILE)) / tk)
         self.sets[s].fb_k = scene.layer_tk[i]
         self.sets[s].k = scene.layer_tk[i]
         self.sets[s].k_seen = scene.layer_tk[i]
@@ -489,6 +518,28 @@ struct Tiles(Movable):
         self.sets[s].saved = self.snap_key(scene, i, w, h).text()
         if self.snap_log:
             print("SNAP: restored " + String(len(keys)) + " tiles of " + scene.layer_keys[i], flush=True)
+
+    def _promote(mut self, s: Int):
+        """(D-7956) A restored snapshot becomes the layer's tiles: its layer stopped holding, so its ops in the view are
+        the document the snapshot was kept of, and each tile is what a raster at this zoom draws there (test_viewsnap:
+        identical), good for the part it holds. Nothing is rastered again to replace it; a pan extends a tile by strips
+        (_extend), an edit marks its part stale, as for any tile."""
+        swap(self.sets[s].tiles, self.sets[s].fb)
+        self.sets[s].k = self.sets[s].fb_k
+        self.sets[s].fb_k = 0
+        self.sets[s].good = Dict[Int, Int]()
+        self.sets[s].good_r = List[Float64]()
+        self.sets[s].dirty = Dict[Int, Int]()
+        self.sets[s].dirty_r = List[Int]()
+        for e in self.sets[s].snap_good.items():
+            self.sets[s].good[e.key] = len(self.sets[s].good_r) // 4
+            for c in range(4):
+                self.sets[s].good_r.append(self.sets[s].snap_good_r[4 * e.value + c])
+        self.sets[s].snap = False
+        self.sets[s].snap_good = Dict[Int, Int]()
+        self.sets[s].snap_good_r = List[Float64]()
+        if self.snap_log:
+            print("SNAP: promoted " + String(len(self.sets[s].tiles)) + " tiles of " + self.sets[s].key, flush=True)
 
     def _save_abort(mut self, s: Int):
         self.sets[s].save_list = List[Int]()
@@ -528,7 +579,7 @@ struct Tiles(Movable):
             self.sets[s].save_key = kt
             self.sets[s].save_version = scene.layer_versions[i]
             self.sets[s].writer = List[SnapWriter]()
-            self.sets[s].writer.append(SnapWriter(scene.layer_snap[i], self.snap_key(scene, i, w, h), ""))
+            self.sets[s].writer.append(SnapWriter(scene.layer_snap[i], self.snap_key(scene, i, w, h), scene.layer_snap_note[i]))
         else:
             return
         # one tile a frame (an empty one costs nothing: then the next too)
@@ -635,6 +686,8 @@ struct Tiles(Movable):
             if self.snap_log:
                 print("SNAP: withdrawn", flush=True)
             self._drop_fb(s)
+        if self.sets[s].snap and not scene.layer_hold[i] and len(self.sets[s].tiles) == 0 and self.sets[s].fb_k == k and not self.promote_off:
+            self._promote(s)
         if scene.layer_hold[i]:  # (its ops aren't complete in the view: the snapshot, if any, alone; nothing rastered)
             if self.sets[s].snap:
                 var hk = self.sets[s].fb_k
