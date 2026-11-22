@@ -279,6 +279,7 @@ struct BoardLook(Movable):
     var keep_path: String  # (D-7956) the file the board's last view is kept in ("": none), the app's tag for what it
     var keep_tag: String  # shows ("": being edited: nothing kept or shown), and whether its objects are still loading
     var keep_hold: Bool
+    var fills: Int  # (D-7960) looks that found only adoptions (damage from those objects alone, nothing walked)
     var keep_note: String  # the app's words kept in the file's head (kept_note() reads them back first)
     var build: Int
 
@@ -304,6 +305,7 @@ struct BoardLook(Movable):
         self.keep_tag = ""
         self.keep_hold = False
         self.keep_note = ""
+        self.fills = 0
         self.build = build_id()
 
     def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
@@ -440,6 +442,28 @@ struct BoardLook(Movable):
         if lifting and not lift_changed and self.generation == self.seen_gen:
             self.seen_doc = layer.version
             return
+        # (D-7960) only adoptions since the last look (a progressive open filling in): their damage, nothing walked
+        if self.generation == self.seen_gen and not lift_changed and self.snap.have and len(self.lift_ids) == 0:
+            var ad = layer.adoptions(self.seen_doc)
+            if ad:
+                self.seen_doc = layer.version
+                self.fills += 1
+                var rects = List[Float64]()
+                for id in ad.value():
+                    var q = layer.index(id)
+                    if q < 0:
+                        continue
+                    ref o = layer.objs[q]
+                    if o.kind == CONNECTOR:
+                        rects += self.snap.append(o.id, _obj_key(o), o.ax, o.ay, o.bx, o.by, o.line_width + CONNECTOR_HEAD + 9)
+                    else:
+                        var b = self.paint_box(o)
+                        rects += self.snap.append(o.id, _obj_key(o), b[0], b[1], b[2], b[3])
+                if len(rects) > 0:
+                    self.since = self.board_version
+                    self.board_version += 1
+                    self.dmg = rects^
+                return
         self.seen_doc = layer.version
         self.seen_gen = self.generation
         self.snap_lift = self.lift_key.copy()

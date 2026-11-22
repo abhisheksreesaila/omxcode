@@ -127,6 +127,28 @@ struct DamageSnap(Movable):
         self.have = True
         return self.out.copy()
 
+    def append(mut self, id: Int, key: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64, pad: Float64 = -1) -> List[Float64]:
+        """(D-7960) An item that came while nothing else changed (a progressive open adopting it): added to the snapshot
+        as if fed, its damage returned, nothing walked. Outside a begin()/finish(). pad ≥ 0: a line, as feed_line."""
+        self.out.clear()
+        var p = self.at.get(id, -1) if self.have else -1
+        if p >= 0:  # (already there: a change of it)
+            self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
+            self.keys[p] = key
+            self.boxes[4 * p] = x0
+            self.boxes[4 * p + 1] = y0
+            self.boxes[4 * p + 2] = x1
+            self.boxes[4 * p + 3] = y1
+            self.pads[p] = pad
+        else:
+            self.at[id] = len(self.ids)
+            self.ids.append(id)
+            self.keys.append(key)
+            self.boxes += [x0, y0, x1, y1]
+            self.pads.append(pad)
+        self._emit(x0, y0, x1, y1, pad)
+        return self.out.copy()
+
     def reset(mut self):
         """Forget the snapshot (the next finish() is fresh)."""
         self.have = False

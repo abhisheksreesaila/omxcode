@@ -1,4 +1,5 @@
-# Goal 79, D-7940: a whole board kept as raster tiles, end to end. mojoui.pagedesk's BoardLook paints Personal Note's
+# Goal 79, D-7940: a whole board kept as raster tiles, end to end. (D-7960: a progressive open's slices damage only
+# what they adopt, nothing walked: still tiled == direct.) mojoui.pagedesk's BoardLook paints Personal Note's
 # stress note (5,296 objects, build/g79/race/note-stress.json; or the 600-object note, or a generated board) into a
 # tiled layer whose damage comes from mojoui.damage; mojoui.objectlayer edits it (a move, new words, a colour, a delete,
 # undo and redo, a drag whose objects are lifted out of the tiles and dropped back, a pan, a zoom that settles; review 2:
@@ -292,4 +293,5 @@ def main() raises:
         check("open complete", g2, s3, p2)
         g2.gl.close()
         assert_true(frames >= 2, "the open came in over several frames")
+        assert_true(look2.fills >= frames - 2, "(D-7960) the slices' damage came from the adopted objects alone: " + String(look2.fills) + " of " + String(frames))
     print("boardraster: ok")

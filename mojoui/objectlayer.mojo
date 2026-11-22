@@ -346,6 +346,10 @@ struct ObjectLayer(Movable):
     var rev_counter: Int
     var selected: List[Int]  # ids, in the order they were picked
     var history: History[Change]
+    var adopt_ids: List[Int]  # (D-7960) objects adopted (adopt_as), with the version after each, and the version
+    var adopt_vers: List[Int]  # after the last change that wasn't an adoption: adoptions(since) answers from them
+    var edit_ver: Int
+    var adopting: Bool
     var version: Int  # every change to the objects (the objects layer's version)
     var sel_version: Int
     # the open step
@@ -404,6 +408,10 @@ struct ObjectLayer(Movable):
         self.rev_counter = 0
         self.selected = List[Int]()
         self.history = History[Change](cap=100000, window_ms=0)
+        self.adopt_ids = List[Int]()
+        self.adopt_vers = List[Int]()
+        self.edit_ver = 0
+        self.adopting = False
         self.version = 0
         self.sel_version = 0
         self.txn = Change(0)
@@ -608,6 +616,22 @@ struct ObjectLayer(Movable):
     def _changed(mut self):
         self.version += 1
         self.dirty = True
+        if not self.adopting:
+            self.edit_ver = self.version
+
+    def adoptions(self, since: Int) -> Optional[List[Int]]:
+        """(D-7960) The ids adopted since version `since` when every change since then was an adoption (a progressive
+        open filling in), else None (something else changed: compare everything). A drawing that kept a snapshot of
+        the layer at `since` damages only these."""
+        if self.edit_ver > since or since > self.version:
+            return None
+        var out = List[Int]()
+        var q = len(self.adopt_vers) - 1
+        while q >= 0 and self.adopt_vers[q] > since:
+            q -= 1
+        for r in range(q + 1, len(self.adopt_ids)):
+            out.append(self.adopt_ids[r])
+        return out^
 
     def _prune_selection(mut self):
         var keep = List[Int]()
@@ -1959,9 +1983,13 @@ struct ObjectLayer(Movable):
             o.rev = self._next_rev()
         self.pos_of[id] = len(self.objs)
         self.objs.append(o^)
+        self.adopting = True
         if self.objs[len(self.objs) - 1].kind == CONNECTOR:
             self._route(len(self.objs) - 1)
         self._changed()
+        self.adopting = False
+        self.adopt_ids.append(id)
+        self.adopt_vers.append(self.version)
         return id
 
     def order_by_z(mut self):
