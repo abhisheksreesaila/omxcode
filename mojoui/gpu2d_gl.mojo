@@ -191,6 +191,10 @@ comptime F_GET_STRINGI = 71
 comptime F_MAP_BUFFER_RANGE = 72
 comptime F_UNMAP_BUFFER = 73
 comptime F_COUNT = 74
+comptime C_BYTES = 0  # (D-7965) counters after the entry points'
+comptime C_MULTI = 1
+comptime C_EXT = 2
+comptime C_BASE = 3
 comptime GL_PIXEL_UNPACK_BUFFER = 0x88EC
 comptime GL_MAP_WRITE_BIT = 0x0002
 comptime GL_MAP_INVALIDATE_BUFFER_BIT = 0x0008
@@ -639,6 +643,16 @@ struct GL2D(Movable):
     var tile_ds: Int
     var tile_color: Int
     var tile_tex: List[Int]  # by tile slot (0: not made yet)
+    var state_cache: Bool  # (D-7966) MOJOUI_GL_CACHE=0: every run sets all its state (the comparison)
+    var base_instance: Int  # glDrawArraysInstancedBaseInstance (GL_ARB_base_instance), 0: none
+    var run_vao: Int  # within a layer's runs: the vertex array, array buffer, attribute base, replace flag and
+    var run_buf: Int  # texture last set (-1: unknown)
+    var run_pointed: Int
+    var run_replace: Int
+    var run_tex: Int
+    var vao_buf: List[Int]  # (D-7966) per vertex array: the buffer its attributes point at from offset 0 (-1: unknown)
+    var counting: Bool  # (D-7965) MOJOUI_GL_COUNT=1
+    var counts: List[Int]
     var unpack_buf: Int  # (D-7956) the pixel-unpack buffer a snapshot's tiles are decoded into (0: not made yet)
     var unpack_cap: Int  # its storage's size (kept between restores: new storage cost ~2.7 ms each time, measured)
     var unpack_sync: Int  # a fence after the last uploads from it (0: none)
@@ -734,6 +748,16 @@ struct GL2D(Movable):
         self.tile_color = 0
         self.tile_tex = List[Int]()
         self.unpack_buf = 0
+        self.counting = getenv("MOJOUI_GL_COUNT") == "1"
+        self.state_cache = getenv("MOJOUI_GL_CACHE") != "0"
+        self.base_instance = 0
+        self.run_vao = -1
+        self.run_buf = -1
+        self.run_pointed = -1
+        self.run_replace = -1
+        self.run_tex = -1
+        self.vao_buf = List[Int](length=8, fill=-1)
+        self.counts = List[Int](length=F_COUNT + 4, fill=0)
         self.unpack_cap = 0
         self.unpack_sync = 0
         self.timing_open = False
@@ -745,7 +769,38 @@ struct GL2D(Movable):
         return Int(self.out.unsafe_ptr()) + 8 * k
 
     def f(self, i: Int) -> Int:
+        if self.counting:  # (MOJOUI_GL_COUNT=1, D-7965: calls per entry point; the array is written through its address)
+            Pointer[Int, MutUntrackedOrigin](unsafe_from_address=Int(self.counts.unsafe_ptr()) + 8 * i)[] += 1
         return self.fp[i]
+
+    def count_extra(self, slot: Int, n: Int):
+        """(D-7965) A counter beyond the entry points: C_BYTES (bytes uploaded), C_MULTI (multi-draw calls), C_EXT
+        (other extension calls)."""
+        if self.counting:
+            Pointer[Int, MutUntrackedOrigin](unsafe_from_address=Int(self.counts.unsafe_ptr()) + 8 * (F_COUNT + slot))[] += n
+
+    def counts_reset(mut self):
+        for q in range(len(self.counts)):
+            self.counts[q] = 0
+
+    def counts_line(self) -> String:
+        """This frame's GL calls so far: total, draws, bytes uploaded, state changes."""
+        var total = 0
+        for q in range(F_COUNT):
+            total += self.counts[q]
+        total += self.counts[F_COUNT + C_MULTI] + self.counts[F_COUNT + C_EXT] + self.counts[F_COUNT + C_BASE]
+        var draws = self.counts[F_DRAW_ARRAYS] + self.counts[F_DRAW_ARRAYS_INSTANCED] + self.counts[F_COUNT + C_MULTI] + self.counts[F_COUNT + C_BASE]
+        return ("calls " + String(total) + " draws " + String(draws) + " (instanced " + String(self.counts[F_DRAW_ARRAYS_INSTANCED]) + ", multi "
+                + String(self.counts[F_COUNT + C_MULTI]) + ", base-instance " + String(self.counts[F_COUNT + C_BASE]) + ") bytes " + String(self.counts[F_COUNT + C_BYTES]) + " uploads "
+                + String(self.counts[F_BUFFER_SUB_DATA] + self.counts[F_BUFFER_DATA] + self.counts[F_TEX_SUB_IMAGE_2D]) + " (bufferdata "
+                + String(self.counts[F_BUFFER_DATA]) + ") program " + String(self.counts[F_USE_PROGRAM]) + " texbind " + String(self.counts[F_BIND_TEXTURE])
+                + " fbo " + String(self.counts[F_BIND_FRAMEBUFFER]) + " fbtex " + String(self.counts[F_FRAMEBUFFER_TEXTURE_2D]) + " scissor "
+                + String(self.counts[F_SCISSOR]) + " enable/disable " + String(self.counts[F_ENABLE] + self.counts[F_DISABLE]) + " blend "
+                + String(self.counts[F_BLEND_FUNC_SEPARATE]) + " uniform " + String(self.counts[F_UNIFORM_2F] + self.counts[F_UNIFORM_3F] + self.counts[F_UNIFORM_4F] + self.counts[F_UNIFORM_1I])
+                + " vao " + String(self.counts[F_BIND_VERTEX_ARRAY]) + " bindbuf " + String(self.counts[F_BIND_BUFFER]) + " attrib "
+                + String(self.counts[F_VERTEX_ATTRIB_POINTER] + self.counts[F_ENABLE_VERTEX_ATTRIB_ARRAY]) + " clear " + String(self.counts[F_CLEAR])
+                + " stencil " + String(self.counts[F_STENCIL_FUNC] + self.counts[F_STENCIL_OP] + self.counts[F_STENCIL_OP_SEPARATE] + self.counts[F_STENCIL_MASK])
+                + " viewport " + String(self.counts[F_VIEWPORT]) + " geterror " + String(self.counts[F_GET_ERROR]))
 
     def gen(mut self, which: Int) -> Int:
         """glGen*(1, &id) → id."""
@@ -807,6 +862,10 @@ struct GL2D(Movable):
                 has_mixed = True
             elif ext == "GL_EXT_multi_draw_arrays":
                 has_multi = True
+            elif ext == "GL_ARB_base_instance" and not es and getenv("MOJOUI_GL_BASEINSTANCE") != "0":
+                self.base_instance = gl_proc("glDrawArraysInstancedBaseInstance")
+            elif ext == "GL_EXT_base_instance" and es and getenv("MOJOUI_GL_BASEINSTANCE") != "0":
+                self.base_instance = gl_proc("glDrawArraysInstancedBaseInstanceEXT")
             elif ext == "GL_EXT_multi_draw_indirect" or (ext == "GL_ARB_multi_draw_indirect" and getenv("MOJOUI_GPU2D_INDIRECT") == "1"):
                 has_indirect = True  # (desktop GL takes the indirect path only when asked: tests cover it there)
         if has_indirect and not es:
@@ -1108,11 +1167,13 @@ struct GL2D(Movable):
         if append and have <= n and n <= self.lcap[i]:
             if n > have:
                 fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, have, n - have, addr + have)
+                self.count_extra(C_BYTES, n - have)
                 self.uploaded += n - have
         elif n > 0:
             var cap = max(n + n // 2, 65536)
             fcall[NoneType](self.f(F_BUFFER_DATA), target, cap, 0, c_uint(GL_STREAM_DRAW))
             fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
+            self.count_extra(C_BYTES, n)
             self.lcap[i] = cap
             self.uploaded += n
         self.lsize[i] = n
@@ -1129,6 +1190,45 @@ struct GL2D(Movable):
             var loc = gi
             var off = first * stride + gi * 16
             fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(loc), c_int(4), c_uint(GL_FLOAT), UInt8(0), c_int(stride), off)
+
+    def _run_forget(mut self):
+        self.run_vao = -1
+        self.run_buf = -1
+        self.run_pointed = -1
+        self.run_replace = -1
+        self.run_tex = -1
+
+    def _run_draw(mut self, b: Int, set: Int, first: Int, count: Int):
+        """(D-7966) An instanced run of vertex array b from buffer set `set`. With base instances the array's attributes
+        point at its buffer's start once (a vertex array keeps them: binding it is enough while its buffer is the same)
+        and each run names its first instance; else they are pointed at the run's first (GL 3.3)."""
+        var bufid = self.buf(set, b)
+        var vao = self.vao[b]
+        if not self.state_cache or self.run_vao != vao:
+            fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(vao))
+            self.run_vao = vao
+        if self.state_cache and self.base_instance != 0:
+            if self.vao_buf[b] != bufid:
+                fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(bufid))
+                self.point(b, 0)
+                self.vao_buf[b] = bufid
+            fcall[NoneType](self.base_instance, c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(count), c_uint(first))
+            self.count_extra(C_BASE, 1)
+        else:
+            fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(bufid))
+            self.point(b, first)
+            self.vao_buf[b] = -1
+            fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(count))
+        self.draws += 1
+
+    def vao_point(mut self, b: Int, bufid: Int) -> Bool:
+        """(D-7966) Vertex array b (bound) must point at bufid from offset 0: True when it must be (re)pointed now (the
+        buffer bound for it), False when it already does (nothing to set)."""
+        if self.state_cache and self.vao_buf[b] == bufid:
+            return False
+        fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(bufid))
+        self.vao_buf[b] = bufid
+        return True
 
     def use(mut self, p: Int, w: Int, h: Int, mut cur: Int):
         if cur == p:
@@ -1230,6 +1330,7 @@ struct GL2D(Movable):
                     self.msaa_ds = 0
                     return self.begin(tex, w, h)
             fcall[NoneType](self.cov_mod, c_uint(GL_ALPHA))
+            self.count_extra(C_EXT, 1)
         self.cw = w
         self.ch = h
         self.timer_begin()
@@ -1254,6 +1355,7 @@ struct GL2D(Movable):
         the ends of their lists): only those are uploaded and planned."""
         var w = self.cw
         var h = self.ch
+        self._run_forget()
         if upload:
             var add = append_from >= 0 and self.multi_draw != 0 and set < len(self.pgroups)
             self.stream(set, B_QUAD, frame.quads, add)
@@ -1261,6 +1363,7 @@ struct GL2D(Movable):
             self.plan_polys(frame, set, append_from if add else 0)
         if len(frame.images) > 0:
             self.images(frame)
+        self._run_forget()  # (uploads and images bound buffers and textures of their own)
         var cur = self.cur_prog
         for li in range(len(frame.layers)):
             ref layer = frame.layers[li]
@@ -1277,22 +1380,19 @@ struct GL2D(Movable):
                 if run.pipe == PIPE_QUAD:
                     self.use(P_QUAD, w, h, cur)
                     self.set_xf(P_QUAD, tx, ty, tk)
-                    fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.loc_replace), c_int(1 if run.blend == BLEND_REPLACE else 0))
-                    fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.vao[B_QUAD]))
-                    fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(self.buf(set, B_QUAD)))
-                    self.point(B_QUAD, run.first)
-                    fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(run.count))
-                    self.draws += 1
+                    var rep = 1 if run.blend == BLEND_REPLACE else 0
+                    if not self.state_cache or rep != self.run_replace:
+                        fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.loc_replace), c_int(rep))
+                        self.run_replace = rep
+                    self._run_draw(B_QUAD, set, run.first, run.count)
                 elif run.pipe == PIPE_GLYPH:
                     self.use(P_GLYPH, w, h, cur)
                     self.set_xf(P_GLYPH, tx, ty, tk)
-                    fcall[NoneType](self.f(F_ACTIVE_TEXTURE), c_uint(GL_TEXTURE0))
-                    fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
-                    fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.vao[B_GLYPH]))
-                    fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(self.buf(set, B_GLYPH)))
-                    self.point(B_GLYPH, run.first)
-                    fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(run.count))
-                    self.draws += 1
+                    if not self.state_cache or self.run_tex != self.atlas_tex:
+                        fcall[NoneType](self.f(F_ACTIVE_TEXTURE), c_uint(GL_TEXTURE0))
+                        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
+                        self.run_tex = self.atlas_tex
+                    self._run_draw(B_GLYPH, set, run.first, run.count)
                 elif run.pipe == PIPE_IMAGE:
                     self.use(P_IMAGE, w, h, cur)
                     self.set_xf(P_IMAGE, tx, ty, tk)
@@ -1308,9 +1408,12 @@ struct GL2D(Movable):
                         fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.loc_clip), frame.images[at + 8], frame.images[at + 9], frame.images[at + 10], frame.images[at + 11])
                         fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(1))
                         self.draws += 1
+                    self._run_forget()
                 else:
                     self.polys(set, ri, tx, ty, tk, w, h, cur)
+                    self._run_forget()
         self.cur_prog = cur
+        self._run_forget()
 
     def timer_begin(mut self):
         """This frame's GPU time: a time-elapsed query from here to end() (begun once a frame; tile rasters drawn before
@@ -1379,6 +1482,7 @@ struct GL2D(Movable):
         if self.mixed:
             fcall[NoneType](self.f(F_FRAMEBUFFER_TEXTURE_2D), c_uint(GL_FRAMEBUFFER), c_uint(GL_COLOR_ATTACHMENT0), c_uint(GL_TEXTURE_2D), c_uint(tex), c_int(0))
             fcall[NoneType](self.cov_mod, c_uint(GL_ALPHA))
+            self.count_extra(C_EXT, 1)
         self.cw = TILE_TEX
         self.ch = TILE_TEX
         self.set_sizes(TILE_TEX, TILE_TEX)
@@ -1761,6 +1865,7 @@ struct GL2D(Movable):
                 fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(self.lvbo[i]))
                 if len(covers) > 0:
                     fcall[NoneType](self.f(F_BUFFER_SUB_DATA), c_uint(GL_ARRAY_BUFFER), have, len(covers) * 4, Int(covers.unsafe_ptr()))
+                    self.count_extra(C_BYTES, len(covers) * 4)
                 self.lsize[i] = have + len(covers) * 4
                 self.uploaded += len(covers) * 4
                 swap(covers, self.cov_stage)
@@ -1809,12 +1914,12 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_ENABLE), c_uint(GL_SCISSOR_TEST))
         # the vertex arrays point at this set's buffers once for the run (fans: x, y; covers: colour, bounds)
         fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.vao[B_COVER]))
-        fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(self.buf(set, B_COVER)))
-        fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(1), c_int(4), c_uint(GL_FLOAT), UInt8(0), c_int(32), 0)
-        fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(2), c_int(4), c_uint(GL_FLOAT), UInt8(0), c_int(32), 16)
+        if self.vao_point(B_COVER, self.buf(set, B_COVER)):
+            fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(1), c_int(4), c_uint(GL_FLOAT), UInt8(0), c_int(32), 0)
+            fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(2), c_int(4), c_uint(GL_FLOAT), UInt8(0), c_int(32), 16)
         fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.vao[B_FAN]))
-        fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(self.buf(set, B_FAN)))
-        fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(0), c_int(2), c_uint(GL_FLOAT), UInt8(0), c_int(8), 0)
+        if self.vao_point(B_FAN, self.buf(set, B_FAN)):
+            fcall[NoneType](self.f(F_VERTEX_ATTRIB_POINTER), c_uint(0), c_int(2), c_uint(GL_FLOAT), UInt8(0), c_int(8), 0)
         if self.indirect and self.md_on[set]:
             fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(0x8F3F), c_uint(self.buf(set, B_INDIRECT)))
         var sx0 = -1
@@ -1860,9 +1965,11 @@ struct GL2D(Movable):
             fcall[NoneType](self.f(F_BIND_VERTEX_ARRAY), c_uint(self.vao[B_FAN]))
             if self.md_on[set] and self.indirect:  # (fan0: the group's first command, fan_n: its polygons)
                 fcall[NoneType](self.multi_draw, c_uint(GL_TRIANGLES), 16 * fan0, c_int(fan_n), c_int(0))
+                self.count_extra(C_MULTI, 1)
             elif self.md_on[set]:  # (fan0: the group's first entry in md_first/md_count, fan_n: its polygons)
                 fcall[NoneType](self.multi_draw, c_uint(GL_TRIANGLES), Int(self.md_first[set].unsafe_ptr()) + 4 * fan0,
                                 Int(self.md_count[set].unsafe_ptr()) + 4 * fan0, c_int(fan_n))
+                self.count_extra(C_MULTI, 1)
             else:
                 fcall[NoneType](self.f(F_DRAW_ARRAYS), c_uint(GL_TRIANGLES), c_int(fan0), c_int(fan_n))
             # 2. the covers where the stencil isn't zero, zeroing it as they go
@@ -2380,6 +2487,8 @@ struct GPU2D(Movable):
             return -1
         var t0 = perf_counter_ns()
         self.stamp += 1
+        if self.gl.counting:
+            self.gl.counts_reset()
         self._switch(owner)
         if not self.prewarmed and self.stamp >= 2 and self.tiles_on and snapshots_expected():
             self._prewarm(w, h)
@@ -2563,6 +2672,9 @@ struct GPU2D(Movable):
             self._stamp(PASS_END)
             self._stamps(scene, n)
         _ = self.gl.fence(slot)
+        if self.gl.counting:
+            print("GLCOUNT: " + self.gl.counts_line() + " · tiles rastered " + String(self.tiles.rastered) + " layers rebuilt " + String(self.rebuilt)
+                  + " cpu " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms", flush=True)
         if self.tile_trace:
             print("G2DPARTS: pages " + String(Float64(tq1 - tq0) / 1e6) + " layers " + String(Float64(tq2 - tq1) / 1e6) + " end " + String(Float64(perf_counter_ns() - tq2) / 1e6), flush=True)
         self.batch_ns = Int(t1 - t0)
