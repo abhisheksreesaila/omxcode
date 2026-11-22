@@ -43,7 +43,7 @@ TAG = re.compile(r"^card\d+\.(word|sounds|meaning|example|origin)$")
 WORDS = {  # M2: the word, a reference meaning the card's is judged against
     "ephemeral": "lasting for only a very short time",
     "serendipity": "finding something good or valuable by happy chance, without looking for it",
-    "ubiquitous": "present, appearing or found everywhere",
+    "ubiquitous": "existing or being everywhere at the same time, constantly encountered",  # (Merriam-Webster's own words, D-7890: the old paraphrase dropped "at the same time" and the judge then refused a card that said it)
 }
 ROUTING = [  # M5: (what the person says, the kind of card that is right)
     ("What does the word ephemeral mean?", "word"),
