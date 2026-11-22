@@ -8,6 +8,51 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 7 (2026-11-22, autopilot): the kept view, the deferred open, a fast restore
+Decisions D-7956–D-7958; journal "continuation 7". The Mac was still unreachable. The machine was **not quiet**: another
+session's goal 77 apps ran in bursts (15–21 GB and up to 92 % on GPU 1, 100–270 % CPU). The M6 run (11:31–11:37) started
+at load 2.25 and ended at 2.4–2.75; clocks are in build/g79/c7-m6-start.txt / -end.txt; GPU 0 sat at P8 throughout.
+Treat its single-spike rows as suspect, not as proof.
+
+**What changed (all in mojoui; pnote only composes it):**
+- `mojoui.viewsnap` is now wired into pnote. A canvas's settled view is kept on disk, keyed by note, revision, skin, zoom,
+  view, size, GPU and build. The next open shows it in its first frame. The page grid travels in the file's note.
+- `OpenBoard.open_later(TextSource)` reads and skims the note on a job thread (`SqlText`, `start_ui_job`). The view's
+  objects, and both ends of every edge crossing it, come in by parallel slices, and `holding()` stays true until they are in.
+- The restore went from 7.6–19 ms to about 2 ms (4–8 ms the first time in a process). It does one read, decodes every tile
+  in parallel into a mapped pixel-unpack buffer that is kept between restores, then uploads from that buffer.
+- A cold open now restores in its own frame. The restored tiles become real tiles once the hold ends, so nothing is
+  rastered again to replace them.
+- `mojoui.framebudget.FrameBudget` sizes the open's slices to what is left of the frame.
+- The checker labels which path each open took, counts restores, and prints the no-snapshot runs beside the table.
+
+**Race rows that moved (race.md, this run; before = review round 2's final run):**
+| note | row | before | now | |
+|---|---|---|---|---|
+| 600 | open: first frame (judged: from the kept view, 30 of 30 cold opens + the first open) | 25.7 ✗ | **7.8** | ✓ |
+| 600 | open: frames during / press / complete | 3.4/4.7 · 3.2 · 50 | 8.1/8.8 · 5.0 · 53/69 | ✓ ✓ ✓ |
+| 600 | pan 100 % | 3.8 / 6.1 ✓ | 3.9 / **53.6** | ✗ (one spike; p95 unchanged) |
+| 600 | redo | 7.5 / 8.2 ✓ | **9.4 / 11.3** | ✗ (composited run 20.6 / 39: GPU contention) |
+| stress | open: first frame (judged, from the kept view) | 105.9 | **11.7** | ✗ |
+| stress | open: frames during | 9.2 / 10.2 | **12.6 / 16.6** | ✗ (worse) |
+| stress | open: a press during it | 11.1 | **60.6** | ✗ (worse: waits for the job and the whole parse, D-7952) |
+| stress | zoom from 30 % | 5.4 / 21.3 ✗ | 4.6 / 13.9 | ✓ |
+| stress | undo / redo | 10.1 / 10.7 ✗ | 5.7 / 6.2 · 6.3 / 8.9 | ✓ ✓ (no change aimed at them: run-to-run) |
+| 600 / stress | first open ever, no kept view (printed) | — | 27.7 / 112.7 | not judged |
+| 600 / stress | cold opens with MOJOUI_SNAP=0 (printed): first frame | — | 15.1 / 74.4 | not judged |
+
+**Read it honestly.** Where the kept view can be used, the first frame meets D-7946 (a) on the 600 note (7.8 ms). On the
+stress note it comes close (11.7 ms; ~9.6 ms p95 in quieter probes). The first open of a note ever, with nothing kept,
+still parses: 27.7 and 112.7 ms. If the owner rules that this is the open D-7946 (a) judges (D-7958), (a) can't pass on
+the stress note. The cost of the new path is a press during the open: it must finish the whole load (D-7952), which now
+includes waiting for the job, so it takes 60 ms. The stress frames during the open (12.6 / 16.6) are the paint walk plus
+damage tracking over ~5,000 objects each slice, plus slices. Next: edits on a partial board (attack D-7952's
+finish-first), damage from adopted objects without a walk over all of them, lever 3 (undo/redo ops per damaged tile).
+
+**Milestones after this round** (`scripts/check`): M0 PASS (unchanged inputs) · M1 BLOCKED (Mac) · M2, M3, M4
+**PASS** on this build (rerun 11:38–12:0x: SSIM 0.974/0.984/0.972/0.974; canvas 0.992, map 0.986; 28 steps, worst 0.964, notes
+equal) · M5 BLOCKED (Mac) · M6 **FAIL** · M7 BLOCKED (Mac unreachable).
+
 **Review round 2 (11-20, 07:0x–08:2x): a fresh reviewer's NEEDS WORK at 256035e0, and the main session's cold-start
 decision.** Every number here comes from the final M6 run (08:05–08:2x, build/g79/final-check5.log; docs/goals/79/race.md),
 started after waiting 15 minutes for a quiet machine (load 1.3 at the start, 1.5 at the end; no program over 1 GB on

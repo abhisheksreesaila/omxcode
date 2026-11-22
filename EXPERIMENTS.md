@@ -4,6 +4,22 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 7: the kept view and the deferred open (2026-11-22)
+- **Setup:** Linux only on the hidden 1.6× screen (the Mac unreachable). The machine was busy: another session's goal 77
+  apps ran in bursts on GPU 1. The M6 run was at load 2.25–2.75. Probes were compared only as back-to-back pairs.
+- **What worked:** a canvas's settled view is kept on disk (mojoui.viewsnap) and shown in the next open's first frame. The
+  note is read and skimmed on a job thread meanwhile (`OpenBoard.open_later`), and the kept tiles become the board's
+  tiles (no re-raster). The restore went from 7.6–19 ms to about 2 ms (parallel decode into a mapped GL unpack buffer).
+  First frames: 600 note 25.7 → 7.8 ms (passes), stress 105.9 → 11.7 ms (the bar is 8.3).
+- **What broke and was fixed:** jobs abort under `mojo run`'s JIT (AsyncRT), so tests that start jobs are built;
+  `parallelize` can't run on a job thread; a cold open showed its snapshot one frame late; connectors crossing the view
+  loaded after the hold and made 15–18 ms raster frames (the hold now waits for both ends).
+- **What got worse:** a press during the stress open waits for the job and the whole parse, 11 → 60 ms. Stress frames
+  during the open went 9.2 → 12.6 ms p95.
+- **What it means:** a kept view buys the first frame. A silky press during the open needs edits on a partial board.
+- **Next small step:** let an edit touch a partially loaded board (no finish-first); damage from adopted objects without a
+  walk over every object; undo/redo rasters per damaged tile.
+
 ## Goal 79, review round 2: honest opens, OpenBoard, cold start like with like (2026-11-20, morning)
 - **Setup:** a fresh reviewer's NEEDS WORK at 256035e0; Linux only (the Mac unreachable). Final M6 08:05–08:2x on a quiet
   machine (waited 15 min for another session's GPU program to stop; load 1.3–1.5).

@@ -6,46 +6,50 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 - *web*: requestAnimationFrame gaps (frame to frame) in Chromium, which can't go below one refresh, 16.7 ms at 60 Hz; undo and redo are "to the frame after"; open is one open to the first settled frame (its p50 stands for p95 and max): a page load in a new browser context of an already-running Chromium (benchmark-f034's open row).
 - *native work*: each frame's own work: the event, the app's update, the redraw, the GPU time, GTK's paint and a display round trip (the GTK host's framebench). The canvas is handed to the compositor (graphics offload), so GTK never composites it and presentation is not in this number.
 - *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after its work plus its shown time; read the web column against that sum, not against the work alone.
-- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), progressively (mojoui.canvasload, D-7944), its board's raster tiles dropped first and the first timed open coming from another note (D-7951); and once more as the process's very first open of it (PNOTE_FIRST). Every frame counts its draw, its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). Judged by D-7946: (a) the first frame, showing the chrome and the visible board, within 8.3 ms (its max over the cold opens and the first open); (b) every frame after it until the board is complete silky, and the frame showing a press made during the open (the app finishes the load first, D-7952); (c) complete (wall clock, to the frame that shows it) sooner than the web's open; (d) tests/test_canvasload (a pan and an edit during the open) passes: yes. A reopen of a canvas kept parsed at the revision the file still holds is printed after the table, not judged.
+- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), progressively (mojoui.canvasload, D-7944), its board's raster tiles dropped first and the first timed open coming from another note (D-7951); and once more as the process's very first open of it (PNOTE_FIRST). Every frame counts its draw, its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). (D-7956, D-7958) A canvas whose settled view was kept on disk (mojoui.viewsnap: same document revision, skin, zoom, view, size, GPU and build) opens from it: the first frame shows those tiles, the note is read and skimmed on a job thread, the view's objects come in by slices, then the kept tiles become the board's tiles. The first-open row says which path it took and how many cold opens used it; the open without a kept view (the very first open of a note, and MOJOUI_SNAP=0) is printed after the table, not judged. Judged by D-7946: (a) the first frame, showing the chrome and the visible board, within 8.3 ms (its max over the cold opens and the first open); (b) every frame after it until the board is complete silky, and the frame showing a press made during the open (the app finishes the load first, D-7952); (c) complete (wall clock, to the frame that shows it) sooner than the web's open; (d) tests/test_canvasload (a pan and an edit during the open) passes: yes. A reopen of a canvas kept parsed at the revision the file still holds is printed after the table, not judged.
 
 | note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |
 |---|---|---|---|---|---|
-| 600 | open (cold): first frame (the process's first open: 25.7) | 1271.0 / 1271.0 | 25.7 / 25.7 | 11.0 / 11.0 · shown: not measured | ✗ |
-| 600 | open: frames during (n 60) | — | 3.4 / 4.7 | | ✓ |
-| 600 | open: a press during it, the frame that shows it (n 10) | — | 3.2 / 3.2 | | ✓ |
-| 600 | open: complete (wall) | 1271.0 | 49.9 / 50.4 | | ✓ |
-| 600 | pan 30% | 16.8 / 16.8 | 3.7 / 5.4 | 8.8 / 8.9 · shown: not measured | ✓ |
-| 600 | zoom from 30% | 16.7 / 16.8 | 3.6 / 5.0 | 7.3 / 8.9 · shown: not measured | ✓ |
-| 600 | pan 100% | 16.8 / 16.8 | 3.8 / 6.1 | 8.9 / 9.0 · shown: not measured | ✓ |
-| 600 | drag one | 16.8 / 33.2 | 4.4 / 6.1 | 10.6 / 10.8 · shown: not measured | ✓ |
-| 600 | drag 40 | 16.7 / 16.8 | 4.9 / 6.0 | 13.6 / 21.4 · shown: not measured | ✓ |
-| 600 | undo | 16.9 / 17.4 | 5.3 / 7.4 | 9.2 / 11.3 · shown: not measured | ✓ |
-| 600 | redo | 17.1 / 17.1 | 7.5 / 8.2 | 9.1 / 11.0 · shown: not measured | ✓ |
-| 600 | pen | 16.7 / 16.8 | 4.3 / 10.6 | 8.7 / 8.8 · shown: not measured | ✓ |
-| 600 | typing | 16.7 / 16.8 | 4.5 / 5.5 | 9.0 / 9.0 · shown: not measured | ✓ |
-| stress | open (cold): first frame (the process's first open: 105.9) | 1167.0 / 1167.0 | 105.9 / 105.9 | 54.9 / 54.9 · shown: not measured | ✗ |
-| stress | open: frames during (n 124) | — | 9.2 / 10.2 | | ✗ |
-| stress | open: a press during it, the frame that shows it (n 10) | — | 11.1 / 11.1 | | ✗ |
-| stress | open: complete (wall) | 1167.0 | 96.3 / 98.3 | | ✓ |
-| stress | pan 30% | 16.7 / 16.8 | 5.0 / 5.1 | 8.3 / 8.4 · shown: not measured | ✓ |
-| stress | zoom from 30% | 16.8 / 299.9 | 5.4 / 21.3 | 10.3 / 26.7 · shown: not measured | ✗ |
-| stress | pan 100% | 16.8 / 33.2 | 4.5 / 5.1 | 9.3 / 9.4 · shown: not measured | ✓ |
-| stress | drag one | 16.8 / 16.8 | 6.5 / 16.7 | 10.0 / 10.1 · shown: not measured | ✓ |
-| stress | drag 40 | 16.7 / 66.7 | 6.0 / 7.7 | 10.2 / 10.2 · shown: not measured | ✓ |
-| stress | undo | 17.1 / 17.1 | 10.1 / 10.1 | 15.0 / 16.2 · shown: not measured | ✗ |
-| stress | redo | 17.1 / 17.3 | 10.7 / 10.7 | 11.3 / 12.3 · shown: not measured | ✗ |
-| stress | pen | 16.8 / 150.0 | 4.5 / 6.9 | 9.3 / 11.8 · shown: not measured | ✓ |
-| stress | typing | 16.8 / 16.8 | 5.5 / 6.9 | 9.4 / 9.4 · shown: not measured | ✓ |
-| 600 | open again, kept parsed (not judged) | — | 2.6 / 2.6 | | |
-| stress | open again, kept parsed (not judged) | — | 5.9 / 5.9 | | |
+| 600 | open (cold): first frame (the process's first open: 7.8, from the kept view); the kept view shown in 30 of 30 cold opens | 1281.0 / 1281.0 | 7.8 / 7.8 | 27.8 / 27.8 · shown: not measured | ✓ |
+| 600 | open: frames during (n 86) | — | 8.1 / 8.8 | | ✓ |
+| 600 | open: a press during it, the frame that shows it (n 10) | — | 5.0 / 5.0 | | ✓ |
+| 600 | open: complete (wall) | 1281.0 | 52.7 / 69.0 | | ✓ |
+| 600 | pan 30% | 16.7 / 16.8 | 1.5 / 2.7 | 6.0 / 7.7 · shown: not measured | ✓ |
+| 600 | zoom from 30% | 16.8 / 183.3 | 2.7 / 4.9 | 6.0 / 7.8 · shown: not measured | ✓ |
+| 600 | pan 100% | 16.7 / 16.8 | 3.9 / 53.6 | 6.0 / 8.0 · shown: not measured | ✗ |
+| 600 | drag one | 16.8 / 16.8 | 6.4 / 8.8 | 6.1 / 6.2 · shown: not measured | ✓ |
+| 600 | drag 40 | 16.7 / 16.8 | 4.2 / 9.3 | 6.4 / 6.5 · shown: not measured | ✓ |
+| 600 | undo | 16.8 / 16.8 | 4.9 / 6.1 | 24.7 / 49.4 · shown: not measured | ✓ |
+| 600 | redo | 16.8 / 16.8 | 9.4 / 11.3 | 20.6 / 39.0 · shown: not measured | ✗ |
+| 600 | pen | 16.7 / 16.8 | 3.8 / 8.7 | 6.0 / 7.5 · shown: not measured | ✓ |
+| 600 | typing | 16.8 / 16.8 | 3.4 / 4.6 | 5.9 / 6.2 · shown: not measured | ✓ |
+| stress | open (cold): first frame (the process's first open: 11.7, from the kept view); the kept view shown in 30 of 30 cold opens | 1147.0 / 1147.0 | 11.7 / 11.7 | 41.2 / 41.2 · shown: not measured | ✗ |
+| stress | open: frames during (n 328) | — | 12.6 / 16.6 | | ✗ |
+| stress | open: a press during it, the frame that shows it (n 10) | — | 60.6 / 60.6 | | ✗ |
+| stress | open: complete (wall) | 1147.0 | 167.2 / 232.1 | | ✓ |
+| stress | pan 30% | 16.7 / 16.8 | 6.9 / 8.3 | 7.5 / 7.7 · shown: not measured | ✓ |
+| stress | zoom from 30% | 16.8 / 66.7 | 4.6 / 13.9 | 8.5 / 14.6 · shown: not measured | ✓ |
+| stress | pan 100% | 16.8 / 16.8 | 2.3 / 8.5 | 6.7 / 7.3 · shown: not measured | ✓ |
+| stress | drag one | 16.7 / 16.8 | 2.6 / 3.1 | 6.9 / 7.6 · shown: not measured | ✓ |
+| stress | drag 40 | 16.8 / 66.7 | 4.9 / 6.7 | 8.6 / 18.9 · shown: not measured | ✓ |
+| stress | undo | 16.7 / 16.8 | 5.7 / 6.2 | 6.0 / 6.1 · shown: not measured | ✓ |
+| stress | redo | 16.8 / 16.8 | 6.3 / 8.9 | 13.5 / 15.3 · shown: not measured | ✓ |
+| stress | pen | 16.8 / 150.1 | 3.6 / 5.2 | 6.7 / 12.0 · shown: not measured | ✓ |
+| stress | typing | 16.7 / 16.8 | 5.0 / 6.7 | 6.5 / 6.9 · shown: not measured | ✓ |
+| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 27.7 / 27.7 | | |
+| 600 | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 15.1 · 7.8 / 8.9 · 3.2 / 3.2 · 51.6 | | |
+| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 112.7 / 112.7 | | |
+| stress | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 74.4 · 13.6 / 21.5 · 11.2 / 11.2 · 154.5 | | |
+| 600 | open again, kept parsed (not judged) | — | 2.0 / 2.0 | | |
+| stress | open again, kept parsed (not judged) | — | 6.2 / 6.2 | | |
 
 | | web | native | |
 |---|---|---|---|
-| cold start: Personal Note's desktop launcher (server + Chromium app window) | 735.8 ms | 270.0 ms | ✓ |
-| cold start: a fresh Chromium process on the built app | 558.9 ms | 270.0 ms | ✓ |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | 239.0 ms | 270.0 ms | |
-| RSS after opening all three kinds | 814.4 MB | 201.9 MB | ✓ |
-| note switch p95 | — | 6.55 ms | ✓ |
-| omnibar open p95 | — | 7.35 ms | ✓ |
+| cold start: Personal Note's desktop launcher (server + Chromium app window) | 780.2 ms | 310.0 ms | ✓ |
+| cold start: a fresh Chromium process on the built app | 608.4 ms | 310.0 ms | ✓ |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | 269.0 ms | 310.0 ms | |
+| RSS after opening all three kinds | 809.2 MB | 202.0 MB | ✓ |
+| note switch p95 | — | 6.88 ms | ✓ |
+| omnibar open p95 | — | 7.71 ms | ✓ |
 
 Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar: native frame work, no web number (PN measures none).
