@@ -46,6 +46,13 @@ def collisions(path):
         for base, lo, hi in ranges:
             if lo <= v < hi and name != base:
                 found.append(f"{name} = {v} lies in {base}'s range {lo}–{hi - 1}")
+    by_value = {}  # (two messages update() tells apart by `m ==` with one number: the first branch takes both, goal 78 review 1)
+    for name in sorted(singles):
+        if name in consts:
+            by_value.setdefault(consts[name], []).append(name)
+    for v, names in sorted(by_value.items()):
+        if len(names) > 1:
+            found.append(f"{' and '.join(names)} are all {v}")
     return found
 
 

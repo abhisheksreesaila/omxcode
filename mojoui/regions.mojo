@@ -52,10 +52,24 @@ def headline_in(v: View, i: Int) -> String:
     return String("")
 
 
+def shown_nodes(v: View) -> List[Bool]:
+    """Which nodes are drawn: neither they nor a parent .hidden() (a ribbon's other bands, D-7601)."""
+    var out = List[Bool](length=len(v.nodes), fill=True)
+    for i in range(len(v.nodes)):  # (parents come before their children in a View)
+        if v.nodes[i].hidden or not out[i]:
+            out[i] = False
+            for c in v.nodes[i].children:
+                out[c] = False
+    return out^
+
+
 def regions(v: View) -> List[Region]:
     var out = List[Region]()
+    var drawn = shown_nodes(v)
     for i in range(len(v.nodes)):
         ref n = v.nodes[i]
+        if not drawn[i]:
+            continue
         var name = region_of(n.name)
         if name != "":
             out.append(Region(i, name, -1))

@@ -407,6 +407,11 @@ def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
     var t = String(text.strip())
     if t.find(" = ") >= 0:
         var parts = t.split(" = ")
+        var rhs = String(parts[1].strip())
+        var cut = rhs.rfind(" ")
+        if cut > 0 and _is_number(String(rhs[byte = cut + 1 :])):  # ("a.t = b.t +1.2": an offset only means something on a time link;
+            var w = String(rhs[byte = cut + 1 :])                  # a card named "Robot runs 2024" is a name, not an offset)
+            raise Error('an offset needs "~" (a time link): "' + String(parts[0].strip()) + " ~ " + String(String(rhs[byte=0:cut]).strip()) + " " + w + '"; "=" matches equal values')
         return Link.key(_end(String(parts[0])), _end(String(parts[1])), by)
     if t.find(" ~ ") >= 0:
         var parts = t.split(" ~ ")
@@ -421,6 +426,24 @@ def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
                 offset = atof(String(w[byte = 1:]) if w.startswith("+") else w)
         return Link.time(_end(String(parts[0])), _end(String(rest[0])), offset, scale, by)
     raise Error('a link reads "card.column = card.column" (key) or "card.column ~ card.column +seconds" (time), not "' + t + '"')
+
+
+def _is_number(w: String) -> Bool:
+    """The whole word is a number: an optional sign, digits, at most one point, at least one digit ("+1.2", "-3", "0.5")."""
+    var digits = 0
+    var points = 0
+    var bytes = w.as_bytes()
+    for k in range(len(bytes)):
+        var ch = Int(bytes[k])
+        if 48 <= ch <= 57:
+            digits += 1
+        elif ch == 46:
+            points += 1
+        elif (ch == 43 or ch == 45) and k == 0:
+            pass
+        else:
+            return False
+    return digits > 0 and points <= 1
 
 
 def _end(text: String) raises -> End:
@@ -791,7 +814,7 @@ struct Links(Movable, Sized):
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         items.append(self.chips())
         if self.problem != "":
-            items.append(Text(self.problem, CAPTION))
+            items.append(Text(self.problem, CAPTION).tag("link-problem"))
         if len(self.items) > 0:
             var opts: List[String] = ["Unlink…"]
             for l in self.items:
@@ -829,7 +852,7 @@ struct Links(Movable, Sized):
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         add.append(self.chips())
         if self.problem != "":
-            add.append(Text(self.problem, CAPTION))
+            add.append(Text(self.problem, CAPTION).tag("link-problem"))
         var out = List[View]()
         rows.insert(0, Text("On this sheet", CAPTION).tone(TONE_STRONG))  # (a plain heading: Liquid's section-title role wrapped a long one)
         add.insert(0, Text("Add a link", CAPTION).tone(TONE_STRONG))

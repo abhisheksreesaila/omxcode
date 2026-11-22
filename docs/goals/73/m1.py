@@ -185,7 +185,7 @@ def web():
             c.p.kill()
 
 
-def panel_edge(png, y=500, inside=1250):
+def panel_edge(png, y=700, inside=1250):  # (y=700: blank in the panel under goal 76's ribbon too; at y=500 its chips now sit at x=1250)
     """Where the inspector starts in a shot: walking left on row y from a point inside the (empty, white) panel, the first
     pixel that isn't the panel's white, plus one."""
     from PIL import Image

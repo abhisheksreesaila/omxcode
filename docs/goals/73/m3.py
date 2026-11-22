@@ -22,7 +22,7 @@ FLEET = os.environ.get("G73_DATA", str(ROOT / "build/g47/full")) + "/fleet.csv" 
 sys.path.insert(0, str(ROOT / "scripts"))
 
 # the page: import dialog -> Create table, then two charts (the Chart tool), as a person would
-GTK_STEPS = "wait:3000;click:1201,843;wait:2500;click:297,63;wait:2500;click:297,63;wait:2000;shot:{shot}"
+GTK_STEPS = "wait:3000;click:1201,843;wait:2500;click:278,21;wait:600;click:525,60;wait:2500;click:525,60;wait:2000;shot:{shot}"  # (goal 76: Chart is on the ribbon's Insert tab: the tab at 278,21, then its Chart at 525,60)
 WEB_STEPS = "wait:3000;tap:Create table;wait:2500;tap:Chart;wait:2500;tap:Chart;wait:2000"
 
 
@@ -58,22 +58,29 @@ def web_shot(web_dir, mode, png):
     return Path(png).exists() and r.returncode == 0, out[-400:]
 
 
-def step_of(png, mode):
-    """(canvas rgb, card rgb): the canvas in the margin between the side rail and the first card, the card in the blank of
+# where the first card's title row is, and the canvas margin beside it (goal 76: the ribbon is taller than the old bars and there
+# is no rail, so the title row moved from y=162 to 219 on GTK, 205 on the web, and the margin from x=54 to x=6; both points
+# are the same features as before: the board's padding left of the card, the blank of the card's title row)
+TITLE_Y = {"gtk": 219, "web": 205}
+MARGIN_X = 6
+
+
+def step_of(png, mode, host="gtk"):
+    """(canvas rgb, card rgb): the canvas in the margin between the window's edge and the first card, the card in the blank of
     its title row (both at the height of the title, where nothing else is drawn)."""
     from PIL import Image
     im = Image.open(png).convert("RGB")
-    return im.getpixel((54, 162)), im.getpixel((420, 162))
+    return im.getpixel((MARGIN_X, TITLE_Y[host])), im.getpixel((420, TITLE_Y[host]))
 
 
-def edge_of(png, mode):
+def edge_of(png, mode, host="gtk"):
     """The first card's bottom edge and what lies under it: (rim dL*, shadow dL*). The edge is found at x=300: the last row, scanning up from the
     window's bottom, that is the card's own colour. Rim: how far the edge pixels are from the card and the
     canvas. Shadow: the canvas 1 px under the edge against 10 px under it (light: darker next to the card)."""
     from PIL import Image
     im = Image.open(png).convert("RGB")
     H = im.size[1]
-    card = im.getpixel((420, 162))
+    card = im.getpixel((420, TITLE_Y[host]))
     y = 1 + next(y for y in range(H - 68, 700, -1) if max(abs(a - b) for a, b in zip(im.getpixel((300, y)), card)) <= 3)
     rim = max(abs(lstar(im.getpixel((300, y + k))) - lstar(card)) for k in (0, 1))
     near, far = lstar(im.getpixel((300, y + 1))), lstar(im.getpixel((300, y + 10)))
@@ -81,6 +88,7 @@ def edge_of(png, mode):
 
 
 def check():
+    os.environ["OMX_CANVAS"] = "tiled"  # (goal 78: the card edges are found where the tiling puts the cards; the free canvas is the default now)
     OUT.mkdir(parents=True, exist_ok=True)
     notes = []
     # 1. the contrast test
@@ -105,13 +113,13 @@ def check():
             ok, tail = gtk_shot(exe, mode, png) if host == "gtk" else web_shot(web, mode, png)
             if not ok:
                 return False, f"{host} {mode}: no shot: {tail}"
-            canvas, card = step_of(png, mode)
+            canvas, card = step_of(png, mode, host)
             if card is None:
                 return False, f"{host} {mode}: no card pixel found beside the canvas {canvas}"
             lc, lk = lstar(canvas), lstar(card)
             d = lk - lc  # (light: the cards lighter than a darker canvas; dark: the cards lifted lighter than the canvas)
             want = d >= (8 if mode == "light" else 5)
-            rim, sh = edge_of(png, mode)
+            rim, sh = edge_of(png, mode, host)
             notes.append(f"{host} {mode}: canvas {canvas} L*{lc:.1f}, card {card} L*{lk:.1f}, step {d:+.1f}, rim dL* {rim:.1f}, shadow dL* {sh:.1f}")
             if not want:
                 return False, f"{host} {mode}: canvas L*{lc:.1f} card L*{lk:.1f} (card must be lighter by >= {8 if mode == 'light' else 5}): " + "; ".join(notes)
@@ -127,5 +135,5 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "before":
         for mode in ("light", "dark"):
             png = OUT / f"{host}-{mode}-before.png"
             ok, tail = gtk_shot(lin / "omxplorer", mode, png) if host == "gtk" else web_shot(wb, mode, png)
-            canvas, card = step_of(png, mode)
+            canvas, card = step_of(png, mode, host)
             print(host, mode, ok, canvas, card, f"L* {lstar(canvas):.1f} vs {lstar(card) if card else None}", tail if not ok else "")
