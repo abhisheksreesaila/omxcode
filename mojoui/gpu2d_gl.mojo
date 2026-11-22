@@ -642,6 +642,8 @@ struct GL2D(Movable):
     var unpack_buf: Int  # (D-7956) the pixel-unpack buffer a snapshot's tiles are decoded into (0: not made yet)
     var unpack_cap: Int  # its storage's size (kept between restores: new storage cost ~2.7 ms each time, measured)
     var unpack_sync: Int  # a fence after the last uploads from it (0: none)
+    var span_t0: Int  # (diagnosis, MOJOUI_GPU_SPAN=1) when the frame's GPU query began on the CPU's clock
+    var span_log: Bool
     var timing_open: Bool  # this frame's time-elapsed query already begun (tile rasters before the frame are in it)
     var lim: List[Int]  # (D-7940) a partial tile raster's scissor (x0, y0, x1, y1), every draw kept inside it; empty: none
 
@@ -735,6 +737,8 @@ struct GL2D(Movable):
         self.unpack_cap = 0
         self.unpack_sync = 0
         self.timing_open = False
+        self.span_t0 = 0
+        self.span_log = getenv("MOJOUI_GPU_SPAN") == "1"
         self.lim = List[Int]()
 
     def at(self, k: Int) -> Int:
@@ -1031,6 +1035,8 @@ struct GL2D(Movable):
             self.out[0] = 0
             fcall[NoneType](self.timer[3], c_uint(qid), c_uint(0x8866), self.at(0))  # GL_QUERY_RESULT
             total = self.out[0] if last_only else total + self.out[0]
+            if self.span_log:
+                print("GPUSPAN: gpu " + String(Float64(self.out[0]) / 1e6), flush=True)
             self.q_free.append(qid)
         self.q_pending.clear()
         self.gpu_ns = total
@@ -1322,6 +1328,7 @@ struct GL2D(Movable):
         fcall[NoneType](self.timer[1], c_uint(0x88BF), c_uint(qid))  # GL_TIME_ELAPSED
         self.q_pending.append(qid)
         self.timing_open = True
+        self.span_t0 = Int(perf_counter_ns())
 
     # ---------- raster tiles (D-7940, mojoui.gpu2d_tiles) ----------
 
@@ -1566,6 +1573,8 @@ struct GL2D(Movable):
         if self.timing_open:
             fcall[NoneType](self.timer[2], c_uint(0x88BF))
             self.timing_open = False
+            if self.span_log:
+                print("GPUSPAN: cpu " + String(Float64(Int(perf_counter_ns()) - self.span_t0) / 1e6), flush=True)
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_BLEND))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_SCISSOR_TEST))
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_STENCIL_TEST))
@@ -2158,6 +2167,12 @@ struct GPU2D(Movable):
         """(diagnosis) each layer's GPU time this frame (waits for the GPU)."""
         self.ts_frames += 1
         var line = String("LAYERTIMES:")
+        self.gl.out[0] = 0
+        fcall[NoneType](self.gl.timer[3], c_uint(self.ts_q[PASS_PRE]), c_uint(0x8866), self.gl.at(0))
+        var pre = self.gl.out[0]
+        self.gl.out[0] = 0
+        fcall[NoneType](self.gl.timer[3], c_uint(self.ts_q[0]), c_uint(0x8866), self.gl.at(0))
+        line += " tiles=" + String(Float64(self.gl.out[0] - pre) / 1e6)
         var prev = 0
         for i in range(n + 1):
             self.gl.out[0] = 0
@@ -2166,6 +2181,9 @@ struct GPU2D(Movable):
             if i > 0:
                 line += " " + scene.layer_keys[i - 1] + "=" + String(Float64(t - prev) / 1e6)
             prev = t
+        self.gl.out[0] = 0
+        fcall[NoneType](self.gl.timer[3], c_uint(self.ts_q[PASS_END]), c_uint(0x8866), self.gl.at(0))
+        line += " end=" + String(Float64(self.gl.out[0] - prev) / 1e6) + " total=" + String(Float64(self.gl.out[0] - pre) / 1e6)
         print(line, flush=True)
 
     def _raster_plan(mut self, scene: Scene, mut plan: TilePlan) -> Bool:
@@ -2484,6 +2502,8 @@ struct GPU2D(Movable):
         for i in range(n):
             tile_draws.append(List[TileDraw]())
         var tt0 = perf_counter_ns()
+        if self.layer_times:
+            self._stamp(PASS_PRE)
         self.t_plan = 0
         self.t_fill = 0
         self.t_merge = 0
@@ -2534,13 +2554,14 @@ struct GPU2D(Movable):
                 self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
             if self.layer_times:
                 self._stamp(i + 1)
-        if self.layer_times:
-            self._stamps(scene, n)
         var tq2 = perf_counter_ns()
         if not self.gl.end(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0
             return -1
+        if self.layer_times:
+            self._stamp(PASS_END)
+            self._stamps(scene, n)
         _ = self.gl.fence(slot)
         if self.tile_trace:
             print("G2DPARTS: pages " + String(Float64(tq1 - tq0) / 1e6) + " layers " + String(Float64(tq2 - tq1) / 1e6) + " end " + String(Float64(perf_counter_ns() - tq2) / 1e6), flush=True)
@@ -2553,6 +2574,10 @@ struct GPU2D(Movable):
             self.traced += 1
             print("STARTUP: gpu2d frame: batches " + String(Float64(self.batch_ns) / 1e6) + " ms, render " + String(Float64(self.render_ns) / 1e6) + " ms", flush=True)
         return slot
+
+
+comptime PASS_PRE = 60  # (diagnosis) timestamp slots: before the tile rasters, after the frame's end (resolve)
+comptime PASS_END = 61
 
 
 def gl_proc(name: String) -> Int:

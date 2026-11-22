@@ -13,7 +13,7 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.scene import Painter, snap_px
+from mojoui.scene import Painter, snap_px, KeptOps
 from mojoui.viewsnap import snap_read, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
@@ -279,6 +279,11 @@ struct BoardLook(Movable):
     var keep_path: String  # (D-7956) the file the board's last view is kept in ("": none), the app's tag for what it
     var keep_tag: String  # shows ("": being edited: nothing kept or shown), and whether its objects are still loading
     var keep_hold: Bool
+    var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
+    var kept_token: String
+    var last_token: String
+    var keep_ops: Bool  # MOJOUI_KEEP_OPS=0: walk every paint (an A/B)
+    var replays: Int  # paints that replayed the kept ops (nothing walked)
     var fills: Int  # (D-7960) looks that found only adoptions (damage from those objects alone, nothing walked)
     var keep_note: String  # the app's words kept in the file's head (kept_note() reads them back first)
     var build: Int
@@ -306,6 +311,11 @@ struct BoardLook(Movable):
         self.keep_hold = False
         self.keep_note = ""
         self.fills = 0
+        self.kept = KeptOps()
+        self.kept_token = ""
+        self.last_token = ""
+        self.replays = 0
+        self.keep_ops = getenv("MOJOUI_KEEP_OPS") != "0"
         self.build = build_id()
 
     def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
@@ -391,11 +401,23 @@ struct BoardLook(Movable):
             p.layer_damage(self.since, self.dmg[4 * d], self.dmg[4 * d + 1], self.dmg[4 * d + 2], self.dmg[4 * d + 3])
         var any_lift = len(self.lift_ids) > 0
         var up = List[Int]()
-        for i in layer.query(tx0, ty0, tx1, ty1):
-            if any_lift and layer.objs[i].id in self.lift_set:
-                up.append(i)
-                continue
-            self.paint_obj(p, layer, i)
+        # (D-7963) the same board, cull rect, lift, look and zoom as the last paint: its ops again, nothing walked
+        var token = String(self.board_version) + "|" + String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1) + "|" + String(k) + "|" + String(v.scale)
+        for id in self.lift_key:
+            token += "," + String(id)
+        if self.keep_ops and token == self.kept_token and p.ops_replay(self.kept):
+            self.replays += 1
+        else:
+            var mark = p.ops_mark()
+            for i in layer.query(tx0, ty0, tx1, ty1):
+                if any_lift and layer.objs[i].id in self.lift_set:
+                    up.append(i)
+                    continue
+                self.paint_obj(p, layer, i)
+            if self.keep_ops and mark >= 0 and token == self.last_token:  # (kept once it held two paints: frames that change don't pay a copy)
+                self.kept = p.ops_capture(mark)
+                self.kept_token = token
+            self.last_token = token
         if any_lift:  # (the lifted objects: all of them, wherever they are, over the board)
             p.begin_layer("board-lift")
             p.layer_transform(v.x * k, v.y * k, v.scale * k)

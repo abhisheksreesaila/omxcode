@@ -10,6 +10,7 @@
 #       p.begin_layer("ring")        # a layer that moves on its own: the host reuses the cells' nodes untouched
 #       ...
 
+from std.collections import Dict
 from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
@@ -33,6 +34,38 @@ comptime STRIDE = 6  # floats per op
 def snap_px(v: Float64) -> Float64:
     """A translation snapped to a whole device pixel (a tiled layer's, D-7940: its kept tiles then land 1:1)."""
     return Float64(Int(v + 0.5)) if v >= 0 else -Float64(Int(-v + 0.5))
+
+
+struct KeptOps(Copyable, Movable):
+    """(D-7963) A run of a layer's ops kept from one frame to replay in a later one (Painter.ops_capture/ops_replay):
+    its texts, images and polygon points travel with it, renumbered when it is replayed. An app keeps one with the
+    token its ops depend on and replays it while the token holds, instead of drawing the same items again."""
+
+    var ok: Bool
+    var kinds: List[UInt8]
+    var nums: List[Float32]
+    var colors: List[UInt32]
+    var text_of: List[Int32]
+    var texts: List[String]
+    var images: List[List[UInt32]]
+    var path: List[Float32]
+    var note_ops: List[Int]
+    var notes: List[String]
+
+    def __init__(out self):
+        self.ok = False
+        self.kinds = List[UInt8]()
+        self.nums = List[Float32]()
+        self.colors = List[UInt32]()
+        self.text_of = List[Int32]()
+        self.texts = List[String]()
+        self.images = List[List[UInt32]]()
+        self.path = List[Float32]()
+        self.note_ops = List[Int]()
+        self.notes = List[String]()
+
+    def ops(self) -> Int:
+        return len(self.kinds)
 
 
 trait Painter:
@@ -87,6 +120,18 @@ trait Painter:
         """(D-7940) Since the layer's version `since`, only what's inside this rect (its units) changed; call once per
         rect, all with the same `since`. A host whose tiles show version `since` rasters again only the tiles these
         meet; with no damage (or another base) a new version invalidates every tile."""
+        ...
+
+    def ops_mark(self) -> Int:
+        """(D-7963) How many ops the painter holds now (for ops_capture), -1 when it can't keep ops."""
+        ...
+
+    def ops_capture(self, from_op: Int) -> KeptOps:
+        """(D-7963) The ops from from_op on, kept to be replayed in a later frame (empty when it can't keep ops)."""
+        ...
+
+    def ops_replay(mut self, kept: KeptOps) -> Bool:
+        """(D-7963) Ops kept from an earlier frame appended as if drawn again (False: this painter can't; draw them)."""
         ...
 
     def layer_snapshot(mut self, path: String, tag: String, hold: Bool, note: String):
@@ -217,6 +262,15 @@ struct SurfacePainter(Painter, Movable):
 
     def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         pass
+
+    def ops_mark(self) -> Int:
+        return -1
+
+    def ops_capture(self, from_op: Int) -> KeptOps:
+        return KeptOps()
+
+    def ops_replay(mut self, kept: KeptOps) -> Bool:
+        return False
 
     def layer_snapshot(mut self, path: String, tag: String, hold: Bool, note: String):
         pass
@@ -454,6 +508,75 @@ struct Scene(Painter, Movable, Copyable):
         self.dmg.append(y0)
         self.dmg.append(x1)
         self.dmg.append(y1)
+
+    def ops_mark(self) -> Int:
+        return len(self.kinds)
+
+    def ops_capture(self, from_op: Int) -> KeptOps:
+        var k = KeptOps()
+        k.ok = True
+        var n = len(self.kinds)
+        var imap = Dict[Int, Int]()
+        for op in range(from_op, n):
+            var kind = Int(self.kinds[op])
+            k.kinds.append(self.kinds[op])
+            for c in range(STRIDE):
+                k.nums.append(self.nums[op * STRIDE + c])
+            k.colors.append(self.colors[op])
+            var t = Int(self.text_of[op])
+            if t >= 0:
+                k.text_of.append(Int32(len(k.texts)))
+                k.texts.append(self.texts[t])
+            else:
+                k.text_of.append(-1)
+            var b = (op - from_op) * STRIDE
+            if kind == OP_IMAGE:
+                var im = Int(self.nums[op * STRIDE + 4])
+                if im not in imap:
+                    imap[im] = len(k.images)
+                    k.images.append(self.images[im].copy())
+                k.nums[b + 4] = Float32(imap.get(im, 0))
+            elif kind == OP_POLY or kind == OP_STROKE:
+                var first = Int(self.nums[op * STRIDE])
+                var cnt = Int(self.nums[op * STRIDE + 1])
+                k.nums[b] = Float32(len(k.path) // 2)
+                for q in range(2 * first, 2 * (first + cnt)):
+                    k.path.append(self.path[q])
+        for q in range(len(self.note_ops)):
+            if self.note_ops[q] >= from_op:
+                k.note_ops.append(self.note_ops[q] - from_op)
+                k.notes.append(self.notes[q])
+        return k^
+
+    def ops_replay(mut self, kept: KeptOps) -> Bool:
+        if not kept.ok:
+            return False
+        if len(self.layer_keys) == 0:
+            self.begin_layer("")
+        var base = len(self.kinds)
+        var t0 = len(self.texts)
+        var i0 = len(self.images)
+        var p0 = len(self.path) // 2
+        self.kinds += kept.kinds.copy()
+        var nb = len(self.nums)
+        self.nums += kept.nums.copy()
+        self.colors += kept.colors.copy()
+        for t in kept.text_of:
+            self.text_of.append(Int32(Int(t) + t0) if t >= 0 else Int32(-1))
+        for op in range(len(kept.kinds)):
+            var kind = Int(kept.kinds[op])
+            if kind == OP_IMAGE:
+                self.nums[nb + op * STRIDE + 4] += Float32(i0)
+            elif kind == OP_POLY or kind == OP_STROKE:
+                self.nums[nb + op * STRIDE] += Float32(p0)
+        self.texts += kept.texts.copy()
+        for im in kept.images:
+            self.images.append(im.copy())
+        self.path += kept.path.copy()
+        for q in range(len(kept.note_ops)):
+            self.note_ops.append(kept.note_ops[q] + base)
+            self.notes.append(kept.notes[q])
+        return True
 
     def layer_snapshot(mut self, path: String, tag: String, hold: Bool, note: String):
         if len(self.layer_keys) == 0:
