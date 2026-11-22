@@ -434,9 +434,10 @@ struct CanvasLoad(Movable):
             return Json()
 
     def covers(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
-        """No pending node meets the rect (page units): what take() of it would parse is all in."""
-        for i in range(len(self.ns)):
-            if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
+        """Nothing the rect needs is pending (page units: the nodes meeting it and both ends of every edge crossing it,
+        what take() of it would parse): everything drawn there is in."""
+        for m in self._marks(x0, y0, x1, y1):
+            if m:
                 return False
         return True
 
@@ -570,8 +571,9 @@ struct CanvasLoad(Movable):
             i = self.dup_prev[i]
         return -1
 
-    def take(mut self, mut layer: ObjectLayer, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
-        """Every pending node whose box meets the rect (page units), parsed and adopted now."""
+    def _marks(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> List[Bool]:
+        """Per node: pending and needed to draw the rect: its box meets it, or it is an end (the whole chain of nodes
+        with that id) of an edge crossing it."""
         var mark = List[Bool](length=len(self.ns), fill=False)
         for i in range(len(self.ns)):
             if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
@@ -589,6 +591,11 @@ struct CanvasLoad(Movable):
                         if self.state[q] == _PENDING:
                             mark[q] = True
                         q = self.dup_prev[q]
+        return mark^
+
+    def take(mut self, mut layer: ObjectLayer, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
+        """Every pending node the rect needs (its box meets it, or it ends an edge crossing it), parsed and adopted now."""
+        var mark = self._marks(x0, y0, x1, y1)
         var idx = List[Int]()
         for i in range(len(self.ns)):
             if mark[i]:
@@ -604,8 +611,9 @@ struct CanvasLoad(Movable):
         var budget = Int((self.rate if self.rate > 0 else 400.0) * Float64(budget_us))
         var idx = List[Int]()
         var taken = 0
+        var need = self._marks(x0, y0, x1, y1)  # (what the rect needs first: as take() would load it)
         for i in range(len(self.ns)):
-            if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
+            if need[i]:
                 idx.append(i)
                 taken += self.ne[i] - self.ns[i]
                 if taken >= budget:
@@ -705,9 +713,11 @@ struct CanvasOpenJob[S: TextSource](JobBody):
     var x1: Float64
     var y1: Float64
     var gap: Float64
+    var take: Bool  # the rect's nodes parsed on the job too (serially: max's parallelize can't run on a job thread)
 
-    def __init__(out self, var src: Self.S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, gap: Float64):
+    def __init__(out self, var src: Self.S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, gap: Float64, take: Bool):
         self.src = src^
+        self.take = take
         self.x0 = x0
         self.y0 = y0
         self.x1 = x1
@@ -734,8 +744,9 @@ struct CanvasOpenJob[S: TextSource](JobBody):
         if self.gap >= 0:
             out.layer.set_connector_gap(self.gap)
         out.layer.mark_saved()
-        ld.serial = True
-        ld.take(out.layer, self.x0, self.y0, self.x1, self.y1)
+        if self.take:
+            ld.serial = True
+            ld.take(out.layer, self.x0, self.y0, self.x1, self.y1)
         out.take_us = clock_us() - t2
         if not ld.done():
             out.load.append(ld^)
@@ -773,10 +784,13 @@ struct OpenBoard(Movable):
         self.job = None
         self.layer = layer^
 
-    def open_later[S: TextSource](mut self, var src: S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1):
-        """(D-7956) The open with nothing on this thread: the text read, skimmed and the rect's nodes parsed on a job
-        thread (start_ui_job: the UI is woken when it ends). Until then the board is empty and pending(); step() adopts
-        it the frame after it lands (that frame shows the rect's nodes, no slice in it), then slices as open() does.
+    def open_later[S: TextSource](mut self, var src: S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1,
+                                  take_on_job: Bool = False):
+        """(D-7956) The open with nothing on this thread: the text read and skimmed on a job thread (start_ui_job: the UI
+        is woken when it ends). Until then the board is empty and pending(); step() adopts it the frame after it lands
+        (no slice in that frame), then slices as open() does, the rect's nodes first, on every core (holding() until
+        they're in). take_on_job: the rect's nodes parsed on the job as well (one core there: measured 44 ms for PN's
+        stress view, against ~5 ms of slices here; an edit made meanwhile waits for it).
         edit(), take(), member() and finish() wait for it. An app shows something in the meantime (the view kept on
         disk, mojoui.viewsnap, while holding() says the rect isn't in yet)."""
         self.load.clear()
@@ -787,7 +801,7 @@ struct OpenBoard(Movable):
         if connector_gap >= 0:
             self.layer.set_connector_gap(connector_gap)
         self.layer.mark_saved()
-        self.job = start_ui_job(CanvasOpenJob[S](src^, x0, y0, x1, y1, connector_gap))
+        self.job = start_ui_job(CanvasOpenJob[S](src^, x0, y0, x1, y1, connector_gap, take_on_job))
 
     def pending(self) -> Bool:
         """An open_later() whose job hasn't been adopted yet."""

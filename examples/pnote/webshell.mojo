@@ -34,6 +34,7 @@ from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready
+from mojoui.framebudget import FrameBudget
 from mojoui.pagedesk import board_rect
 from mojoui.buzanmap import map_text, node_extra
 
@@ -75,6 +76,8 @@ def parse_grid(note: String) -> Tuple[Int, Int]:
         return (0, 0)
 
 
+comptime LOAD_SLICE_MIN_US = 250  # (D-7957) the least a slice gets (the open still ends: every frame takes a node at least)
+comptime FRAME_WORK_US = 4000  # (D-7957) the app's own share of an 8.3 ms frame (the renderer, GPU and compositor the rest)
 comptime LOAD_SLICE_US = 1500  # a progressive open's slice per frame (D-7944): the frame keeps its silky budget
 
 
@@ -185,6 +188,7 @@ struct WebShell(Movable):
     var win_w: Float64  # the window's size (layout px) at the last paint
     var win_h: Float64
     var win_k: Float64  # the device scale at the last paint (0: not painted yet)
+    var budget: FrameBudget  # (D-7957) the open's slices sized by what the rest of the frame cost
     var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
@@ -232,6 +236,7 @@ struct WebShell(Movable):
         self.win_h = 900
         self.win_k = 0
         self.snap_dir = ""
+        self.budget = FrameBudget(FRAME_WORK_US)
         if getenv("MOJOUI_SNAP") != "0":
             var d = environment("PNOTE_SNAPS", config_dir("pnote") + "/snaps")
             if snap_dir_ready(d):
@@ -482,6 +487,11 @@ struct WebShell(Movable):
     # ------------------------------------------------ drawing
 
     def paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
+        self.budget.begin()  # (D-7957: what this frame's own work costs sets the next open slice)
+        self._paint(p, w, h, k)
+        self.budget.end()
+
+    def _paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         self.boxes.clear()
         self.boxes.add("#app", 0, 0, w, h)
         p.begin_layer("shell")
@@ -500,7 +510,10 @@ struct WebShell(Movable):
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
             var r = self.view_rect()
             if self.board.loading():  # (D-7944: a slice of the rest of the board this frame, the view's part first)
-                if self.board.step(r[0], r[1], r[2], r[3], LOAD_SLICE_US):
+                var ts = clock_us()
+                var more = self.board.step(r[0], r[1], r[2], r[3], self.budget.slice_us(LOAD_SLICE_MIN_US, LOAD_SLICE_US))
+                self.budget.spent(clock_us() - ts)
+                if more:
                     p.set_again()
                 if self.board.problem != "":
                     print("PNOTE ERROR: canvas: " + self.board.problem, flush=True)

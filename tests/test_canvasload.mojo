@@ -245,16 +245,22 @@ def main() raises:
         frames += 1
         _ = libc.usleep(200)
         assert_true(frames < 50000, "the job ends")
-    assert_false(lb.holding(1000, 1000, 2000, 1800), "the rect's nodes came with it")
+    assert_true(lb.holding(1000, 1000, 2000, 1800), "read and skimmed only: the rect's nodes come by slices here")
+    var slices_held = 0
+    while lb.holding(1000, 1000, 2000, 1800):
+        _ = lb.step(1000, 1000, 2000, 1800, 200)
+        slices_held += 1
+        assert_true(slices_held < 10000, "the rect fills")
     var got = Dict[String, Bool]()
     for ref o in lb.layer.objs:
         got[o.key] = True
     for i in range(ld4.nodes()):  # (the same rect as case 5: every node meeting it)
         if ld4.bx1[i] >= rx0 and ld4.bx0[i] <= rx1 and ld4.by1[i] >= ry0 and ld4.by0[i] <= ry1 and whole.has(i + 1):
-            assert_true(whole.objs[whole.index(i + 1)].key in got, "a node in the rect came with the adopted open")
+            assert_true(whole.objs[whole.index(i + 1)].key in got, "a node in the rect is in once it stops holding")
+    for ref o in whole.objs:  # (and every edge crossing it: holding() waits for both its ends, as take() loads them)
+        if o.kind == CONNECTOR and not (max(o.ax, o.bx) < rx0 or min(o.ax, o.bx) > rx1 or max(o.ay, o.by) < ry0 or min(o.ay, o.by) > ry1):
+            assert_true(o.key in got, "an edge crossing the rect is in once it stops holding: " + o.key)
     var adopted = len(lb.layer.objs)
-    if lb.loading():
-        _ = lb.step(1000, 1000, 2000, 1800, 200)  # (the adopting frame's next call: still no slice, it was that frame)
     assert_false(lb.layer.unsaved(), "an open isn't an edit")
     while lb.step(1000, 1000, 2000, 1800, 200):
         pass
@@ -269,9 +275,17 @@ def main() raises:
     lay2.move_by(37, -21)
     lay2.end_gesture()
     assert_equal(export_json_canvas(lb2.layer, 4, 3), export_json_canvas(w2, 4, 3))
+    var lb4 = OpenBoard()  # (take_on_job: the rect's nodes parsed on the job, there when it's adopted)
+    lb4.open_later(SqlText(dbp, q, 7), 1000, 1000, 2000, 1800, -1, True)
+    while lb4.pending():
+        _ = lb4.step(1000, 1000, 2000, 1800, 200)
+        _ = libc.usleep(200)
+    assert_false(lb4.holding(1000, 1000, 2000, 1800), "the rect's nodes came with the job")
+    lb4.finish()
+    same_layers(lb4.layer, whole)
     var lb3 = OpenBoard()
     lb3.open_later(SqlText(dbp, q, 8), 0, 0, 10, 10)
     lb3.finish()
     assert_true(lb3.problem != "" and len(lb3.layer.objs) == 0 and not lb3.loading(), "a missing row: a problem")
-    print("canvasload open_later: " + String(adopted) + " objects adopted after " + String(frames) + " polls (" + lb.times + " us on the job)")
+    print("canvasload open_later: " + String(adopted) + " objects in the rect after " + String(frames) + " polls and " + String(slices_held) + " slices (" + lb.times + " us on the job)")
     print("canvasload: ok · " + String(len(whole.objs)) + " objects, first slice " + String(first) + ", " + String(slices) + " slices, " + String(crossing) + " crossing edges")
