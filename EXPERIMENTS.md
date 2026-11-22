@@ -4,6 +4,17 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 10: counting GL calls (2026-11-22, late afternoon)
+- **Setup:** Linux. The race started quiet but goal 77 woke mid-race; an hour of polling afterwards found no quiet window.
+- **What it showed:** an undo frame issues ~4,400 GL calls (most of them per-draw state). Cutting a third of them
+  (cached state, base-instance draws, vertex arrays keeping their pointers; pixel-identical) left undo/redo unchanged.
+  Their cost is the GPU's work at idle clocks plus the CPU draw: a rerun while another app held the GPU at full clock
+  gave undo 7.8 ms.
+- **What didn't work:** two fixes aimed at the press during the open (no lift without a move, no save for a no-op
+  click). Both are right, but the row's max is the first press: a first-use cost.
+- **Open:** a ~44 ms undo frame seen three times under load; not reproduced with tracing.
+- **Next small step:** warm the first press's one-time cost; find the 44 ms undo frame; race when the machine is quiet.
+
 ## Goal 79, continuation 9: undo/redo settled, retained ops (2026-11-22, afternoon)
 - **Setup:** quiet probes first (13:28). The race ran in a quiet window found by polling (13:51); goal 77 was busy in 5
   of 14 samples during it.

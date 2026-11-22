@@ -8,6 +8,42 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 10 (2026-11-22, autopilot): counting GL, the premise tested
+Decisions D-7965–D-7967; journal "continuation 10". The machine was quiet at 14:28 and the race started then, but goal 77
+woke mid-race (busy in 5 of 14 samples). Polling 14:50–15:50 found no quiet window again (load up to 46, GPU bursts to
+100 %; build/g79/c10-quiet.log). The reruns at 15:50 ran under goal 77 load and are labelled so (c10-reruns2.txt).
+
+**Counts (MOJOUI_GL_COUNT, D-7965), stress:**
+- An undo frame (4 partial tile rasters): 4,407 calls · 377 draws · 351 program · 496 VAO · 530 buffer binds · 1,029
+  attribute calls · 395 stencil · 625 KB in 62 uploads.
+- An open-slice frame: 311 calls · 37 draws · 6.9 KB.
+- The press frame: ~5.8k calls · 744 draws · 1.1 MB.
+
+**The fix and the premise (D-7966).** Run state is now set only when it changes, and draws use base instances (the GLES
+extension included; pnote's context is GLES), with each vertex array keeping its attribute pointers. That cuts GL calls
+by about a third (attribute calls 1,964 → 8 in a 6-tile frame), pixel-identical (tests/test_glstate). **Undo/redo didn't
+move** (A/B ×3, 9.3–10.1 either way), so GL call cost isn't what makes them slow. The GPU's undo work is ~2.4 ms at idle
+clocks, and the bench adds it to the CPU draw. A rerun while goal 77 held the GPU at P2 gave undo/redo 7.8 / 6.0. The
+one-burst ordering wasn't needed: the GPU query no longer spans the CPU's issue.
+
+**The press (D-7967).** A press that hasn't moved no longer lifts, and a no-op release no longer saves. Both are correct
+and tested, but neither moved the row (10.2–10.4). The row's max is always the first press; later presses run ~6.5 ms.
+Next: warm that first use in the framework.
+
+**Race (14:28, race.md) and reruns under load (15:50, 3×):**
+| stress row | race | reruns (each run: goal 77 busy) | |
+|---|---|---|---|
+| open: first frame (first open from the kept view) | cold max 18.8 (first open 7.9) | first open 8.8 / 7.2 / 7.9 · cold max 7.6 / 5.2 / 5.4 | ✗ in race.md |
+| open: frames during (p95) | 11.4 / 35.8 | 8.6 / 8.5 / 8.4 | ✗ |
+| open: a press during it | 10.7 | 8.8 / 10.5 / 10.3 | ✗ |
+| zoom from 30 % (max) | 21.6 | 14.5 / 14.9 / 15.1 (pass) | ✗ in race.md |
+| drag 40 (max) | 19.5 | 7.4 / 19.0 / 18.2 | ✗ |
+| undo / redo (p95) | 12.5 · 9.3 | 7.8 · 6.0 (GPU at P2) / 12.3 · 10.3 / 11.3 · 9.4 | ✗ |
+| undo max | 43.4 | 15.9 / 43.5 / 44.1 | new: a ~44 ms undo frame, not reproduced with tracing; open |
+
+Every 600 row passed in the race. **Milestones:** M0 PASS · M1 BLOCKED (Mac) · M2, M3, M4 **PASS** (rerun: 0.974 /
+0.984 / 0.972 / 0.974; canvas 0.992; 28 steps, worst 0.964, notes equal) · M5 BLOCKED · M6 **FAIL** · M7 BLOCKED.
+
 ## Continuation 9 (2026-11-22, autopilot): undo/redo settled, retained ops
 Decisions D-7963 and D-7964; journal "continuation 9". The quiet probes ran first (13:28: load 1.5, both GPUs P8 at 0 %).
 The race waited for a quiet window (13:43–13:51, build/g79/c9-quiet.log) and ran 13:51–13:58 from load 0.5. Goal 77 was
