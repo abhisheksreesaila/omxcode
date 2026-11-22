@@ -13,6 +13,7 @@
 from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
 from std.os import getenv
+from std.time import perf_counter_ns
 from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, SnapWriter, snap_read, snap_dir_ready, build_id
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
@@ -82,9 +83,15 @@ def gl_identity() raises:
     var g = GPU2D()
     assert_true(g.start(False), "start")
     var a = frame(g, look, layer, v)
-    for _ in range(80):
+    var t_settle = perf_counter_ns()
+    var settle_frames = 0
+    while not snap_read(path, True).ok and perf_counter_ns() - t_settle < 5_000_000_000:  # (D-7962: a save waits for 750 ms of a still view)
         var again = frame(g, look, layer, v)
         assert_equal(differ(again, a), 0)  # (reading tiles back changes nothing on screen)
+        settle_frames += 1
+    for _ in range(40):  # (and the last tiles' reads after the file appears change nothing either)
+        assert_equal(differ(frame(g, look, layer, v), a), 0)
+    assert_true(perf_counter_ns() - t_settle >= 700_000_000, "not saved before the view held still")
     var kept = snap_read(path)
     assert_true(kept.ok, "kept after settling")
     print("   kept:", len(kept.tiles), "tiles,", len(kept.bytes), "bytes")

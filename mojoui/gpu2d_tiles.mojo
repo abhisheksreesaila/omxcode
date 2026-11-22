@@ -37,6 +37,7 @@ comptime TILE = 512  # content px per tile side
 comptime TILE_BORDER = 1
 comptime TILE_TEX = TILE + 2 * TILE_BORDER  # a tile texture's side
 comptime TILE_SETTLE_NS = 120_000_000  # a zoom held this long gets tiles at its own scale
+comptime SNAP_QUIET_NS = 750_000_000  # (D-7962) how long a view must hold before its snapshot is read back
 comptime TILE_BUDGET_OPS = 2500  # rasters beyond those a frame must have (ring, settling): ops built per frame at most
 # (batch building, merging and submitting a tile costs ~1–2 µs an op, more when its glyphs are new at that size)
 comptime TILE_MIN_OPS = 400  # (D-7949) a layer that asks for tiles but has fewer ops is drawn directly: rastering tiles
@@ -325,6 +326,9 @@ struct TileSet(Movable):
     var snap_good: Dict[Int, Int]  # a restored tile → index into snap_good_r: the part it holds (layer units)
     var snap_good_r: List[Float64]
     var saved: String  # the key of the snapshot on disk (saved or restored here): not saved again
+    var quiet_key: String  # (D-7962) the key and version last seen, and since when (a save waits for them to hold)
+    var quiet_ver: Int
+    var quiet_since: Int
     var save_list: List[Int]  # tiles still to read back for the snapshot being written, and its key and version
     var save_key: String
     var save_version: Int
@@ -351,6 +355,9 @@ struct TileSet(Movable):
         self.snap_tried = ""
         self.snap_good = Dict[Int, Int]()
         self.snap_good_r = List[Float64]()
+        self.quiet_key = ""
+        self.quiet_ver = -1
+        self.quiet_since = 0
         self.saved = ""
         self.save_list = List[Int]()
         self.save_key = ""
@@ -541,6 +548,20 @@ struct Tiles(Movable):
         if self.snap_log:
             print("SNAP: promoted " + String(len(self.sets[s].tiles)) + " tiles of " + self.sets[s].key, flush=True)
 
+    def _quiet(mut self, s: Int, kt: String, v: Int) -> Bool:
+        """(D-7962) The layer's key and version have held for SNAP_QUIET_NS: a snapshot's reads (one a frame) start only
+        then, never between the frames of a pan, a zoom or an edit (measured: 20 saves begun and dropped in one bench
+        run, each frame paying a synchronous read). Until then it asks for a frame later (more)."""
+        var now = Int(perf_counter_ns())
+        if self.sets[s].quiet_key != kt or self.sets[s].quiet_ver != v:
+            self.sets[s].quiet_key = kt
+            self.sets[s].quiet_ver = v
+            self.sets[s].quiet_since = now
+        if now - self.sets[s].quiet_since >= SNAP_QUIET_NS:
+            return True
+        self.more = True
+        return False
+
     def _save_abort(mut self, s: Int):
         self.sets[s].save_list = List[Int]()
         self.sets[s].writer = List[SnapWriter]()
@@ -572,7 +593,7 @@ struct Tiles(Movable):
                     print("SNAP: save dropped (the layer changed)", flush=True)
                 self._save_abort(s)
                 return
-        elif want and ready and kt != self.sets[s].saved:
+        elif want and ready and kt != self.sets[s].saved and self._quiet(s, kt, scene.layer_versions[i]):
             for jj in range(j0, j1 + 1):
                 for ii in range(i0, i1 + 1):
                     self.sets[s].save_list.append(_pack(ii, jj))
