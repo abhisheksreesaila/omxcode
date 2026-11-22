@@ -23,7 +23,7 @@ from mojoui.geometry import rect_of
 from mojoui.json import Json, json_string
 from mojoui.livetiles import size_name
 from mojoui.pointer import Pointer, PointerView, POINTER_TAG, point_event
-from mojoui.theme import Theme
+from mojoui.theme import Theme, ThemePair
 from mojoui.png import encode_png
 from mojoui.shared import environment
 from mojoui.view import Overlay
@@ -108,6 +108,7 @@ struct Main(App):
     var screens: Screens[]
     var pointer: Pointer
     var dark: Bool
+    var schemes: ThemePair  # light and dark, built once (D-7889)
     var status: String
     var version: Int
     var point_stamp: Int  # the pointer's stamp when the last point was sent (-1: none to report)
@@ -123,6 +124,7 @@ struct Main(App):
         self.screens = Screens(UI_BASE, CANVAS_BASE)
         self.pointer = Pointer()
         self.dark = False
+        self.schemes = ThemePair(omxqua(False), omxqua(True))
         self.status = "Ask: What matters this morning?"
         self.version = 1
         self.point_stamp = -1
@@ -137,7 +139,7 @@ struct Main(App):
         return (1280, 820)
 
     def theme(self) -> Theme:
-        return omxqua(self.dark)
+        return self.schemes.of(self.dark)
 
     def appearance(mut self, dark: Bool):
         self.dark = dark

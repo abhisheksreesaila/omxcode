@@ -69,7 +69,7 @@ from mojoui.creator import Creator
 from mojoui.looker import Looker
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
-from mojoui.theme import Theme, Palette
+from mojoui.theme import Theme, Palette, ThemePair
 from mojoui.utf8 import head, boundary
 from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, POINT, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
 from mojoui.voiceui import VoiceDock, VoiceLane
@@ -145,6 +145,7 @@ struct Main(App):
     var turn_look: Int  # the camera's look serial when this turn began: only this turn's looks are pointed at
     var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var dark: Bool
+    var schemes: ThemePair  # light and dark, built once (D-7889)
     var width: Int
     var height: Int
     var suggestions: List[String]
@@ -227,6 +228,7 @@ struct Main(App):
         self.turn_look = 0
         self.marks = List[PointMark]()
         self.dark = False
+        self.schemes = ThemePair(omxqua_counter(False), omxqua_counter(True))
         self.width = 1280
         self.height = 820
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
@@ -299,7 +301,7 @@ struct Main(App):
         self.tv.version += 1
 
     def theme(self) -> Theme:
-        return omxqua_counter(self.dark)
+        return self.schemes.of(self.dark)
 
     def every(self) -> List[Every]:
         return [Every(30, TICK)]

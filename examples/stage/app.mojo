@@ -32,7 +32,7 @@ from mojoui.canvas import Surface
 from mojoui.effects import Every
 from mojoui.geometry import rect_of
 from mojoui.text import Font
-from mojoui.theme import Theme, Palette
+from mojoui.theme import Theme, Palette, ThemePair
 from mojoui.orb import Orb, OrbView, ORB_LISTEN
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, DROPPED, size_name, tile_icon
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
@@ -82,6 +82,7 @@ comptime ASK_ISO_LABEL = "Heat pump?"
 
 struct Main(App):
     var dark: Bool
+    var schemes: ThemePair  # light and dark, built once (D-7889)
     var width: Int
     var height: Int
     var text: String
@@ -111,6 +112,7 @@ struct Main(App):
 
     def __init__(out self):
         self.dark = False
+        self.schemes = ThemePair(omxqua_counter(False), omxqua_counter(True))
         self.width = 1280
         self.height = 820
         self.text = ""
@@ -259,7 +261,7 @@ struct Main(App):
         self.tv.version += 1  # (the TV's box in the night's colours)
 
     def theme(self) -> Theme:
-        return omxqua_counter(self.dark)
+        return self.schemes.of(self.dark)
 
     def update(mut self, event: Event):
         if event.message == TYPE:

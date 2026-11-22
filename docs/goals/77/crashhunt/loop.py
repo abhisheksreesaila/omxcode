@@ -22,6 +22,7 @@ BIN = Path(os.environ.get("LOOP_BIN", str(OUT / "bin/stage")))
 
 
 def _gtk(steps, trace, window="1280x820", timeout=300):
+    timeout = int(timeout * float(os.environ.get("LOOP_TIMEOUT_X", "1")))  # (guarded runs: longer, D-7889)
     import headless
     headless.ensure()
     trace.unlink(missing_ok=True)
