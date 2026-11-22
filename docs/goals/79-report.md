@@ -8,6 +8,50 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 8 (2026-11-22, autopilot): edits mid-open, fill damage, quiet snapshot reads
+Decisions D-7959–D-7962; journal "continuation 8". The Mac was not tried (still offline). I waited an hour for a quiet
+machine (12:12–13:12, every 2 min, build/g79/c8-quiet.log), but goal 77's checker ran throughout (a process over 50 % CPU,
+GPU bursts of 97–100 % on either GPU). The race ran at 13:12–13:19 with both GPUs idle at the start and end (P8) and load
+1.1–1.6. One mid-race sample showed GPU 1 at 63 % (build/g79/c8-m6-samples.txt).
+
+**What changed (framework; pnote only composes):**
+- `OpenBoard.near(rect)`: an edit during the open loads what it touches, not the whole board. The open reserves the
+  document's ids. An edge whose end was deleted joins that delete's undo step. pnote's press, drag, release and tap load
+  only the pointer's neighbourhood.
+- Damage from adopted objects only (`ObjectLayer.adoptions`, `DamageSnap.append`).
+- The restore is prewarmed: `viewsnap.expect_snapshots()` makes the buffer and textures after the first screen.
+- The open's slice target is 3000 µs.
+- Snapshot reads wait for a view that has held still for 750 ms. Before, they were starting between bench frames, each
+  frame paying a synchronous read.
+
+**Race rows that moved (race.md 13:19; before = continuation 7's run):**
+| note | row | before | now | |
+|---|---|---|---|---|
+| 600 | open: first frame (from the kept view) | 7.8 | 5.1 | ✓ |
+| 600 | pan 100 % / redo | 3.9 / 53.6 ✗ · 9.4 / 11.3 ✗ | 4.2 / 6.2 · 5.8 / 7.7 | ✓ ✓ |
+| stress | open: first frame (from the kept view; 30 of 30 cold opens) | 11.7 ✗ | **8.1** (first open 7.1) | ✓ |
+| stress | open: frames during | 12.6 / 16.6 ✗ | **8.1 / 14.4** | ✓ |
+| stress | open: a press during it | 60.6 ✗ | **10.3** (reruns 9.9 / 10.6 / 10.6: median 10.6, worst 10.6) | ✗ |
+| stress | open: complete | 167 / 232 | 333 / 450 (web 1,336) | ✓ |
+| stress | zoom from 30 % | 4.6 / 13.9 ✓ | 6.7 / 23.1 (one spike; reruns max 13.7 / 13.0 / 12.8: median 13.0, worst 13.7) | ✗ in race.md |
+| stress | undo / redo | 5.7 / 6.2 · 6.3 / 8.9 ✓ | 10.1 / 10.5 · 9.7 / 10.1 | ✗ ✗ |
+| — | printed, not judged: first open ever 26.0 / 109.8; MOJOUI_SNAP=0 cold first frame 14.1 / 62.1 | | | |
+
+**Read it honestly.** On the kept-view path, D-7946 (a) now passes on both notes: 5.1 ms and 8.1 ms, the latter with
+0.2 ms to spare. The stress open's frames during now pass as well. Three things still fail:
+- *The press during the stress open* is ~10.5 ms, every time. The press itself costs 1.2 ms; the frame that shows it costs
+  ~9: the lift re-emits the board and its damage is rastered.
+- *Stress undo/redo* run ~10 ms in every probe this round (8.1–10.6). The tile work is 1–1.8 ms of CPU. The frame's GPU
+  time is 4.8–5.7 ms under graphics offload, against 1.3 ms when GTK composites. That points at the offloaded frame
+  (dmabuf export or implicit sync), not at tile ops, so "ops per damaged tile" wasn't built.
+- *Zoom*'s race row failed on a single spike. Its reruns are 12.8–13.7 ms, but the row in race.md stays ✗ as generated.
+
+The first open of a note ever, with no kept view, is unchanged at 26 / 110 ms (printed, D-7958).
+
+**Milestones** (`scripts/check`): M0 PASS · M1 BLOCKED (Mac) · M2, M3, M4 **PASS** (rerun 13:2x on this build: SSIM
+0.974/0.984/0.972/0.974; canvas 0.992; 28 steps, worst 0.964, notes equal) · M5 BLOCKED (Mac) · M6 **FAIL** (4 rows:
+stress press during the open, zoom (one spike), undo, redo) · M7 BLOCKED (Mac unreachable).
+
 ## Continuation 7 (2026-11-22, autopilot): the kept view, the deferred open, a fast restore
 Decisions D-7956–D-7958; journal "continuation 7". The Mac was still unreachable. The machine was **not quiet**: another
 session's goal 77 apps ran in bursts (15–21 GB and up to 92 % on GPU 1, 100–270 % CPU). The M6 run (11:31–11:37) started

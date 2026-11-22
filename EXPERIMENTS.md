@@ -4,6 +4,25 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 8: edits during the open, fill damage, quiet snapshot reads (2026-11-22, afternoon)
+- **Setup:** Linux, hidden 1.6× screen. I waited an hour for a quiet machine; goal 77's checker never stopped. The race
+  ran with idle GPUs at the start and end (load 1.1–1.6), with one 63 % sample mid-race.
+- **What worked:**
+  - Edits on a partly loaded board (`OpenBoard.near`): a press during the stress open went 60 → 10 ms.
+  - Damage from adopted objects only.
+  - A prewarmed restore.
+  - Snapshot reads only after a still view.
+  - Results: the stress open's first frame is 8.1 ms (passes the 8.3 bar) and its frames during are 8.1 / 14.4 (pass).
+    The 600 note passes every row.
+- **What broke and was fixed:**
+  - An edge to a node deleted mid-open was dropped, so its undo differed from the whole import's. It now joins the
+    delete's undo step.
+  - Snapshot saves were starting between bench frames, each paying a synchronous read.
+- **Still failing:** the press during the stress open (~10.5 ms every time) and stress undo/redo (~10 ms; GPU time under
+  graphics offload, not tile work). Zoom failed in the race on one spike; its reruns pass (max 12.8–13.7).
+- **Next small step:** find what the offloaded frame's GPU time is; make a lift's frame cheaper (keep the board's ops
+  instead of re-emitting them).
+
 ## Goal 79, continuation 7: the kept view and the deferred open (2026-11-22)
 - **Setup:** Linux only on the hidden 1.6× screen (the Mac unreachable). The machine was busy: another session's goal 77
   apps ran in bursts on GPU 1. The M6 run was at load 2.25–2.75. Probes were compared only as back-to-back pairs.
