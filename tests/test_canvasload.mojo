@@ -1,5 +1,6 @@
 # mojoui.canvasload: a JSON Canvas opened a part at a time ends as the whole import does (D-7944).
-#   pixi run mojo run -I . -I vendor tests/test_canvasload.mojo
+#   pixi run mojo build -I . -I vendor -o build/test/test_canvasload tests/test_canvasload.mojo && build/test/test_canvasload
+#   (built, not `mojo run`: a job thread under the JIT aborts in AsyncRT, case 8)
 # 1. skim: strings holding brackets, escaped quotes and backslash runs that cross 64-byte blocks don't fool it;
 # 2. a generated board (texts, stickies, ink, cards, edges, in no spatial order) opened by take + step slices equals
 #    import_json_canvas_doc: the same ids, z, order and the same exported document; stays "saved";
@@ -7,12 +8,18 @@
 # 4. an edit during the open waits for the whole board (finish), lands, and undoes back to the document;
 # 5. the first slice holds every node meeting its rect and both ends of every edge crossing it;
 # 6. duplicate node ids (the later one making nothing) bind edges as the whole import binds them (review 2);
-# 7. OpenBoard: an edit mid-open through edit() finishes the load first, lands, and undoes (review 2, D-7952).
+# 7. OpenBoard: an edit mid-open through edit() finishes the load first, lands, and undoes (review 2, D-7952);
+# 8. OpenBoard.open_later (D-7956): a row read, skimmed and the rect taken on a job thread (SqlText on a scratch SQLite
+#    file); pending and holding until adopted, adopted by step() with the rect's nodes in and no slice that frame, then it
+#    ends as the whole import; an edit while still pending waits for it; a missing row is a problem, not a crash.
 from std.testing import assert_equal, assert_true, assert_false
 from std.collections import Dict
 from mojoui.json import Json, json_string
 from mojoui.objectlayer import ObjectLayer, import_json_canvas_doc, export_json_canvas, CH_MOVE, CONNECTOR
-from mojoui.canvasload import CanvasLoad, skim, OpenBoard
+from mojoui.canvasload import CanvasLoad, skim, OpenBoard, SqlText
+from mojoui.sqlite import Database
+from mojoui import libc
+from std.os import makedirs
 
 
 def rnd(mut seed: UInt64) -> Int:
@@ -217,4 +224,54 @@ def main() raises:
     assert_true(ob.edit().undo())
     assert_equal(export_json_canvas(ob.layer, 4, 3), export_json_canvas(whole, 4, 3))
     assert_true(ob.open("{not a canvas", 0, 0, 1, 1) != "", "a text the skim can't open comes back")
+
+    # 8. open_later: the read, the skim and the rect's take on a job thread
+    makedirs("build/test", exist_ok=True)
+    var dbp = String("build/test/canvasload-later.db")
+    _ = libc.unlink(dbp)
+    var db = Database(dbp)
+    db.exec("CREATE TABLE notes(id INTEGER PRIMARY KEY, content TEXT)")
+    var ins = db.prepare("INSERT INTO notes(id, content) VALUES (7, ?)")
+    ins.bind(1, text)
+    _ = ins.step()
+    var q = String("SELECT content FROM notes WHERE id = ?")
+    var lb = OpenBoard()
+    lb.open_later(SqlText(dbp, q, 7), 1000, 1000, 2000, 1800)
+    assert_true(lb.pending() and lb.loading() and lb.holding(1000, 1000, 2000, 1800), "pending until its job is adopted")
+    assert_equal(len(lb.layer.objs), 0, "nothing on the board while it reads")
+    var frames = 0
+    while lb.pending():
+        _ = lb.step(1000, 1000, 2000, 1800, 200)
+        frames += 1
+        _ = libc.usleep(200)
+        assert_true(frames < 50000, "the job ends")
+    assert_false(lb.holding(1000, 1000, 2000, 1800), "the rect's nodes came with it")
+    var got = Dict[String, Bool]()
+    for ref o in lb.layer.objs:
+        got[o.key] = True
+    for i in range(ld4.nodes()):  # (the same rect as case 5: every node meeting it)
+        if ld4.bx1[i] >= rx0 and ld4.bx0[i] <= rx1 and ld4.by1[i] >= ry0 and ld4.by0[i] <= ry1 and whole.has(i + 1):
+            assert_true(whole.objs[whole.index(i + 1)].key in got, "a node in the rect came with the adopted open")
+    var adopted = len(lb.layer.objs)
+    if lb.loading():
+        _ = lb.step(1000, 1000, 2000, 1800, 200)  # (the adopting frame's next call: still no slice, it was that frame)
+    assert_false(lb.layer.unsaved(), "an open isn't an edit")
+    while lb.step(1000, 1000, 2000, 1800, 200):
+        pass
+    same_layers(lb.layer, whole)
+    var lb2 = OpenBoard()
+    lb2.open_later(SqlText(dbp, q, 7), 0, 0, 1500, 1000)
+    ref lay2 = lb2.edit()  # (still pending: waits for the job, then the rest)
+    assert_false(lb2.loading())
+    assert_equal(len(lay2.objs), len(whole.objs))
+    lay2.select(target, False)
+    lay2.begin_gesture(CH_MOVE)
+    lay2.move_by(37, -21)
+    lay2.end_gesture()
+    assert_equal(export_json_canvas(lb2.layer, 4, 3), export_json_canvas(w2, 4, 3))
+    var lb3 = OpenBoard()
+    lb3.open_later(SqlText(dbp, q, 8), 0, 0, 10, 10)
+    lb3.finish()
+    assert_true(lb3.problem != "" and len(lb3.layer.objs) == 0 and not lb3.loading(), "a missing row: a problem")
+    print("canvasload open_later: " + String(adopted) + " objects adopted after " + String(frames) + " polls (" + lb.times + " us on the job)")
     print("canvasload: ok · " + String(len(whole.objs)) + " objects, first slice " + String(first) + ", " + String(slices) + " slices, " + String(crossing) + " crossing edges")

@@ -6,6 +6,12 @@
 #   ld.step(layer, x0, y0, x1, y1, budget_us)         # the next slice: nodes meeting the rect first, then file order
 #   ld.finish(layer)                                  # everything now: a reader that needs the whole document calls it
 #   ld.done()                                         # nothing left
+#   ld.covers(x0, y0, x1, y1)                         # every node meeting the rect is in (and both ends of its edges)
+#
+#   var b = OpenBoard()                               # a board and its open as one value (D-7952)
+#   b.open(text, x0, y0, x1, y1)                      # skimmed and the rect's nodes taken now, on this thread
+#   b.open_later(SqlText(db, sql, id), x0, y0, x1, y1)  # (D-7956) read + skim + the rect's nodes on a job thread: the
+#                                                     # frame that asks costs nothing; b.holding(rect) until they're in
 #
 # Why: parsing Personal Note's 12 MB stress canvas whole takes ~100 ms, and the window shows a part of it. The skim
 # finds where every node is without parsing: the bytes go by in 64-byte blocks, each turned into bit masks (quotes,
@@ -23,6 +29,11 @@ from max.algorithm import parallelize
 from mojoui.json import Json, c_locale, c_float, pow5_table
 from mojoui.objectlayer import ObjectLayer, Obj, canvas_node_obj, canvas_edge_obj, CONNECTOR
 from mojoui.docstore import clock_us
+from mojoui.objectlayer import import_json_canvas_doc
+from mojoui.sqlite import Database
+from mojoui.uijobs import start_ui_job
+from mojoui import libc
+from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 from std.os import getenv
 
 comptime _EVEN = UInt64(0x5555555555555555)
@@ -325,6 +336,7 @@ struct CanvasLoad(Movable):
     var skim_us: Int
     var bad: Int  # nodes that weren't JSON (made nothing)
     var trace: Bool  # MOJOUI_LOAD_TRACE=1: each slice's parse and adopt times (diagnosis)
+    var serial: Bool  # parse on this thread only (a job thread's load, D-7956)
     var cores: Int  # workers for a slice (the machine's logical cores: 12 → 24 measured 6.5 → 4.8 ms; MOJOUI_LOAD_CORES=n for an A/B)
 
     def __init__(out self, var text: String):
@@ -352,6 +364,7 @@ struct CanvasLoad(Movable):
         self.bad = 0
         self.trace = getenv("MOJOUI_LOAD_TRACE") == "1"
         self.cores = num_logical_cores()
+        self.serial = False
         try:
             if getenv("MOJOUI_LOAD_CORES") != "":
                 self.cores = max(1, Int(getenv("MOJOUI_LOAD_CORES")))
@@ -420,6 +433,13 @@ struct CanvasLoad(Movable):
         except:
             return Json()
 
+    def covers(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
+        """No pending node meets the rect (page units): what take() of it would parse is all in."""
+        for i in range(len(self.ns)):
+            if self.state[i] == _PENDING and self._meets(i, x0, y0, x1, y1):
+                return False
+        return True
+
     def _meets(self, i: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
         return self.bx1[i] >= x0 and self.bx0[i] <= x1 and self.by1[i] >= y0 and self.by0[i] <= y1
 
@@ -477,6 +497,9 @@ struct CanvasLoad(Movable):
 
             if tasks == 1:
                 work(0)
+            elif self.serial:  # (on a job thread: max's parallelize there aborts, AsyncRT's CPU device made with other options)
+                for w in range(tasks):
+                    work(w)
             else:
                 parallelize(work, tasks, min(tasks, workers))
             _ = len(cut)
@@ -622,6 +645,103 @@ struct CanvasLoad(Movable):
                 layer.mark_saved()
 
 
+trait TextSource(Movable, Deinitable):
+    """(D-7956) Where a document's text comes from, read on a job thread (so it opens its own handles there)."""
+
+    def read(mut self) raises -> String:
+        ...
+
+
+struct SqlText(TextSource):
+    """One TEXT column of one row: `sql` with one integer parameter, on a connection of its own (memory-mapped reads),
+    opened on the thread that reads it."""
+
+    var path: String
+    var sql: String
+    var arg: Int
+
+    def __init__(out self, path: String, sql: String, arg: Int):
+        self.path = path
+        self.sql = sql
+        self.arg = arg
+
+    def read(mut self) raises -> String:
+        var db = Database(self.path)
+        db.map_reads()
+        var q = db.prepare(self.sql)
+        q.bind(1, self.arg)
+        if not q.step():
+            raise Error("no such row")
+        return q.text(0)
+
+
+struct OpenedCanvas(Movable):
+    """What an open on a job thread hands back: the load with the rect's nodes taken into `layer`, or `back` (the text,
+    when the skim can't open it: imported whole on the UI thread), or `problem` (the read failed)."""
+
+    var load: List[CanvasLoad]
+    var layer: ObjectLayer
+    var back: String
+    var problem: String
+    var read_us: Int
+    var skim_us: Int
+    var take_us: Int
+
+    def __init__(out self):
+        self.load = List[CanvasLoad]()
+        self.layer = ObjectLayer()
+        self.back = ""
+        self.problem = ""
+        self.read_us = 0
+        self.skim_us = 0
+        self.take_us = 0
+
+
+struct CanvasOpenJob[S: TextSource](JobBody):
+    comptime Out = OpenedCanvas
+    var src: Self.S
+    var x0: Float64
+    var y0: Float64
+    var x1: Float64
+    var y1: Float64
+    var gap: Float64
+
+    def __init__(out self, var src: Self.S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, gap: Float64):
+        self.src = src^
+        self.x0 = x0
+        self.y0 = y0
+        self.x1 = x1
+        self.y1 = y1
+        self.gap = gap
+
+    def run(mut self, ctl: JobCtl) raises -> OpenedCanvas:
+        var out = OpenedCanvas()
+        var t0 = clock_us()
+        var text: String
+        try:
+            text = self.src.read()
+        except e:
+            out.problem = String(e)
+            return out^
+        var t1 = clock_us()
+        out.read_us = t1 - t0
+        var ld = CanvasLoad(text^)
+        var t2 = clock_us()
+        out.skim_us = t2 - t1
+        if not ld.ok:
+            swap(out.back, ld.text)
+            return out^
+        if self.gap >= 0:
+            out.layer.set_connector_gap(self.gap)
+        out.layer.mark_saved()
+        ld.serial = True
+        ld.take(out.layer, self.x0, self.y0, self.x1, self.y1)
+        out.take_us = clock_us() - t2
+        if not ld.done():
+            out.load.append(ld^)
+        return out^
+
+
 struct OpenBoard(Movable):
     """(D-7952) A board and the progressive open still filling it, as one value, so an app can't act on part of a
     document: painting and panning read `layer` as it is (the visible part is there from the first frame); edit() and
@@ -631,17 +751,88 @@ struct OpenBoard(Movable):
     var layer: ObjectLayer
     var load: List[CanvasLoad]
     var fresh: Bool  # the open's own frame: it shows what open() took, no slice in it
+    var job: Optional[Job[OpenedCanvas]]  # (D-7956) an open_later() still reading on its job thread
+    var gap: Float64
+    var problem: String  # why the last open_later() found nothing ("" when it didn't fail)
+    var times: String  # the last open_later()'s read / skim / take on its thread, µs (MOJOUI_LOAD_TRACE prints it)
 
     def __init__(out self):
         self.layer = ObjectLayer()
         self.load = List[CanvasLoad]()
         self.fresh = False
+        self.job = None
+        self.gap = -1
+        self.problem = ""
+        self.times = ""
 
     def set(mut self, var layer: ObjectLayer):
-        """A board made whole elsewhere (a kept parse, a whole import, an empty one): any open in progress is dropped."""
+        """A board made whole elsewhere (a kept parse, a whole import, an empty one): any open in progress is dropped
+        (a job still reading ends on its own thread; what it read is thrown away)."""
         self.load.clear()
         self.fresh = False
+        self.job = None
         self.layer = layer^
+
+    def open_later[S: TextSource](mut self, var src: S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1):
+        """(D-7956) The open with nothing on this thread: the text read, skimmed and the rect's nodes parsed on a job
+        thread (start_ui_job: the UI is woken when it ends). Until then the board is empty and pending(); step() adopts
+        it the frame after it lands (that frame shows the rect's nodes, no slice in it), then slices as open() does.
+        edit(), take(), member() and finish() wait for it. An app shows something in the meantime (the view kept on
+        disk, mojoui.viewsnap, while holding() says the rect isn't in yet)."""
+        self.load.clear()
+        self.fresh = False
+        self.problem = ""
+        self.gap = connector_gap
+        self.layer = ObjectLayer()
+        if connector_gap >= 0:
+            self.layer.set_connector_gap(connector_gap)
+        self.layer.mark_saved()
+        self.job = start_ui_job(CanvasOpenJob[S](src^, x0, y0, x1, y1, connector_gap))
+
+    def pending(self) -> Bool:
+        """An open_later() whose job hasn't been adopted yet."""
+        return Bool(self.job)
+
+    def holding(self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
+        """The rect's nodes aren't all in yet (an open_later() still on its thread, or a load whose rect part is pending)."""
+        if self.job:
+            return True
+        return len(self.load) > 0 and not self.load[0].covers(x0, y0, x1, y1)
+
+    def _adopt(mut self, wait: Bool) -> Bool:
+        """An open_later()'s result into the board when its job has ended (wait: block until it has). True when adopted."""
+        if not self.job:
+            return False
+        if not wait and self.job.value().poll() == JOB_RUNNING:
+            return False
+        while self.job.value().poll() == JOB_RUNNING:
+            _ = libc.usleep(100)
+        var job = self.job.take()
+        var got = OpenedCanvas()
+        try:
+            got = job.result()
+        except e:
+            got.problem = String(e)
+        self.times = "read " + String(got.read_us) + " skim " + String(got.skim_us) + " take " + String(got.take_us)
+        if got.problem != "":
+            self.problem = got.problem
+            return True
+        if got.back != "":  # (not something the skim opens: the whole import, which raises the why)
+            try:
+                var j = Json.parse(got.back)
+                self.layer = import_json_canvas_doc(j)
+                if self.gap >= 0:
+                    self.layer.set_connector_gap(self.gap)
+                self.layer.mark_saved()
+            except e:
+                self.problem = String(e)
+            return True
+        if len(got.load) > 0:
+            self.load.append(got.load.pop())
+            self.load[0].serial = False  # (its slices run here, on every core)
+        swap(self.layer, got.layer)
+        self.fresh = True
+        return True
 
     def open(mut self, var text: String, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1) -> String:
         """A JSON Canvas opened progressively: the nodes meeting the rect (page units) now, the rest by step(). Returns
@@ -663,8 +854,9 @@ struct OpenBoard(Movable):
             self.load.append(ld^)
         return ""
 
-    def member(self, key: String) -> Json:
+    def member(mut self, key: String) -> Json:
         """A top-level member of the document being opened (its page grid); an empty object when none is opening."""
+        _ = self._adopt(True)
         if len(self.load) > 0:
             return self.load[0].member(key)
         try:
@@ -673,7 +865,7 @@ struct OpenBoard(Movable):
             return Json()
 
     def loading(self) -> Bool:
-        return len(self.load) > 0
+        return len(self.load) > 0 or Bool(self.job)
 
     def left(self) -> Int:
         """Nodes not parsed yet (0 when whole)."""
@@ -681,7 +873,12 @@ struct OpenBoard(Movable):
 
     def step(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, budget_us: Int) -> Bool:
         """One slice (the rect's nodes first); True while more is left (the app asks for another frame)."""
+        if self.job:
+            _ = self._adopt(False)
+            if self.job:
+                return True  # (still reading: another frame)
         if len(self.load) == 0:
+            self.fresh = False
             return False
         if self.fresh:
             self.fresh = False
@@ -694,6 +891,7 @@ struct OpenBoard(Movable):
 
     def finish(mut self):
         """Everything left, now."""
+        _ = self._adopt(True)
         if len(self.load) > 0:
             self.load[0].finish(self.layer)
             self.load.clear()
