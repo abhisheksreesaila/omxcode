@@ -11,7 +11,10 @@
 # 7. OpenBoard: an edit mid-open through edit() finishes the load first, lands, and undoes (review 2, D-7952);
 # 8. OpenBoard.open_later (D-7956): a row read, skimmed and the rect taken on a job thread (SqlText on a scratch SQLite
 #    file); pending and holding until adopted, adopted by step() with the rect's nodes in and no slice that frame, then it
-#    ends as the whole import; an edit while still pending waits for it; a missing row is a problem, not a crash.
+#    ends as the whole import; an edit while still pending waits for it; a missing row is a problem, not a crash;
+# 9. OpenBoard.near (D-7959): edits on a partly loaded board (a move in the view, a new text, deleting a node whose edge
+#    is still pending) with the rest loading after: the end equals the whole import with the same edits, the new
+#    object's id sits above the document's, and three undos give back the document.
 from std.testing import assert_equal, assert_true, assert_false
 from std.collections import Dict
 from mojoui.json import Json, json_string
@@ -77,6 +80,16 @@ def board_text(count: Int, edges: Int, mut seed: UInt64) -> String:
         out += ("," if i > 0 else "") + es[i]
     out += '],"pn":{"schemaVersion":1,"page":{"columns":4,"rows":3}}}'
     return out^
+
+
+def three_edits(mut L: ObjectLayer, mover: Int, victim: Int) -> Int:
+    L.select(mover, False)
+    L.begin_gesture(CH_MOVE)
+    L.move_by(37, -21)
+    L.end_gesture()
+    var made = L.add_text(1200, 1200, 200, 60, "made during the open")
+    L.delete(victim)
+    return made
 
 
 def same_layers(a: ObjectLayer, b: ObjectLayer) raises:
@@ -287,5 +300,49 @@ def main() raises:
     lb3.open_later(SqlText(dbp, q, 8), 0, 0, 10, 10)
     lb3.finish()
     assert_true(lb3.problem != "" and len(lb3.layer.objs) == 0 and not lb3.loading(), "a missing row: a problem")
+
+    # 9. edits on a partly loaded board
+    var R0 = 1000.0
+    var R1 = 1000.0
+    var R2 = 2000.0
+    var R3 = 1800.0
+    var pb = OpenBoard()
+    assert_equal(pb.open(text, R0, R1, R2, R3), "")
+    _ = pb.step(R0, R1, R2, R3, 200)  # (the open's own frame)
+    for _ in range(3):
+        _ = pb.step(R0, R1, R2, R3, 300)  # (some slices in file order: nodes outside the view, some edges waiting)
+    assert_true(pb.loading(), "still loading")
+    # a loaded node, not in the view, with an edge whose other end isn't in yet
+    var victim = -1
+    for ref o in whole.objs:
+        if o.kind != CONNECTOR:
+            continue
+        if pb.layer.has(o.from_id) and not pb.layer.has(o.to_id) and not pb.layer.has(o.id):
+            victim = o.from_id
+            break
+    assert_true(victim > 0, "the case has a pending edge with one end loaded")
+    var mover = -1
+    for ref o in pb.layer.objs:
+        if o.kind != CONNECTOR and o.x >= R0 and o.y >= R1 and o.x + o.w <= R2 and o.y + o.h <= R3 and o.id != victim:
+            mover = o.id
+            break
+    assert_true(mover > 0, "an object in the view")
+    var edited = import_json_canvas_doc(Json.parse(text))  # (the same edits on the whole import)
+    var left_before = pb.left()
+    ref pl = pb.near(R0, R1, R2, R3)
+    assert_true(pb.loading() and pb.left() == left_before, "near() loads only what the view needs (it already had it)")
+    var made_ids = List[Int]()
+    made_ids.append(three_edits(pl, mover, victim))
+    made_ids.append(three_edits(edited, mover, victim))
+    assert_equal(made_ids[0], made_ids[1], "a new object's id: as after the whole import")
+    assert_true(made_ids[0] > len(whole.objs), "above the document's ids")
+    while pb.step(R0, R1, R2, R3, 300):
+        pass
+    assert_false(pb.loading())
+    assert_equal(export_json_canvas(pb.layer, 4, 3), export_json_canvas(edited, 4, 3))
+    assert_true(pb.layer.unsaved(), "the edits are edits")
+    for _ in range(3):
+        assert_true(pb.edit().undo(), "undoable after the open")
+    assert_equal(export_json_canvas(pb.layer, 4, 3), export_json_canvas(whole, 4, 3))
     print("canvasload open_later: " + String(adopted) + " objects in the rect after " + String(frames) + " polls and " + String(slices_held) + " slices (" + lb.times + " us on the job)")
     print("canvasload: ok · " + String(len(whole.objs)) + " objects, first slice " + String(first) + ", " + String(slices) + " slices, " + String(crossing) + " crossing edges")

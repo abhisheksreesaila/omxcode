@@ -6,7 +6,9 @@
 # holding: no ops yet) is pixel-identical to the frame the renderer that kept it drew, and the real tiles that replace
 # it are too; a snapshot whose key differs is never shown; the app's note comes back from the head for its tag only;
 # (5) a renderer already showing the board's real tiles, given a new picture of it (BoardLook.forget(), a cold open)
-# that holds, shows the snapshot in that same frame, identical, nothing rastered. `viewsnap: ok`.
+# that holds, shows the snapshot in that same frame, identical, nothing rastered; (6) an edit in the frame the hold ends
+# (the app withdraws its tag: unsaved) promotes the snapshot and applies the edit's damage: equal to a fresh raster.
+# `viewsnap: ok`.
 #   pixi run mojo run -I . -I vendor tests/test_viewsnap.mojo
 from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
@@ -182,6 +184,38 @@ def gl_identity() raises:
     assert_equal(g.tiles.rastered, 0)
     assert_equal(differ(a, e), 0)
     print("   a cold open on a live renderer: shown from the snapshot in its first frame, identical")
+    # (6) the hold ends with an edit in the same frame (the tag withdrawn: an unsaved board)
+    var g6 = GPU2D()
+    assert_true(g6.start(False), "start 6")
+    var look6 = BoardLook()
+    look6.keep_path = path
+    look6.keep_tag = "note=1;rev=5;skin=paper"
+    look6.keep_hold = True
+    _ = frame(g6, look6, empty, v)
+    assert_true(g6.tiles.has_snap("board", 1), "6: shown from the snapshot")
+    var vis6 = BoardTools().visible_objects(layer, v, 1440, 900)
+    var moved = layer.objs[vis6[len(vis6) // 3]].id
+    layer.select(moved, False)
+    layer.begin_gesture(CH_MOVE)
+    layer.move_by(-33, 29)
+    layer.end_gesture()
+    look6.keep_hold = False
+    look6.keep_tag = ""
+    var got6 = frame(g6, look6, layer, v)
+    for _ in range(3):
+        got6 = frame(g6, look6, layer, v)
+    var gr6 = GPU2D()
+    assert_true(gr6.start(False), "start ref 6")
+    var pl6 = BoardLook()
+    var want6 = frame(gr6, pl6, layer, v)
+    for _ in range(3):
+        want6 = frame(gr6, pl6, layer, v)
+    var d6 = differ(want6, got6)
+    print("   an edit as the hold ends: promoted, damaged:", d6, "pixels differ from a fresh raster")
+    assert_equal(d6, 0)
+    _ = layer.undo()
+    gr6.gl.close()
+    g6.gl.close()
     g.gl.close()
     g2.gl.close()
     print("gl: ok")

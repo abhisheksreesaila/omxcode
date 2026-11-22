@@ -1011,7 +1011,8 @@ struct WebShell(Movable):
                 return False  # (the chrome: nothing of the board read, an open keeps coming in)
             if self.tools.tool == "hand":  # (the hand only moves the view)
                 return self.tools.press(x, y, self.board.layer, self.view)
-            return self.tools.press(x, y, self.board.edit(), self.view)  # (may edit: waits for the whole board, D-7952)
+            var r = self.view_rect()  # (D-7959: an edit needs only what the view shows; an open keeps coming in)
+            return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
@@ -1023,7 +1024,8 @@ struct WebShell(Movable):
         if self.on_canvas():
             if self.tools.tool == "hand":
                 return self.tools.pan(x, y, self.board.layer, self.view)  # (the hand tool moves self.view)
-            return self.tools.pan(x, y, self.board.edit(), self.view)
+            var r = self.view_rect()
+            return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True
@@ -1031,7 +1033,8 @@ struct WebShell(Movable):
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
-            var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.edit(), self.view)
+            var vr = self.view_rect()
+            var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
             return r
         if len(self.page.wet) > 0:
@@ -1083,7 +1086,8 @@ struct WebShell(Movable):
         elif hit == "#zoom-fit":
             self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
         elif hit == "":
-            if not self.tools.tap(x, y, self.board.edit(), self.view, self.win_w, self.win_h):
+            var vr = self.view_rect()
+            if not self.tools.tap(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view, self.win_w, self.win_h):
                 return False
         self.save_canvas()
         return True

@@ -635,6 +635,11 @@ struct Tiles(Movable):
         var v = scene.layer_versions[i]
         if not self.sets[s].bins.fresh(scene, i):
             self.sets[s].bins.build(scene, i)
+        # (D-7959) an edit while a restored snapshot is still the fallback (the app withdrew its tag): the layer's view is
+        # complete (it doesn't hold), so the snapshot becomes its tiles first and this frame's damage, the edit's,
+        # applies to them below (ignored while the snapshot stood for the document as saved)
+        if self.sets[s].snap and not scene.layer_hold[i] and not self.snap_wanted(scene, i) and len(self.sets[s].tiles) == 0 and self.sets[s].fb_k == k and not self.promote_off:
+            self._promote(s)
         # an edit: the damaged tiles go (all of them without damage from the version they show)
         if self.sets[s].version != v or v < 0:
             var since = scene.layer_since[i]

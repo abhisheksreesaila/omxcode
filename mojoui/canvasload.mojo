@@ -447,6 +447,7 @@ struct CanvasLoad(Movable):
     def _parse(mut self, mut layer: ObjectLayer, idx: List[Int], stepping: Bool = False):
         """Nodes idx (pending, in file order) parsed on every core and adopted with their file ids, then the edges whose
         ends are both there."""
+        layer.reserve_ids(len(self.ns) + len(self.es))  # (D-7959: an edit meanwhile makes ids above the document's)
         var count = len(idx)
         if count > 0:
             var t0 = clock_us()
@@ -543,6 +544,19 @@ struct CanvasLoad(Movable):
                 continue
             if a == -2 or b == -2:  # (a node it may bind to isn't parsed yet)
                 still.append(e)
+                continue
+            if not layer.has(a + 1) or not layer.has(b + 1):
+                # (D-7959) an end deleted by an edit made during the open: that delete would have taken the edge too, so
+                # it joins that step as deleted there (an undo brings it back with its end)
+                try:
+                    j.reparse(Int(self.text.unsafe_ptr()) + self.es[e], self.ee[e] - self.es[e])
+                    var rd = canvas_edge_obj(j, 0)
+                    var cd = rd[2].copy()
+                    cd.from_id = a + 1
+                    cd.to_id = b + 1
+                    _ = layer.adopt_deleted(cd^, count + e + 1, count + e + 1, [a + 1, b + 1])
+                except:
+                    pass
                 continue
             if a == b:
                 continue
@@ -648,8 +662,8 @@ struct CanvasLoad(Movable):
         if self.done():
             var was_saved = not layer.unsaved()
             layer.order_by_z()
-            layer.history.clear()
-            if was_saved:
+            if was_saved:  # (D-7959: an edit made during the open stays undoable)
+                layer.history.clear()
                 layer.mark_saved()
 
 
@@ -910,6 +924,19 @@ struct OpenBoard(Movable):
             self.load[0].finish(self.layer)
             self.load.clear()
         self.fresh = False
+
+    def near(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> ref [self.layer] ObjectLayer:
+        """(D-7959) The board to edit or read inside the rect (page units: the view): everything the rect needs is
+        loaded first (an open_later() still reading is waited for; then the rect's pending nodes and both ends of edges
+        crossing it), the rest keeps coming a slice a frame. An edit made now stays undoable after the open ends, its
+        ids sit above the document's, and an edge whose end it deleted is dropped as deleting would have dropped it.
+        Anything that reads or writes the whole board (a save, an export, select all) uses edit()."""
+        _ = self._adopt(True)
+        if len(self.load) > 0:
+            self.load[0].take(self.layer, x0, y0, x1, y1)
+            if self.load[0].done():
+                self.load.clear()
+        return self.layer
 
     def edit(mut self) -> ref [self.layer] ObjectLayer:
         """The whole board, to change or to read all of (a save, a search, a selection): the load is finished first."""

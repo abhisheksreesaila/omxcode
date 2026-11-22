@@ -1917,6 +1917,37 @@ struct ObjectLayer(Movable):
         return id
 
 
+    def reserve_ids(mut self, n: Int):
+        """(D-7959) Ids and z 1…n belong to a document still being adopted (adopt_as): objects made meanwhile get ids and
+        z above them, as they would after the whole import."""
+        self.next_id = max(self.next_id, n + 1)
+        self.z_top = max(self.z_top, n)
+
+    def adopt_deleted(mut self, var o: Obj, id: Int, z: Int, ends: List[Int]) -> Bool:
+        """(D-7959) A document's connector arriving after an edit deleted one of its ends (a progressive open): had it
+        been there, the delete would have taken it too. It goes into that step (the earliest one in the history that
+        deleted an end) as deleted there, restored after its ends by an undo. False when no step in the history
+        deleted an end (it is dropped, as the delete would have dropped it)."""
+        o.id = id
+        o.z = z
+        self.next_id = max(self.next_id, id + 1)
+        self.z_top = max(self.z_top, z)
+        for c in range(len(self.history.done)):
+            var hit = False
+            ref ch = self.history.done[c]
+            for k in range(len(ch.ids)):
+                if ch.ids[k] in ends and ch.before[k] and not ch.after[k]:
+                    hit = True
+                    break
+            if not hit:
+                continue
+            # (first in the step: an undo puts the step's objects back last to first, so its ends are back before it)
+            ch.ids.insert(0, id)
+            ch.before.insert(0, Optional[Obj](o^))
+            ch.after.insert(0, Optional[Obj](None))
+            return True
+        return False
+
     def adopt_as(mut self, var o: Obj, id: Int, z: Int) -> Int:
         """An object as it is with the id and z its document gives it (an importer's: a JSON Canvas node's index), no
         undo step; later objects get ids and z above every one given so far."""
