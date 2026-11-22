@@ -62,7 +62,8 @@ REGION_MIN_AREA = 150
 REGION_MARGIN = 0.10
 STEPS_MIN = 25        # M4
 P95 = 8.3             # M6: silky
-OPEN_TEST_OK = [False]  # (D-7946 (d)) tests/test_canvasload passed in this M6 run
+OPEN_TEST_OK = [False]
+SNAPINFO = {}  # (D-7958) per race note: the first opens A (no kept view) and B, the cold opens' restores, the run without  # (D-7946 (d)) tests/test_canvasload passed in this M6 run
 MAX = 16.7
 LINUX_DPR = 1.6
 MAC_DPR = 2.0
@@ -833,13 +834,40 @@ def m6():
     if r.returncode or "SEEDED stress" not in r.stdout:
         return "FAIL", f"seeding the race notes through the web API: {tail(r.stdout + r.stderr)}"
     nat, shown = {}, {}
+    # (D-7951, review 2) the process's very first open of each race note: pnote starts on another note (PNOTE_FIRST), so
+    # nothing of the canvas (tiles, parses, its glyphs at that zoom) exists in the process. (D-7956/D-7958) Twice: A, the
+    # first open ever (no kept view on disk: parsed; printed, not judged), which keeps the settled view (it waits 4 s);
+    # B, a new process opening it again from that kept view (judged with the cold opens, labelled). The race below
+    # starts from B's folder, so its cold opens can use the kept view; how many did is counted and printed.
+    snapinfo = {}
+    for note in RACE_NOTES:
+        cfg = race / f"cfg-first-{note}"
+        shutil.rmtree(cfg, ignore_errors=True)
+        cfg.mkdir()
+        shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
+        other = subprocess.run(["sqlite3", str(cfg / "pn.db"), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"],
+                               capture_output=True, text=True).stdout.strip()
+        for run_ in ("A", "B"):
+            steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
+            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), PNOTE_FIRST=other,
+                       MOJOUI_SNAP_LOG="1", MOJOUI_TEST=";".join(steps), MOJOUI_SHOT="")
+            r = run(["scripts/testscreen", str(APP)], 600, env=env)
+            log = r.stdout + r.stderr
+            (race / f"native-first-{note}{'-nosnap' if run_ == 'A' else ''}.log").write_text(log)
+            fo = native_race(log).get("open")
+            used = "SNAP: restored" in log
+            snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": used, "saved": "SNAP: saved" in log}
+            if run_ == "B" and fo:
+                nat.setdefault(note, {})["first open"] = dict(fo, snap=used)
     for note in RACE_NOTES:
         for visible in (False, True):
             cfg = race / f"cfg-{note}"
             shutil.rmtree(cfg, ignore_errors=True)
             cfg.mkdir()
             shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
-            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"),
+            if (race / f"cfg-first-{note}" / "snaps").exists():  # (the kept view B opened from)
+                shutil.copytree(race / f"cfg-first-{note}" / "snaps", cfg / "snaps")
+            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), MOJOUI_SNAP_LOG="1",
                        MOJOUI_TEST=";".join(["wait:800", "window:1440x900"] + NATIVE_RACE), MOJOUI_SHOT="")
             if visible:
                 env["MOJOUI_OFFLOAD"] = "0"
@@ -852,7 +880,24 @@ def m6():
             if visible:
                 shown[note] = native_race(log)
             else:
+                first_ = nat.get(note, {}).get("first open")
                 nat[note] = native_race(log)
+                if first_:
+                    nat[note]["first open"] = first_
+                cold = log.split("APPBENCH: coldopens", 1)[-1].split("APPBENCH: keptopens", 1)[0]
+                snapinfo.setdefault(note, {})["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
+        # (D-7958) the same cold opens with the kept view turned off (MOJOUI_SNAP=0): printed beside, not judged
+        cfg = race / f"cfg-nosnap-{note}"
+        shutil.rmtree(cfg, ignore_errors=True)
+        cfg.mkdir()
+        shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
+        env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), MOJOUI_SNAP="0",
+                   MOJOUI_TEST=";".join(["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,20", "framebench:desk=openpress,10"]), MOJOUI_SHOT="")
+        r = run(["scripts/testscreen", str(APP)], 900, env=env)
+        (race / f"native-nosnap-{note}.log").write_text(r.stdout + r.stderr)
+        snapinfo.setdefault(note, {})["off"] = native_race(r.stdout + r.stderr).get("open")
+    SNAPINFO.clear()
+    SNAPINFO.update(snapinfo)
     starts = []
     for _ in range(5):
         cfg = race / "cfg-start"
@@ -867,22 +912,6 @@ def m6():
             return "FAIL", f"native start-up run didn't run pnote's web look (no 'PNOTE WEB:' line): {tail(r.stdout + r.stderr)}"
         starts.append(r.stdout + r.stderr)
     nstart = native_start(starts)
-    # (D-7951, review 2) the process's very first open of each race note: pnote starts on another note (PNOTE_FIRST), so
-    # nothing of the canvas (tiles, parses, its glyphs at that zoom) exists yet; one timed open. Judged with the cold opens
-    for note in RACE_NOTES:
-        cfg = race / f"cfg-first-{note}"
-        shutil.rmtree(cfg, ignore_errors=True)
-        cfg.mkdir()
-        shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
-        other = subprocess.run(["sqlite3", str(cfg / "pn.db"), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"],
-                               capture_output=True, text=True).stdout.strip()
-        env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), PNOTE_FIRST=other,
-                   MOJOUI_TEST=";".join(["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"]), MOJOUI_SHOT="")
-        r = run(["scripts/testscreen", str(APP)], 600, env=env)
-        (race / f"native-first-{note}.log").write_text(r.stdout + r.stderr)
-        fo = native_race(r.stdout + r.stderr).get("open")
-        if fo:
-            nat.setdefault(note, {})["first open"] = fo
     # (D-7950, set by the main session) cold start, like with like: Personal Note's own desktop launcher cold, and a
     # fresh Chromium process on the built app, each from its process's start to the title island painted
     for mode in ("desktop", "chromium"):
@@ -1044,7 +1073,11 @@ def race_table(web, nat, start, shown=None):
              "- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), "
              "progressively (mojoui.canvasload, D-7944), its board's raster tiles dropped first and the first timed open coming from "
              "another note (D-7951); and once more as the process's very first open of it (PNOTE_FIRST). Every frame counts its draw, "
-             "its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). Judged by D-7946: (a) the first frame, "
+             "its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). (D-7956, D-7958) A canvas whose settled view "
+             "was kept on disk (mojoui.viewsnap: same document revision, skin, zoom, view, size, GPU and build) opens from it: the first frame "
+             "shows those tiles, the note is read and skimmed on a job thread, the view's objects come in by slices, then the kept tiles "
+             "become the board's tiles. The first-open row says which path it took and how many cold opens used it; the open without a kept "
+             "view (the very first open of a note, and MOJOUI_SNAP=0) is printed after the table, not judged. Judged by D-7946: (a) the first frame, "
              "showing the chrome and the visible board, within 8.3 ms (its max over the cold opens and the first open); (b) every frame "
              "after it until the board is complete silky, and the frame showing a press made during the open (the app finishes the "
              "load first, D-7952); (c) "
@@ -1073,7 +1106,10 @@ def race_table(web, nat, start, shown=None):
             ok = ok and good
             vis = (f"{v['p95']} / {v['max']} · " + (f"{v['shown_p95']} / {v['shown_max']} ({v['shown_n']})" if v.get("shown_n", 0) > 0 else "shown: not measured")) if v else "—"
             if step == "open" and n and "complete_max" in n:
-                fo = f" (the process's first open: {first['max']})" if first else " (the process's first open: not measured)"
+                si = SNAPINFO.get(note, {})
+                fo = (f" (the process's first open: {first['max']}, " + ("from the kept view" if first.get("snap") else "parsed, no kept view") + ")") if first else " (the process's first open: not measured)"
+                cold_ = si.get("cold")
+                fo += f"; the kept view shown in {cold_[0]} of {cold_[1]} cold opens" if cold_ else ""
                 lines.append(f"| {note} | open (cold): first frame{fo} | {f'{w['p95']} / {w['max']}' if w else '—'} | {n['p95']} / {n['max']} | {vis} | {'✓' if n['max'] <= P95 else '✗'} |")
                 lines.append(f"| {note} | open: frames during (n {n['during_n']}) | — | {n['during_p95']} / {n['during_max']} | | {'✓' if n['during_p95'] <= P95 and n['during_max'] <= MAX else '✗'} |")
                 pn_ = n.get("press_n", 0)
@@ -1081,6 +1117,15 @@ def race_table(web, nat, start, shown=None):
                 lines.append(f"| {note} | open: complete (wall) | {f'{w['p95']}' if w else '—'} | {n['complete_p50']} / {n['complete_max']} | | {'✓' if w and n['complete_max'] < w['p95'] else '✗'} |")
                 continue
             lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {vis} | {'✓' if good else '✗'} |")
+    for note in RACE_NOTES:  # (D-7958) the open without the kept view, beside the judged rows: not judged
+        si = SNAPINFO.get(note, {})
+        a_ = si.get("A", {}).get("open")
+        off = si.get("off")
+        if a_:
+            lines.append(f"| {note} | the process's first open ever, no kept view on disk (parsed; not judged) | — | {a_['p95']} / {a_['max']} | | |")
+        if off and "complete_max" in off:
+            lines.append(f"| {note} | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | "
+                         f"{off['max']} · {off['during_p95']} / {off['during_max']} · {off.get('press_p95', '—')} / {off.get('press_max', '—')} · {off['complete_max']} | | |")
     for note in RACE_NOTES:
         kept = nat.get(note, {}).get("open (kept)")
         if kept:
