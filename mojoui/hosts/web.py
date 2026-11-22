@@ -753,7 +753,7 @@ CANVAS_JS = r"""
     async function one(tick) {
       const m = meta(), version = m ? m.dataset.version : '', skin = skinNow(), seq = ++st.seq;
       const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-      if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { await new Promise(ok => requestAnimationFrame(ok)); return 'ok'; }  // (not laid out yet, a screen just rebuilt: a 1x1 frame would wipe the picture it kept; up to 30 frames, D-7813)
+      if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { await new Promise(ok => requestAnimationFrame(ok)); return 'ok'; }  // (not laid out yet, a screen just rebuilt: a 1x1 frame would wipe the picture it kept; up to 30 frames, D-6713)
       st.unsized = 0;
       const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
@@ -837,7 +837,7 @@ CANVAS_JS = r"""
           const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-          if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); continue; }  // (not laid out yet: as in one(), D-7813)
+          if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); continue; }  // (not laid out yet: as in one(), D-6713)
           st.unsized = 0;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
@@ -977,7 +977,7 @@ CANVAS_JS = r"""
   }
   document.addEventListener('DOMContentLoaded', () => { scan(); focusFirst(); });
   // A rebuilt screen's canvases are wired up (each shows the picture it kept) before the browser paints it, not ~20 ms
-  // later at afterSettle: in between, a new <canvas> painted blank (the Stage's TV flashed as its body arrived, D-7813).
+  // later at afterSettle: in between, a new <canvas> painted blank (the Stage's TV flashed as its body arrived, D-6713).
   // One microtask per answer, however many elements it swapped.
   let scanQueued = false;
   const scanSoon = () => { if (scanQueued) return; scanQueued = true; queueMicrotask(() => { scanQueued = false; scan(); }); };
@@ -1853,7 +1853,7 @@ def render_node(s, i, sid):
                 h = {START: "start", END: "end"}.get(ch["x"], "center")
                 v = "end" if ch["y"] == END else "start"
                 cover = " cover" if ch["fills"] and ch["grows"] else ""  # (a layer over the whole overlay: mojoui.orb.RimView)
-                if ch["x"] == STRETCH:  # (a band, .pin(STRETCH, START or END): the overlay's whole width at an edge, no margin, no island's chrome; mojoui.stage's TV, D-7811)
+                if ch["x"] == STRETCH:  # (a band, .pin(STRETCH, START or END): the overlay's whole width at an edge, no margin, no island's chrome; mojoui.stage's TV, D-6711)
                     kids.append(Div(render(s, c, sid), cls=f"band v-{v}"))
                     continue
                 kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}{cover}"))

@@ -705,7 +705,7 @@ def counter_web(p: Palette, cls: String) -> String:
     var card = hex_of(p.card)
     var sh1 = shadow_css(counter_sh1(p.dark))
     var out = (b + "[data-tag=stage-side]:first-child { border-top-left-radius: 0; } " + b + "[data-tag=stage-side]:last-child { border-top-right-radius: 0; }\n"
-               + b + "[data-tag=stage-side-wrap] > [data-tag=stage-side] { border-top-left-radius: 28px; border-top-right-radius: 28px; } "  # (a Stage with a TV: each band under its own 14, D-7812)
+               + b + "[data-tag=stage-side-wrap] > [data-tag=stage-side] { border-top-left-radius: 28px; border-top-right-radius: 28px; } "  # (a Stage with a TV: each band under its own 14, D-6712)
                + b + "[data-tag=stage-side-wrap]:first-child > [data-tag=stage-side] { border-top-left-radius: 0; } " + b + "[data-tag=stage-side-wrap]:last-child > [data-tag=stage-side] { border-top-right-radius: 0; }\n"
                + b + "[data-tag=stage-input] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
                + b + "[data-tag=stage-input] input[type=text]:focus { box-shadow: none; outline: none; } " + b + "[data-tag=stage-input] input::placeholder { color: " + hex_of(p.ink2) + "; }\n"

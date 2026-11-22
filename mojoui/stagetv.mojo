@@ -1,4 +1,4 @@
-# mojoui.stagetv: the Stage's TV (goal 77 M7d, D-7810…). When she explains, the chat bar (orb, text box, mic) grows over the
+# mojoui.stagetv: the Stage's TV (goal 77 M7d, D-6710…). When she explains, the chat bar (orb, text box, mic) grows over the
 # whole centre column, like gitaway's cover postcard: ONE box reshapes, its height on a soft spring (gitaway's --spring-soft,
 # 900 ms, 1.7 % overshoot) while its faces crossfade: the tiles fade out fast (260 ms), the TV's content fades in after 160 ms.
 # Inside it: a card on the left (the explanation: a Word, an Iso, a TripMap, a Sight card), the conversation on the right, the
@@ -16,7 +16,7 @@
 #   view():    Stage(top, left, tiles, right, chat, w, h, tv=tv, content=TVContent(card_for(tv.card), StageThread(msgs, …), chips))
 #   draw():    if tv.draws(canvas): tv.draw(canvas, surface, counter_tv_look(dark))     # the box, its shadow, the veils
 #
-# How (D-7810): the box is drawn on a see-through Canvas laid over the centre column (Stage puts it there), so its height
+# How (D-6710): the box is drawn on a see-through Canvas laid over the centre column (Stage puts it there), so its height
 # follows the curve on every frame on every host (the web streams a canvas's frames; view patches are paced to 10 a second
 # there). The native views sit over it in a band across the column's bottom (Overlay .pin(STRETCH, END)): the chat bar, the
 # same TextField all along (typing and IME are never interrupted), and, while open, the TV's body (head, card, thread). The

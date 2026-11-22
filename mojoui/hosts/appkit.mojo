@@ -1096,7 +1096,7 @@ struct AppKitHost[A: App](Movable):
                 if k == 0:  # the base fills the overlay
                     for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
                         _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
-                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the whole width at an edge, no margin (mojoui.stage's TV, D-7811)
+                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the whole width at an edge, no margin (mojoui.stage's TV, D-6711)
                     for anchor in ["leadingAnchor", "trailingAnchor", "bottomAnchor" if self.rt.shown.nodes[c].y == END else "topAnchor"]:
                         _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
                 else:  # an island: pinned to an edge or corner, 12 pt in (AppKit's y runs up: END is the bottom)

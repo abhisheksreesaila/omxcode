@@ -2068,7 +2068,7 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(0))
                     external_call["gtk_widget_set_valign", NoneType](child, c_int(0))
                     external_call["gtk_overlay_add_overlay", NoneType](w, child)
-                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the overlay's whole width at its top or bottom edge, no margin, its own height (mojoui.stage's TV, D-7811)
+                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the overlay's whole width at its top or bottom edge, no margin, its own height (mojoui.stage's TV, D-6711)
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(0))
                     external_call["gtk_widget_set_valign", NoneType](child, c_int(2 if self.rt.shown.nodes[c].y == END else 1))
                     external_call["gtk_overlay_add_overlay", NoneType](w, child)

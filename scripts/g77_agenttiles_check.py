@@ -126,7 +126,7 @@ def check_gtk(said, probs):
         (OUT / f).unlink(missing_ok=True)
     # the ring is judged from the pointer layer's own pixels, saved by the app once the ring has settled on the tile at full
     # strength (AGENTTILES_RING_SHOT): the same pixels GTK shows over the page, with no race against a test step's settling
-    # (a window shot right after the tap caught it before or after it showed on two reruns: D-7821). The window picture is
+    # (a window shot right after the tap caught it before or after it showed on two reruns: D-6721). The window picture is
     # only the record for people.
     steps = (f"wait:900;tap:What matters this morning?;wait:1500;shot:{OUT}/gtk-morning.png;tap:Rain at pickup;"
              f"wait:1600;shot:{OUT}/gtk-point.png;wait:2500")

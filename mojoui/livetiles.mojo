@@ -1176,7 +1176,7 @@ struct LiveTiles(Copyable, Movable):
         s.fill(look.ground)
         if Float64(s.width) / k < MIN_AREA or Float64(s.height) / k < MIN_AREA:
             return  # (a canvas not laid out yet: the web host can ask a 1 x 1 frame of a canvas it just rebuilt; taking that size
-            # would snap every tile to a degenerate grid and back, killing the water motion. As StageTV, D-7813)
+            # would snap every tile to a degenerate grid and back, killing the water motion. As StageTV, D-6713)
         self.set_area(Float64(s.width) / k, Float64(s.height) / k)
         var still = s.still or self.reduced
         var lay = self.layout()

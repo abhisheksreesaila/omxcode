@@ -155,7 +155,7 @@ def _m7a_pixels(png, panel, dark):
     # the panel's sh1 (0 1px 2px, 5 % black by day, 50 % at night) leaves the room just under its bottom edge darker than 9 px
     # away (the bar's own shadows reach only 2 px above it): no shadow is a step of 0. GTK's blur spreads it thinner than
     # CSS (about 1 level by day and 2 at night where the arithmetic says ~5), so the bar is >= 0.75 level, flat colours
-    # averaged over 80 px (D-7820)
+    # averaged over 80 px (D-6720)
     shadow = (away - below) <= -0.75
     return ok_fill and rounded and shadow, (f"fill rgb{fill} (want rgb{want}), corner rgb{corner} ({'rounded' if rounded else 'square'}), "
                                             f"shadow step {away - below:.1f} ({'a shadow' if shadow else 'NO shadow'})")

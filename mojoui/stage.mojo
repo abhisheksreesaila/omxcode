@@ -96,7 +96,7 @@ def _below_gap(var band: View) -> View:
 
 
 def _tv_layers(var base: View, tv: StageTV, content: TVContent, var bar_part: View, tail: Int) -> View:
-    """The TV over a column whose bottom holds the chat bar (D-7810): `base` with the bar's room left empty; the TV's
+    """The TV over a column whose bottom holds the chat bar (D-6710): `base` with the bar's room left empty; the TV's
     canvas over it (the veil over the tiles, the growing box: see-through, presses pass); a band across the bottom with the
     real chat bar (`bar_part`, the same TextField whether open or not) and, while open, the TV's body above it, `tail`
     points of room under the bar."""
@@ -136,7 +136,7 @@ def Stage(top: View, left: View, centre: View, right: View, bar: View, width: In
     var top_line = HStack(_gap(STAGE_PAD_X), top.copy().grow().tag("stage-top"), _gap(STAGE_PAD_X), spacing=0).align(CENTER)
     var top_row = top_line.copy().padding(STAGE_PAD_TOP, 0).fill()
     if tv.on():  # (the 14 under the top bar moves into the columns: the TV's canvas reaches into it, so the spring's
-        # overshoot pokes up into the gap as the prototype's does rather than being cut flat; D-7812)
+        # overshoot pokes up into the gap as the prototype's does rather than being cut flat; D-6712)
         top_row = VStack(_gap(0).height(STAGE_PAD_TOP), top_line^.fill(), spacing=0).fill()
     var half = STAGE_GAP // 2  # (a band's shade stops half a gap short of the centre, as the prototype's st-shade)
     var left_band = HStack(_gap(STAGE_PAD_X), VStack(_side_scroll(left), spacing=0).align(START).padding(4, 0).width(lay.side).fill().tag("stage-left"),

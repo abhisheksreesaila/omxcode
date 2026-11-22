@@ -12,7 +12,7 @@
 # message. Calls the app didn't offer are left alone. After MAX_RETRIES refusals in a row take() stops asking for reruns
 # (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
 #
-# A shown screen changes without being sent again (goal 77 M7c, D-7803): patch(k, json_patch) applies RFC 6902 to the card's
+# A shown screen changes without being sent again (goal 77 M7c, D-6703): patch(k, json_patch) applies RFC 6902 to the card's
 # render_ui arguments ({"ui": …}), validates the result with the same catalog and swaps it in, keeping what the card itself
 # holds (its live tiles' motion: they glide to their new places); a refused patch leaves the card as it was. It arrives as
 #   - a CUSTOM event `ui_patch` {"card": "card2", "patch": [...]} from any AG-UI agent: custom(agent) after EV_CUSTOM;
