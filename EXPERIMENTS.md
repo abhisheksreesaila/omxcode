@@ -4,6 +4,18 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 9: undo/redo settled, retained ops (2026-11-22, afternoon)
+- **Setup:** quiet probes first (13:28). The race ran in a quiet window found by polling (13:51); goal 77 was busy in 5
+  of 14 samples during it.
+- **What it showed:** stress undo/redo at ~10 ms is not new code. The old and new builds measure the same side by side;
+  the row depends on the steps before it and on the GPU's clocks. The "GPU time" is the GPU waiting on the CPU's command
+  issue (passes total 0.5–1.5 ms).
+- **What worked:** retained board ops (replay while unchanged, pixel-identical, invalidated on edit): stress pan p95
+  roughly halved. The stress open's first frame passes again (8.2), and every 600 row passes.
+- **Still failing:** stress frames during the open (p95 8.4 median of reruns), the press during it (10.3), undo/redo
+  (~10). The race's zoom and drag-one spikes pass when rerun.
+- **Next small step:** issue a frame's GL work in one burst after its CPU work; find the first press's one-time cost.
+
 ## Goal 79, continuation 8: edits during the open, fill damage, quiet snapshot reads (2026-11-22, afternoon)
 - **Setup:** Linux, hidden 1.6× screen. I waited an hour for a quiet machine; goal 77's checker never stopped. The race
   ran with idle GPUs at the start and end (load 1.1–1.6), with one 63 % sample mid-race.

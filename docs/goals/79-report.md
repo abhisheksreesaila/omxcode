@@ -8,6 +8,43 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 9 (2026-11-22, autopilot): undo/redo settled, retained ops
+Decisions D-7963 and D-7964; journal "continuation 9". The quiet probes ran first (13:28: load 1.5, both GPUs P8 at 0 %).
+The race waited for a quiet window (13:43–13:51, build/g79/c9-quiet.log) and ran 13:51–13:58 from load 0.5. Goal 77 was
+busy in 5 of the 14 samples taken during it (c9-m6-samples.txt). The Mac was not tried.
+
+**Undo/redo, settled (D-7964).** I built 69b9ae2d (before continuation 8) in a scratch copy and probed it alternately
+with a841a377 in the same quiet window. Both measure ~10 ms, so this round's code didn't cause it. The row depends on
+the steps before it and on the GPU's clocks:
+- After `drag40`, the same tile work costs ~2 ms more GL issue time.
+- Continuation 7's 5.7 / 6.3 ran while goal 77 kept that GPU at P2.
+
+The reported "GPU time" is mostly the GPU waiting while the CPU issues the frame. Per pass the GPU works 0.5–1.5 ms, and
+the elapsed query tracks the CPU's span inside it (+0.2 ms). No clear, full-surface blit, sync or read-back showed up.
+Not fixed yet; the next lever is to issue a frame's GL work in one burst.
+
+**Retained ops (D-7963).** `Painter.ops_mark/ops_capture/ops_replay` and `KeptOps`: BoardLook replays the board's last
+ops while its token holds. tests/test_keptops shows op-for-op equality, pixel-identical frames, and invalidation on an
+edit, a pan, a zoom and a lift. Stress probe: pan 3.8–4.6 → 2.0–2.1 ms p95, typing 4.7 → 3.6.
+
+**The press during the open** stays ~10 ms. Most press frames are ~6.5 ms; the first press of each row costs ~4 ms
+more, a first-use cost not found yet.
+
+**Race (race.md 13:58) and reruns (3×, median / worst, build/g79/c9-reruns.txt):**
+| note | row | race | reruns | |
+|---|---|---|---|---|
+| 600 | every row | open first frame 5.1, during 4.0 / 4.4, press 4.4, undo 5.5 / 7.6, redo 5.5 / 7.2 | — | ✓ all |
+| stress | open: first frame (from the kept view, 30 of 30 cold opens; first open 8.2) | 8.2 | — | ✓ |
+| stress | open: frames during | 8.9 / 11.9 | p95 8.4 / 9.3 (max ≤ 11.4) | ✗ (just over) |
+| stress | open: a press during it | 10.0 | 10.3 / 10.4 | ✗ |
+| stress | zoom from 30 % (max) | 21.7 | 14.3 / 14.8 | ✗ in race.md (a spike; reruns pass) |
+| stress | drag one (max) | 20.1 | 6.6 / 7.1 | ✗ in race.md (a spike; reruns pass) |
+| stress | undo / redo (p95) | 13.1 · 9.1 | 10.2 / 10.5 · 9.6 / 9.8 | ✗ ✗ |
+| stress | pan 30 % / 100 % | 3.7 / 5.9 · 3.4 / 5.5 | — | ✓ |
+| — | printed, not judged: first open ever 25.0 / 103.6; MOJOUI_SNAP=0 cold first frame 12.4 / 116.2 | | | |
+
+**Milestones:** M0 PASS · M1 BLOCKED (Mac) · M2, M3, M4 **PASS** (rerun on this build: 0.974/0.984/0.972/0.974; canvas 0.992; 28 steps, worst 0.964, notes equal) · M5 BLOCKED (Mac) · M6 **FAIL** (stress: frames during, press, undo, redo; zoom and drag one on spikes) · M7 BLOCKED (Mac).
+
 ## Continuation 8 (2026-11-22, autopilot): edits mid-open, fill damage, quiet snapshot reads
 Decisions D-7959–D-7962; journal "continuation 8". The Mac was not tried (still offline). I waited an hour for a quiet
 machine (12:12–13:12, every 2 min, build/g79/c8-quiet.log), but goal 77's checker ran throughout (a process over 50 % CPU,
