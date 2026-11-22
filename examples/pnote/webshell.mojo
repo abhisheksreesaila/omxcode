@@ -314,6 +314,12 @@ struct WebShell(Movable):
                 return i
         return -1
 
+    def near_rect(self, x: Float64, y: Float64) -> Tuple[Float64, Float64, Float64, Float64]:
+        """The page rect round a pointer (window px) the board tools read: a hit test's tolerance and a handle's reach."""
+        var pt = self.view.to_page(x, y)
+        var m = 24.0 / max(self.view.scale, 0.01)
+        return (pt[0] - m, pt[1] - m, pt[0] + m, pt[1] + m)
+
     def view_rect(self) -> Tuple[Float64, Float64, Float64, Float64]:
         return board_rect(self.view, self.win_w, self.win_h)
 
@@ -520,7 +526,7 @@ struct WebShell(Movable):
                     self.board.problem = ""
             if self.look.keep_path != "":  # (D-7956) the kept view: shown while the view's nodes load, kept again when settled
                 self.look.keep_hold = self.board.holding(r[0], r[1], r[2], r[3])
-                var still = len(self.board.layer.selected) == 0 and len(self.tools.lifted(self.board.layer)) == 0 and not self.board.layer.unsaved() and self.save_kind == ""
+                var still = len(self.tools.lifted(self.board.layer)) == 0 and not self.board.layer.unsaved() and self.save_kind == ""  # (a selection is drawn above the board: its pixels unchanged)
                 if still and self.look.keep_tag == "" and not self.board.loading():
                     self.look.keep_tag = self.snap_tag(i)  # (saved again: its revision moved on)
                 elif not still:
@@ -1011,7 +1017,7 @@ struct WebShell(Movable):
                 return False  # (the chrome: nothing of the board read, an open keeps coming in)
             if self.tools.tool == "hand":  # (the hand only moves the view)
                 return self.tools.press(x, y, self.board.layer, self.view)
-            var r = self.view_rect()  # (D-7959: an edit needs only what the view shows; an open keeps coming in)
+            var r = self.near_rect(x, y)  # (D-7959: the tools hit-test at the pointer: only what lies there must be in)
             return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and not self.searching and not self.card_open:
@@ -1024,7 +1030,7 @@ struct WebShell(Movable):
         if self.on_canvas():
             if self.tools.tool == "hand":
                 return self.tools.pan(x, y, self.board.layer, self.view)  # (the hand tool moves self.view)
-            var r = self.view_rect()
+            var r = self.near_rect(x, y)
             return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
@@ -1033,7 +1039,7 @@ struct WebShell(Movable):
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
-            var vr = self.view_rect()
+            var vr = self.near_rect(x, y)
             var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
             return r
@@ -1086,7 +1092,7 @@ struct WebShell(Movable):
         elif hit == "#zoom-fit":
             self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
         elif hit == "":
-            var vr = self.view_rect()
+            var vr = self.near_rect(x, y)
             if not self.tools.tap(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view, self.win_w, self.win_h):
                 return False
         self.save_canvas()
