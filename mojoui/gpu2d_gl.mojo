@@ -47,7 +47,7 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
 from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TileRead, TILE, TILE_TEX, _pack
-from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode
+from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
 from max.algorithm import parallelize
 from std.sys.info import num_logical_cores
 
@@ -2025,6 +2025,7 @@ struct GPU2D(Movable):
     var tile_frames: List[Frame2D]
     var tile_set: Int  # the GL buffer set tile rasters upload into (one at a time)
     var tiles_on: Bool  # MOJOUI_GPU2D_TILES=0: tiled layers drawn directly (for comparisons)
+    var prewarmed: Bool  # (D-7961) the snapshot restore's buffer and textures made
     var tile_ns: Int  # last frame's tile work (plan + batches + raster submission, CPU side)
     var more: Bool  # the last frame left tile work for later frames: a host draws again
     var tile_trace: Bool  # MOJOUI_TILE_TRACE=1: each frame's tile work printed
@@ -2069,6 +2070,7 @@ struct GPU2D(Movable):
         self.tile_frames = List[Frame2D]()
         self.tile_set = -1
         self.tiles_on = getenv("MOJOUI_GPU2D_TILES") != "0"
+        self.prewarmed = False
         self.tile_ns = 0
         self.more = False
         self.tile_trace = getenv("MOJOUI_TILE_TRACE") == "1"
@@ -2208,6 +2210,24 @@ struct GPU2D(Movable):
             self.t_raster += Int(perf_counter_ns() - m1)
         return True
 
+    def _prewarm(mut self, w: Int, h: Int):
+        """(D-7961) The unpack buffer and a w × h window's worth of tile textures made now (once), not in the first
+        restore's frame."""
+        self.prewarmed = True
+        var t0 = perf_counter_ns()
+        var nx = w // TILE + 2
+        var ny = h // TILE + 2
+        var bytes = (w + 2 * TILE_TEX) * (h + 2 * TILE_TEX) * 4
+        var a = self.gl.unpack_map(bytes)
+        if a != 0:
+            _ = self.gl.unpack_unmap()
+            self.gl.unpack_done()
+        for q in range(nx * ny):  # (made and written once: the driver gives a texture its memory at the first write)
+            _ = self.gl.upload_tile_unpacked(q, 0, 0, 0, 0, 0, True)
+        self.gl.unpack_done()
+        if self.tiles.snap_log:
+            print("SNAP: prewarmed " + String(nx * ny) + " tile textures and " + String(bytes // 1048576) + " MB in " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms", flush=True)
+
     def _snap_restore(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, path: String):
         """(D-7956) Tiled layer i's snapshot from path, when every part of its key matches: its tiles uploaded as the
         layer's fallback tiling (mojoui.viewsnap, gpu2d_tiles.Tiles.snap_restored)."""
@@ -2343,6 +2363,8 @@ struct GPU2D(Movable):
         var t0 = perf_counter_ns()
         self.stamp += 1
         self._switch(owner)
+        if not self.prewarmed and self.stamp >= 2 and self.tiles_on and snapshots_expected():
+            self._prewarm(w, h)
         var n = scene.layers()
         while len(self.frames) < n:
             self.frames.append(Frame2D())

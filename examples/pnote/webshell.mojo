@@ -33,7 +33,8 @@ from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
-from mojoui.viewsnap import snap_dir_ready
+from mojoui.viewsnap import snap_dir_ready, expect_snapshots
+from std.os import listdir
 from mojoui.framebudget import FrameBudget
 from mojoui.pagedesk import board_rect
 from mojoui.buzanmap import map_text, node_extra
@@ -77,7 +78,7 @@ def parse_grid(note: String) -> Tuple[Int, Int]:
 
 
 comptime LOAD_SLICE_MIN_US = 250  # (D-7957) the least a slice gets (the open still ends: every frame takes a node at least)
-comptime FRAME_WORK_US = 4000  # (D-7957) the app's own share of an 8.3 ms frame (the renderer, GPU and compositor the rest)
+comptime FRAME_WORK_US = 3000  # (D-7957) the app's own share of an 8.3 ms frame (the renderer, GPU and compositor the rest)
 comptime LOAD_SLICE_US = 1500  # a progressive open's slice per frame (D-7944): the frame keeps its silky budget
 
 
@@ -241,6 +242,13 @@ struct WebShell(Movable):
             var d = environment("PNOTE_SNAPS", config_dir("pnote") + "/snaps")
             if snap_dir_ready(d):
                 self.snap_dir = d
+                try:
+                    for f in listdir(d):
+                        if String(f).endswith(".snap"):
+                            expect_snapshots()  # (D-7961: the renderer readies a restore after the first screen)
+                            break
+                except:
+                    pass
         self.dbs = List[Database]()
         self.saver = SaveTimer(650)
         self.save_state = ""

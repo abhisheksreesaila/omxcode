@@ -12,6 +12,7 @@
 # pushes those frames past the silky budget; with nothing else in a frame the slice can take more.
 
 from mojoui.docstore import clock_us
+from std.os import getenv
 
 
 struct FrameBudget(Copyable, Movable):
@@ -19,12 +20,19 @@ struct FrameBudget(Copyable, Movable):
     var t0: Int
     var slice: Int  # this frame's slice time so far
     var other_us: Int  # the last frame's work besides its slices (-1: none measured yet)
+    var trace: Bool
 
     def __init__(out self, target_us: Int):
         self.target_us = target_us
+        try:
+            if getenv("MOJOUI_FRAME_WORK_US") != "":  # (an A/B of the target)
+                self.target_us = Int(getenv("MOJOUI_FRAME_WORK_US"))
+        except:
+            pass
         self.t0 = 0
         self.slice = 0
         self.other_us = -1
+        self.trace = getenv("MOJOUI_FRAME_TRACE") == "1"
 
     def begin(mut self):
         self.t0 = clock_us()
@@ -43,4 +51,6 @@ struct FrameBudget(Copyable, Movable):
     def end(mut self):
         if self.t0 > 0:
             self.other_us = max(0, clock_us() - self.t0 - self.slice)
+            if self.trace:
+                print("FRAMEBUDGET: other " + String(self.other_us) + " us, slice " + String(self.slice) + " us", flush=True)
         self.t0 = 0

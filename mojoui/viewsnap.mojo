@@ -26,7 +26,19 @@ from mojoui.libc import rename, unlink
 from mojoui import libc
 
 comptime SLOT_SNAP_RENDERER = 235  # mojoui.shared slot: the GPU 2D renderer's id (0: none yet: no snapshot is used)
+comptime SLOT_SNAP_EXPECT = 236  # mojoui.shared slot: an app expects to restore snapshots (the renderer prewarms)
 comptime SNAP_MAGIC = "MOJOSNP1"
+
+
+def expect_snapshots():
+    """(D-7961) This process will likely restore a kept view soon (an app whose snapshot folder has files): the GPU 2D
+    renderer makes its pixel-unpack buffer and a window's worth of tile textures in its second draw, after the first
+    screen, so the first restore doesn't pay for them (measured ~5 ms)."""
+    put_shared(SLOT_SNAP_EXPECT, 1)
+
+
+def snapshots_expected() -> Bool:
+    return get_shared(SLOT_SNAP_EXPECT) != 0
 
 
 def renderer_id() -> Int:
