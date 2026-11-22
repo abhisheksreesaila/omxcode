@@ -699,8 +699,6 @@ struct BoardTools(Movable):
     var edit_w: Float64
     var drag: Int
     var drag_from: Int
-    var press_hist: Int  # the history's version at the press
-    var moved: Bool  # (D-7967) the move under way has moved (only then is the selection lifted out of the tiles)
     var last_x: Float64
     var last_y: Float64
     var wet: Stroke
@@ -728,8 +726,6 @@ struct BoardTools(Movable):
         self.edit_w = 0
         self.drag = T_NONE
         self.drag_from = -1
-        self.moved = False
-        self.press_hist = -1
         self.last_x = 0
         self.last_y = 0
         self.wet = Stroke(3, 0xFF1E2020)
@@ -762,8 +758,8 @@ struct BoardTools(Movable):
     def lifted(self, layer: ObjectLayer) -> List[Int]:
         """What a drag is moving (the selection while a move is under way), for BoardLook.paint to lift out of the
         board's tiles (D-7940); empty otherwise."""
-        if self.drag == T_MOVE and self.moved:  # (D-7967: a press that hasn't moved yet lifts nothing: drawn in place it
-            return layer.selected.copy()          # is the same picture, and the board's tiles aren't rastered again)
+        if self.drag == T_MOVE:
+            return layer.selected.copy()
         return List[Int]()
 
     def finish(mut self, mut layer: ObjectLayer):
@@ -843,8 +839,6 @@ struct BoardTools(Movable):
                     layer.select(id)
                 layer.begin_gesture(CH_MOVE)
                 self.drag = T_MOVE
-                self.moved = False
-                self.press_hist = layer.history.version
                 return True
         elif self.tool == "pen":
             self.finish(layer)
@@ -868,8 +862,6 @@ struct BoardTools(Movable):
             return True
         var pt = view.to_page(sx, sy)
         if self.drag == T_MOVE:
-            if pt[0] != self.last_x or pt[1] != self.last_y:
-                self.moved = True
             layer.move_by(pt[0] - self.last_x, pt[1] - self.last_y)
         elif self.drag == T_INK:
             self.wet.add(pt[0], pt[1], 0.5)
@@ -887,8 +879,7 @@ struct BoardTools(Movable):
             return True
         if kind == T_MOVE:
             layer.end_gesture()
-            if layer.history.version != self.press_hist:  # (D-7967: a press that didn't move changed nothing: no save)
-                self.changed = True
+            self.changed = True
             return True
         if kind == T_INK:
             if self.wet.points() > 1:

@@ -2,7 +2,7 @@
 # BoardLook's kept board). (1) a replayed board's ops equal a fresh walk's op for op (kinds, numbers, colours, texts,
 # images, polygon and stroke points, notes); (2) on the real GL renderer (headless) the replayed frame is pixel-identical
 # to the walked one; (3) an edit, a pan past the cull rect, a zoom and a lift each invalidate it (the next paint walks)
-# and still match a fresh walk; a press that hasn't moved lifts nothing (D-7967); (4) the CPU painter can't keep ops (ops_replay False) and draws as before. `keptops: ok`.
+# and still match a fresh walk; (4) the CPU painter can't keep ops (ops_replay False) and draws as before. `keptops: ok`.
 #   pixi run mojo run -I . -I vendor tests/test_keptops.mojo
 from std.testing import assert_true, assert_equal
 from mojoui.canvas import Surface
@@ -140,30 +140,6 @@ def main() raises:
     var lb = Scene(W, H, 1.0)
     walk.paint(lb, layer, v, 1440, 900, K, lifted)
     same_ops(la, lb, "lifted")
-    # (D-7967) a press on an object lifts nothing until the pointer moves: the board's ops (and tiles) stay
-    var tools = BoardTools()
-    tools.tool = "select"
-    var target = layer.objs[vis[len(vis) // 2]].copy()
-    var sx = (target.x + target.w / 2) * v.scale + v.x
-    var sy = (target.y + target.h / 2) * v.scale + v.y
-    layer.clear_selection()
-    assert_true(tools.press(sx, sy, layer, v), "pressed an object")
-    assert_equal(len(tools.lifted(layer)), 0, "a press alone lifts nothing")
-    _ = scene_of(look, layer, v)  # (back from the lift case above: walked, then kept)
-    _ = scene_of(look, layer, v)
-    var r1 = look.replays
-    _ = scene_of(look, layer, v)
-    assert_true(look.replays > r1, "the board's ops replayed under a press")
-    var vv = v
-    tools.changed = False
-    _ = tools.release(sx, sy, layer, vv)
-    assert_true(not tools.changed, "a press released where it was changed nothing (no save)")
-    assert_true(tools.press(sx, sy, layer, v), "pressed again")
-    _ = tools.pan(sx + 6, sy + 3, layer, vv)
-    assert_true(len(tools.lifted(layer)) > 0, "moving lifts the selection")
-    _ = tools.release(sx + 6, sy + 3, layer, vv)
-    assert_true(tools.changed, "a move is a change")
-    _ = layer.undo()
     # the CPU painter keeps nothing
     var buf = List[UInt32](length=64 * 64, fill=0)
     var sp = SurfacePainter(Surface(Int(buf.unsafe_ptr()), 64, 64, 1.0))
