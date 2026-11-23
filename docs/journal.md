@@ -1698,3 +1698,9 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Zoom budget A/B (c12-zoom-ab.txt): max 13.4–14.1 whatever the budget; worst frame = 5 uncovered tiles (5,758 ops: fill 3.3, issue 2.7 ms).
 - M6 17:34–17:41 quiet (0/14 goal 77 samples): FAIL on stress frames during max 17.2 and undo 8.8/9.2; zoom 4.6/14.1 ✓, redo 6.8/8.5 ✓, press 6.9 ✓, first frame 8.1 ✓. Reruns (c12-reruns.txt, quiet): undo 9.5/9.4/6.5, redo 7.2/7.0/6.8, during max 10.2/12.5/13.4, press 4.6/5.1/5.1. M2–M4 PASS.
 - NEXT: (1) undo's remaining frame: CPU tile fill + issue (~1.7 ms), the scene's walk (an edit walks: retained ops per object range would let an edit re-emit only the changed objects), glyph/path partial rasters; (2) the openpress row's frames-during max (13.7–17.2); (3) cheaper fills for tiles a zoom reveals; (4) the Mac.
+
+## 2026-11-22 goal 79 (continuation 13: retained-scene patch, the open's spike) — autopilot
+- Patch (D-7974): test_keptpatch 37/40 patched, identical. A/B ×3 (c13-patch-ab.txt, load 3–4): scene p95 1.5–1.6 both; undo noise.
+- The 13.7–17.2 ms frames during the open: one frame per open with 5 tile rasters (5,770 calls, 1.3 MB, cpu 3.5–5.3 ms) = ring/extension under the 2500-op budget; MOJOUI_TILE_BUDGET=200 removed them; A/B 2500/800/300 (c13-budget-ab.txt, quiet) → 800 (D-7975).
+- M6 18:04–18:11 quiet: FAIL on stress undo 9.6/9.9 only. Reruns: undo 12.3/9.5/9.7, redo 7.8/7.2/7.7. M2–M4 PASS.
+- Mac reported online by the owner at the end of this round (ssh bhoomijaprasad@100.76.9.101, key ~/.ssh/edx_mac): Mac half next.

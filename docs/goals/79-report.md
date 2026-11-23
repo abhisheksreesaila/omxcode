@@ -8,6 +8,30 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 13 (2026-11-22, evening, autopilot): the retained-scene patch, the open's spike; Linux M6 down to one row
+Decisions D-7974–D-7975; journal "continuation 13". The race (18:04–18:11) and the reruns ran on a quiet machine (goal 77
+idle in all 14 samples, load ~1).
+
+- **Retained-scene patch (D-7974).** An edit now re-paints only the objects it changed and replays everything else's kept
+  ops, for any board. tests/test_keptpatch runs 40 random edits: commands identical to a full walk, frames identical. It
+  didn't move undo: the edit path's cost is the damage compare over every object and the renderer's op-bin rebuild,
+  not the walk.
+- **The open's spike (D-7975).** It was one frame per open rastering 5 ring/extension tiles under a too-large per-frame
+  budget. The budget is now 800 ops; frames-during max went from 17.2 to 9.8 in the race.
+
+**Race (race.md 18:11, quiet):** every 600 row passes. Every stress row passes except **undo**:
+- open first frame 7.7 (first open, kept view in 30 of 30 cold opens)
+- frames during 5.1 / 9.8
+- press 4.7
+- complete 417 / 503 ms (web 1,124)
+- zoom 5.8 / 14.4
+- redo 6.8 / 7.1
+- undo **9.6 / 9.9**; reruns p95 12.3 / 9.5 / 9.7 (median 9.7)
+
+**Linux M6 is one row from passing.** The levers left for undo are named: an id-level change log in ObjectLayer, so an
+edit doesn't compare all ~5,300 objects, and incremental op bins in the renderer. Neither is built. M2, M3, M4 **PASS**
+(rerun).
+
 ## Continuation 12 (2026-11-22, evening, autopilot): where undo's GPU time goes, shadows thinned
 Decisions D-7971–D-7973; journal "continuation 12". The race ran on a quiet machine (17:34–17:41; goal 77 idle in all
 14 samples, GPUs P8), and so did the reruns.

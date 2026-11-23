@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 13: Linux M6 down to stress undo (2026-11-22, evening)
+- **Setup:** Linux, a quiet machine.
+- **What worked:**
+  - A retained-scene patch: an edit re-paints only what it changed (tested on 40 random edits, identical).
+  - A smaller per-frame tile budget removed the open's one big ring/extension frame.
+  - Every race row passes except stress undo (p95 ~9.7 median, bar 8.3).
+- **What didn't:** the patch didn't move undo; its cost is elsewhere: the damage compare over all objects and the
+  renderer's op bins.
+- **Next small step:** an id-level change log in ObjectLayer; incremental op bins.
+
 ## Goal 79, continuation 12: undo's GPU time was shadows (2026-11-22, evening)
 - **Setup:** Linux, a quiet machine for the race and its reruns.
 - **What it showed:** GPU timers per op kind in undo frames put the 10-layer shadows (quads) at 1.1–2.4 ms, ahead of
