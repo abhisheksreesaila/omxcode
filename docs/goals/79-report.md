@@ -8,6 +8,37 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 12 (2026-11-22, evening, autopilot): where undo's GPU time goes, shadows thinned
+Decisions D-7971–D-7973; journal "continuation 12". The race ran on a quiet machine (17:34–17:41; goal 77 idle in all
+14 samples, GPUs P8), and so did the reruns.
+
+**The split (D-7971), stress undo frames:** quads 1.1–2.4 ms (the 10-layer shadows), glyphs 0.2–0.5, stencil paths
+0.2–0.55, clears 0.03–0.14, tile composite ~0.37. Two framework fixes, both pixel-identical by test:
+- **D-7972:** each quad's and glyph's box is cut to its clip and the scissor before its triangle is built. Two triangles
+  were tried and refused: their shared seam blends twice under coverage modulation.
+- **D-7973:** shadow layers under an opaque sticky are drawn as four clipped bands round the middle the sticky hides.
+  Undo frames' quad GPU time went 1.16 → 0.78 ms. M2/M3 still pass.
+
+Undo/redo went from ~10 to ~7–9.5 ms.
+
+**Zoom:** the worst settle frame rasters tiles the old tiling doesn't cover (revealed edges). The per-frame budget doesn't
+move it, and deferring those tiles would show blanks. Its max stays 13.4–14.1 in quiet runs, under the 16.7 bar.
+
+**Race (race.md 17:41, quiet) and reruns (3×, quiet):**
+| note | row | before (c11) | now | |
+|---|---|---|---|---|
+| stress | open: first frame (first open 8.1; kept view 30 of 30) | 7.8 ✓ | 8.1 | ✓ |
+| stress | open: frames during | 4.1 / 14.7 ✓ | 5.1 / **17.2** · reruns (cold-open row) max 10.2 / 12.5 / 13.4 (median 12.5) | ✗ in race.md |
+| stress | open: a press during it | 6.2 ✓ | 6.9 · reruns 4.6 / 5.1 / 5.1 | ✓ |
+| stress | zoom from 30 % | 6.9 / 20.7 ✗ | **4.6 / 14.1** | ✓ |
+| stress | undo | 10.6 / 11.3 ✗ | **8.8 / 9.2** · reruns p95 9.5 / 9.4 / 6.5 (median 9.4) | ✗ |
+| stress | redo | 11.3 / 11.5 ✗ | **6.8 / 8.5** · reruns 7.2 / 7.0 / 6.8 | ✓ |
+| 600 | every row | ✓ | ✓ | ✓ |
+
+**Milestones:** M0 PASS · M1 BLOCKED (Mac) · M2, M3, M4 **PASS** (rerun after the shadow change: 0.974 / 0.984 / 0.972 /
+0.974; canvas 0.992; 28 steps, worst 0.964, notes equal) · M5 BLOCKED · M6 **FAIL** (stress undo p95; stress frames during
+max 17.2, reruns pass) · M7 BLOCKED.
+
 ## Continuation 11 (2026-11-22, evening, autopilot): the 44 ms frame bisected, the open's frames pass
 Decisions D-7968–D-7970; journal "continuation 11".
 

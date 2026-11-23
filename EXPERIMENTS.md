@@ -4,6 +4,20 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 12: undo's GPU time was shadows (2026-11-22, evening)
+- **Setup:** Linux, a quiet machine for the race and its reruns.
+- **What it showed:** GPU timers per op kind in undo frames put the 10-layer shadows (quads) at 1.1–2.4 ms, ahead of
+  glyphs, paths and clears.
+- **What worked (pixel-identical by test):**
+  - Each box is cut to its clip and the scissor before its triangle.
+  - Shadow layers under an opaque sticky skip the middle it hides.
+  - Results: undo ~10 → ~7–9.5 ms, redo passes (6.8 / 8.5), zoom passes (4.6 / 14.1).
+- **What didn't:** two triangles per box (their seam blends twice under coverage modulation); a fragment discard for the
+  hole (it never fired; bands replaced it).
+- **Still failing:** stress undo p95 (median of reruns 9.4) and one frames-during max (17.2; reruns 12.5).
+- **Next small step:** the rest of undo's frame (CPU: tile fill and issue ~1.7 ms, the scene ~1.2, plus GPU); glyph and
+  path cost in partial rasters.
+
 ## Goal 79, continuation 11: the open passes; undo is GPU-bound (2026-11-22, evening)
 - **Setup:** Linux. One of goal 77's processes was busy throughout; the GPUs were idle.
 - **What worked:**
