@@ -1013,6 +1013,16 @@ struct FontEngine(Movable):
             if font != 0:
                 idx = self._face_from_ctfont(font, True)
         else:
+            # (D-7981) Chrome on the Mac falls back to PingFang SC for Han ideographs and CJK punctuation with no language
+            # given (measured: 世、， 36.69 device px at 18 px ×2, as PingFang SC; kana from the cascade, 36.0)
+            if (cp >= 0x4E00 and cp <= 0x9FFF) or (cp >= 0x3400 and cp <= 0x4DBF) or (cp >= 0x3000 and cp <= 0x303F) or (cp >= 0xFF00 and cp <= 0xFFEF):
+                var pn = self._cfstr("PingFangSC-Regular")
+                var pf = _fn[def(Int, Float64, Int) thin abi("C") -> Int](self._m(_M_CTBYNAME))(pn, 16.0, 0)
+                if pf != 0:
+                    var pidx = self._face_from_ctfont(pf, False)
+                    if pidx >= 0 and self._mac_has(self.inst(pidx, 400, 16), cp):
+                        self.fallback[key] = pidx
+                        return pidx
             var base = self.pick("Geist", 400, False)
             var s = String(chr(cp))
             var cfs = self._cfstr(s)
