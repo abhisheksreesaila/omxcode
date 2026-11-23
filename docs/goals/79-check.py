@@ -108,6 +108,16 @@ def make_ref(out=REF, dpr=LINUX_DPR):
         return _ref_done[key]
     if out.exists():
         shutil.rmtree(out)
+    if out == REF_MAC and not mac_reachable():
+        # (D-7983, ruling A) the Mac's reference: the web app in the Mac's own Chrome at 2.0 (ruling B's setup there)
+        print("(shooting the web app on the Mac in its own Chrome at 2.0: about two minutes)", flush=True)
+        r = run(["python3", str(ROOT / "docs/goals/79/macref.py"), str(out)], 1500)
+        if r.returncode == 0 and (out / "made-by.json").exists():
+            _ref_done[key] = ""
+            return ""
+        print("(no Mac reference: " + tail(r.stdout + r.stderr, 200) + "; Linux Chromium at 2.0 instead, said so)", flush=True)
+        if out.exists():
+            shutil.rmtree(out)
     print(f"(shooting the web app at {dpr}×: about a minute)", flush=True)
     r = run(["node", str(ROOT / "docs/goals/79/ref.mjs"), str(out), f"--dpr={dpr}"], 900, cwd=PN)
     _ref_done[key] = "" if r.returncode == 0 else f"ref.mjs exit {r.returncode}: {tail(r.stdout + r.stderr)}"

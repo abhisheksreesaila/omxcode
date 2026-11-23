@@ -137,7 +137,11 @@ async function dump(page, name) {
 }
 
 // ---------- the screens ----------
-const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] })
+// (D-7983, ruling A) on the Mac the reference comes from the Mac's own Chrome: PW_CHANNEL=chrome (Playwright drives the
+// installed Chrome; nothing downloaded); the machine and browser are written beside the shots (made-by.json)
+const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) })
+fs.mkdirSync(OUT, { recursive: true })
+fs.writeFileSync(path.join(OUT, 'made-by.json'), JSON.stringify({ browser: `${process.env.PW_CHANNEL || 'chromium'} ${browser.version()}`, platform: process.platform, arch: process.arch, dpr: DPR }, null, 1))
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: DPR, reducedMotion: 'reduce' })
 await routeFonts(ctx)
 const p = await ctx.newPage()

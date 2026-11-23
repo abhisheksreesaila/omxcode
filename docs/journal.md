@@ -1722,3 +1722,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Mac M1: 16 of 19 lines within 0.01 px of the Mac's Chrome; Japanese/Chinese (Han advance) and emoji (advance) still off (D-7981).
 - Mac M6: not started this round (AppKit framebench kinds; ruling B setup).
 - NEXT: (1) M1 Mac: why the PingFang preference doesn't change Han widths (is the face used? its advance via _mac_advance_units vs CTRun); emoji advance (Chrome 1 em vs our 1.22 em); (2) ruling B setup on the Mac (node tarball + npm Playwright in ~/omxcode-g54-web or similar, PN backend in a pixi env), record paths; then REF_MAC from Chrome on the Mac and M6's web race; (3) AppKit framebench kinds (open, openpress, dragone, drag40, undo, redo, draw, typing) shared with GTK's; (4) goal 75 M3 on the Mac; (5) Linux undo: incremental op bins.
+
+## 2026-11-22 goal 79 (continuation 15: ruling B setup, the Mac reference) — autopilot
+- Ruling B setup on the Mac, every path in docs/goals/79/mac-setup.md (with the removal line): ~/omxcode-g79-web/{node (v26.10.0 tarball), pn (PN code + dist, npm install with Playwright, no browser download), pn/.venv/bin/python (wrapper), pyenv (pixi: Python 3.14 + PN's requirements), repo (ref.mjs, fixture, fonts), ref-*}. 526 MB.
+- Mac reference: ref.mjs with PW_CHANNEL=chrome: Chrome 158.0.8127.36, darwin arm64, dpr 2 (made-by.json); docs/goals/79/macref.py runs it and fetches it; make_ref(REF_MAC) uses it when the setup is there, else Linux Chromium at 2.0 (said so).
