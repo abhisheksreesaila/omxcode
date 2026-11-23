@@ -10,11 +10,18 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
+from mojoui.look import css_color
 from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Segments, glass, solid, words, chip, slot
 from themes.skins import skin_css, SKIN_WEB
 
 
 comptime WHITE: UInt32 = 0xFFFFFFFF
+
+
+def tab_tint(p: Palette) -> UInt32:
+    """The selected bottom tab's tint (owner, 2026-11-22: a rectangle with a subtle highlight, no pill): one value for GTK,
+    the web and the Mac (liquid_look's sheet-tabs-button-on), so the three can't drift (tests/test_liquid_tabs.mojo)."""
+    return rgba(15, 23, 42, 18) if not p.dark else rgba(255, 255, 255, 20)
 
 
 def alpha(c: UInt32, a: Int) -> UInt32:
@@ -68,7 +75,7 @@ def liquid_look(p: Palette) -> Look:
     var edge = p.line_strong
     var tabs = dock(p, "sheet-tabs", edge, 0)
     # the selected bottom tab on the Mac: a tinted rectangle, no pill (owner, 2026-11-22; GTK's and the web's are liquid_css's)
-    var tab_on = dock(p, "sheet-tabs-button-on", 0, 0, rgba(15, 23, 42, 18) if not p.dark else rgba(255, 255, 255, 20))
+    var tab_on = dock(p, "sheet-tabs-button-on", 0, 0, tab_tint(p))
     tab_on.radius_top, tab_on.radius_bottom, tab_on.pad_top, tab_on.pad_x, tab_on.pad_bottom, tab_on.ink, tab_on.font_weight = 6, 6, 2, 14, 2, p.ink, 500
     var status = dock(p, "status-bar", 0, 0)
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
@@ -203,8 +210,7 @@ def liquid_css(p: Palette) -> String:
     var thumb = String("background: #ffffff; color: ") if not d else ("background: " + hex_of(p.raised) + "; color: ")
     var thumb_shadow = String("0 1px 3px rgba(15,23,42,0.12), 0 0 0 1px rgba(15,23,42,0.04)") if not d else ("0 1px 3px rgba(0,0,0,0.35), 0 0 0 1px " + strong)
     # the selected bottom tab: a quiet tint on a rectangle, no white pill (owner, 2026-11-22: "the pill in the rectangular box looks weird")
-    var tab_on = String("background: rgba(15,23,42,0.07); color: " + ink + "; box-shadow: none;") if not d else (
-        "background: rgba(255,255,255,0.08); color: " + ink + "; box-shadow: none;")
+    var tab_on = "background: " + css_color(tab_tint(p)) + "; color: " + ink + "; box-shadow: none;"
     var pop = String("background-color: rgba(255,255,255,0.94); box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 0 0 1px rgba(15,23,42,0.08), 0 12px 40px rgba(15,23,42,0.16);") if not d else (
         "background-color: " + css_rgba(mix(p.card, WHITE, 0.03), 0.97) + "; box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,0.50);")
     var key_ink = hex_of(mix(p.ink3, rgba(255, 255, 255), 0.3)) if not d else ink2
@@ -344,7 +350,6 @@ body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-ti
 body.liquid .board > .object [data-tag=player-controls] button.icon-only { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
 body.liquid [data-tag=sheet-tabs] button { border-radius: 6px; padding: 2px 14px; }  /* (rectangles, the selected one tinted: owner 2026-11-22) */
-body.liquid [data-tag=sheet-tabs] button:not(.subtle) { background: var(--l-track); color: var(--o-ink); box-shadow: none; border: 0; }
 body.liquid [data-tag=ribbon-tabs] { background: var(--l-track); border-radius: 999px; padding: 3px; gap: 2px; }  /* (the ribbon's tabs: a quiet segmented row, goal 76) */
 body.liquid [data-tag=ribbon-tabs] button { border-radius: 999px; min-height: 26px; padding: 0 14px; font-weight: 500; border: 0; box-shadow: none; background: transparent; color: var(--o-ink3); }
 body.liquid [data-tag=ribbon-tabs] button:not(.subtle) { background: var(--l-thumb); color: var(--o-ink); box-shadow: var(--l-thumb-shadow); }
@@ -425,5 +430,6 @@ def liquid(dark: Bool) -> Theme:
 def liquid(pal: Palette) -> Theme:
     """Liquid over `pal`: dark when the palette is (liquid_dark_palette)."""
     var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else liquid_light_gtk(pal))
-    var web = String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else liquid_light_web())
+    var web = (String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else liquid_light_web())
+               + "body.liquid [data-tag=sheet-tabs] button:not(.subtle) { background: " + css_color(tab_tint(pal)) + "; color: var(--o-ink); box-shadow: none; border: 0; }\n")
     return Theme("liquid", "skin liquid", pal.copy(), gtk, web, pal.ink2, pal.accent_ink, True, liquid_look(pal))
