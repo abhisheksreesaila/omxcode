@@ -603,8 +603,11 @@ struct AppKitHost[A: App](Movable):
                 var inh = self.inherited_size(i)
                 if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)
                     _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else (inh if inh > 0 else msg[Float64](msg(w, "font"), "pointSize")), self.look.type.tabular))
+                var up_ink = self.ancestor_role(i, 3) if sf.ink == 0 else -1  # (no ink of its own: the role around it, as CSS's color inherits; a bubble's words, D-7894)
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_rgba(sf.ink))
+                elif up_ink >= 0:
+                    _ = msg(w, "setTextColor:", ns_rgba(self.look.surfaces[up_ink].ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
                     var attrs = new("NSMutableDictionary")
                     _ = msg(attrs, "setObject:forKey:", msg(w, "font"), ns_string("NSFont"))
@@ -2921,7 +2924,7 @@ struct AppKitHost[A: App](Movable):
             cfunc[NoneType]("CGImageRelease", image)
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
-        self.canvases[k].drawn = version
+        self.canvases[k].drawn = version if not surface.again else -1  # mid-animation (the draw asked for another frame: the word card's letters, D-7894): drawn again next tick, as GTK's
         self.apply(d, self_addr)
 
     def offer_iosurface(mut self, k: Int, wpx: Int, hpx: Int, mut surface: Surface):

@@ -978,7 +978,7 @@ struct UIKitHost[A: App](Movable):
         cfunc[NoneType]("CGImageRelease", image)
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
-        self.canvases[k].drawn = version
+        self.canvases[k].drawn = version if not surface.again else -1  # mid-animation: drawn again next tick, as GTK's (D-7894)
         self.apply(d, self_addr)
 
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
