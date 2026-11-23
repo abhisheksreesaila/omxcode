@@ -79,6 +79,9 @@ comptime _M_CFRELEASE = 39
 comptime _M_CFGETCSTR = 40
 comptime _M_LEADING = 41
 comptime _M_RGBFILL = 42
+comptime _M_CGTABLE = 43
+comptime _M_DATAPTR = 44
+comptime _M_DATALEN = 45
 
 # alignment of a run at x
 comptime ALIGN_LEFT = 0
@@ -226,6 +229,7 @@ struct _Face(Copyable, Movable):
     var fixed: Bool  # bitmap strikes only (not scalable)
     var asc: Int  # hhea/OS2 ascender, font units (FreeType's)
     var desc: Int
+    var trak: Trak  # (D-7989) its 'trak' table's normal track (the Mac; empty: none)
     var coords_set: Int  # the instance whose design coordinates FreeType has now (-1: none)
     var size_set: Int  # the 26.6 size FreeType has now
 
@@ -237,6 +241,7 @@ struct _Face(Copyable, Movable):
         self.weight = weight
         self.ft = 0
         self.hb_face = 0
+        self.trak = Trak(List[Float64](), List[Int]())
         self.upem = 1000
         self.axes = List[_Axis]()
         self.color = False
@@ -316,6 +321,8 @@ struct FontEngine(Movable):
     var mac: List[Int]  # function addresses, by the _M_* indices below
     var k_font_attr: Int  # kCTFontAttributeName's value
     var k_var_attr: Int  # kCTFontVariationAttribute's value
+    var k_track_attr: Int  # kCTTrackingAttribute's value (D-7989)
+    var trak_on: Bool  # FONTTEXT_TRAK=0: no trak applied (A/B)
     var k_dict_keys: Int  # &kCFTypeDictionaryKeyCallBacks
     var k_dict_vals: Int
     var ct_fonts: Dict[String, Int]  # (instance, size) → CTFont
@@ -382,6 +389,8 @@ struct FontEngine(Movable):
         self.mac = List[Int]()
         self.k_font_attr = 0
         self.k_var_attr = 0
+        self.k_track_attr = 0
+        self.trak_on = getenv("FONTTEXT_TRAK") != "0"
         self.k_dict_keys = 0
         self.k_dict_vals = 0
         self.ct_fonts = Dict[String, Int]()
@@ -846,7 +855,7 @@ struct FontEngine(Movable):
             "CGContextSetShouldSmoothFonts", "CGContextSetShouldAntialias", "CGContextSetAllowsFontSubpixelPositioning",
             "CGContextSetShouldSubpixelPositionFonts", "CGContextRelease", "CFStringCreateWithBytes", "CFAttributedStringCreate",
             "CFDictionaryCreate", "CFDictionaryGetValue", "CFNumberCreate", "CFArrayGetCount", "CFArrayGetValueAtIndex", "CFRelease",
-            "CFStringGetCString", "CGFontGetLeading", "CGContextSetRGBFillColor",
+            "CFStringGetCString", "CGFontGetLeading", "CGContextSetRGBFillColor", "CGFontCopyTableForTag", "CFDataGetBytePtr", "CFDataGetLength",
         ]
         for n in names:
             var lib = ct if n.startswith("CT") else (cg if n.startswith("CG") else cf)
@@ -857,6 +866,7 @@ struct FontEngine(Movable):
             self.mac.append(a)
         self.k_font_attr = _peek(_dlsym(ct, "kCTFontAttributeName"))
         self.k_var_attr = _peek(_dlsym(ct, "kCTFontVariationAttribute"))
+        self.k_track_attr = _peek(_dlsym(ct, "kCTTrackingAttribute"))
         self.k_dict_keys = _dlsym(cf, "kCFTypeDictionaryKeyCallBacks")
         self.k_dict_vals = _dlsym(cf, "kCFTypeDictionaryValueCallBacks")
         var dir = fonts_dir()
@@ -909,6 +919,15 @@ struct FontEngine(Movable):
             f.axes = read_fvar(f.path)
             f.color = has_table(f.path, "sbix") or has_table(f.path, "CBDT") or has_table(f.path, "COLR")
         f.upem = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_UPEM))(f.ft))
+        var td = _fn[def(Int, UInt32) thin abi("C") -> Int](self._m(_M_CGTABLE))(f.ft, _tag("trak"))
+        if td != 0:  # (D-7989) the face's tracking, as HarfBuzz reads it for Chrome
+            var n = _fn[def(Int) thin abi("C") -> Int](self._m(_M_DATALEN))(td)
+            var ptr = _fn[def(Int) thin abi("C") -> Int](self._m(_M_DATAPTR))(td)
+            var bytes = List[UInt8](capacity=n)
+            for q in range(n):
+                bytes.append(Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=ptr + q)[])
+            f.trak = parse_trak(bytes, 0)
+            self._release(td)
         f.asc = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_ASC))(f.ft))
         f.desc = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_DESC))(f.ft))
         self.faces.append(f^)
@@ -1059,6 +1078,11 @@ struct FontEngine(Movable):
         var font = self.ct_font(inst, st.size)
         var ak = List[Int](length=1, fill=self.k_font_attr)
         var av = List[Int](length=1, fill=font)
+        var zero = 0
+        if self.trak_on and self.k_track_attr != 0:  # (D-7989) CoreText's own tracking off: the face's trak is added below, as HarfBuzz adds it
+            zero = self._cfnum_f(0.0)
+            ak.append(self.k_track_attr)
+            av.append(zero)
         var attrs = self._cfdict(ak, av)
         var astr = _fn[def(Int, Int, Int) thin abi("C") -> Int](self._m(_M_ATTRSTR))(0, cfs, attrs)
         var line = _fn[def(Int) thin abi("C") -> Int](self._m(_M_LINE))(astr)
@@ -1090,12 +1114,14 @@ struct FontEngine(Movable):
                     line_t += " " + String(adv[2 * g]) + "/" + String(Float64(self._mac_advance_units(rinst, Int(glyphs[g]))) * rk)
                 print(line_t, flush=True)
             var unrounded = 0.0
+            ref rtk = self.faces[self.insts[rinst].face].trak
+            var track = trak_units(rtk, st.size) * rk if self.trak_on and not rtk.empty() else 0.0
             for g in range(n):
                 var gid = Int(glyphs[g])
                 if gid == 0:
                     run.missing += 1
                 var xo = pos[2 * g] - unrounded
-                run.glyphs.append(Glyph(self.insts[rinst].face, rinst, gid, pen + xo, -pos[2 * g + 1], 0))
+                run.glyphs.append(Glyph(self.insts[rinst].face, rinst, gid, pen + xo + track / 2, -pos[2 * g + 1], 0))
                 var fa = Float64(self._mac_advance_units(rinst, gid)) * rk
                 var kern = adv[2 * g] - fa
                 var a = fa + kern
@@ -1104,13 +1130,14 @@ struct FontEngine(Movable):
                     var t = ar + kern
                     a = Float64(Int(t + 0.5)) if t >= 0 else -Float64(Int(-t + 0.5))
                 unrounded += adv[2 * g]
-                pen += a + st.letter_spacing
+                pen += a + track + st.letter_spacing
             _ = glyphs
             _ = pos
             _ = adv
         self._release(line)
         self._release(astr)
         self._release(attrs)
+        self._release(zero)
         self._release(cfs)
         _ = ak
         _ = av
@@ -1534,3 +1561,68 @@ def read_fvar(path: String) -> List[_Axis]:
         var mx = Float64(_be32(b, a + 12) - ((1 << 32) if _be32(b, a + 12) >= (1 << 31) else 0)) / 65536.0
         out.append(_Axis(UInt32(_be32(b, a)), mn, df, mx))
     return out^
+
+
+@fieldwise_init
+struct Trak(Copyable, Movable):
+    """(D-7989) A face's AAT 'trak' table, its normal track (value 0): font units added to every glyph's advance at a
+    size, by size. Apple's system faces carry one (PingFang, Apple Color Emoji); Chrome on the Mac applies it through
+    HarfBuzz at the CSS size, CoreText's CTLine doesn't (or not the same), so the Mac's widths follow it here."""
+    var sizes: List[Float64]
+    var values: List[Int]
+
+    def empty(self) -> Bool:
+        return len(self.values) == 0
+
+
+def parse_trak(b: List[UInt8], t: Int) -> Trak:
+    """The normal track of a 'trak' table starting at byte t of b (empty: none, or not a horizontal one)."""
+    var none = Trak(List[Float64](), List[Int]())
+    if t < 0 or t + 12 > len(b):
+        return none^
+    var ho = _be16(b, t + 6)
+    if ho == 0 or t + ho + 8 > len(b):
+        return none^
+    var td = t + ho
+    var nt = _be16(b, td)
+    var ns = _be16(b, td + 2)
+    var so = t + _be32(b, td + 4)
+    if ns == 0 or nt == 0 or so + 4 * ns > len(b) or td + 8 + 8 * nt > len(b):
+        return none^
+    var pick = 0  # (the track whose value is 0, "normal"; else the first)
+    for k in range(nt):
+        if _be32(b, td + 8 + 8 * k) == 0:
+            pick = k
+            break
+    var vo = t + _be16(b, td + 8 + 8 * pick + 6)
+    if vo + 2 * ns > len(b):
+        return none^
+    var sizes = List[Float64]()
+    var values = List[Int]()
+    for i in range(ns):
+        var s = _be32(b, so + 4 * i)
+        sizes.append(Float64(s - (1 << 32) if s >= (1 << 31) else s) / 65536.0)
+        var v = _be16(b, vo + 2 * i)
+        values.append(v - 65536 if v >= 32768 else v)
+    return Trak(sizes^, values^)
+
+
+def trak_units(tk: Trak, ptem: Float64) -> Float64:
+    """The tracking at size ptem in font units, as HarfBuzz computes it (hb-aat-layout-trak-table): below the first
+    size the first value, past the last the last, between two sizes linear in the size."""
+    var n = len(tk.values)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return Float64(tk.values[0])
+    var i = 0
+    while i < n and tk.sizes[i] < ptem:
+        i += 1
+    if i == 0:
+        return Float64(tk.values[0])
+    if i == n:
+        return Float64(tk.values[n - 1])
+    var s0 = tk.sizes[i - 1]
+    var s1 = tk.sizes[i]
+    var t = 0.0 if s0 == s1 else (ptem - s0) / (s1 - s0)
+    return t * Float64(tk.values[i]) + (1.0 - t) * Float64(tk.values[i - 1])
