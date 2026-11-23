@@ -133,28 +133,31 @@ inline float blur_x(float x, float y, float sigma, float corner, float2 hs) {
     return hi - lo;
 }
 inline float shadow_alpha(float2 p, float2 hs, float corner, float sigma) {
-    // (goal 80) exact across x (erf) and along the straight middle (erf); only the corner bands sampled, 8 midpoints each
+    // (goal 80) exact across x (erf) and along the straight middle (erf); only the corner bands are cut in 4 slices each,
+    // their Gaussian weights exact (erf), the row's width taken at the slice's middle
     float c = min(abs(corner), min(hs.x, hs.y));
     float reach = 3.0 * sigma;
     float2 ap = abs(p);
     if (ap.x > hs.x + reach + 1.0 || ap.y > hs.y + reach + 1.0) return 0.0;
     float k = 0.70710678 / sigma;
     if (ap.x + reach <= hs.x - c) return 0.5 * (erf1((p.y + hs.y) * k) - erf1((p.y - hs.y) * k));  // (full-width rows only)
+    if (ap.y + reach <= hs.y - c) return 0.5 * (erf1((p.x + hs.x) * k) - erf1((p.x - hs.x) * k));
+    // above the corner's diagonal the rows narrow ever faster: there the box is sliced by columns (it is its own transpose)
+    if (ap.y - hs.y > ap.x - hs.x) { p = p.yx; hs = hs.yx; }
     float s = hs.y - c;
     float alpha = blur_x(p.x, 0.0, sigma, c, hs) * 0.5 * (erf1((p.y + s) * k) - erf1((p.y - s) * k));
     if (c > 0.0) {
         for (int side = 0; side < 2; side++) {
-            float lo = side == 0 ? s : -hs.y;
-            float hi = side == 0 ? hs.y : -s;
-            lo = max(lo, p.y - reach);
-            hi = min(hi, p.y + reach);
+            float lo = max(side == 0 ? s : -hs.y, p.y - reach);
+            float hi = min(side == 0 ? hs.y : -s, p.y + reach);
             if (hi <= lo) continue;
-            float step = (hi - lo) / 8.0;
-            float yr = lo + step * 0.5;
-            for (int i = 0; i < 8; i++) {
-                float d = p.y - yr;
-                alpha += blur_x(p.x, yr, sigma, c, hs) * exp(-(d * d) / (2.0 * sigma * sigma)) * 0.39894228 / sigma * step;
-                yr += step;
+            float step = (hi - lo) * 0.25;
+            float e0 = erf1((p.y - lo) * k);
+            for (int i = 1; i <= 4; i++) {
+                float y1 = lo + step * float(i);
+                float e1 = erf1((p.y - y1) * k);
+                alpha += blur_x(p.x, y1 - 0.5 * step, sigma, c, hs) * 0.5 * (e0 - e1);
+                e0 = e1;
             }
         }
     }

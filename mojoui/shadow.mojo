@@ -9,12 +9,11 @@
 #   shadow_alpha(px, py, hx, hy, corner, sigma)   coverage 0–1 at p (from the box's centre), half size (hx, hy)
 #   draw_shadow(s, x, y, w, h, radius, sigma, color)   into a Surface (its clip honoured), pixels
 
-from std.math import sqrt, exp
+from std.math import sqrt
 from mojoui.canvas import Surface
 from mojoui.draw import blend
 
 comptime SQRT_HALF = 0.7071067811865476
-comptime INV_SQRT_2PI = 0.3989422804014327
 
 
 @always_inline
@@ -42,57 +41,70 @@ def _side(x: Float64, half: Float64, k: Float64) -> Float64:
     return 0.5 * (_erf((x + half) * k) - _erf((x - half) * k))
 
 
-def shadow_at(px: Float64, py: Float64, hx: Float64, hy: Float64, corner: Float64, sigma: Float64, col: Float64, row: Tuple[Float64, Float64]) -> Float64:
+def shadow_at(x: Float64, y: Float64, w: Float64, h: Float64, corner: Float64, sigma: Float64, col: Tuple[Float64, Float64], row: Tuple[Float64, Float64]) -> Float64:
     """shadow_alpha with what its column (shadow_columns) and row (shadow_row) share already worked out."""
-    var c = min(abs(corner), min(hx, hy))
+    var c = min(abs(corner), min(w, h))
     var reach = 3.0 * sigma
-    var ax = abs(px)
-    var ay = abs(py)
-    if ax > hx + reach + 1.0 or ay > hy + reach + 1.0:  # (past the reach: nothing; the shaders cut their quads there)
+    var ax = abs(x)
+    var ay = abs(y)
+    if ax > w + reach + 1.0 or ay > h + reach + 1.0:  # (past the reach: nothing; the shaders cut their quads there)
         return 0.0
-    if ax + reach <= hx - c:  # (every row within reach is full width here: the height's blur alone)
+    if ax + reach <= w - c:  # (every row within reach is full width here: the height's blur alone)
         return row[0]
-    var alpha = col * row[1]
+    if ay + reach <= h - c:
+        return col[0]
+    # above the corner's diagonal the rows narrow ever faster: there the box is sliced by columns (it is its own transpose)
+    var turn = ay - h > ax - w
+    var px = y if turn else x
+    var py = x if turn else y
+    var hx = h if turn else w
+    var hy = w if turn else h
+    var alpha = row[0] * col[1] if turn else col[0] * row[1]
     if c > 0.0:
         var s = hy - c
+        var k = SQRT_HALF / sigma
         for side in range(2):  # the corner bands [s, hy] and [−hy, −s], where the rows narrow
             var lo = max(s if side == 0 else -hy, py - reach)
             var hi = min(hy if side == 0 else -s, py + reach)
             if hi <= lo:
                 continue
-            var step = (hi - lo) / 8.0
-            var yr = lo + step * 0.5
-            for _ in range(8):
-                var d = py - yr
-                alpha += _blur_along_x(px, yr, sigma, c, hx, hy) * exp(-(d * d) / (2.0 * sigma * sigma)) * INV_SQRT_2PI / sigma * step
-                yr += step
+            # (4 slices: each one's Gaussian weight exact, by erf; only the row's width is taken, at its middle)
+            var step = (hi - lo) * 0.25
+            var e0 = _erf((py - lo) * k)
+            for i in range(1, 5):
+                var y1 = lo + step * Float64(i)
+                var e1 = _erf((py - y1) * k)
+                alpha += _blur_along_x(px, y1 - 0.5 * step, sigma, c, hx, hy) * 0.5 * (e0 - e1)
+                e0 = e1
     return min(max(alpha, 0.0), 1.0)
 
 
-def shadow_columns(x0: Int, x1: Int, cx: Float64, hx: Float64, hy: Float64, corner: Float64, sigma: Float64) -> List[Float64]:
-    """Per pixel column x0 … x1 − 1: the blur across x of the box's full-width rows (its centre at cx)."""
-    var out = List[Float64](capacity=max(x1 - x0, 1))
+def shadow_columns(x0: Int, x1: Int, cx: Float64, hx: Float64, hy: Float64, corner: Float64, sigma: Float64) -> List[Tuple[Float64, Float64]]:
+    """Per pixel column x0 … x1 − 1 of a box centred at cx: its share of the whole width, and of the straight part
+    (between the corners)."""
+    var out = List[Tuple[Float64, Float64]](capacity=max(x1 - x0, 1))
     var k = SQRT_HALF / sigma
+    var c = min(abs(corner), min(hx, hy))
     for px in range(x0, x1):
-        out.append(_side(Float64(px) + 0.5 - cx, hx, k))
+        out.append((_side(Float64(px) + 0.5 - cx, hx, k), _side(Float64(px) + 0.5 - cx, hx - c, k)))
     return out^
 
 
 def shadow_row(py: Float64, hy: Float64, corner: Float64, sigma: Float64) -> Tuple[Float64, Float64]:
     """A row's share along y: of the whole height, and of the straight middle (between the corner bands)."""
     var k = SQRT_HALF / sigma
-    var c = min(abs(corner), hy)
-    return (_side(py, hy, k), _side(py, hy - c, k))
+    return (_side(py, hy, k), _side(py, hy - abs(corner), k))
 
 
 def shadow_alpha(px: Float64, py: Float64, hx: Float64, hy: Float64, corner: Float64, sigma: Float64) -> Float64:
     """The shadow's coverage (0–1) at p, measured from the box's centre; half size (hx, hy), corner radius, sigma > 0
     (pixels). Across x the blur is exact (erf). Along y, the rows of the box's straight middle all blur alike across x,
-    so that part is exact too (one more erf): only the two corner bands (c tall) are sampled, 8 midpoints each within
-    3 sigma (GPUI samples the whole height). Away from the corners, and for square ones, it is exact up to erf's
+    so that part is exact too (one more erf): only the two corner bands (c tall) are sampled, 4 slices each within
+    3 sigma, their Gaussian weights exact (GPUI samples the whole height). Away from the corners, and for square ones, it is exact up to erf's
     approximation."""
     var c = min(abs(corner), min(hx, hy))
-    return shadow_at(px, py, hx, hy, c, sigma, _side(px, hx, SQRT_HALF / sigma), shadow_row(py, hy, c, sigma))
+    var k = SQRT_HALF / sigma
+    return shadow_at(px, py, hx, hy, c, sigma, (_side(px, hx, k), _side(px, hx - c, k)), shadow_row(py, hy, c, sigma))
 
 
 def shadow_reach(sigma: Float64) -> Float64:

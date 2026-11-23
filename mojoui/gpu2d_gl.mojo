@@ -37,7 +37,6 @@
 
 from std.ffi import c_int, c_uint, c_char
 from std.memory import Pointer
-from mojoui.libc import _sym as libc_sym
 from std.os import getenv
 from std.time import perf_counter_ns
 from mojoui.present import fcall, dl_open, dl_sym, c_text
@@ -423,28 +422,31 @@ float blur_x(float x, float y, float sigma, float corner, vec2 hs) {
     return hi - lo;
 }
 float shadow_alpha(vec2 p, vec2 hs, float corner, float sigma) {
-    // (goal 80) exact across x (erf) and along the straight middle (erf); only the corner bands sampled, 8 midpoints each
+    // (goal 80) exact across x (erf) and along the straight middle (erf); only the corner bands are cut in 4 slices each,
+    // their Gaussian weights exact (erf), the row's width taken at the slice's middle
     float c = min(abs(corner), min(hs.x, hs.y));
     float reach = 3.0 * sigma;
     vec2 ap = abs(p);
     if (ap.x > hs.x + reach + 1.0 || ap.y > hs.y + reach + 1.0) return 0.0;
     float k = 0.70710678 / sigma;
     if (ap.x + reach <= hs.x - c) return 0.5 * (erf1((p.y + hs.y) * k) - erf1((p.y - hs.y) * k));  // (full-width rows only)
+    if (ap.y + reach <= hs.y - c) return 0.5 * (erf1((p.x + hs.x) * k) - erf1((p.x - hs.x) * k));
+    // above the corner's diagonal the rows narrow ever faster: there the box is sliced by columns (it is its own transpose)
+    if (ap.y - hs.y > ap.x - hs.x) { p = p.yx; hs = hs.yx; }
     float s = hs.y - c;
     float alpha = blur_x(p.x, 0.0, sigma, c, hs) * 0.5 * (erf1((p.y + s) * k) - erf1((p.y - s) * k));
     if (c > 0.0) {
         for (int side = 0; side < 2; side++) {
-            float lo = side == 0 ? s : -hs.y;
-            float hi = side == 0 ? hs.y : -s;
-            lo = max(lo, p.y - reach);
-            hi = min(hi, p.y + reach);
+            float lo = max(side == 0 ? s : -hs.y, p.y - reach);
+            float hi = min(side == 0 ? hs.y : -s, p.y + reach);
             if (hi <= lo) continue;
-            float step = (hi - lo) / 8.0;
-            float yr = lo + step * 0.5;
-            for (int i = 0; i < 8; i++) {
-                float d = p.y - yr;
-                alpha += blur_x(p.x, yr, sigma, c, hs) * exp(-(d * d) / (2.0 * sigma * sigma)) * 0.39894228 / sigma * step;
-                yr += step;
+            float step = (hi - lo) * 0.25;
+            float e0 = erf1((p.y - lo) * k);
+            for (int i = 1; i <= 4; i++) {
+                float y1 = lo + step * float(i);
+                float e1 = erf1((p.y - y1) * k);
+                alpha += blur_x(p.x, y1 - 0.5 * step, sigma, c, hs) * 0.5 * (e0 - e1);
+                e0 = e1;
             }
         }
     }
@@ -796,7 +798,6 @@ struct GL2D(Movable):
     var tex_upload_bytes: Int  # render targets allocated, since the context started: a frame's waste is the difference
     var buf_allocs: Int  # (tests/test_gpu2d_waste)
     var target_allocs: Int
-    var memcpy_fn: Int  # libc's memcpy, looked up once (std has none to call here)
     var img_w: List[Int]
     var img_h: List[Int]
     var samples: Int  # stencil (raster) samples per pixel; MSAA mode: colour samples too
@@ -916,7 +917,6 @@ struct GL2D(Movable):
         self.tex_upload_bytes = 0
         self.buf_allocs = 0
         self.target_allocs = 0
-        self.memcpy_fn = 0
         self.img_w = List[Int]()
         self.img_h = List[Int]()
         self.samples = 8
@@ -1449,20 +1449,10 @@ struct GL2D(Movable):
                 fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, have, n - have, addr + have)
                 self.count_extra(C_BYTES, n - have)
                 self.uploaded += n - have
-        elif n > 0 and n <= self.lcap[i] and self.fp[F_MAP_BUFFER_RANGE] != 0:
-            # (goal 80) the store it has is big enough: mapped with INVALIDATE_BUFFER (the driver hands a fresh copy if
-            # draws still read the old one; no wait) and written, not a new store every frame
-            var p = fcall[Int](self.f(F_MAP_BUFFER_RANGE), target, 0, n, c_uint(0x0002 | 0x0008))  # WRITE | INVALIDATE_BUFFER
-            if self.memcpy_fn == 0:
-                self.memcpy_fn = libc_sym("memcpy")
-            if p != 0 and self.memcpy_fn != 0:
-                _ = fcall[Int](self.memcpy_fn, p, addr, n)
-                _ = fcall[UInt8](self.f(F_UNMAP_BUFFER), target)
-            elif p != 0:
-                _ = fcall[UInt8](self.f(F_UNMAP_BUFFER), target)
-                fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
-            else:
-                fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
+        elif n > 0 and n <= self.lcap[i]:
+            # (goal 80) the store it has is big enough: written in place. A mapped write (WRITE | INVALIDATE_BUFFER) made
+            # NVIDIA keep the store where the CPU writes fast: the whiteboard's 1 MB of ink then drew 2.3× slower.
+            fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
             self.count_extra(C_BYTES, n)
             self.uploaded += n
         elif n > 0:
