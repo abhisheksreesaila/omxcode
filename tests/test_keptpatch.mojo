@@ -1,7 +1,8 @@
 # Goal 79, D-7974: an edit patches the kept board ops in place: the objects it changed (or added) painted again, every
 # other object's kept ops replayed in the layer's order, gone ones dropped. After 40 random edits on the stress board
 # (moves, new texts and stickies, deletes, colours, bring to front, undo, redo) each patched paint's ops equal a full
-# walk's op for op, and every few steps the GL renderer's frames are pixel-identical. `keptpatch: ok`.
+# walk's op for op, and every few steps the GL renderer's frames are pixel-identical; (D-7978) the edits' damage comes
+# from ObjectLayer's change log (the tiled frames would differ if a damage were missed). `keptpatch: ok`.
 #   pixi run mojo run -I . -I vendor tests/test_keptpatch.mojo
 from std.testing import assert_true, assert_equal
 from mojoui.scene import Scene, KeptOps, OP_IMAGE, OP_POLY, OP_STROKE, STRIDE
@@ -136,6 +137,8 @@ def main() raises:
             assert_equal(d, 0, "pixel-identical at step " + String(step))
     print("   40 edits (moves, texts, stickies, deletes, colours, to front, undo/redo: " + String(kinds[0]) + "/" + String(kinds[1]) + "/" + String(kinds[2]) + "/" + String(kinds[3]) + "/" + String(kinds[4]) + "/" + String(kinds[5]) + "/" + String(kinds[6]) + "): " + String(look.patches) + " patched, ops identical each time, frames identical every 8th")
     assert_true(look.patches >= 30, "most edits patched")
+    print("   (D-7978) looks answered from the change log: " + String(look.fills))
+    assert_true(look.fills >= 30, "edits' damage from the change log, not a compare over every object")
     g1.gl.close()
     g2.gl.close()
     print("keptpatch: ok")

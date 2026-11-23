@@ -294,6 +294,7 @@ struct BoardLook(Movable):
     var last_token: String
     var keep_ops: Bool  # MOJOUI_KEEP_OPS=0: walk every paint (an A/B)
     var shadow_holes: Bool  # (D-7973) MOJOUI_SHADOW_HOLE=0: shadows drawn whole (the comparison)
+    var change_log: Bool  # (D-7978) MOJOUI_CHANGE_LOG=0: every change compared over all objects (the comparison)
     var hold_skip: Bool  # MOJOUI_HOLD_SKIP=0 / MOJOUI_FILL_KEEP=0: A/B switches for D-7969
     var fill_keep: Bool
     var kept_ver: Int
@@ -342,6 +343,7 @@ struct BoardLook(Movable):
         self.replays = 0
         self.held_paints = 0
         self.hold_skip = getenv("MOJOUI_HOLD_SKIP") != "0"
+        self.change_log = getenv("MOJOUI_CHANGE_LOG") != "0"
         self.shadow_holes = getenv("MOJOUI_SHADOW_HOLE") != "0"
         self.fill_keep = getenv("MOJOUI_FILL_KEEP") != "0"
         self.kept_ver = -1
@@ -535,28 +537,37 @@ struct BoardLook(Movable):
         if lifting and not lift_changed and self.generation == self.seen_gen:
             self.seen_doc = layer.version
             return
-        # (D-7960) only adoptions since the last look (a progressive open filling in): their damage, nothing walked
-        if self.generation == self.seen_gen and not lift_changed and self.snap.have and len(self.lift_ids) == 0:
-            var ad = layer.adoptions(self.seen_doc)
-            if ad:
+        # (D-7960, D-7978) every change since the last look named by id (ObjectLayer.changes_since: edits, undo and
+        # redo, re-routed connectors, removals, adoptions): their damage alone, nothing walked
+        if self.change_log and self.generation == self.seen_gen and not lift_changed and self.snap.have and len(self.lift_ids) == 0:
+            var ch = layer.changes_since(self.seen_doc)
+            if ch:
                 self.seen_doc = layer.version
                 self.fills += 1
                 self.fill_outside = True
                 self.snap.changed = List[Int]()
                 var rects = List[Float64]()
-                for id in ad.value():
+                var done = Dict[Int, Bool]()
+                for id in ch.value():
+                    if id in done:
+                        continue
+                    done[id] = True
+                    var old = self.snap.box_of(id)
+                    if len(old) == 4 and len(self.cull) == 4 and old[2] >= self.cull[0] and old[0] <= self.cull[2] and old[3] >= self.cull[1] and old[1] <= self.cull[3]:
+                        self.fill_outside = False
                     var q = layer.index(id)
                     if q < 0:
+                        rects += self.snap.remove(id)
                         continue
                     ref o = layer.objs[q]
-                    var ob = o.bounds()  # (D-7969: what the cull query tests: meets the cull rect, its ops change)
+                    var ob = o.bounds()  # (what the cull query tests: meets the cull rect, its ops change)
                     if len(self.cull) == 4 and ob[2] >= self.cull[0] and ob[0] <= self.cull[2] and ob[3] >= self.cull[1] and ob[1] <= self.cull[3]:
                         self.fill_outside = False
                     if o.kind == CONNECTOR:
                         rects += self.snap.append(o.id, _obj_key(o), o.ax, o.ay, o.bx, o.by, o.line_width + CONNECTOR_HEAD + 9)
                     else:
-                        var b = self.paint_box(o)
-                        rects += self.snap.append(o.id, _obj_key(o), b[0], b[1], b[2], b[3])
+                        var bx = self.paint_box(o)
+                        rects += self.snap.append(o.id, _obj_key(o), bx[0], bx[1], bx[2], bx[3])
                 if len(rects) > 0:
                     self.since = self.board_version
                     self.board_version += 1

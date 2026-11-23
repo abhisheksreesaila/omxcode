@@ -117,7 +117,7 @@ struct DamageSnap(Movable):
         self.fresh = not self.have
         if self.have:
             for p in range(len(self.ids)):
-                if not self.seen[p]:
+                if not self.seen[p] and self.pads[p] > -1.5:
                     self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
                     self.changed.append(self.ids[p])
         if len(self.nids) != len(self.ids):
@@ -137,8 +137,10 @@ struct DamageSnap(Movable):
         """(D-7960) An item that came while nothing else changed (a progressive open adopting it): added to the snapshot
         as if fed, its damage returned, nothing walked. Outside a begin()/finish(). pad ≥ 0: a line, as feed_line."""
         self.out.clear()
-        self.changed.append(id)
         var p = self.at.get(id, -1) if self.have else -1
+        if p >= 0 and self.keys[p] == key and self.boxes[4 * p] == x0 and self.boxes[4 * p + 1] == y0 and self.boxes[4 * p + 2] == x1 and self.boxes[4 * p + 3] == y1 and self.pads[p] == pad:
+            return self.out.copy()  # (named but unchanged: no damage, as the full compare would find)
+        self.changed.append(id)
         if p >= 0:  # (already there: a change of it)
             self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
             self.keys[p] = key
@@ -154,6 +156,32 @@ struct DamageSnap(Movable):
             self.boxes += [x0, y0, x1, y1]
             self.pads.append(pad)
         self._emit(x0, y0, x1, y1, pad)
+        return self.out.copy()
+
+    def box_of(self, id: Int) -> List[Float64]:
+        """The item's last box (x0, y0, x1, y1; a line's ends padded out), empty when it isn't in the snapshot."""
+        var p = self.at.get(id, -1) if self.have else -1
+        if p < 0:
+            return List[Float64]()
+        var pad = max(self.pads[p], 0.0)
+        return [min(self.boxes[4 * p], self.boxes[4 * p + 2]) - pad, min(self.boxes[4 * p + 1], self.boxes[4 * p + 3]) - pad,
+                max(self.boxes[4 * p], self.boxes[4 * p + 2]) + pad, max(self.boxes[4 * p + 1], self.boxes[4 * p + 3]) + pad]
+
+    def remove(mut self, id: Int) -> List[Float64]:
+        """(D-7978) An item gone while nothing else was compared: its last box's damage; it leaves the snapshot (its slot
+        stays, emptied: a later full compare skips it)."""
+        self.out.clear()
+        var p = self.at.get(id, -1) if self.have else -1
+        if p < 0:
+            return self.out.copy()
+        self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
+        self.changed.append(id)
+        self.pads[p] = -2  # (a tombstone)
+        self.ids[p] = -1
+        try:
+            _ = self.at.pop(id)
+        except:
+            pass
         return self.out.copy()
 
     def reset(mut self):

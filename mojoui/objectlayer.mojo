@@ -346,6 +346,10 @@ struct ObjectLayer(Movable):
     var rev_counter: Int
     var selected: List[Int]  # ids, in the order they were picked
     var history: History[Change]
+    var chg_ids: List[Int]  # (D-7978) every object change by id, with the version it is part of; the last version made
+    var chg_vers: List[Int]  # by a change that named no object; objects named since the last version
+    var unlogged_ver: Int
+    var logged_n: Int
     var adopt_ids: List[Int]  # (D-7960) objects adopted (adopt_as), with the version after each, and the version
     var adopt_vers: List[Int]  # after the last change that wasn't an adoption: adoptions(since) answers from them
     var edit_ver: Int
@@ -409,6 +413,10 @@ struct ObjectLayer(Movable):
         self.selected = List[Int]()
         self.history = History[Change](cap=100000, window_ms=0)
         self.adopt_ids = List[Int]()
+        self.chg_ids = List[Int]()
+        self.chg_vers = List[Int]()
+        self.unlogged_ver = 0
+        self.logged_n = 0
         self.adopt_vers = List[Int]()
         self.edit_ver = 0
         self.adopting = False
@@ -495,8 +503,38 @@ struct ObjectLayer(Movable):
 
     # ------------------------------------------------ the undo step
 
+    def _log(mut self, id: Int):
+        """(D-7978) Object `id` changes in the version about to be made: changes_since() names it."""
+        self.chg_ids.append(id)
+        self.chg_vers.append(self.version + 1)
+        self.logged_n += 1
+        if len(self.chg_ids) > 100000:  # (the oldest half goes; a question from before them can't be answered)
+            var half = len(self.chg_ids) // 2
+            self.unlogged_ver = max(self.unlogged_ver, self.chg_vers[half - 1])
+            var ids2 = List[Int](capacity=len(self.chg_ids) - half)
+            var vers2 = List[Int](capacity=len(self.chg_ids) - half)
+            for q in range(half, len(self.chg_ids)):
+                ids2.append(self.chg_ids[q])
+                vers2.append(self.chg_vers[q])
+            self.chg_ids = ids2^
+            self.chg_vers = vers2^
+
+    def changes_since(self, since: Int) -> Optional[List[Int]]:
+        """(D-7978) The ids changed since version `since` (made, changed, re-routed, removed or adopted) when every change
+        since then named its objects, else None (something changed unnamed: compare everything). Ids may repeat."""
+        if self.unlogged_ver > since or since > self.version:
+            return None
+        var out = List[Int]()
+        var q = len(self.chg_vers) - 1
+        while q >= 0 and self.chg_vers[q] > since:
+            q -= 1
+        for r in range(q + 1, len(self.chg_ids)):
+            out.append(self.chg_ids[r])
+        return out^
+
     def _touch(mut self, id: Int):
         """Before object `id` changes (or is created): keep its state before, once per step."""
+        self._log(id)
         if not self.txn_open:
             self.txn = Change(self.gesture_kind if self.gesture else 0)
             self.txn_open = True
@@ -555,6 +593,7 @@ struct ObjectLayer(Movable):
 
     def _put(mut self, id: Int, state: Optional[Obj]):
         """Object `id` becomes `state` (absent: removed). For undo and redo."""
+        self._log(id)
         var p = self.index(id)
         if state:
             if p >= 0:
@@ -618,6 +657,9 @@ struct ObjectLayer(Movable):
         self.dirty = True
         if not self.adopting:
             self.edit_ver = self.version
+            if self.logged_n == 0:
+                self.unlogged_ver = self.version  # (D-7978: a change that named no object: changes_since() can't answer)
+        self.logged_n = 0
 
     def adoptions(self, since: Int) -> Optional[List[Int]]:
         """(D-7960) The ids adopted since version `since` when every change since then was an adoption (a progressive
@@ -646,6 +688,7 @@ struct ObjectLayer(Movable):
     def _remove_at(mut self, p: Int):
         var last = len(self.objs) - 1
         var id = self.objs[p].id
+        self._log(id)
         if p != last:
             self.objs.swap_elements(p, last)
             self.pos_of[self.objs[p].id] = p
@@ -773,6 +816,7 @@ struct ObjectLayer(Movable):
 
     def _route(mut self, c: Int):
         """Connector objs[c]: its ends at the nearest pair of side midpoints (or the side nearest its free end)."""
+        self._log(self.objs[c].id)
         var fp = self.index(self.objs[c].from_id)
         var tp = self.index(self.objs[c].to_id)
         if fp < 0:
@@ -1983,6 +2027,7 @@ struct ObjectLayer(Movable):
             o.rev = self._next_rev()
         self.pos_of[id] = len(self.objs)
         self.objs.append(o^)
+        self._log(id)
         self.adopting = True
         if self.objs[len(self.objs) - 1].kind == CONNECTOR:
             self._route(len(self.objs) - 1)
