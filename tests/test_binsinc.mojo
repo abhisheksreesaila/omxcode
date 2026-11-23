@@ -5,8 +5,8 @@
 # query. `binsinc: ok`.
 #   pixi run mojo build -I . -I vendor tests/test_binsinc.mojo -o build/test_binsinc && build/test_binsinc
 from std.testing import assert_true, assert_equal
-from mojoui.scene import Scene
-from mojoui.gpu2d_tiles import OpBins
+from mojoui.scene import Scene, OP_RUN
+from mojoui.gpu2d_tiles import OpBins, op_box
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CH_MOVE
 
@@ -50,19 +50,39 @@ def board_layer(sc: Scene) -> Int:
     return -1
 
 
-def same_bins(mut a: OpBins, mut b: OpBins, what: String) raises:
+def same_bins(mut a: OpBins, mut b: OpBins, what: String, strict: Bool) raises:
+    """a answers as b, a fresh build: every box, 240 queries of every size; strict (built whole, MOJOUI_BINS_INPLACE=0):
+    the same grid and cells too, as this test always asked."""
     assert_equal(a.nops, b.nops, what + ": ops")
     for o in range(a.nops):
         assert_true(a.bx0[o] == b.bx0[o] and a.by0[o] == b.by0[o] and a.bx1[o] == b.bx1[o] and a.by1[o] == b.by1[o], what + ": box of op " + String(o))
-    if len(a.extra) == 0:
+    if strict or len(a.extra) == 0:
         assert_true(a.nx == b.nx and a.ny == b.ny and a.cell == b.cell and a.gx0 == b.gx0 and a.gy0 == b.gy0, what + ": grid")
-    if len(a.extra) == 0:  # (built whole: the same grid; patched in place, D-7999, it keeps the old grid and `extra`)
         assert_true(a.start == b.start and a.items == b.items, what + ": cells")
-    for q in range(240):  # (what it answers is what counts: rects of every size, the whole board to a few px)
-        var x = -900.0 + Float64((q * 7919) % 4200)
-        var y = -700.0 + Float64((q * 104729) % 3000)
-        var w = 8.0 * Float64(1 << (q % 10))
-        assert_true(a.query(x, y, x + w, y + w * 0.7) == b.query(x, y, x + w, y + w * 0.7), what + ": query " + String(q))
+    for q in range(240):
+        var r = rect_of(q)
+        assert_true(a.query(r[0], r[1], r[2], r[3]) == b.query(r[0], r[1], r[2], r[3]), what + ": query " + String(q))
+
+
+def rect_of(q: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+    var x = -900.0 + Float64((q * 7919) % 4200)
+    var y = -700.0 + Float64((q * 104729) % 3000)
+    var w = 8.0 * Float64(1 << (q % 10))
+    return (x, y, x + w, y + w * 0.7)
+
+
+def brute(sc: Scene, i: Int, mut bins: OpBins, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> List[Int]:
+    """Every op of layer i tested one by one, its box measured from the scene itself (nothing of the index's grid, boxes
+    or extra list): the ops, in paint order, whose boxes meet the rect."""
+    var out = List[Int]()
+    var span = sc.layer_range(i)
+    for o in range(span[1] - span[0]):
+        var op = span[0] + o
+        var b = bins.run_box(sc, op) if Int(sc.kinds[op]) == OP_RUN else op_box(sc, op)
+        if Float64(Float32(b[2])) < x0 or Float64(Float32(b[0])) > x1 or Float64(Float32(b[3])) < y0 or Float64(Float32(b[1])) > y1:
+            continue
+        out.append(o)
+    return out^
 
 
 def rnd(mut seed: UInt64) -> Int:
@@ -70,18 +90,21 @@ def rnd(mut seed: UInt64) -> Int:
     return Int(seed >> 33)
 
 
-def main() raises:
+def edits(in_place: Bool) raises:
     var layer = board()
     var v = DeskView(-300, -200, 1.0)
     var look = BoardLook()
     var inc = OpBins()
     inc.incremental = True
+    inc.in_place = in_place
+    var scan = OpBins()  # (only its text widths are used, by the brute-force scan)
     _ = scene_of(look, layer, v)
     var s0 = scene_of(look, layer, v)
     inc.build(s0, board_layer(s0))
     var reused = 0
     var measured = 0
     var builds = 0
+    var scanned = 0
     var seed: UInt64 = 79
     var kinds = List[Int](length=7, fill=0)
     for step in range(40):
@@ -114,14 +137,28 @@ def main() raises:
         var fresh = OpBins()
         fresh.incremental = False
         fresh.build(a, i)
-        same_bins(inc, fresh, "step " + String(step))
+        same_bins(inc, fresh, "step " + String(step), not in_place)
+        if step % 4 == 3 or len(inc.extra) > 0 and step % 2 == 0:  # (the property itself: a scan of every op's box)
+            for q in range(0, 240, 5):
+                var r = rect_of(q)
+                assert_true(inc.query(r[0], r[1], r[2], r[3]) == brute(a, i, scan, r[0], r[1], r[2], r[3]), "step " + String(step) + ": brute force " + String(q))
+            scanned += 1
         reused += inc.reused
         measured += inc.nops - inc.reused
         if inc.reused > 0:
             builds += 1
     print("   patched in place (D-7999): " + String(inc.patched))
-    assert_true(inc.patched >= 5, "some edits keep every op's place: patched in place")
+    if in_place:
+        assert_true(inc.patched >= 5, "some edits keep every op's place: patched in place")
+    else:
+        assert_equal(inc.patched, 0, "built whole every time")
+    assert_true(scanned >= 10, "checked against a scan of every op")
     print("   40 edits: " + String(builds) + " builds took boxes from the one before; " + String(reused) + " boxes kept, " + String(measured) + " measured")
     assert_true(builds >= 30, "most builds incremental")
     assert_true(reused > 10 * measured, "most boxes kept")
+
+
+def main() raises:
+    edits(True)  # (the index patched in place where it can be, D-7999)
+    edits(False)  # (MOJOUI_BINS_INPLACE=0: built whole, strictly equal to a fresh build, grid and cells too)
     print("binsinc: ok")
