@@ -30,6 +30,7 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
+from mojoui.keycaps import keycap, device_name
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
@@ -589,13 +590,13 @@ struct WebShell(Movable):
         var i = self.note_index(self.current)
         if self.card_open and i >= 0:
             ref c = self.card
-            c.status = "Saved on this device" if self.save_state == "" else self.save_state
+            c.status = "Saved on this " + device_name() if self.save_state == "" else self.save_state
             c.status_dot = self.sk.c2
             c.place = "Inbox"
             c.wide_id = "#share-focus"
             c.wide_label = "Focus"
             c.wide_icon = "focus"
-            c.wide_key = "Ctrl ."
+            c.wide_key = keycap(".")
             c.tiles.clear()
             var ids: List[String] = ["#share-print", "#share-png", "#share-backup", "#share-markdown", "#share-vault", "#share-icon", "#share-link", "#share-props", "#top-properties", "#clear-note"]
             var labels: List[String] = ["Print", "Picture", "Backup", "Markdown", "Obsidian", "Icon", "Link note", "Properties", "Settings", "Clear all"]

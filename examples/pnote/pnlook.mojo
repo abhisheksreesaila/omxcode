@@ -6,6 +6,7 @@
 from mojoui.canvas import rgba
 from mojoui.skin import Skin, Shadow, hexc
 from mojoui.notesshell import Boxes, PanelConfig, Shelf, SkinChoice, DockItem, DOCK_TOOL, DOCK_DIVIDER, DOCK_DOT, DOCK_ACCENT
+from mojoui.keycaps import keycap
 
 
 def pn_names(mut b: Boxes):
@@ -118,7 +119,7 @@ def pn_panel() -> PanelConfig:
     c.brand = "Personal Note"
     c.action_label = "Quick note"
     c.action_icon = "plus"
-    c.action_key = "Alt N"
+    c.action_key = keycap("N", alt=True)  # (⌥N on the Mac, as the web app there)
     c.loose_label = "Inbox"
     c.loose_icon = "inbox"
     c.shelves = [Shelf("projects", "Projects", "target", True, False), Shelf("areas", "Areas", "compass", True, False),

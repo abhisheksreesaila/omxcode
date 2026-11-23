@@ -118,9 +118,13 @@ struct OpBins(Movable):
     var stamp: List[Int]
     var stamp_now: Int
     var widths: Dict[Int, Float64]  # a run's shaped width by a hash of its text and style (kept across builds)
+    var incremental: Bool  # (D-7987) boxes of replayed ops taken from the last build (MOJOUI_BINS_INCREMENTAL=0: all measured)
+    var reused: Int  # how many boxes the last build took from the one before
 
     def __init__(out self):
         self.widths = Dict[Int, Float64]()
+        self.incremental = getenv("MOJOUI_BINS_INCREMENTAL") != "0"
+        self.reused = 0
         self.version = -999
         self.ext = List[Float64]()
         self.nops = -1
@@ -151,6 +155,25 @@ struct OpBins(Movable):
     def build(mut self, scene: Scene, i: Int):
         var span = scene.layer_range(i)
         var n = span[1] - span[0]
+        # (D-7987) ops replayed from the version this index was built from keep their boxes: only the ops drawn again
+        # (an edit's objects) are measured; the grid is rebuilt from the boxes either way
+        var src = List[Int]()
+        var old_n = len(self.bx0)
+        if self.incremental and self.version >= 0 and scene.layer_reuse_v[i] == self.version and old_n == self.nops:
+            var runs = scene.reuse_of(i)
+            if len(runs) > 0:
+                src = List[Int](length=n, fill=-1)
+                for q in range(len(runs) // 3):
+                    for o in range(runs[3 * q + 2]):
+                        var d = runs[3 * q] + o
+                        var f = runs[3 * q + 1] + o
+                        if d < n and f < old_n:
+                            src[d] = f
+        var old_x0 = self.bx0^
+        var old_y0 = self.by0^
+        var old_x1 = self.bx1^
+        var old_y1 = self.by1^
+        self.reused = 0
         self.version = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]
         self.nops = n
         self.ext = List[Float64]()
@@ -166,7 +189,21 @@ struct OpBins(Movable):
         var y1 = -1e300
         if len(self.widths) > 65536:
             self.widths = Dict[Int, Float64]()
+        var have_src = len(src) == n
         for o in range(n):
+            if have_src and src[o] >= 0:
+                var f = src[o]
+                self.bx0.append(old_x0[f])
+                self.by0.append(old_y0[f])
+                self.bx1.append(old_x1[f])
+                self.by1.append(old_y1[f])
+                self.reused += 1
+                if old_x0[f] > -1e299:
+                    x0 = min(x0, Float64(old_x0[f]))
+                    y0 = min(y0, Float64(old_y0[f]))
+                    x1 = max(x1, Float64(old_x1[f]))
+                    y1 = max(y1, Float64(old_y1[f]))
+                continue
             var b = self.run_box(scene, span[0] + o) if Int(scene.kinds[span[0] + o]) == OP_RUN else op_box(scene, span[0] + o)
             self.bx0.append(Float32(b[0]))
             self.by0.append(Float32(b[1]))
@@ -391,6 +428,7 @@ struct Tiles(Movable):
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
     var promote_off: Bool
+    var bins_trace: Bool
     var trace: Bool  # MOJOUI_TILE_TRACE=1: why each tile is rastered (diagnosis)
     var build: Int  # (D-7956) this program's build id, for snapshot keys (once)
     var snaps_on: Bool  # MOJOUI_SNAP=0 turns snapshots off (the race prints the open without them)
@@ -414,6 +452,7 @@ struct Tiles(Movable):
         self.settle_ns = TILE_SETTLE_NS
         self.planned_ops = 0
         self.trace = getenv("MOJOUI_TILE_TRACE") == "1"
+        self.bins_trace = getenv("MOJOUI_BINS_TRACE") == "1"
         self.build = build_id()
         self.snaps_on = getenv("MOJOUI_SNAP") != "0"
         self.promote_off = getenv("MOJOUI_SNAP_PROMOTE") == "0"  # (A/B: the snapshot replaced by rasters, as before)
@@ -661,7 +700,10 @@ struct Tiles(Movable):
         var ty = scene.layer_ty[i]
         var v = scene.layer_versions[i]
         if not self.sets[s].bins.fresh(scene, i):
+            var tb0 = perf_counter_ns()
             self.sets[s].bins.build(scene, i)
+            if self.bins_trace:  # (MOJOUI_BINS_TRACE=1: what the index rebuild costs, diagnosis)
+                print("BINS: build " + String(self.sets[s].bins.nops) + " ops reused " + String(self.sets[s].bins.reused) + " " + String(Float64(Int(perf_counter_ns()) - Int(tb0)) / 1e6) + " ms", flush=True)
         # (D-7959) an edit while a restored snapshot is still the fallback (the app withdrew its tag): the layer's view is
         # complete (it doesn't hold), so the snapshot becomes its tiles first and this frame's damage, the edit's,
         # applies to them below (ignored while the snapshot stood for the document as saved)

@@ -15,8 +15,12 @@ scratch database copied in from this checkout.
 | `~/omxcode-g79-web/repo/` | this checkout's docs/goals/79 (ref.mjs, fixture) and fonts/, refreshed by each run of docs/goals/79/macref.py | tar over ssh |
 | `~/omxcode-g79-web/ref-mac/`, `ref-<time>/`, `*.log` | the reference shots each run makes (Chrome on the Mac at 2.0) and their logs | ref.mjs |
 | `~/omxcode-g79-web/npm.log`, `ref.log` | install and first-run logs | — |
+| `~/omxcode-g79-web/pw-browsers/` | Playwright's own Chrome Headless Shell 151 (554 MB), downloaded before the race settled on the installed Chrome (D-7986); unused now, delete with the rest | `PLAYWRIGHT_BROWSERS_PATH=~/omxcode-g79-web/pw-browsers npx playwright install chromium` |
+| `~/omxcode-g79-web/pn/.g79/` | macgpu.mjs (the preload that gives PN's benchmark the Apple GPU, D-7986) and two small probe scripts | scp |
+| `~/omxcode-g79-web/race-mac/` | the web race's results: benchmark-f034's JSON and log | benchmark-f034.mjs |
 
 ## Also made by goal 79's runs (earlier rounds)
+- `~/omxcode-g54/data/snaps-<note>/`, `~/omxcode-g54/data/cfg/`: the native race's kept views and settings (so nothing lands in ~/.config).
 - `~/omxcode-g54/data/out-<time>/`: each scripts/mac-ssh run's output folder; `~/omxcode-g54/data/widths/` (macwidths.py: a
   page, a fonts copy, a throwaway Chrome profile `widths/profile`); scratch databases copied in (`pn.db`, `race-600.db`).
 - `~/Desktop/omxcode-report-Personal Note/<time>/`: the app's own test reports (pictures and view dumps), as every
@@ -24,5 +28,5 @@ scratch database copied in from this checkout.
 
 ## Removal (the owner runs it; nothing else on the Mac refers to these)
 ```
-rm -rf ~/omxcode-g79-web ~/omxcode-g54/data/out-* ~/omxcode-g54/data/widths
+rm -rf ~/omxcode-g79-web ~/omxcode-g54/data/out-* ~/omxcode-g54/data/widths ~/omxcode-g54/data/snaps-* ~/omxcode-g54/data/cfg
 ```
