@@ -877,6 +877,9 @@ def m6():
     (race / "web-mem.log").write_text(r3.stdout + r3.stderr)
     mm = re.search(r"WEB RSS MB: ([\d.]+)", r3.stdout)
     web["rss_mb"] = float(mm.group(1)) if mm else None
+    rs = run(["node", str(ROOT / "docs/goals/79/webswitch.mjs"), str(REF / "pn.db"), "--gpu", f"--dpr={LINUX_DPR}"], 900, cwd=PN)  # (D-8001)
+    (race / "web-switch.log").write_text(rs.stdout + rs.stderr)
+    web.update(web_switch(rs.stdout))
     # the web's first screen: the "after" build of PN's benchmark (both are this checkout)
     mf = re.search(r"after\s+first screen (\d+)", r2.stdout)
     if mf:
@@ -1028,7 +1031,7 @@ def m6_mac(race):
     # the web, on the Mac
     print("(the web's race on the Mac in its own Chrome on Metal: several minutes)", flush=True)
     mac_sh(f"mkdir -p {MAC_WEB}/pn/.g79 {MAC_WEB}/race-mac", 60)
-    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "desktop_cold_mac.py"):
+    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "webswitch.mjs", "desktop_cold_mac.py"):
         if not mac_put(ROOT / "docs/goals/79" / f, f"{MAC_WEB}/pn/.g79/{f}"):
             return "FAIL", f"copying {f} to the Mac"
     if not mac_put(REF_MAC / "pn.db", f"{MAC_WEB}/race-mac/ref.db"):
@@ -1044,6 +1047,9 @@ def m6_mac(race):
     (rm / "web-mem.log").write_text(r.stdout + r.stderr)
     mm = re.search(r"WEB RSS MB: ([\d.]+)", r.stdout)
     web["rss_mb"] = float(mm.group(1)) if mm else None
+    r = mac_sh(envp + f"node .g79/webswitch.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)  # (D-8001)
+    (rm / "web-switch.log").write_text(r.stdout + r.stderr)
+    web.update(web_switch(r.stdout))
     for mode in ("desktop", "chromium"):
         r = mac_sh(envp + f"node .g79/webcold.mjs ../race-mac/ref.db {mode} 5", 900)
         (rm / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
@@ -1160,6 +1166,16 @@ def native_race(out):
     return res
 
 
+def web_switch(out):
+    """webswitch.mjs's lines (D-8001): {switch, switch_max, omnibar, omnibar_max} (ms)."""
+    res = {}
+    for k, name in [("switch", "note switch"), ("omnibar", "omnibar")]:
+        m = re.search(rf"^WEBSWITCH {name} p95: ([\d.]+) max: ([\d.]+)", out, re.M)
+        if m:
+            res[k], res[k + "_max"] = float(m.group(1)), float(m.group(2))
+    return res
+
+
 def web_race(f034, first_screen_text):
     """{note: {step: {p95, max}}} from PN's benchmark-f034 --out JSON, plus first screen ms."""
     res = {}
@@ -1205,15 +1221,16 @@ def web_race(f034, first_screen_text):
 
 
 def native_start(outs):
-    vals = {"first": [], "switch": [], "omnibar": [], "rss": []}
+    vals = {"first": [], "switch": [], "omnibar": [], "rss": [], "switch_max": [], "omnibar_max": []}
     for o in outs:
         for k, pat in [("first", r"^FIRSTSCREEN: ([\d.]+)"), ("switch", r"^NOTESWITCH: .*p95=([\d.]+)"), ("omnibar", r"^OMNIBAR: .*p95=([\d.]+)"),
+                       ("switch_max", r"^NOTESWITCH: .*max=([\d.]+)"), ("omnibar_max", r"^OMNIBAR: .*max=([\d.]+)"),
                        ("rss", r"^RSS: ([\d.]+)")]:
             m = re.search(pat, o, re.M)
             if m:
                 vals[k].append(float(m.group(1)))
     med = lambda v: sorted(v)[len(v) // 2] if v else None
-    return {k: med(v) for k, v in vals.items()}
+    return {k: (max(v) if v else None) if k.endswith("_max") else med(v) for k, v in vals.items()}
 
 
 def race_table(web, nat, start, shown=None, machine="linux"):
@@ -1320,18 +1337,21 @@ def race_table(web, nat, start, shown=None, machine="linux"):
     good = bool(w and nr and nr < w)
     ok = ok and good
     lines.append(f"| RSS after opening all three kinds | {w if w else '—'} MB | {nr if nr else '—'} MB | {'✓' if good else '✗'} |")
-    for k in ["switch", "omnibar"]:
-        n = start.get(k)
-        good = bool(n is not None and n <= P95)
+    for k in ["switch", "omnibar"]:  # (D-8001: raced and silky, as every step: faster than the web's p95 and max, p95 ≤ 8.3, max ≤ 16.7)
+        n, nm = start.get(k), start.get(k + "_max")
+        w, wm = web.get(k), web.get(k + "_max")
+        good = bool(n is not None and nm is not None and w and wm and n < w and nm < wm and n <= P95 and nm <= MAX)
         ok = ok and good
-        lines.append(f"| {'note switch' if k == 'switch' else 'omnibar open'} p95 | — | {n if n is not None else '—'} ms | {'✓' if good else '✗'} |")
+        lines.append(f"| {'note switch' if k == 'switch' else 'omnibar open'} p95 / max (5 runs of 5; p95 the median run's, max the worst) | "
+                     f"{f'{w} / {wm}' if w else 'not measured'} ms | {f'{n} / {nm}' if n is not None else '—'} ms | {'✓' if good else '✗'} |")
     lines += ["", "Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the "
               "title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools "
               "port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment "
               "before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: "
               "FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own "
-              "benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar: native frame "
-              "work, no web number (PN measures none)."]
+              "benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar (D-8001): native, the "
+              "step's event, view, draw and GPU time (the host's app_step_bench); web, docs/goals/79/webswitch.mjs: the input event's "
+              "timestamp to the frame after the new title (or the search panel) shows, in Chromium with the GPU: a fresh page per run."]
     return "\n".join(lines) + "\n", ok
 
 
