@@ -32,6 +32,18 @@ idle in all 14 samples, load ~1).
 edit doesn't compare all ~5,300 objects, and incremental op bins in the renderer. Neither is built. M2, M3, M4 **PASS**
 (rerun).
 
+## Mac half, first contact (2026-11-22, late evening)
+The Mac came online (arm64, macOS 27.2, its screen at backing scale 1.0). I changed no `defaults` or privacy settings and
+installed nothing system-wide. Status per milestone on the Mac:
+
+| # | Mac | why |
+|---|---|---|
+| M1 | **FAIL** | Web faces, CJK and emoji match exactly; the fallback scripts (Hindi, Tamil, Arabic, Korean) use Apple's faces where the reference (Chromium on Linux) used Noto. The decision is open: ship the Noto faces, or judge those lines against the Mac's Chrome (macwidths.py measures them; Chrome's own web-face widths differ per platform too) |
+| M5 | **FAIL** | The AppKit host has no NSTextInputClient yet (struct-returning methods to solve on arm64) |
+| GPU | present | gpu2d draws on Metal (Apple M4) |
+| M6 | **FAIL / BLOCKED** | Native: zoom p95 9.2 / max 12.9 on Metal; every other row n=0 (the AppKit framebench lacks those bench kinds). Web race: needs node + Playwright on the Mac (not installed: the owner's call) |
+| M7 | **FAIL** | The shots come back now (render step, PNOTE_BOXES, fetched {out}). Open: renders at 1× (the screen's scale) vs the 2× reference; the notes panel rows come out in another order; goal 75's compare.png; components.md fonttext ✅ on the Mac |
+
 ## Continuation 12 (2026-11-22, evening, autopilot): where undo's GPU time goes, shadows thinned
 Decisions D-7971–D-7973; journal "continuation 12". The race ran on a quiet machine (17:34–17:41; goal 77 idle in all
 14 samples, GPUs P8), and so did the reruns.
