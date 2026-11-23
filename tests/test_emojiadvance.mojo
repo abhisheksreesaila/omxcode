@@ -10,17 +10,18 @@ def main() raises:
     var f = open(getenv("EMOJI_TABLE", "docs/goals/79/emoji-chrome-mac.json"), "r")
     var t = f.read()
     f.close()
-    var at = t.find('"sizes"')
-    assert_true(at >= 0, "the measured sizes")
-    var body = String(t[byte=at:t.byte_length()])
-    var open_ = body.find("{")
-    var close = body.find("}")
     var n = 0
-    for pair in String(body[byte=open_ + 1:close]).split(","):
-        var kv = String(pair).split(":")
-        var size = atof(String(kv[0]).replace('"', "").strip())
-        var want = atof(String(kv[1]).strip())
-        assert_equal(apple_emoji_advance(size), want, "at " + String(size) + " px")
-        n += 1
-    assert_true(n >= 31, "every size measured")
+    for part in ["sizes", "more"]:  # (whole sizes 10–40 px, and 6–96 px with fractional ones)
+        var at = t.find('"' + String(part) + '"')
+        assert_true(at >= 0, "the measured " + String(part))
+        var body = String(t[byte=at:t.byte_length()])
+        var open_ = body.find("{")
+        var close = body.find("}")
+        for pair in String(body[byte=open_ + 1:close]).split(","):
+            var kv = String(pair).split(":")
+            var size = atof(String(kv[0]).replace('"', "").strip())
+            var want = atof(String(kv[1]).strip())
+            assert_equal(apple_emoji_advance(size), want, "at " + String(size) + " px")
+            n += 1
+    assert_true(n >= 60, "every size measured")
     print("emojiadvance: ok (" + String(n) + " sizes)")

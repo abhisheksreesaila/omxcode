@@ -200,7 +200,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `ObjectLayer (free objects on a canvas: text, stickies, shapes, pictures, ink, arrows; select, handles, rotate, z, undo)` | `mojoui/objectlayer.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ✅ | ❌ | ❌ | pnote |
 | `MindMap (a balanced tidy tree with tapered branches; Tab, Enter, F2, arrows, Space; undo; outline text)` | `mojoui/mindmap.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | ✅ | ❌ | ❌ | pnote |
 | `GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)` | `mojoui/gpu2d.mojo` | Canvas, Canvas frames (animation) | ✅ | 🔨 | 🔨 | ✅ | 🔨 | ❌ | pnote |
-| `Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule; CoreText on the Mac to come)` | `mojoui/fonttext.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule, the AAT tracking table; CoreText on the Mac)` | `mojoui/fonttext.mojo` | Canvas | ✅ | 🔨 | 🔨 | ✅ | 🔨 | 🔨 | pnote |
 | `Skins as themes (a token set an app fills: desk, panel, ink, accent, tints, faces, radii, shadow scale, locked colours; color-mix; Personal Note's Paper, Night and Crayon live in pnote, D-7928)` | `mojoui/skin.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Document store (rows with a revision: a save debounce, saves written only on the revision the editor read with conflicts reported, parsed documents kept by revision; D-7927, D-7934)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Stroke icons (Lucide geometry rasterized natively at device px)` | `mojoui/strokeicon.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -279,6 +279,7 @@ Run by a check of its own on that host (not through RUN_ON's examples):
 - `mojoui/objectlayer.mojo` (Mac (AppKit)): docs/goals/75-check.py M3 and M5 on the M4: pnote's 645-object canvas and 1,000-stroke whiteboard panned, zoomed and drawn on (strokes landing in the layer); selection, handles, rotation and its keys aren't driven there.
 - `mojoui/mindmap.mojo` (Mac (AppKit)): docs/goals/75-check.py M3 and M4 on the M4: pnote's 300-topic map panned, zoomed and grown (20 topics added on springs, a collapse and an expand); its keys aren't driven there.
 - `mojoui/gpu2d.mojo` (Mac (AppKit)): tests/test_gpu2d_metal.mojo on the owner's M4 (every primitive and the three judged scenes, Metal vs gpu2d's CPU executor) and docs/goals/75-check.py M3 (pnote's whiteboard, canvas and mind map on Metal, read back in the app within M1's bounds).
+- `mojoui/fonttext.mojo` (Mac (AppKit)): goal 79's M1 on the owner's M4: 19 lines (web faces, fallback scripts, colour emoji) through CoreText within 0.03 device px of the Mac's own Chrome, none .notdef (docs/goals/79-check.py M1, 2026-11-23).
 
 ## JavaScript widgets (WebComponent)
 
@@ -297,7 +298,7 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 | Linux (GTK) | 206 | 11 | 0 |
 | Web | 174 | 26 | 17 |
 | Android | 19 | 77 | 121 |
-| Mac (AppKit) | 8 | 182 | 27 |
+| Mac (AppKit) | 9 | 181 | 27 |
 | iPhone (UIKit) | 0 | 148 | 69 |
 | Agent (MCP) | 66 | 55 | 96 |
 

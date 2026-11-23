@@ -134,6 +134,9 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
 # checks run single apps over scripts/mac-ssh): (module, host) → the check that runs it there. Set by hand and narrow:
 # ✅ only for what that check drives, its limits said; pnote's other editors (TextEdit, MdEdit) run on the Mac nowhere.
 COMPOSITE_RUN = {
+    ("mojoui/fonttext.mojo", "Mac (AppKit)"): "goal 79's M1 on the owner's M4: 19 lines (web faces, fallback scripts, colour emoji) through "
+                                              "CoreText within 0.03 device px of the Mac's own Chrome, none .notdef (docs/goals/79-check.py M1, "
+                                              "2026-11-23)",
     ("mojoui/gpu2d.mojo", "Mac (AppKit)"): "tests/test_gpu2d_metal.mojo on the owner's M4 (every primitive and the three judged "
                                            "scenes, Metal vs gpu2d's CPU executor) and docs/goals/75-check.py M3 (pnote's whiteboard, "
                                            "canvas and mind map on Metal, read back in the app within M1's bounds)",
@@ -194,7 +197,7 @@ COMPOSITES = [
     # goal 75: the Scene on the GPU (GL on Linux, Metal on the Mac; a CPU executor as reference and fallback)
     ("GPU 2D renderer (a canvas opts in with .gpu(): a Scene as instanced batches, stencil polygons, a glyph atlas; GL and Metal)", "mojoui/gpu2d.mojo", ["Canvas", "Canvas frames (animation)"], "backend_name("),  # (apps opt in with Canvas(…).gpu(); backend_name( names the ones that report the renderer, since a bare gpu( matches other APIs)
     # goal 79: Personal Note's web look, as framework pieces (D-7900)
-    ("Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule; CoreText on the Mac to come)", "mojoui/fonttext.mojo", ["Canvas"], "mojoui.fonttext"),
+    ("Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule, the AAT tracking table; CoreText on the Mac)", "mojoui/fonttext.mojo", ["Canvas"], "mojoui.fonttext"),
     ("Skins as themes (a token set an app fills: desk, panel, ink, accent, tints, faces, radii, shadow scale, locked colours; color-mix; Personal Note's Paper, Night and Crayon live in pnote, D-7928)", "mojoui/skin.mojo", ["Canvas"], "Skin("),
     ("Document store (rows with a revision: a save debounce, saves written only on the revision the editor read with conflicts reported, parsed documents kept by revision; D-7927, D-7934)", "mojoui/docstore.mojo", [], "RowSave("),
     ("Stroke icons (Lucide geometry rasterized natively at device px)", "mojoui/strokeicon.mojo", ["Canvas"], "draw_icon("),
