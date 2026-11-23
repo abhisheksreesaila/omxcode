@@ -756,18 +756,30 @@ def m5():
     if m:
         mac_said = f"Mac BLOCKED ({m})"
     else:
-        out_mac, e = mac_run("ime", ["wait:800", "imemarked:desk=かんじ", "imefirstrect:desk", "imeinsert:desk=漢字", "key:desk=Return",
+        # (D-7979, fixed 11-22: the Mac half had never run: no PNOTE_OPEN exists; the same path as Linux's: the note's row,
+        # the caret to the end; the saved note read back from the app's own database, fetched from the Mac)
+        os.environ["MAC_FETCH"] = "pn.db pn.db-wal pn.db-shm"
+        out_mac, e = mac_run("ime", ["wait:800", f"tapat:desk={box_center(sb, row)}", "wait:600", "key:desk=ctrl+End",
+                                     "imemarked:desk=かんじ", "imefirstrect:desk", "imeinsert:desk=漢字", "key:desk=Return",
                                      "imemarked:desk=नमस्", "imeinsert:desk=नमस्ते", "key:desk=Return", "imemarked:desk=한", "imeinsert:desk=한국어",
-                                     "key:desk=Return", "clipboard:漢字 नमस्ते 한국어", "key:desk=cmd+v", "wait:800", "notes:"],
-                             {"PNOTE_DB": "{data}/pn.db", "PNOTE_OPEN": "Weekly review"}, [REF / "pn.db"])
+                                     "key:desk=Return", "clipboard:漢字 नमस्ते 한국어", "key:desk=ctrl+v", "wait:800"],
+                             {"PNOTE_DB": "{data}/pn.db", "PNOTE_SKIN": "paper"}, [REF / "pn.db"])
+        os.environ.pop("MAC_FETCH", None)
         if e:
             probs.append("Mac: " + e)
         else:
-            if not re.search(r"^PNOTE IME: marked=\"かんじ\" underline=1", out_mac, re.M) or "PNOTE IME: firstRect=" not in out_mac:
+            # (D-7979) the host's own line when setMarkedText:… ran on the real view, the app's line when the composition
+            # reached it drawn underlined (both: the method and its effect), and firstRectForCharacterRange:'s answer
+            if (not re.search(r"^IME: marked=\"かんじ\"", out_mac, re.M) or not re.search(r"^PNOTE IME: preedit=\"かんじ\" underline=1", out_mac, re.M)
+                    or not re.search(r"^IME: firstRect=[\d.-]+,[\d.-]+,[\d.]+,[\d.]+ markedRange=0,3 ", out_mac, re.M)):
                 probs.append("Mac: setMarkedText/firstRectForCharacterRange not seen on the real view")
-            mm = re.search(r"^PNOTE NOTE: Weekly review (.*)$", out_mac, re.M)
-            if not mm or want.replace("\n", "\\n") not in mm.group(1):
-                probs.append(f"Mac: saved Markdown lacks the words ({mm.group(1)[:80] if mm else 'no PNOTE NOTE line'})")
+            rep = next(iter(sorted((ROOT / "build/mac-ssh").glob("pnote-*"))[-1:]), None)
+            dbm = next(iter(rep.rglob("pn.db")), None) if rep else None
+            md_mac = page_markdown(dbm, "Weekly review") if dbm else None
+            if md_mac is None or want not in md_mac:
+                probs.append(f"Mac: saved Markdown {md_mac!r} lacks {want!r}")
+            if "かんじ" in (md_mac or ""):
+                probs.append("Mac: the marked text was saved")
             mac_said = "Mac: NSTextInputClient on the real view"
     if probs:
         return "FAIL", "; ".join(probs)
@@ -1205,7 +1217,7 @@ def m7():
                 # PNOTE_BOXES, as on Linux) and files written to {data} never came back: {out} is fetched into the report)
                 out, e = mac_run(f"look-{s}", ["wait:1200"] + screen_steps(s, REF_MAC) + ["wait:600", "render:desk={out}/" + f"{s}.png"],
                                  {"PNOTE_DB": "{data}/pn.db", "PNOTE_SKIN": "night" if s.endswith("night") else "crayon" if s.endswith("crayon") else "paper",
-                                  "PNOTE_CHROME": "mac", "PNOTE_BOXES": "{out}/" + f"{s}.boxes.json"}, [REF_MAC / "pn.db"])
+                                  "PNOTE_CHROME": "mac", "PNOTE_BOXES": "{out}/" + f"{s}.boxes.json", "MOJOUI_RENDER_SCALE": str(MAC_DPR)}, [REF_MAC / "pn.db"])
                 if e:
                     probs.append(f"Mac {s}: {e}")
                     continue

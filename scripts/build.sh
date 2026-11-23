@@ -215,6 +215,11 @@ build_mac() {
     echo "== Mac ($EX): AppKit, arm64, native, GPU ($MAC_GPU)"
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     local frameworks=(-Xlinker -framework -Xlinker AppKit -Xlinker -lobjc)
+    # (D-7979) the input-method shim: NSTextInputClient's struct-taking methods in Objective-C (bridge/mac_ime.m)
+    if xcrun --find clang > /dev/null 2>&1; then
+      xcrun clang -c -O2 -fno-objc-arc -mmacosx-version-min=14.0 bridge/mac_ime.m -o "$out/mac_ime.o"
+      frameworks+=(-Xlinker "$out/mac_ime.o" -Xlinker -framework -Xlinker Cocoa -Xlinker -export_dynamic)
+    fi
     if [ "$MAC_GPU" = native ]; then  # (two calls: an empty array is "unbound" under set -u in macOS's bash 3.2)
       if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D MOJOUI_DEBUG -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
       else mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi

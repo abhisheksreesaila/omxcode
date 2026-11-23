@@ -22,13 +22,13 @@ stamp=$(date +%Y%m%d-%H%M%S)
 out=build/mac-ssh/$app-$stamp
 mkdir -p "$out"
 tar -czf "$out/src.tar.gz" --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
-    mojoui themes hosts "examples/$app" apple vendor fonts
-"${ssh_[@]}" "mkdir -p $remote/data"
+    mojoui themes hosts "examples/$app" apple vendor fonts bridge/mac_ime.m
+"${ssh_[@]}" "mkdir -p $remote/data && rm -f $remote/data/*.db-wal $remote/data/*.db-shm"  # (a database copied in fresh must not meet the last run's write-ahead log: SQLite would apply it)
 grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > "$out/steps.txt"  # (a file: ssh's remote shell would split the steps at each ;)
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$out/env.txt" "$@" "$host:$remote/data/"
 rc=0
-"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
+"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" FETCH="'${MAC_FETCH:-}'" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
 set -uo pipefail
 app=$1 settings=${3:-}  # (an empty argument vanishes on its way through ssh)
 cd ~/"$2" && tar -xzf data/src.tar.gz
@@ -61,6 +61,7 @@ while kill -0 "$pid" 2>/dev/null; do
     sleep 2
 done
 wait "$pid"; echo "exit $?"
+for f in ${FETCH:-}; do [ -f "data/$f" ] && cp "data/$f" "$outd/"; done  # (MAC_FETCH: data files the caller reads back, e.g. the app's database)
 tail -5 stdout.txt
 last=$(ls -td ~/Desktop/omxcode-report-*/*/ | head -1)
 [ "$last" != "$before" ] || { echo "no new report"; exit 1; }

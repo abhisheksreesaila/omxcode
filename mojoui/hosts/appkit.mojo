@@ -11,7 +11,10 @@ from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
 from mojoui.browser import open_url as browser_open_url
-from mojoui.view import FIELD_SECRET
+from mojoui.view import FIELD_SECRET, IME_COMMIT, IME_PREEDIT, PASTE
+from mojoui.shared import put_shared, get_shared
+
+comptime SLOT_MAC_IME = 238  # (D-7979) mojoui.shared slot: 1 when the canvas class is an NSTextInputClient (bridge/mac_ime.m)
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
@@ -334,6 +337,11 @@ struct AppKitHost[A: App](Movable):
     var toast_text: String
     var toast_claimed: Bool
     var has_menubar: Bool  # the screen put its own menus in the system menu bar (D-150)
+    var ime_on: Bool  # (D-7979) bridge/mac_ime.m is linked in: the canvas is an NSTextInputClient
+    var ime_text: String  # the composition (marked text) in progress, on canvas node ime_node
+    var ime_node: Int
+    var ime_key: String  # the keyDown: being offered to the input context (a doCommandBySelector: sends it as a KEY)
+    var ime_mods: Int
     var report: MacReport  # Debug → Record: pictures and view dumps on the Desktop (mojoui/hosts/mac_report.mojo)
     var size_w: List[Int]  # per node: its fixed-width and fixed-height constraints (0: none), so a new size is a patch
     var size_h: List[Int]
@@ -427,6 +435,11 @@ struct AppKitHost[A: App](Movable):
         self.toast_claimed = False
         self.has_menubar = False
         self.report = MacReport()
+        self.ime_on = False
+        self.ime_text = ""
+        self.ime_node = -1
+        self.ime_key = ""
+        self.ime_mods = 0
         self.steps = List[String]()
         self.step_at = 0
         var wv = alloc(Layout[MacWebViews].single()).unsafe_leak()  # (lives as long as the window: WebKit's callbacks hold its address)
@@ -2977,11 +2990,43 @@ struct AppKitHost[A: App](Movable):
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
 
+    def ime_caret(self, node: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """(D-7979) The app's caret on canvas node `node` (canvas points from the top left; x < 0: none)."""
+        if node < 0 or node >= len(self.rt.shown.nodes):
+            return (-1.0, 0.0, 0.0, 0.0)
+        return self.rt.app.caret(self.rt.shown.nodes[node].style)
+
+    def ime_preedit(mut self, node: Int, text: String, self_addr: Int):
+        """The composition on canvas `node` is now `text` ("": over): IME_PREEDIT with the caret, as GTK's preedit."""
+        self.ime_text = text
+        self.ime_node = node if text != "" else -1
+        var r = self.ime_caret(node)
+        if env("MOJOUI_IME_TRACE") == "1":
+            print("IME: node=" + String(node) + " kind=" + String(self.rt.shown.nodes[node].kind if node >= 0 and node < len(self.rt.shown.nodes) else -1) + " caret=" + String(r[0]) + "," + String(r[1]), flush=True)
+        var d = self.rt.text_event(node, IME_PREEDIT, text, r[0], r[1], r[2], r[3], Float64(text.byte_length()))
+        self.apply(d, self_addr)
+
+    def ime_commit(mut self, node: Int, text: String, self_addr: Int):
+        """Text the input method committed on canvas `node`: IME_COMMIT, and the composition is over."""
+        var had = self.ime_text != ""
+        self.ime_text = ""
+        self.ime_node = -1
+        var d = self.rt.text_event(node, IME_COMMIT, text)
+        self.apply(d, self_addr)
+        if had:
+            var d2 = self.rt.text_event(node, IME_PREEDIT, "")
+            self.apply(d2, self_addr)
+
     def canvas_key(mut self, node: Int, name: String, mods: Int, self_addr: Int):
         """A KEY on canvas node `node` (keyDown, and the test steps that stand for it)."""
         self.gpu_input(node)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
+        if (mods & 2) != 0 and (name == "v" or name == "V"):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
+            var text = from_ns(msg(paste_board(), "stringForType:", ns_string("public.utf8-plain-text")))
+            if text != "":
+                var d2 = self.rt.text_event(node, PASTE, text)
+                self.apply(d2, self_addr)
 
     def gpu_input(mut self, node: Int):
         """Input reached canvas node `node`: when it's drawn by gpu2d on Metal, the GPU is woken now if it's idle (it's
@@ -3802,7 +3847,128 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     var name = key_name_of(event)
     if name == "" or name.byte_length() > 32:
         return
+    # (D-7979) a text caret on this canvas: the keystroke goes to the input context first (an input method composes or
+    # inserts text through the NSTextInputClient methods; keys it doesn't take come back as doCommandBySelector:)
+    if get_shared(SLOT_MAC_IME) != 0 and mods & 2 == 0 and host[].ime_caret(t[1])[0] >= 0:
+        host[].ime_key = name
+        host[].ime_mods = mods
+        var took = shim_call2("mojoui_ime_key", view, event)
+        host[].ime_key = ""
+        if took != 0:
+            return
     host[].canvas_key(t[1], name, mods, t[0])
+
+
+# ---------- (D-7979) the input methods: bridge/mac_ime.m calls these with scalars only ----------
+
+def paste_board() -> Int:
+    """The pasteboard a paste reads: the general one; in test mode a private one (mojoui.test), so a test's clipboard:
+    step never replaces what the person copied."""
+    if env("MOJOUI_TEST") != "":
+        return msg(cls("NSPasteboard"), "pasteboardWithName:", ns_string("mojoui.test"))
+    return msg(cls("NSPasteboard"), "generalPasteboard")
+
+
+def shim_sym(name: String) -> Int:
+    """A function of the linked shim (bridge/mac_ime.m) by name; 0 when the build has none."""
+    var n = name
+    return external_call["dlsym", Int](Int(-2), n.as_c_string_span())  # (RTLD_DEFAULT)
+
+
+def shim_call2(name: String, a: Int, b: Int) -> Int:
+    var f = shim_sym(name)
+    if f == 0:
+        return 0
+    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> Int]()[](a, b)
+
+
+def utf16_len(s: String) -> Int:
+    var n = 0
+    for cp in s.codepoints():
+        n += 2 if Int(cp.to_u32()) > 0xFFFF else 1
+    return n
+
+
+def ime_text_of(utf8: Int, n: Int) -> String:
+    var b = List[UInt8](length=n, fill=0)
+    if n > 0:
+        _ = external_call["memcpy", Int](Int(b.unsafe_ptr()), utf8, n)
+    return String(from_utf8_lossy=Span(b))
+
+
+def ime_marked_cb[A: App](view: Int, utf8: Int, n: Int, sel_loc: Int, sel_len: Int) abi("C"):
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var text = ime_text_of(utf8, n)
+    print("IME: marked=\"" + text + "\" selected=" + String(sel_loc) + "," + String(sel_len), flush=True)
+    host[].ime_preedit(t[1], text, t[0])
+
+
+def ime_insert_cb[A: App](view: Int, utf8: Int, n: Int, a: Int, b: Int) abi("C"):
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var text = ime_text_of(utf8, n)
+    if host[].ime_key != "" and host[].ime_text == "" and text.byte_length() == 1 and Int(text.as_bytes()[0]) < 32:
+        host[].canvas_key(t[1], host[].ime_key, host[].ime_mods, t[0])  # (a control character: the key itself)
+        return
+    print("IME: insert=\"" + text + "\"", flush=True)
+    host[].ime_commit(t[1], text, t[0])
+
+
+def ime_unmark_cb[A: App](view: Int) abi("C"):
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    if host[].ime_text != "":
+        var text = host[].ime_text
+        host[].ime_commit(t[1], text, t[0])  # (the composition, as it stands, is the text)
+
+
+def ime_marked_range_cb[A: App](view: Int, loc: Int, len: Int) abi("C") -> Int:
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    if host[].ime_text == "" or host[].ime_node != t[1]:
+        return 0
+    Pointer[Int, MutUntrackedOrigin](unsafe_from_address=loc)[] = 0
+    Pointer[Int, MutUntrackedOrigin](unsafe_from_address=len)[] = utf16_len(host[].ime_text)
+    return 1
+
+
+def ime_selected_range_cb[A: App](view: Int, loc: Int, len: Int) abi("C") -> Int:
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    Pointer[Int, MutUntrackedOrigin](unsafe_from_address=loc)[] = utf16_len(host[].ime_text) if host[].ime_node == t[1] else 0
+    Pointer[Int, MutUntrackedOrigin](unsafe_from_address=len)[] = 0
+    return 1
+
+
+def ime_rect_cb[A: App](view: Int, loc: Int, len: Int, xywh: Int) abi("C"):
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var r = host[].ime_caret(t[1])
+    var out = Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=xywh)
+    out[] = max(r[0], 0.0)
+    (out + 1)[] = r[1]
+    (out + 2)[] = max(r[2], 1.0)
+    (out + 3)[] = max(r[3], 1.0)
+
+
+def ime_command_cb[A: App](view: Int, selector: Int) abi("C"):
+    """doCommandBySelector: the keystroke the input method didn't take (Return, arrows, delete…): the KEY it is."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    if host[].ime_key != "":
+        host[].canvas_key(t[1], host[].ime_key, host[].ime_mods, t[0])
+
+
+def ime_install[A: App](canvas_class: Int) -> Bool:
+    """The canvas class becomes an NSTextInputClient (bridge/mac_ime.m) when the shim is linked in."""
+    var f = shim_sym("mojoui_ime_install")
+    if f == 0:
+        return False
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, Int, Int, Int, Int, Int, Int, Int) thin abi("C")]()[]
+    call(canvas_class, fn_address(ime_marked_cb[A]), fn_address(ime_insert_cb[A]), fn_address(ime_unmark_cb[A]),
+         fn_address(ime_marked_range_cb[A]), fn_address(ime_selected_range_cb[A]), fn_address(ime_rect_cb[A]), fn_address(ime_command_cb[A]))
+    return True
 
 
 def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
@@ -4686,6 +4852,27 @@ def run_step[A: App](host_addr: Int, step: String):
             presses.append(web_key(name))
         for p in presses:
             canvas_key_step[A](host_addr, kv[0], p, mods)
+    elif verb == "clipboard":  # clipboard:text: the paste board holds text (as another app's copy would; in test mode the private one)
+        var board = paste_board()
+        _ = msg(board, "clearContents")
+        _ = msg(board, "setString:forType:", ns_string(rest), ns_string("public.utf8-plain-text"))
+    elif verb == "imemarked" or verb == "imefirstrect" or verb == "imeinsert":  # (D-7979) the real NSTextInputClient methods on the real view, as an input method calls them
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        var f = shim_sym("mojoui_ime_drive")
+        if k < 0 or f == 0:
+            host[].report.note("TEST: no canvas " + kv[0] + " or no input-method shim")
+            return
+        var drive = Pointer(to=f).unsafe_bitcast[def(Int, Int, Int, Int) thin abi("C")]()[]
+        var text = kv[1]
+        var out = List[Float64](length=8, fill=0)
+        var kind = 0 if verb == "imemarked" else (1 if verb == "imefirstrect" else 2)
+        drive(host[].canvases[k].view, kind, Int(text.as_c_string_span().unsafe_ptr()), Int(out.unsafe_ptr()))
+        if kind == 1:
+            print("IME: firstRect=" + String(out[0]) + "," + String(out[1]) + "," + String(out[2]) + "," + String(out[3]) + " markedRange=" + String(Int(out[4])) + ","
+                  + String(Int(out[5])) + " selectedRange=" + String(Int(out[6])) + " hasMarkedText=" + String(Int(out[7])), flush=True)
+        _ = len(out)
+        _ = text.byte_length()
     elif verb == "render":  # render:K=path: canvas K painted by the app's draw() (the CPU painter, at the window's backing scale) into a PNG, as GTK's
         var node = canvas_node_at(host[], kv[0])
         var k = host[].canvas_at(node) if node >= 0 else -1
@@ -4694,6 +4881,11 @@ def run_step[A: App](host_addr: Int, step: String):
             return
         var b = msg[CGRect](host[].canvases[k].view, "bounds")
         var scale = msg[Float64](host[].window, "backingScaleFactor") if host[].window != 0 else 2.0
+        if env("MOJOUI_RENDER_SCALE") != "":  # (offscreen at a scale of its own, whatever the screen's: the app at 2× on a 1× screen)
+            try:
+                scale = Float64(env("MOJOUI_RENDER_SCALE"))
+            except:
+                pass
         var wpx = Int(b.width * scale + 0.5)
         var hpx = Int(b.height * scale + 0.5)
         var px = List[UInt32](length=wpx * hpx, fill=0)
@@ -5315,6 +5507,8 @@ def run[A: App]() -> c_int:
     add_method(canvas, "mouseDragged:", on_canvas_mouse_dragged[A], "v@:@")
     add_method(canvas, "mouseUp:", on_canvas_mouse_up[A], "v@:@")
     add_method(canvas, "keyDown:", on_canvas_key[A], "v@:@")
+    if ime_install[A](canvas):  # (D-7979: bridge/mac_ime.m linked in)
+        put_shared(SLOT_MAC_IME, 1)
     register_class(canvas)
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top
     add_method(board, "isFlipped", is_flipped, "B@:")
