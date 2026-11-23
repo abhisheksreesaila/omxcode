@@ -1676,6 +1676,8 @@ struct AppKitHost[A: App](Movable):
         var size = c.button_font if c.button_font > 0 else self.look.type.body
         var family = self.look.type.family
         var k = self.look.surface(self.rt.shown.nodes[i].name) if i >= 0 and self.rt.shown.nodes[i].name != "" else -1
+        if k < 0 and i >= 0 and style != SUBTLE and style != PROMINENT and style != DESTRUCTIVE:
+            k = self.on_role(i)  # (a strip's highlighted button: its "<strip>-button-on" role, as GTK's `.mui-tag-<strip> button:not(.flat)`)
         if k >= 0:
             ref sf = self.look.surfaces[k]
             if not text_only(sf):  # (a box rule: its own fill, or none)
@@ -1857,6 +1859,17 @@ struct AppKitHost[A: App](Movable):
                     ref sf = self.look.surfaces[k]
                     if (field == 0 and sf.font_size > 0) or (field == 1 and sf.line_height != 0) or (field == 2 and sf.font != "") or (field == 3 and sf.ink != 0):
                         return k
+            p = self.parents[p] if p < len(self.parents) else -1
+        return -1
+
+    def on_role(self, i: Int) -> Int:
+        """The look's "<strip>-button-on" surface for a plain button among subtle ones, where <strip> is the nearest tagged view
+        around button i (the sheet's bottom tabs: the selected tab is plain, the others subtle; GTK and the web scope
+        their rule to the strip, `.mui-tag-sheet-tabs button:not(.flat)`, owner 2026-11-22). -1: the look has none."""
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            if self.rt.shown.nodes[p].name != "":
+                return self.look.surface(self.rt.shown.nodes[p].name + "-button-on")  # (not "-on": list-row-on, tab-on… are rows' own roles)
             p = self.parents[p] if p < len(self.parents) else -1
         return -1
 

@@ -67,6 +67,9 @@ def liquid_look(p: Palette) -> Look:
     rail and the inspector flush at the sides), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
     var edge = p.line_strong
     var tabs = dock(p, "sheet-tabs", edge, 0)
+    # the selected bottom tab on the Mac: a tinted rectangle, no pill (owner, 2026-11-22; GTK's and the web's are liquid_css's)
+    var tab_on = dock(p, "sheet-tabs-button-on", 0, 0, rgba(15, 23, 42, 18) if not p.dark else rgba(255, 255, 255, 20))
+    tab_on.radius_top, tab_on.radius_bottom, tab_on.pad_top, tab_on.pad_x, tab_on.pad_bottom, tab_on.ink, tab_on.font_weight = 6, 6, 2, 14, 2, p.ink, 500
     var status = dock(p, "status-bar", 0, 0)
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
     var header = dock(p, "menubar", 0, 0)
@@ -79,7 +82,7 @@ def liquid_look(p: Palette) -> Look:
     var row = Surface("inspector-row", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, 30, "", 0, 0, 0, 0, 0, 0, 0, False)
     var inspector = dock(p, "inspector", 0, 0, p.card)
     inspector.pad_top, inspector.pad_x, inspector.pad_bottom = 10, 10, 10
-    var surfaces: List[Surface] = [header^, row^, toolbar^, inspector^, tabs^, status^, bar^,
+    var surfaces: List[Surface] = [header^, row^, toolbar^, inspector^, tabs^, tab_on^, status^, bar^,
                                    dock(p, "sidebar", 0, 0),  # (the side rail, mojoui.sheetchrome.Rail; its edge line: liquid_css)
                                    card(p, "table", 16, 10, 12, 12), card(p, "tile", 16, 16, 18, 16), words("sentence-line", 15, 600, p.ink),
                                    words("section-title", 0, 600, 0, 0.5), words("stat-value", 15, 600, p.ink), words("kpi-fact", 12, 0, p.ink3),
