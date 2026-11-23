@@ -18,7 +18,13 @@ const out = await p.evaluate(() => {
     const s = document.createElement('span'); s.style.cssText = `font-family:"Geist";font-size:${z}px;white-space:pre;position:absolute`; s.textContent = '📚'; document.body.appendChild(s)
     sizes[z] = s.getBoundingClientRect().width; s.remove()
   }
-  return { total: span.getBoundingClientRect().width, glyphs, sizes }
+  // (continuation 17) sizes between whole ones, small and large ones, and the same text on a zoomed canvas: pnote shapes at
+  // the layout size and scales the drawing; the web's board scales with a CSS transform (zoomed) or redraws at size × zoom
+  const at = (z, css = '') => { const s = document.createElement('span'); s.style.cssText = `font-family:"Geist";font-size:${z}px;white-space:pre;position:absolute;${css}`; s.textContent = '📚'; document.body.appendChild(s); const r = s.getBoundingClientRect().width; s.remove(); return r }
+  const more = {}, zoomed = {}
+  for (const z of [6, 7, 8, 9, 9.5, 10.4, 11.5, 12.25, 12.8, 13.33, 13.5, 14.4, 15.2, 15.5, 15.9, 16.5, 17.25, 18.5, 19.2, 20.5, 21.6, 22.4, 23.3, 23.5, 23.9, 24.5, 25.6, 30.5, 44, 48, 64.5, 96]) more[z] = at(z)
+  for (const k of [0.3, 0.5, 0.75, 1.25, 1.5, 2, 3]) zoomed[k] = { transform: at(18, `transform:scale(${k});transform-origin:0 0`) / k, size: at(18 * k), zoom: at(18, `zoom:${k}`) / k }
+  return { total: span.getBoundingClientRect().width, glyphs, sizes, more, zoomed }
 })
 console.log(JSON.stringify(out))
 await b.close()

@@ -230,6 +230,7 @@ struct _Face(Copyable, Movable):
     var fixed: Bool  # bitmap strikes only (not scalable)
     var asc: Int  # hhea/OS2 ascender, font units (FreeType's)
     var desc: Int
+    var apple_emoji: Bool  # (D-7998) Apple Color Emoji: its advances follow apple_emoji_advance
     var mono: Bool  # (D-7990) monospaced (the Mac: CoreText's monospace trait; its fallback cascades from Menlo)
     var trak: Trak  # (D-7989) its 'trak' table's normal track (the Mac; empty: none)
     var coords_set: Int  # the instance whose design coordinates FreeType has now (-1: none)
@@ -243,6 +244,7 @@ struct _Face(Copyable, Movable):
         self.weight = weight
         self.ft = 0
         self.hb_face = 0
+        self.apple_emoji = False
         self.mono = False
         self.trak = Trak(List[Float64](), List[Int]())
         self.upem = 1000
@@ -1030,6 +1032,7 @@ struct FontEngine(Movable):
         var f = _Face("", 0, "", False, 400)
         f.ft = _fn[def(Int, Int) thin abi("C") -> Int](self._m(_M_COPYCG))(font, 0)
         f.color = emoji or (Int(_fn[def(Int) thin abi("C") -> UInt32](self._m(_M_TRAITS))(font)) & (1 << 13)) != 0
+        f.apple_emoji = name == "AppleColorEmoji"
         var idx = self._mac_open_face(f^)
         self.face_of_name[name] = idx
         return idx
@@ -1146,9 +1149,9 @@ struct FontEngine(Movable):
                     line_t += " " + String(adv[2 * g]) + "/" + String(Float64(self._mac_advance_units(rinst, Int(glyphs[g]))) * rk)
                 print(line_t, flush=True)
             var unrounded = 0.0
+            var apple = self.faces[self.insts[rinst].face].apple_emoji
             ref rtk = self.faces[self.insts[rinst].face].trak
-            # (a colour bitmap face's advance stays CoreText's: Chrome's emoji advances follow neither the trak table nor
-            # CoreText's (measured 11-22: 1 px under CoreText's at 12–24 px, D-7989), left open)
+            # (a colour bitmap face takes no trak: Chrome's emoji advances don't follow that table, D-7989, D-7998)
             var track = trak_units(rtk, st.size) * rk if self.trak_on and not rtk.empty() and not self.faces[self.insts[rinst].face].color else 0.0
             for g in range(n):
                 var gid = Int(glyphs[g])
@@ -1164,6 +1167,8 @@ struct FontEngine(Movable):
                     var t = ar + kern
                     a = Float64(Int(t + 0.5)) if t >= 0 else -Float64(Int(-t + 0.5))
                 unrounded += adv[2 * g]
+                if apple and adv[2 * g] > 0:  # (D-7998; a mark or joiner without an advance keeps none)
+                    a = apple_emoji_advance(st.size)
                 pen += a + track + st.letter_spacing
             _ = glyphs
             _ = pos
@@ -1598,6 +1603,15 @@ def read_fvar(path: String) -> List[_Axis]:
         var mx = Float64(_be32(b, a + 12) - ((1 << 32) if _be32(b, a + 12) >= (1 << 31) else 0)) / 65536.0
         out.append(_Axis(UInt32(_be32(b, a)), mn, df, mx))
     return out^
+
+
+def apple_emoji_advance(size: Float64) -> Float64:
+    """(D-7998) What Apple Color Emoji advances in Chrome on the Mac at a font size (layout px): 5/4 of the size below
+    16, half the size + 12 from 16 to 24, the size from there on, rounded half up to a whole px. Agrees with Chrome 158
+    at every whole size measured (10–40 px, docs/goals/79/emoji-chrome-mac.json, tests/test_emojiadvance); sizes between
+    whole ones and outside 10–40 aren't measured yet."""
+    var a = 1.25 * size if size < 16 else (0.5 * size + 12 if size < 24 else size)
+    return Float64(Int(a + 0.5))
 
 
 @fieldwise_init
