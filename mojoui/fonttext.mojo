@@ -229,6 +229,7 @@ struct _Face(Copyable, Movable):
     var fixed: Bool  # bitmap strikes only (not scalable)
     var asc: Int  # hhea/OS2 ascender, font units (FreeType's)
     var desc: Int
+    var mono: Bool  # (D-7990) monospaced (the Mac: CoreText's monospace trait; its fallback cascades from Menlo)
     var trak: Trak  # (D-7989) its 'trak' table's normal track (the Mac; empty: none)
     var coords_set: Int  # the instance whose design coordinates FreeType has now (-1: none)
     var size_set: Int  # the 26.6 size FreeType has now
@@ -241,6 +242,7 @@ struct _Face(Copyable, Movable):
         self.weight = weight
         self.ft = 0
         self.hb_face = 0
+        self.mono = False
         self.trak = Trak(List[Float64](), List[Int]())
         self.upem = 1000
         self.axes = List[_Axis]()
@@ -578,10 +580,11 @@ struct FontEngine(Movable):
         _ = g
         return ok
 
-    def system_face(mut self, cp: Int, emoji: Bool) -> Int:
-        """fontconfig's face for a codepoint the chosen face lacks (or the emoji face); cached; -1 if none."""
+    def system_face(mut self, cp: Int, emoji: Bool, mono: Bool = False) -> Int:
+        """fontconfig's face for a codepoint the chosen face lacks (or the emoji face); cached; -1 if none. mono: the
+        chosen face is monospaced (the Mac cascades from Menlo then, as Chrome there does, D-7990)."""
         comptime if CompilationTarget.is_macos():
-            return self._mac_system_face(cp, emoji)
+            return self._mac_system_face(cp, emoji, mono)
         var key = -1 if emoji else cp
         if key in self.fallback:
             return self.fallback.get(key, -1)
@@ -670,7 +673,7 @@ struct FontEngine(Movable):
                     continue
             if self.has(pinst, cp) or cp == 0x20 or cp == 0x0A:
                 continue
-            var sf = self.system_face(cp, False)
+            var sf = self.system_face(cp, False, self.faces[primary].mono)
             if sf >= 0:
                 inst_at[i] = self.inst(sf, st.weight, st.size)
         # shape each stretch of one face, with the whole text as context
@@ -920,6 +923,10 @@ struct FontEngine(Movable):
             f.axes = read_fvar(f.path)
             f.color = has_table(f.path, "sbix") or has_table(f.path, "CBDT") or has_table(f.path, "COLR")
         f.upem = Int(_fn[def(Int) thin abi("C") -> c_int](self._m(_M_UPEM))(f.ft))
+        var ctf = _fn[def(Int, Float64, Int, Int) thin abi("C") -> Int](self._m(_M_CTFONT))(f.ft, 16.0, 0, 0)
+        if ctf != 0:  # (kCTFontTraitMonoSpace, 1 << 10)
+            f.mono = (Int(_fn[def(Int) thin abi("C") -> UInt32](self._m(_M_TRAITS))(ctf)) & (1 << 10)) != 0
+            self._release(ctf)
         var td = _fn[def(Int, UInt32) thin abi("C") -> Int](self._m(_M_CGTABLE))(f.ft, _tag("trak"))
         if td != 0:  # (D-7989) the face's tracking, as HarfBuzz reads it for Chrome
             var n = _fn[def(Int) thin abi("C") -> Int](self._m(_M_DATALEN))(td)
@@ -1024,8 +1031,8 @@ struct FontEngine(Movable):
             n += 1
         return String(from_utf8_lossy=Span(buf)[:n])
 
-    def _mac_system_face(mut self, cp: Int, emoji: Bool) -> Int:
-        var key = -1 if emoji else cp
+    def _mac_system_face(mut self, cp: Int, emoji: Bool, mono: Bool = False) -> Int:
+        var key = -1 if emoji else (cp * 2 + (1 if mono else 0))
         if key in self.fallback:
             return self.fallback.get(key, -1)
         var idx = -1
@@ -1045,7 +1052,18 @@ struct FontEngine(Movable):
                     if pidx >= 0 and self._mac_has(self.inst(pidx, 400, 16), cp):
                         self.fallback[key] = pidx
                         return pidx
+            # (D-7990) Chrome on the Mac falls back by the primary's kind: a monospaced web face cascades from Menlo
+            # (measured: ⌥ ⌘ in Geist Mono → Menlo, 6.625 px at 11 px), a proportional one from the system's (Lucida
+            # Grande for ⌥ ⌘)
             var base = self.pick("Geist", 400, False)
+            if mono:
+                var mn = self._cfstr("Menlo-Regular")
+                var mf = _fn[def(Int, Float64, Int) thin abi("C") -> Int](self._m(_M_CTBYNAME))(mn, 16.0, 0)
+                if mf != 0:
+                    var midx = self._face_from_ctfont(mf, False)
+                    if midx >= 0 and self._mac_has(self.inst(midx, 400, 16), cp):
+                        self.fallback[key] = midx
+                        return midx
             var s = String(chr(cp))
             var cfs = self._cfstr(s)
             var u = self._utf16(cp)
