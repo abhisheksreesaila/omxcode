@@ -29,7 +29,7 @@ from std.math import floor, ceil
 from std.time import perf_counter_ns
 from std.collections import Dict
 from std.os import getenv
-from mojoui.fonttext import shape as ft_shape
+from mojoui.fonttext import run_for as ft_run_for
 from mojoui.viewsnap import SnapKey, SnapWriter, renderer_id, build_id
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
 
@@ -259,7 +259,7 @@ struct OpBins(Movable):
         var key = Int(hash(scene.texts[t])) ^ (Int(size * 1000) * 1000003) ^ (Int(scene.num(op, 3)) * 7919) ^ (Int(scene.num(op, 4)) * 104729) ^ (Int(scene.num(op, 5) * 1000) * 31)
         var wd = self.widths.get(key, -1.0)
         if wd < 0:
-            wd = ft_shape(scene.run_style(op), scene.run_text(op)).width
+            wd = ft_run_for(scene.run_style(op), scene.run_text(op))[].width
             self.widths[key] = wd
         var x = scene.num(op, 0)
         var b = scene.num(op, 1)

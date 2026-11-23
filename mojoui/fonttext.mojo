@@ -313,7 +313,14 @@ struct FontEngine(Movable):
     var fallback: Dict[Int, Int]  # codepoint → face (-1: none has it)
     var emoji_face: Int
     var images: List[GlyphImage]
-    var runs: Dict[String, Run]  # shaped runs by (style, text): text redrawn each frame is shaped once (D-7916)
+    var fast: List[FastStyle]  # (goal 80) per style: printable ASCII learned from the shaper, glyph by glyph and pair by pair
+    var fast_last: Int  # the style looked up last (most runs in a row share one)
+    var fast_run: Run  # the last run the fast path made (run_for hands out a pointer to it)
+    var run_cur: Dict[Int, CachedRun]  # (goal 80) shaped runs by (style, text hash): this generation and the one before
+    var run_prev: Dict[Int, CachedRun]  # (a full generation becomes the previous one: what was drawn lately survives)
+    var fast_hits: Int  # runs made by the fast path / found in the cache / shaped (tests, diagnosis)
+    var cache_hits: Int
+    var shaped_runs: Int
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
     var kern_round: String  # FONTTEXT_KERN_ROUND, read once (not per glyph)
@@ -378,7 +385,14 @@ struct FontEngine(Movable):
         self.fallback = Dict[Int, Int]()
         self.emoji_face = -2
         self.images = List[GlyphImage]()
-        self.runs = Dict[String, Run]()
+        self.fast = List[FastStyle]()
+        self.fast_last = -1
+        self.fast_run = Run()
+        self.run_cur = Dict[Int, CachedRun]()
+        self.run_prev = Dict[Int, CachedRun]()
+        self.fast_hits = 0
+        self.cache_hits = 0
+        self.shaped_runs = 0
         self.image_of = Dict[Int, Int]()
         var h = getenv("FONTTEXT_HINT", "light")
         self.hint = FT_LOAD_NO_HINTING if h == "none" else (0 if h == "full" else FT_LOAD_TARGET_LIGHT)
@@ -1392,24 +1406,252 @@ def engine() -> Pointer[FontEngine, MutUntrackedOrigin]:
     return e
 
 
-def shape(st: TextStyle, text: String) -> Run:
-    """The shaped run, from the process's cache when this style and text were shaped before (bounded: cleared at 8,192
-    entries)."""
+# ---------- (goal 80) runs without shaping: the simple-text fast path and the run cache ----------
+#
+# Borrowed from nanoui's shaper.zig (and GPUI's line-layout cache): text redrawn every frame with other digits should
+# cost lookups, not a shaper call. Per style, each printable ASCII character's glyph, face and advance, and each pair's
+# kerning, are learned once, lazily, from FontEngine.shape itself (HarfBuzz on Linux, CoreText on the Mac), so the fast
+# path places glyphs exactly as the shaper does: a pair the shaper turns into anything but its two glyphs at the learned
+# advance plus one kerning (a ligature, a contextual alternate, a mark) is "complex", and a string holding one (or any
+# byte outside printable ASCII) goes to the shaper. Each consecutive triple is checked once too: a face whose triples
+# disagree with its pairs substitutes by wider context (a handwriting face's alternates) and leaves the fast path. tests/test_textfast compares the two on a corpus in every face.
+# Everything else is cached by (style, text hash) in two generations: a hit hands out a pointer, nothing is copied.
+
+comptime _FAST_N = 95  # printable ASCII, 0x20–0x7E
+comptime RUN_GENERATION = 4096  # runs per cache generation
+
+
+struct FastStyle(Movable):
+    """One style's learned printable ASCII: per character (0: not learned, 1: simple, 2: not simple) its glyph, face,
+    instance and the pen's advance (letter spacing included); per pair the same states and the kerning between them."""
+
+    var st: TextStyle
+    var ok: List[UInt8]
+    var gid: List[Int]
+    var face: List[Int]
+    var inst: List[Int]
+    var adv: List[Float64]
+    var pair: List[UInt8]
+    var kern: List[Float64]
+    var ascent: Float64
+    var descent: Float64
+    var triples: Dict[Int, Bool]  # consecutive triples checked against the shaper (key a·95² + b·95 + c)
+    var contextual: Bool  # a triple disagreed with its pairs: the face substitutes by wider context (Caveat): no fast path
+
+    def __init__(out self, st: TextStyle):
+        self.st = st
+        self.ok = List[UInt8](length=_FAST_N, fill=0)
+        self.gid = List[Int](length=_FAST_N, fill=0)
+        self.face = List[Int](length=_FAST_N, fill=0)
+        self.inst = List[Int](length=_FAST_N, fill=0)
+        self.adv = List[Float64](length=_FAST_N, fill=0)
+        self.pair = List[UInt8](length=_FAST_N * _FAST_N, fill=0)
+        self.kern = List[Float64](length=_FAST_N * _FAST_N, fill=0)
+        self.ascent = 0
+        self.descent = 0
+        self.triples = Dict[Int, Bool]()
+        self.contextual = False
+
+
+struct CachedRun(Copyable, Movable):
+    var style: Int
+    var text: String
+    var run: Run
+
+    def __init__(out self, style: Int, text: String, var run: Run):
+        self.style = style
+        self.text = text
+        self.run = run^
+
+
+def _same_style(a: TextStyle, b: TextStyle) -> Bool:
+    return (a.size == b.size and a.weight == b.weight and a.italic == b.italic and a.letter_spacing == b.letter_spacing
+            and a.exact == b.exact and a.family == b.family)
+
+
+def _style_index(mut e: FontEngine, st: TextStyle) -> Int:
+    if e.fast_last >= 0 and _same_style(e.fast[e.fast_last].st, st):
+        return e.fast_last
+    for i in range(len(e.fast)):
+        if _same_style(e.fast[i].st, st):
+            e.fast_last = i
+            return i
+    e.fast.append(FastStyle(st))
+    e.fast_last = len(e.fast) - 1
+    return e.fast_last
+
+
+def _learn_char(mut e: FontEngine, si: Int, c: Int) -> Bool:
+    """Character c (0–94: 0x20 + c) of style si, shaped alone: simple when it is one glyph at the pen, on the baseline."""
+    var state = e.fast[si].ok[c]
+    if state != 0:
+        return state == 1
+    var st = e.fast[si].st
+    var r = e.shape(st, chr(0x20 + c))
+    if len(r.glyphs) == 1 and r.missing == 0 and r.glyphs[0].x == 0 and r.glyphs[0].y == 0:
+        e.fast[si].ok[c] = 1
+        e.fast[si].gid[c] = r.glyphs[0].gid
+        e.fast[si].face[c] = r.glyphs[0].face
+        e.fast[si].inst[c] = r.glyphs[0].inst
+        e.fast[si].adv[c] = r.width
+        e.fast[si].ascent = r.ascent
+        e.fast[si].descent = r.descent
+        return True
+    e.fast[si].ok[c] = 2
+    return False
+
+
+def _learn_pair(mut e: FontEngine, si: Int, a: Int, b: Int) -> Bool:
+    """Characters a, b (both simple) shaped together: simple when they stay the same two glyphs, the second at the
+    first's advance plus one kerning, and the width is both advances plus that kerning."""
+    var k = a * _FAST_N + b
+    var state = e.fast[si].pair[k]
+    if state != 0:
+        return state == 1
+    var t = chr(0x20 + a) + chr(0x20 + b)
+    var st = e.fast[si].st
+    var r = e.shape(st, t)
+    var good = (len(r.glyphs) == 2 and r.missing == 0 and r.glyphs[0].gid == e.fast[si].gid[a] and r.glyphs[1].gid == e.fast[si].gid[b]
+                and r.glyphs[0].inst == e.fast[si].inst[a] and r.glyphs[1].inst == e.fast[si].inst[b] and r.glyphs[0].x == 0
+                and r.glyphs[0].y == 0 and r.glyphs[1].y == 0 and r.glyphs[1].cluster == 1)
+    if good:
+        var kern = r.width - e.fast[si].adv[a] - e.fast[si].adv[b]
+        good = abs(r.glyphs[1].x - (e.fast[si].adv[a] + kern)) < 1e-9
+        e.fast[si].kern[k] = kern
+    e.fast[si].pair[k] = 1 if good else 2
+    return good
+
+
+def _learn_triple(mut e: FontEngine, si: Int, a: Int, b: Int, c: Int) -> Bool:
+    """Characters a, b, c (each simple, both pairs simple) shaped together must come out as the pairs place them; when
+    they don't, the face's substitutions look further than one neighbour, and the style leaves the fast path for good."""
+    var key = (a * _FAST_N + b) * _FAST_N + c
+    var known = e.fast[si].triples.get(key)
+    if known:
+        return known.value()
+    var st = e.fast[si].st
+    var r = e.shape(st, chr(0x20 + a) + chr(0x20 + b) + chr(0x20 + c))
+    var x1 = e.fast[si].adv[a] + e.fast[si].kern[a * _FAST_N + b]
+    var x2 = x1 + e.fast[si].adv[b] + e.fast[si].kern[b * _FAST_N + c]
+    var w = x2 + e.fast[si].adv[c]
+    var good = (len(r.glyphs) == 3 and r.missing == 0 and r.glyphs[0].gid == e.fast[si].gid[a] and r.glyphs[1].gid == e.fast[si].gid[b]
+                and r.glyphs[2].gid == e.fast[si].gid[c] and abs(r.glyphs[1].x - x1) < 1e-9 and abs(r.glyphs[2].x - x2) < 1e-9
+                and abs(r.width - w) < 1e-9 and r.glyphs[1].y == 0 and r.glyphs[2].y == 0)
+    e.fast[si].triples[key] = good
+    if not good:
+        e.fast[si].contextual = True
+    return good
+
+
+def _fast_shape(mut e: FontEngine, si: Int, text: String, mut out: Run) -> Bool:
+    """The run of `text` from style si's learned characters and pairs into `out`; False (out undefined) when a byte isn't
+    printable ASCII or a character or pair isn't simple. Characters and pairs not seen yet are learned on the way."""
+    var bytes = text.as_bytes()
+    var n = len(bytes)
+    if n == 0:
+        return False
+    if e.fast[si].contextual:
+        return False
+    var bp = bytes.unsafe_ptr()
+    for i in range(n):  # (learning first: it may shape, which grows e's lists; the reading below holds raw pointers)
+        var c = Int(bp[i]) - 0x20
+        if c < 0 or c >= _FAST_N:
+            return False
+        if e.fast[si].ok[c] != 1 and not _learn_char(e, si, c):
+            return False
+        if i > 0:
+            var a = Int(bp[i - 1]) - 0x20
+            if e.fast[si].pair[a * _FAST_N + c] != 1 and not _learn_pair(e, si, a, c):
+                return False
+        if i > 1 and not _learn_triple(e, si, Int(bp[i - 2]) - 0x20, Int(bp[i - 1]) - 0x20, c):
+            return False
+    ref fs = e.fast[si]
+    var gid = fs.gid.unsafe_ptr()
+    var face = fs.face.unsafe_ptr()
+    var inst = fs.inst.unsafe_ptr()
+    var adv = fs.adv.unsafe_ptr()
+    var kern = fs.kern.unsafe_ptr()
+    out.glyphs.clear()
+    out.glyphs.reserve(n)
+    out.missing = 0
+    var pen = 0.0
+    var prev = -1
+    for i in range(n):
+        var c = Int(bp[i]) - 0x20
+        if prev >= 0:
+            pen += kern[prev * _FAST_N + c]
+        out.glyphs.append(Glyph(face[c], inst[c], gid[c], pen, 0, i))
+        pen += adv[c]
+        prev = c
+    out.width = pen
+    out.ascent = fs.ascent
+    out.descent = fs.descent
+    out.size = fs.st.size
+    return True
+
+
+def fast_shape(st: TextStyle, text: String, mut out: Run) -> Bool:
+    """(tests) The fast path alone: True and the run in `out` when it applies."""
     var e = engine()
-    var key = st.family + "|" + String(st.weight) + ("i" if st.italic else "") + "|" + String(st.size) + "|" + String(st.letter_spacing) + ("x" if st.exact else "") + "|" + text
-    var hit = e[].runs.get(key)
-    if hit:
-        return hit.value().copy()
-    var r = e[].shape(st, text)
-    if len(e[].runs) >= 8192:
-        e[].runs = Dict[String, Run]()
-    e[].runs[key] = r.copy()
-    return r^
+    return _fast_shape(e[], _style_index(e[], st), text, out)
+
+
+def _run_key(si: Int, text: String) -> Int:
+    var h = UInt64(14695981039346656037) ^ UInt64(si)
+    for b in text.as_bytes():
+        h = (h ^ UInt64(b)) * 1099511628211
+    return Int(h)
+
+
+def run_for(st: TextStyle, text: String) -> Pointer[Run, MutUntrackedOrigin]:
+    """The shaped run of `text` in `st`, without copying it: from the fast path, the cache, or the shaper (then cached).
+    The run pointed at is valid until the next run_for (or shape) call."""
+    return run_in(engine(), st, text)
+
+
+def run_in(e: Pointer[FontEngine, MutUntrackedOrigin], st: TextStyle, text: String) -> Pointer[Run, MutUntrackedOrigin]:
+    """run_for with the engine already in hand: a loop over many runs looks it up once (engine() reads the process's
+    registry, ~0.4 µs, mostly getpid; a frame of 300 labels paid it 300 times)."""
+    var si = _style_index(e[], st)
+    if _fast_shape(e[], si, text, e[].fast_run):
+        e[].fast_hits += 1
+        return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].fast_run)))
+    var key = _run_key(si, text)
+    try:
+        if key in e[].run_cur:
+            ref hit = e[].run_cur[key]
+            if hit.style == si and hit.text == text:
+                e[].cache_hits += 1
+                return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=hit.run)))
+        if key in e[].run_prev:
+            var old = e[].run_prev.pop(key)
+            if old.style == si and old.text == text:
+                e[].cache_hits += 1
+                if len(e[].run_cur) >= RUN_GENERATION:
+                    swap(e[].run_prev, e[].run_cur)
+                    e[].run_cur = Dict[Int, CachedRun]()
+                e[].run_cur[key] = old^
+                return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].run_cur[key].run)))
+        e[].shaped_runs += 1
+        var r = e[].shape(st, text)
+        if len(e[].run_cur) >= RUN_GENERATION:
+            swap(e[].run_prev, e[].run_cur)
+            e[].run_cur = Dict[Int, CachedRun]()
+        e[].run_cur[key] = CachedRun(si, text, r^)
+        return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].run_cur[key].run)))
+    except:
+        e[].fast_run = e[].shape(st, text)
+        return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].fast_run)))
+
+
+def shape(st: TextStyle, text: String) -> Run:
+    """The shaped run (a copy of run_for's: the fast path, the cache, or the shaper)."""
+    return run_for(st, text)[].copy()
 
 
 def measure(st: TextStyle, text: String) -> Float64:
     """The width of `text` in layout px."""
-    return engine()[].shape(st, text).width
+    return run_for(st, text)[].width
 
 
 def _blend_cov(d: UInt32, color: UInt32, cov: Int) -> UInt32:

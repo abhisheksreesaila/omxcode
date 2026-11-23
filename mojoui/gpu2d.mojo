@@ -75,7 +75,7 @@ from std.math import sqrt, ceil, floor
 from mojoui.canvas import Surface
 from mojoui.draw import blend
 from mojoui.text import Font, Face, LEFT, CENTRE, RIGHT
-from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_x, GlyphImage
+from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage
 from mojoui.shared import get_shared, put_shared
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
@@ -626,6 +626,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
     if content_k <= 0:  # (a tile's layer has no OP_IMAGE: its only pixels are colour glyphs, added as they come)
         for ref px in scene.images:
             f.pixels.append(px.copy())
+    var eng = font_engine()  # (goal 80: looked up once per build, not per text op: each lookup costs ~0.4 µs)
+    var pg = glyph_pages(atlas.width)
     var clips = List[Float64](capacity=64)  # the clip stack in pixels, x0, y0, x1, y1 per entry (already intersected)
     for layer in range(min(first, scene.layers())):  # (what earlier layers left open)
         var span0 = scene.layer_range(layer)
@@ -733,10 +735,9 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 added = len(f.glyphs) // GLYPH_FLOATS - before
             elif kind == OP_RUN:  # (goal 79) fonttext's shaped run: coverage glyphs from GlyphPages, colour ones as images
                 var st = scene.run_style(op)
-                var r = ft_shape(st, scene.run_text(op))
+                var rp = ft_run_in(eng, st, scene.run_text(op))  # (goal 80: not copied; valid until the next run_in)
+                ref r = rp[]
                 var xl = run_x(r, a, scene.run_align(op))
-                var eng = font_engine()
-                var pg = glyph_pages(atlas.width)
                 var size_dev = st.size * tk
                 var bdev = b * tk + ty
                 var by = Int(bdev + 0.5) if bdev >= 0 else Int(bdev - 0.5)

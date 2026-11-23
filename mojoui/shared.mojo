@@ -13,6 +13,7 @@ from std.math import floor
 from std.os import getenv, setenv, makedirs
 from std.sys import argv, exit
 from std.ffi import external_call, c_int
+from std.sys import CompilationTarget
 from std.memory.alloc import alloc, Layout
 from std.atomic import Atomic
 from mojoui import libc
@@ -28,13 +29,65 @@ def put_shared(slot: Int, addr: Int):
 
 
 def get_shared(slot: Int) -> Int:
-    var text = getenv(key(slot), "")
-    if text == "":
+    """The address (or number) put in `slot`, 0 when none. (Goal 80) Hot paths call this per frame or per op: on Linux
+    the key is written into a byte buffer and glibc's secure_getenv's own string is parsed in place, no String made
+    (the String path cost 500 ns a call). getenv itself is declared by std.os with another signature, so it can't be
+    declared here; the Mac keeps the String path."""
+    comptime if CompilationTarget.is_macos():
+        var text = getenv(key(slot), "")
+        if text == "":
+            return 0
+        try:
+            return Int(text)
+        except:
+            return 0
+    var buf = List[UInt8](capacity=64)
+    for b in "MOJOUI_SHARED_".as_bytes():
+        buf.append(b)
+    _digits(buf, libc.getpid())
+    buf.append(0x5F)  # "_"
+    _digits(buf, slot)
+    buf.append(0)
+    var p = external_call["secure_getenv", Int](Int(buf.unsafe_ptr()))
+    _ = len(buf)
+    if p == 0:
         return 0
-    try:
-        return Int(text)
-    except:
+    var neg = False
+    var v = 0
+    var i = 0
+    var c = Int(Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=p)[])
+    if c == 0x2D:  # "-"
+        neg = True
+        i = 1
+    while True:
+        c = Int(Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=p + i)[])
+        if c < 0x30 or c > 0x39:
+            break
+        v = v * 10 + (c - 0x30)
+        i += 1
+    if c != 0 or i == (1 if neg else 0):  # (not a whole number: Int(text) would have refused it)
         return 0
+    return -v if neg else v
+
+
+def _digits(mut buf: List[UInt8], n: Int):
+    """n's decimal digits (n ≥ 0) appended."""
+    if n == 0:
+        buf.append(0x30)
+        return
+    var start = len(buf)
+    var m = n
+    while m > 0:
+        buf.append(UInt8(0x30 + m % 10))
+        m //= 10
+    var a = start
+    var b = len(buf) - 1
+    while a < b:
+        var t = buf[a]
+        buf[a] = buf[b]
+        buf[b] = t
+        a += 1
+        b -= 1
 
 
 def floored(x: Float64) -> Float64:
