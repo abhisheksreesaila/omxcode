@@ -1020,7 +1020,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: hold a child (350 ms, still) | `Board(on_hold=…)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus) | `mojoui.freeboard.FreeCanvas` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Canvas: hover and cursor | `Canvas(hover=True): HOVER; .cursor(name)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | 🔨 | 🔨 | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
@@ -1365,8 +1365,8 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 | Linux (GTK) | 193 | 13 | 0 |
 | Web | 178 | 11 | 17 |
 | Android | 19 | 64 | 123 |
-| Mac (AppKit) | 5 | 166 | 35 |
-| iPhone (UIKit) | 0 | 137 | 69 |
+| Mac (AppKit) | 5 | 167 | 34 |
+| iPhone (UIKit) | 0 | 138 | 68 |
 | Agent (MCP) | 67 | 46 | 93 |
 
 ## Inside one app, not components yet (the debt)

@@ -226,7 +226,7 @@ comptime TIMINGS = 75  # Settings: show GPU timings in the status bar
 comptime KEEP_INSPECTOR = 76  # Settings: the inspector opens with a sheet
 comptime ABOUT_CLOSE = 77
 comptime FX_HELP = 78  # the formula bar's ƒx: what formulas can do
-comptime CANVAS_MODE = 94  # Settings: tile the cards instead of the free canvas (saved as canvas=tiled, goal 78)
+comptime CANVAS_MODE = 7981  # Settings: tile the cards instead of the free canvas (saved as canvas=tiled, goal 78; was 94, which is TAB + 1: the Report tab's click toggled this instead)
 comptime HELP_CLOSE = 79
 comptime STYLE_BOLD = 80  # the format toggles: the selected cell, or the whole column when a column is selected
 comptime STYLE_ITALIC = 81

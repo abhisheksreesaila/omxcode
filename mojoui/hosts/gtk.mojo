@@ -2208,6 +2208,8 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_scrolled_window_set_policy", NoneType](w, c_int(1), c_int(1))  # automatic, automatic
             external_call["gtk_scrolled_window_set_child", NoneType](w, inner)
             add_class(inner, "mui-board")
+            if is_free(node.text):  # (a free canvas: every edge resizes, so no corner grip; mojoui.boardlook)
+                add_class(inner, "mui-board-free")
             add_class(w, "mui-board-scroll")  # (the sheet's frame: a theme can ring it, as the web's .board-scroll)
             self.widgets[i] = inner  # patches move and size the board's own widget
             self.board_scrollers.append((i, w))
