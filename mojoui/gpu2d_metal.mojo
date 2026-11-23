@@ -35,6 +35,8 @@ from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
 from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
 from mojoui.gpu2d_merge import merge_runs, append_frame
+from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
+from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode
 
 comptime RTLD_DEFAULT = -2
 comptime PF_BGRA8 = 80  # MTLPixelFormatBGRA8Unorm (the IOSurface's 'BGRA')
@@ -44,6 +46,8 @@ comptime MODE_OVER = 0  # pipelines: blended over (gpu2d BLEND_OVER)
 comptime MODE_REPLACE = 1  # written as they are (BLEND_REPLACE)
 comptime MODE_ACCUMULATE = 2  # a polygon's triangles: coverage added into the accumulator
 comptime MODE_COVER = 3  # a polygon's cover: reads the picture and the accumulator, blends, zeroes the accumulator
+comptime MODE_OVER_TILE = 4  # (D-7993) into a tile: RGB as OVER, alpha = src + dst·(1 − a) (premultiplied, as GL's raster)
+comptime MODE_TILE_DRAW = 5  # a premultiplied tile onto the frame: RGB = src + dst·(1 − a), the frame's alpha kept
 comptime PRIM_STRIP = 4
 
 # buffer slots (the same index in the vertex and fragment stages)
@@ -349,6 +353,56 @@ fragment CoverOut cover_f(VOut in [[stage_in]], device const float* q [[buffer(4
     if (a > 0.0) o.color = float4(d[4] * a + dst.r * (1.0 - a), d[5] * a + dst.g * (1.0 - a), d[6] * a + dst.b * (1.0 - a), dst.a);
     return o;
 }
+
+// ---- raster tiles (D-7993: gpu2d_tiles' plan, as the GL backend draws it) ----
+// in a tile's texture the picture is premultiplied (RGB = sum of c*a over, A = coverage over): the cover's own blend,
+// with the coverage kept in alpha
+fragment CoverOut cover_tile_f(VOut in [[stage_in]], device const float* q [[buffer(4)]], constant U& u [[buffer(1)]],
+                               float4 dst [[color(0)]], float acc [[color(1)]]) {
+    device const float* d = q + in.iid * 16;
+    CoverOut o;
+    o.color = dst;
+    o.acc = 0.0;
+    if (acc == 0.0) discard_fragment();
+    if (clipped(in.pos.xy, d[12], d[13], d[14], d[15], u)) return o;
+    float a = min(abs(acc), 1.0) * d[7];
+    if (a > 0.0) o.color = float4(d[4] * a + dst.r * (1.0 - a), d[5] * a + dst.g * (1.0 - a), d[6] * a + dst.b * (1.0 - a), a + dst.a * (1.0 - a));
+    return o;
+}
+
+struct PosOut { float4 pos [[position]]; };
+
+// a partial raster's stale part cleared (the scissor limits it)
+vertex PosOut full_v(uint vid [[vertex_id]]) {
+    float2 c = corner(vid);
+    PosOut o;
+    o.pos = float4(c.x * 2.0 - 1.0, 1.0 - c.y * 2.0, 0.0, 1.0);
+    return o;
+}
+
+fragment float4 clear_f(PosOut in [[stage_in]]) { return float4(0.0); }
+
+// a kept tile onto the frame (GL's TILE_FS): content px (q) of tile (i, j) at scale map.x, offset map.yz; texel q + 1
+// (the 1 px border); nearest at scale 1, else bilinear
+struct TileU { float2 view; float2 org; float4 rect; float4 clip; float4 map; float lin; float pad0; float2 pad1; };
+
+vertex PosOut tile_v(uint vid [[vertex_id]], constant TileU& u [[buffer(1)]]) {
+    float2 p = mix(u.rect.xy - 1.5, u.rect.zw + 1.5, corner(vid));
+    PosOut o;
+    o.pos = float4(p.x / u.view.x * 2.0 - 1.0, 1.0 - p.y / u.view.y * 2.0, 0.0, 1.0);
+    return o;
+}
+
+fragment float4 tile_f(PosOut in [[stage_in]], constant TileU& u [[buffer(1)]], texture2d<float> t [[texture(1)]]) {
+    float2 p = in.pos.xy;
+    if (p.x < u.clip.x || p.y < u.clip.y || p.x >= u.clip.z || p.y >= u.clip.w) discard_fragment();
+    float2 q = (p - u.map.yz) / u.map.x - u.org;
+    if (q.x < 0.0 || q.y < 0.0 || q.x >= u.map.w || q.y >= u.map.w) discard_fragment();
+    float2 tc = q + 1.0;
+    if (u.lin < 0.5) return t.read(uint2(floor(tc)));
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    return t.sample(s, tc / (u.map.w + 2.0));
+}
 """
 
 
@@ -406,6 +460,16 @@ struct Metal2D(Movable):
     var p_glyph: Int
     var p_image: Int
     var p_image_over: Int  # images with see-through pixels, blended over (goal 79: icons, colour emoji)
+    var p_t_quad_over: Int  # (D-7993) the tile pipelines: premultiplied into a tile, and a tile onto the frame
+    var p_t_glyph: Int
+    var p_t_image_over: Int
+    var p_t_cover: Int
+    var p_clear: Int
+    var p_tile: Int
+    var tile_mode: Bool  # _draw_layer draws into a tile (the tile pipelines)
+    var tile_tex: List[Int]  # per tile slot: its texture (TILE_TEX², BGRA8, shared, premultiplied; made on first use)
+    var tile_acc: Int  # the accumulator for a tile pass (TILE_TEX², memoryless)
+    var cb_open: Int  # a command buffer the next pass encodes into (tile passes went in first), 0: a new one
     var atlas_w: Int
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last copied into the atlas's dynamic rows
@@ -484,6 +548,16 @@ struct Metal2D(Movable):
         self.p_glyph = 0
         self.p_image = 0
         self.p_image_over = 0
+        self.p_t_quad_over = 0
+        self.p_t_glyph = 0
+        self.p_t_image_over = 0
+        self.p_t_cover = 0
+        self.p_clear = 0
+        self.p_tile = 0
+        self.tile_mode = False
+        self.tile_tex = List[Int]()
+        self.tile_acc = 0
+        self.cb_open = 0
         self.atlas_w = atlas.width
         self.atlas_dyn = atlas.dyn_y0
         self.pages_version = -1
@@ -587,6 +661,12 @@ struct Metal2D(Movable):
         self.p_image_over = self._pipeline("image_v", "image_f", MODE_OVER)
         self.p_tri = self._pipeline("tri_v", "tri_f", MODE_ACCUMULATE)
         self.p_cover = self._pipeline("cover_v", "cover_f", MODE_COVER)
+        self.p_t_quad_over = self._pipeline("quad_v", "quad_over_f", MODE_OVER_TILE)
+        self.p_t_glyph = self._pipeline("glyph_v", "glyph_f", MODE_OVER_TILE)
+        self.p_t_image_over = self._pipeline("image_v", "image_f", MODE_OVER_TILE)
+        self.p_t_cover = self._pipeline("cover_v", "cover_tile_f", MODE_COVER)
+        self.p_clear = self._pipeline("full_v", "clear_f", MODE_REPLACE)
+        self.p_tile = self._pipeline("tile_v", "tile_f", MODE_TILE_DRAW)
         if self.p_quad_over == 0 or self.p_quad_replace == 0 or self.p_glyph == 0 or self.p_image == 0 or self.p_tri == 0 or self.p_cover == 0:
             if self.why == "":
                 self.why = "a pipeline failed"
@@ -632,6 +712,14 @@ struct Metal2D(Movable):
             _ = msg(c0, "setDestinationRGBBlendFactor:", 5)  # OneMinusSourceAlpha
             _ = msg(c0, "setSourceAlphaBlendFactor:", 0)  # Zero
             _ = msg(c0, "setDestinationAlphaBlendFactor:", 1)  # One
+        if mode == MODE_OVER_TILE or mode == MODE_TILE_DRAW:
+            _ = msg(c0, "setBlendingEnabled:", 1)
+            _ = msg(c0, "setRgbBlendOperation:", 0)
+            _ = msg(c0, "setAlphaBlendOperation:", 0)
+            _ = msg(c0, "setSourceRGBBlendFactor:", 4 if mode == MODE_OVER_TILE else 1)  # SourceAlpha / One
+            _ = msg(c0, "setDestinationRGBBlendFactor:", 5)  # OneMinusSourceAlpha
+            _ = msg(c0, "setSourceAlphaBlendFactor:", 1 if mode == MODE_OVER_TILE else 0)  # One / Zero
+            _ = msg(c0, "setDestinationAlphaBlendFactor:", 5 if mode == MODE_OVER_TILE else 1)  # OneMinusSourceAlpha / One
         if mode == MODE_ACCUMULATE:  # the accumulator adds; the picture is left alone
             _ = msg(c0, "setWriteMask:", 0)
             _ = msg(c1, "setBlendingEnabled:", 1)
@@ -740,7 +828,8 @@ struct Metal2D(Movable):
         swap(plan, self.whole_plan)
         return self._finish(pool, cb, enc, drawable)
 
-    def render_layers(mut self, layers: List[GpuLayer], n: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
+    def render_layers(mut self, layers: List[GpuLayer], n: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True,
+                      tiled: List[Bool] = List[Bool](), tile_draws: List[List[TileDraw]] = List[List[TileDraw]]()) -> Bool:
         """Draws layers[0 : n] (each one Scene layer's batches in its own buffers, uploaded when it changed; its
         transform this frame in layers[i].dx/dy/k) into IOSurface `io` — or, with `drawable`, into that CAMetalLayer
         drawable's texture, presented when the GPU is done — and waits for the GPU. wait=False: returns once committed;
@@ -759,6 +848,9 @@ struct Metal2D(Movable):
             cfunc[NoneType]("objc_autoreleasePoolPop", pool)
             return False
         for i in range(n):
+            if i < len(tiled) and tiled[i]:  # (D-7993) its kept raster tiles
+                self.draw_tiles(enc, tile_draws[i])
+                continue
             ref L = layers[i]
             if len(L.frame.runs) == 0:
                 continue
@@ -782,7 +874,8 @@ struct Metal2D(Movable):
         _send[NoneType](f, cacc, self.s_set_load, 2)  # Clear (to 0)
         _send[NoneType](f, cacc, self.s_set_store, 0)  # DontCare
         _send[NoneType](f, cacc, self.s_set_clear_color, Float64(0), Float64(0), Float64(0), Float64(0))
-        cb = _send(f, self.queue, self.s_command_buffer)
+        cb = self.cb_open if self.cb_open != 0 else _send(f, self.queue, self.s_command_buffer)
+        self.cb_open = 0
         var enc = _send(f, cb, self.s_encoder, rpd)
         if enc == 0:
             return 0
@@ -792,6 +885,168 @@ struct Metal2D(Movable):
         self.uniform[0] = Float32(w)
         self.uniform[1] = Float32(h)
         return enc
+
+    # ------------------------------------------------ raster tiles (D-7993)
+
+    def tile_texture(mut self, slot: Int) -> Int:
+        """Tile slot's texture (TILE_TEX², BGRA8, shared memory: read back and restored by the CPU; made on first use)."""
+        while len(self.tile_tex) <= slot:
+            self.tile_tex.append(0)
+        if self.tile_tex[slot] == 0:
+            var td = msg(cls("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", PF_BGRA8, TILE_TEX, TILE_TEX, 0)
+            _ = msg(td, "setUsage:", 5)  # RenderTarget | ShaderRead
+            _ = msg(td, "setStorageMode:", 0)  # Shared
+            self.tile_tex[slot] = msg(self.device, "newTextureWithDescriptor:", td)
+        return self.tile_tex[slot]
+
+    def open_frame(mut self) -> Int:
+        """A command buffer this frame's tile passes and then its pass (render_layers) encode into; inside the caller's
+        autorelease pool."""
+        if self.cb_open == 0:
+            self.cb_open = _send(self.f, self.queue, self.s_command_buffer)
+        return self.cb_open
+
+    def raster_tile(mut self, frame: Frame2D, plan: PolyPlan, gb: GpuBuffers, slot: Int, ox: Float64, oy: Float64, rx0: Int, ry0: Int, rx1: Int, ry1: Int) -> Bool:
+        """frame (one layer's batches in content px, uploaded into gb) into tile slot's texture, moved by (ox, oy):
+        premultiplied, the whole texture cleared first, or only [rx0, rx1) × [ry0, ry1) (texture px from the top left)
+        cleared and drawn again, the rest kept. Encoded into open_frame()'s command buffer."""
+        if not self.ok:
+            return False
+        var tex = self.tile_texture(slot)
+        if tex == 0:
+            return False
+        if self.tile_acc == 0:
+            var td = msg(cls("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", PF_ACC, TILE_TEX, TILE_TEX, 0)
+            _ = msg(td, "setUsage:", 4)
+            _ = msg(td, "setStorageMode:", 3)  # Memoryless
+            self.tile_acc = msg(self.device, "newTextureWithDescriptor:", td)
+            if self.tile_acc == 0:
+                _ = msg(td, "setStorageMode:", 2)
+                self.tile_acc = msg(self.device, "newTextureWithDescriptor:", td)
+            if self.tile_acc == 0:
+                return False
+        var f = self.f
+        var partial = rx0 > 0 or ry0 > 0 or rx1 < TILE_TEX or ry1 < TILE_TEX
+        var rpd = _send(f, self.c_rpd, self.s_rpd)
+        var cas = _send(f, rpd, self.s_color_attachments)
+        var ca = _send(f, cas, self.s_at_index, 0)
+        _send[NoneType](f, ca, self.s_set_texture, tex)
+        _send[NoneType](f, ca, self.s_set_load, 1 if partial else 2)  # Load / Clear
+        _send[NoneType](f, ca, self.s_set_store, 1)
+        _send[NoneType](f, ca, self.s_set_clear_color, Float64(0), Float64(0), Float64(0), Float64(0))
+        var cacc = _send(f, cas, self.s_at_index, 1)
+        _send[NoneType](f, cacc, self.s_set_texture, self.tile_acc)
+        _send[NoneType](f, cacc, self.s_set_load, 2)
+        _send[NoneType](f, cacc, self.s_set_store, 0)
+        _send[NoneType](f, cacc, self.s_set_clear_color, Float64(0), Float64(0), Float64(0), Float64(0))
+        var cb = self.open_frame()
+        var enc = _send(f, cb, self.s_encoder, rpd)
+        if enc == 0:
+            return False
+        _send[NoneType](f, enc, self.s_set_ftex, self.atlas, 0)
+        self.cur_pipe = 0
+        var vw = self.uniform[0]
+        var vh = self.uniform[1]
+        self.uniform[0] = Float32(TILE_TEX)
+        self.uniform[1] = Float32(TILE_TEX)
+        if partial:  # MTLScissorRect {x, y, width, height} (32 bytes: by address), then the stale part cleared
+            var sr = List[Int](length=4, fill=0)
+            sr[0] = max(rx0, 0)
+            sr[1] = max(ry0, 0)
+            sr[2] = max(min(rx1, TILE_TEX) - sr[0], 1)
+            sr[3] = max(min(ry1, TILE_TEX) - sr[1], 1)
+            _ = msg[NoneType](enc, "setScissorRect:", Int(sr.unsafe_ptr()))
+            _ = len(sr)
+            self._use(enc, self.p_clear)
+            _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, 1, 0)
+        self._bind(enc, gb.bufs)
+        self.tile_mode = True
+        for li in range(len(frame.layers)):
+            self._draw_layer(enc, frame, plan, li, ox, oy, frame.layers[li].k)
+        self.tile_mode = False
+        _send[NoneType](f, enc, self.s_end)
+        self.uniform[0] = vw
+        self.uniform[1] = vh
+        return True
+
+    def draw_tiles(mut self, enc: Int, draws: List[TileDraw]):
+        """Kept tiles onto the frame being drawn (inside its pass), premultiplied over what's there, the frame's alpha kept."""
+        if len(draws) == 0:
+            return
+        var f = self.f
+        self._use(enc, self.p_tile)
+        var u = List[Float32](length=20, fill=0)
+        u[0] = self.uniform[0]
+        u[1] = self.uniform[1]
+        for ref d in draws:
+            if d.slot < 0 or d.slot >= len(self.tile_tex) or self.tile_tex[d.slot] == 0:
+                continue
+            var x0 = max(Float64(d.i) * TILE * d.s + d.tx, d.cx0)
+            var y0 = max(Float64(d.j) * TILE * d.s + d.ty, d.cy0)
+            var x1 = min(Float64(d.i + 1) * TILE * d.s + d.tx, d.cx1)
+            var y1 = min(Float64(d.j + 1) * TILE * d.s + d.ty, d.cy1)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            u[2] = Float32(Float64(d.i) * TILE)
+            u[3] = Float32(Float64(d.j) * TILE)
+            u[4] = Float32(x0)
+            u[5] = Float32(y0)
+            u[6] = Float32(x1)
+            u[7] = Float32(y1)
+            u[8] = Float32(d.cx0)
+            u[9] = Float32(d.cy0)
+            u[10] = Float32(d.cx1)
+            u[11] = Float32(d.cy1)
+            u[12] = Float32(d.s)
+            u[13] = Float32(d.tx)
+            u[14] = Float32(d.ty)
+            u[15] = Float32(TILE)
+            u[16] = Float32(0.0 if d.s == 1.0 else 1.0)
+            var up = Int(u.unsafe_ptr())
+            _send[NoneType](f, enc, self.s_set_vbytes, up, 80, B_UNIFORM)
+            _send[NoneType](f, enc, self.s_set_fbytes, up, 80, B_UNIFORM)
+            _send[NoneType](f, enc, self.s_set_ftex, self.tile_tex[d.slot], 1)
+            _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, 1, 0)
+        _ = len(u)
+        # (the layers after: their uniform again; _draw_layer sets its own transform)
+
+    def read_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, dst: Int) -> Bool:
+        """w × h pixels of slot's texture from texture px (x0, y0) into dst (rows packed); the GPU done with it first."""
+        if slot < 0 or slot >= len(self.tile_tex) or self.tile_tex[slot] == 0:
+            return False
+        self.drain()
+        var region = List[Int](length=6, fill=0)
+        region[0] = x0
+        region[1] = y0
+        region[3] = w
+        region[4] = h
+        region[5] = 1
+        _ = msg[NoneType](self.tile_tex[slot], "getBytes:bytesPerRow:fromRegion:mipmapLevel:", dst, w * 4, Int(region.unsafe_ptr()), 0)
+        _ = len(region)
+        return True
+
+    def upload_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, src: Int) -> Bool:
+        """A restored tile: slot's texture cleared to transparent, then w × h pixels (rows packed) at texture px (x0, y0).
+        The caller drained first (no frame in flight reads the slot)."""
+        var tex = self.tile_texture(slot)
+        if tex == 0:
+            return False
+        var region = List[Int](length=6, fill=0)
+        region[5] = 1
+        if not (x0 == 0 and y0 == 0 and w == TILE_TEX and h == TILE_TEX):
+            var zero = List[UInt32](length=TILE_TEX * TILE_TEX, fill=0)
+            region[3] = TILE_TEX
+            region[4] = TILE_TEX
+            _ = msg[NoneType](tex, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, Int(zero.unsafe_ptr()), TILE_TEX * 4)
+            _ = len(zero)
+        if w > 0 and h > 0:
+            region[0] = x0
+            region[1] = y0
+            region[3] = w
+            region[4] = h
+            _ = msg[NoneType](tex, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, src, w * 4)
+        _ = len(region)
+        return True
 
     def _bind(self, enc: Int, bufs: List[Int]):
         for slot in range(BUFFERS):
@@ -834,16 +1089,16 @@ struct Metal2D(Movable):
                     if plan.groups[b + 1] > 0:  # (one instance per fan triangle, its coverage added)
                         self._use(enc, self.p_tri)
                         _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, plan.groups[b + 1], plan.groups[b])
-                    self._use(enc, self.p_cover)
+                    self._use(enc, self.p_t_cover if self.tile_mode else self.p_cover)
                     _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, plan.groups[b + 3], plan.groups[b + 2])
                 continue
             var pipe: Int
             if run.pipe == PIPE_QUAD:
-                pipe = self.p_quad_replace if run.blend == BLEND_REPLACE else self.p_quad_over
+                pipe = self.p_quad_replace if run.blend == BLEND_REPLACE else (self.p_t_quad_over if self.tile_mode else self.p_quad_over)
             elif run.pipe == PIPE_GLYPH:
-                pipe = self.p_glyph
+                pipe = self.p_t_glyph if self.tile_mode else self.p_glyph
             else:
-                pipe = self.p_image_over if run.blend == BLEND_OVER else self.p_image
+                pipe = (self.p_t_image_over if self.tile_mode else self.p_image_over) if run.blend == BLEND_OVER else self.p_image
             self._use(enc, pipe)
             _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, run.count, run.first)
         _ = len(self.uniform)
@@ -1347,6 +1602,14 @@ struct MetalCanvas2D(Movable):
     var spared: Int  # layers rebuilt into their spare set (a frame on the GPU read the other), so far
     var busy_rebuilds: Int  # layers rebuilt while a frame on the GPU read their buffers, so far
     var build_ms: Float64  # this frame's layer building, planning and uploading (ms)
+    var tiles: Tiles  # (D-7993) tiled layers: the plan shared with the GL backend (gpu2d_tiles)
+    var tiles_on: Bool  # MOJOUI_GPU2D_TILES=0: tiled layers drawn directly (comparisons)
+    var tile_frames: List[Frame2D]  # per tile rastered this frame: its batches, polygon plan and buffers
+    var tile_plans: List[PolyPlan]
+    var tile_gbs: List[GpuBuffers]
+    var more: Bool  # a later frame has tiles to raster or a zoom to settle: the host draws again
+    var tile_ms: Float64  # this frame's tile planning, building and encoding (ms)
+    var tile_trace: Bool
 
     def __init__(out self):
         var font = Font()
@@ -1368,6 +1631,16 @@ struct MetalCanvas2D(Movable):
         self.spared = 0
         self.busy_rebuilds = 0
         self.build_ms = 0
+        self.tiles = Tiles()
+        self.tiles_on = getenv("MOJOUI_GPU2D_TILES") != "0"
+        self.tile_frames = List[Frame2D]()
+        self.tile_plans = List[PolyPlan]()
+        self.tile_gbs = List[GpuBuffers]()
+        self.more = False
+        self.tile_ms = 0
+        self.tile_trace = getenv("MOJOUI_TILE_TRACE") == "1"
+        if self.metal.ok:  # (D-7956, D-7993: snapshot keys name the renderer; Metal on this device)
+            set_renderer_id(fnv("Metal|" + self.metal.name))
 
     def render_scene(mut self, owner: Int, io: Int, w: Int, h: Int, drawable: Int = 0, wait: Bool = True) -> Bool:
         """This frame's Scene (painted by the app into self.scene) into IOSurface `io` on the GPU: layers that changed
@@ -1386,9 +1659,19 @@ struct MetalCanvas2D(Movable):
         var open = 0  # (clips left open by earlier layers)
         var pg = glyph_pages(self.atlas.width)
         var resets0 = pg[].resets
+        var towner = owner + 1  # (the tile store keys canvases by a nonzero owner; the AppKit host numbers its canvases from 0)
+        var tiled = List[Bool](length=n, fill=False)
         for i in range(n):
             var tr = layer_traits(sc, i, open)  # (D-7930: shared with the GL renderer; fonttext's runs are zoom-bound)
             open = tr.open
+            var span = sc.layer_range(i)
+            if self.tile_trace and sc.layer_tiled[i]:
+                print("TILEPICK: " + sc.layer_keys[i] + " fixed " + String(tr.fixed) + " on " + String(self.tiles_on) + " owner " + String(towner) + " ops " + String(span[1] - span[0]) + " hold " + String(sc.layer_hold[i]), flush=True)
+            if sc.layer_tiled[i] and tr.fixed and self.tiles_on and (span[1] - span[0] >= TILE_MIN_OPS or sc.layer_hold[i]
+                                                                  or self.tiles.has_snap(sc.layer_keys[i], towner)):
+                tiled[i] = True  # (D-7993: drawn from kept raster tiles, as on GL)
+                self.layers[i].valid = False
+                continue
             var fixed = tr.fixed
             var zoom_bound = tr.zoom_bound
             ref L = self.layers[i]
@@ -1454,12 +1737,154 @@ struct MetalCanvas2D(Movable):
             self.layers[i].valid = False
         self.owner = owner
         self.build_ms = Float64(Int(now_ns()) - t0) / 1e6
-        var ok = self.metal.render_layers(self.layers, n, io, w, h, drawable, wait)
+        # (D-7993) tiled layers: restored from a kept view, planned (gpu2d_tiles), their tiles rastered into this frame's
+        # command buffer ahead of its pass; then drawn from the tiles in it
+        var tt0 = Int(now_ns())
+        var tile_draws = List[List[TileDraw]]()
+        var reads = List[TilePlan]()
+        var used = List[Int]()  # tile buffer sets this frame encodes from
+        var pool = pool_push()
+        self.tiles.begin_frame()
+        self.more = False
+        var any_tiled = False
+        var tsc = Scene(0, 0, 1)  # (the scene, out of self while its methods take self mutably)
+        swap(tsc, self.scene)
+        for i in range(n):
+            tile_draws.append(List[TileDraw]())
+            if not tiled[i]:
+                continue
+            any_tiled = True
+            var want = self.tiles.restore_want(tsc, i, towner, w, h)
+            if want != "":
+                self._snap_restore(tsc, i, towner, w, h, want)
+            var plan = self.tiles.plan(tsc, i, towner, w, h)
+            if not self._raster_plan(tsc, plan, used):
+                swap(tsc, self.scene)
+                self.metal.cb_open = 0
+                cfunc[NoneType]("objc_autoreleasePoolPop", pool)
+                return False
+            tile_draws[i] = plan.draws.copy()
+            if len(plan.reads) > 0:
+                reads.append(plan^)
+        swap(tsc, self.scene)
+        self.more = self.tiles.more
+        self.tile_ms = Float64(Int(now_ns()) - tt0) / 1e6
+        if self.tile_trace and any_tiled and (self.tiles.rastered > 0 or self.tiles.damaged > 0):
+            print("TILES: rastered " + String(self.tiles.rastered) + " damaged " + String(self.tiles.damaged) + " drawn " + String(self.tiles.drawn)
+                  + " more " + String(self.more) + " tile_ms " + String(self.tile_ms), flush=True)
+        var ok = self.metal.render_layers(self.layers, n, io, w, h, drawable, wait, tiled, tile_draws)
+        if self.metal.cb_open != 0:  # (not taken by a pass: its tile rasters still go to the GPU, the tiles stay true)
+            _send[NoneType](self.metal.f, self.metal.cb_open, self.metal.s_commit)
+            self.metal.cb_open = 0
+        cfunc[NoneType]("objc_autoreleasePoolPop", pool)
         if ok:  # (the buffer sets this frame reads: busy until it completes)
             for i in range(n):
-                if len(self.layers[i].frame.runs) > 0:
+                if not tiled[i] and len(self.layers[i].frame.runs) > 0:
                     self.layers[i].gpu.used_by = self.metal.serial
+            for g in used:
+                self.tile_gbs[g].used_by = self.metal.serial
+        for q in range(len(reads)):  # (D-7956: the settled view's tiles read back for its snapshot)
+            for rd in reads[q].reads:
+                if rd.w > 0 and rd.h > 0:
+                    var px = List[UInt32](length=rd.w * rd.h, fill=0)
+                    if self.metal.read_tile_part(rd.slot, rd.x0, rd.y0, rd.w, rd.h, Int(px.unsafe_ptr())):
+                        self.tiles.save_add(rd, Int(px.unsafe_ptr()))
+                    _ = len(px)
+                else:
+                    self.tiles.save_add(rd, 0)
         return ok
+
+    def _raster_plan(mut self, scene: Scene, mut plan: TilePlan, mut used: List[Int]) -> Bool:
+        """plan's tiles: each one's batches built (content px at its zoom; a glyph-page reset while building builds
+        them all again), planned, uploaded into a buffer set no frame on the GPU reads, and rastered."""
+        var n = len(plan.rasters)
+        if n == 0:
+            return True
+        while len(self.tile_frames) < n:
+            self.tile_frames.append(Frame2D())
+            self.tile_plans.append(PolyPlan())
+        var pg = glyph_pages(self.atlas.width)
+        for attempt in range(2):
+            var r0 = pg[].resets
+            for r in range(n):
+                ref tr = plan.rasters[r]
+                fill_layers(self.tile_frames[r], scene, self.atlas, self.font, tr.layer, tr.layer + 1, 0, tr.ops, tr.k)
+            if pg[].resets == r0:
+                break
+            if attempt == 1:
+                print("GLYPHPAGES: one frame's tiles need more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
+        self.metal.sync_pages()
+        for r in range(n):
+            ref tr = plan.rasters[r]
+            plan_polys(self.tile_frames[r], self.tile_plans[r])
+            var g = -1
+            for q in range(len(self.tile_gbs)):
+                if q in used or self.metal.busy(self.tile_gbs[q]):
+                    continue
+                g = q
+                break
+            if g < 0:
+                self.tile_gbs.append(GpuBuffers())
+                g = len(self.tile_gbs) - 1
+            used.append(g)
+            self.metal.upload(self.tile_frames[r], self.tile_plans[r], self.tile_gbs[g])
+            if not self.metal.raster_tile(self.tile_frames[r], self.tile_plans[r], self.tile_gbs[g], tr.slot, Float64(-tr.i * TILE + 1), Float64(-tr.j * TILE + 1),
+                                          tr.rx0, tr.ry0, tr.rx1, tr.ry1):
+                return False
+        return True
+
+    def _snap_restore(mut self, scene: Scene, i: Int, owner: Int, w: Int, h: Int, path: String):
+        """(D-7956) Tiled layer i's kept view from path, when every part of its key matches: its tiles decoded and put
+        into tile textures as the layer's fallback tiling (Tiles.snap_restored); the GPU done with every slot first."""
+        var t0 = Int(now_ns())
+        var snap = snap_read(path)
+        if not snap.ok:
+            if self.tiles.snap_log:
+                print("SNAP: none at " + path, flush=True)
+            return
+        var want = self.tiles.snap_key(scene, i, w, h)
+        if not snap.key.same(want):
+            if self.tiles.snap_log:
+                print("SNAP: refused (" + snap.key.why_not(want) + " differs) " + path, flush=True)
+            return
+        var which = List[Int]()
+        for q in range(len(snap.tiles)):
+            ref t = snap.tiles[q]
+            if t.w == 0 or t.h == 0:
+                continue
+            if t.x0 < 0 or t.y0 < 0 or t.x0 + t.w > TILE_TEX or t.y0 + t.h > TILE_TEX:
+                if self.tiles.snap_log:
+                    print("SNAP: refused (a tile outside its texture) " + path, flush=True)
+                return
+            which.append(q)
+        var slots = List[Int]()
+        for _ in range(len(which)):
+            var slot = self.tiles.snap_slot(scene, i, owner)
+            if slot < 0:
+                for sl in slots:
+                    self.tiles.free.append(sl)
+                return
+            slots.append(slot)
+        self.metal.drain()
+        var keys = List[Int]()
+        var parts = List[Int]()
+        var src = Int(snap.bytes.unsafe_ptr())
+        for k in range(len(which)):
+            ref t = snap.tiles[which[k]]
+            var px = List[UInt32](length=t.w * t.h, fill=0)
+            if not rle_decode(src + t.at, t.n, Int(px.unsafe_ptr()), t.w * t.h) or not self.metal.upload_tile_part(slots[k], t.x0, t.y0, t.w, t.h, Int(px.unsafe_ptr())):
+                if self.tiles.snap_log:
+                    print("SNAP: refused (a tile doesn't decode) " + path, flush=True)
+                for sl in slots:
+                    self.tiles.free.append(sl)
+                return
+            _ = len(px)
+            keys.append(_pack(t.i, t.j))
+            parts += [t.x0, t.y0, t.w, t.h]
+        _ = len(snap.bytes)
+        self.tiles.snap_restored(scene, i, owner, w, h, keys, slots, parts)
+        if self.tiles.snap_log:
+            print("SNAP: restore took " + String(Float64(Int(now_ns()) - t0) / 1e6) + " ms (" + String(len(which)) + " tiles, " + String(len(snap.bytes)) + " bytes)", flush=True)
 
     def end_frame(mut self):
         """This frame's Scene becomes last frame's (its memory: next frame's to paint into)."""

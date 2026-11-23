@@ -3302,7 +3302,7 @@ struct AppKitHost[A: App](Movable):
                              + " px on the " + ("GPU (gpu2d, Metal)" if on_gpu else "CPU (gpu2d's executor)") + (" (committed, shown when it completes)" if pending else ""))
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
-        self.canvases[k].drawn = version if not g[].scene.again else -1  # (mid-animation: drawn again next frame, as GTK)
+        self.canvases[k].drawn = version if not (g[].scene.again or g[].more) else -1  # (mid-animation, or tiles still to raster (D-7993): drawn again next frame, as GTK)
         g[].end_frame()
         self.apply(r[1], self_addr)
         return True
