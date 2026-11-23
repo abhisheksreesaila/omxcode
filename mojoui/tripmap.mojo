@@ -38,7 +38,9 @@ comptime GLIDE_MS = 700  # a marker moving to its checked place
 
 comptime MAP_ABOUT = (
     "Show a trip, a route, a day out or a set of places as a map card with real map tiles: the stops numbered in the order visited, "
-    "joined by a line. Give each stop its name exactly as it should be labelled and said (\"Belém Tower\", \"the Alfama\"), a one-line "
+    "joined by a line. Every place the person names is a stop, named as they named it, in their order: a trip through three cities has "
+    "those three cities as its stops (sights inside them only when they ask for sights). "
+    "Give each stop its name exactly as it should be labelled and said (\"Belém Tower\", \"the Alfama\"), a one-line "
     "note, and your best guess of its latitude and longitude (a geocoder checks them). Call it first, then walk through the stops in "
     "order in one or two sentences, naming each exactly as labelled: the map flies to each stop as you name it."
 )
