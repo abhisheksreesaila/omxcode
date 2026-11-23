@@ -76,7 +76,7 @@ from mojoui.canvas import Surface
 from mojoui.draw import blend
 from mojoui.text import Font, Face, LEFT, CENTRE, RIGHT
 from mojoui.shadow import shadow_alpha, shadow_reach, shadow_columns, shadow_row, shadow_at
-from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage, TextStyle
+from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage, TextStyle, FontEngine
 from mojoui.shared import get_shared, put_shared
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
@@ -121,6 +121,7 @@ struct GlyphPages(Movable):
     var width: Int
     var bytes: List[UInt8]
     var slot_of: List[Int32]  # engine image index → slot (-1: not placed): image indices are dense, so a list, not a hash (goal 80)
+    var fonts: Int  # the font engine's address, once known (a registry lookup costs ~0.5 µs, mostly getpid)
     var slot_other: Dict[Int, Int]  # any other key (negative, or past SLOT_KEYS)
     var sx: List[Int]
     var sy: List[Int]
@@ -139,6 +140,7 @@ struct GlyphPages(Movable):
         self.bytes = List[UInt8](length=width * DYN_ROWS, fill=0)
         self.slot_of = List[Int32]()
         self.slot_other = Dict[Int, Int]()
+        self.fonts = 0
         self.sx = List[Int]()
         self.sy = List[Int]()
         self.shelf_x = 1
@@ -295,6 +297,7 @@ struct GlyphAtlas(Movable):
     below them and a column of zeros at each side: bilinear sampling (and a GPU's CLAMP_TO_EDGE) reads zeros past a
     face's edges, as Face.coverage does."""
 
+    var pages_at: Int  # the process's GlyphPages (goal 80: looked up once)
     var width: Int
     var height: Int
     var bytes: List[UInt8]
@@ -311,6 +314,7 @@ struct GlyphAtlas(Movable):
             ys.append(y)
             y += rows[f] + 1
         self.width = w + 2
+        self.pages_at = Int(glyph_pages(w + 2))
         self.dyn_y0 = y
         self.height = y + DYN_ROWS
         self.bytes = List[UInt8](length=self.width * self.height, fill=0)
@@ -330,11 +334,15 @@ struct GlyphAtlas(Movable):
             var x = i - y * face.width
             self.bytes[(oy + y) * self.width + ox + x] = face.atlas[i]
 
+    def pages(self) -> Pointer[GlyphPages, MutUntrackedOrigin]:
+        """The process's GlyphPages (its address kept when the atlas was made)."""
+        return Pointer[GlyphPages, MutUntrackedOrigin](unsafe_from_address=self.pages_at)
+
     def at(self, x: Int, y: Int) -> Float64:
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return 0
         if y >= self.dyn_y0:
-            var pg = glyph_pages(self.width)
+            var pg = self.pages()
             return Float64(Int(pg[].bytes[(y - self.dyn_y0) * self.width + x])) / 255.0
         return Float64(Int(self.bytes[y * self.width + x])) / 255.0
 
@@ -554,7 +562,7 @@ def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font, cull: Bool = True
 def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, cull: Bool = True):
     """build_batches into an existing frame, reusing its memory (a host keeps one Frame2D). When GlyphPages fill and
     start again while it builds, the glyphs placed before that are gone: the frame is built once more (D-7930)."""
-    var pg = glyph_pages(atlas.width)
+    var pg = atlas.pages()
     var r0 = pg[].resets
     fill_layers(f, scene, atlas, font, 0, scene.layers(), cull=cull)
     if pg[].resets != r0:
@@ -735,9 +743,12 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
     if content_k <= 0:  # (a tile's layer has no OP_IMAGE: its only pixels are colour glyphs, added as they come)
         for ref px in scene.images:
             f.pixels.append(px.copy())
+    var styles = List[TextStyle]()  # (the frame's first few styles: a card's label, number and note alternate)
     var st = TextStyle("", 0, False, 0)  # (the last run's style: made again only when the next one's differs)
-    var eng = font_engine()  # (goal 80: looked up once per build, not per text op: each lookup costs ~0.4 µs)
-    var pg = glyph_pages(atlas.width)
+    var pg = atlas.pages()  # (goal 80: no registry lookup per build, let alone per text op)
+    if pg[].fonts == 0:
+        pg[].fonts = Int(font_engine())
+    var eng = Pointer[FontEngine, MutUntrackedOrigin](unsafe_from_address=pg[].fonts)
     var clips = List[Float64](capacity=64)  # the clip stack in pixels, x0, y0, x1, y1 per entry (already intersected)
     for layer in range(min(first, scene.layers())):  # (what earlier layers left open)
         var span0 = scene.layer_range(layer)
@@ -850,7 +861,17 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 while cut < len(fb) and fb[cut] != 0x1F:
                     cut += 1
                 if not _style_is(st, fb.unsafe_ptr(), cut, c, d, e, Float64(scene.nums[base + 5])):
-                    st = scene.run_style(op)
+                    var seen = -1
+                    for si in range(len(styles)):
+                        if _style_is(styles[si], fb.unsafe_ptr(), cut, c, d, e, Float64(scene.nums[base + 5])):
+                            seen = si
+                            break
+                    if seen >= 0:
+                        st = styles[seen]
+                    else:
+                        st = scene.run_style(op)
+                        if len(styles) < 8:
+                            styles.append(st)
                 var rp = ft_run_in(eng, st, String(full[byte=cut + 1:]))  # (goal 80: not copied; valid until the next run_in)
                 ref r = rp[]
                 var xl = run_x(r, a, scene.run_align(op))
@@ -868,17 +889,18 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     var gy = g.y * tk
                     var py = by - (Int(gy + 0.5) if gy >= 0 else Int(gy - 0.5))
                     var ii = eng[].image(g.inst, g.gid, size_dev, 0)
-                    if eng[].images[ii].w == 0:
+                    ref im = eng[].images[ii]
+                    var iw = im.w
+                    if iw == 0:
                         continue
-                    var iw = eng[].images[ii].w
-                    var ih = eng[].images[ii].h
-                    var x_l = (Float64(px + eng[].images[ii].left) - tx) * ik
-                    var y_l = (Float64(py - eng[].images[ii].top) - ty) * ik
+                    var ih = im.h
+                    var x_l = (Float64(px + im.left) - tx) * ik
+                    var y_l = (Float64(py - im.top) - ty) * ik
                     if cull_on and (x_l + Float64(iw) * ik + pad < rx0 or x_l - pad > rx1 or y_l + Float64(ih) * ik + pad < ry0 or y_l - pad > ry1):
                         continue
-                    if eng[].images[ii].color:
+                    if im.color:
                         var al = Int((color >> 24) & 0xFF)
-                        f.pixels.append(pg[].straight(ii, al, eng[].images[ii].rgba))
+                        f.pixels.append(pg[].straight(ii, al, im.rgba))
                         f.images.append(Float32(x_l))
                         f.images.append(Float32(y_l))
                         f.images.append(Float32(Float64(iw) * ik))
@@ -889,7 +911,7 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         f.images.append(0)
                         _clip4(f.images, c0, c1, c2, c3)
                     else:
-                        var slot = pg[].place(ii, eng[].images[ii])
+                        var slot = pg[].place(ii, im)
                         var u0 = pg[].sx[slot]
                         var v0 = atlas.dyn_y0 + pg[].sy[slot]
                         var gp = _grow(f.glyphs, GLYPH_FLOATS)
@@ -1529,7 +1551,7 @@ def execute_cpu(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface, threads
     draws every instance that meets it in paint order, so the picture is the same for any number (tests/test_cpu_threads).
     Plain pthreads, joined before this returns: no runtime pool, so it works on any thread and every platform."""
     var rows = _instance_rows(frame, surface.height)
-    var dyn = Int(glyph_pages(atlas.width)[].bytes.unsafe_ptr())
+    var dyn = Int(atlas.pages()[].bytes.unsafe_ptr())
     var n = threads
     if n <= 0:
         n = 1 if surface.width * surface.height < 65536 else num_logical_cores()
