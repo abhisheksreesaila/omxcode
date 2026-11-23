@@ -2,7 +2,7 @@
 
 Web renderer on the Mac: 158.0.8127.36 renderer ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version).
 
-**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its cold start isn't measurable, and that row stays ✗ for the owner to rule on.
+**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower bound of its first paint, process start to its own server sending the page (ruling D, D-7992; desktop_cold_mac.py, scratch HOME, database and folders).
 
 Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at 1.6×. Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, the same steps through test mode. Silky = native p95 ≤ 8.3 ms and max ≤ 16.7 ms, no CPU frame.
 
@@ -14,44 +14,44 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 
 | note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |
 |---|---|---|---|---|---|
-| 600 | open (cold): first frame (the process's first open: 53.9, parsed, no kept view); the kept view shown in 0 of 0 cold opens | 371.0 / 371.0 | 53.9 / 53.9 | — | ✗ |
-| 600 | open: frames during (n 91) | — | 7.0 / 8.5 | | ✓ |
-| 600 | open: a press during it, the frame that shows it (n 10) | — | 10.3 / 10.3 | | ✗ |
-| 600 | open: complete (wall) | 371.0 | 24.1 / 85.4 | | ✓ |
-| 600 | pan 30% | 16.7 / 16.8 | 2.4 / 4.7 | — | ✓ |
-| 600 | zoom from 30% | 16.7 / 16.8 | 10.0 / 14.1 | — | ✗ |
-| 600 | pan 100% | 16.8 / 16.8 | 3.9 / 4.3 | — | ✓ |
-| 600 | drag one | 16.8 / 16.8 | 2.5 / 3.4 | — | ✓ |
-| 600 | drag 40 | 16.8 / 16.8 | 2.6 / 3.3 | — | ✓ |
-| 600 | undo | 21.3 / 21.3 | 7.3 / 8.6 | — | ✓ |
-| 600 | redo | 21.6 / 21.8 | 6.4 / 6.8 | — | ✓ |
-| 600 | pen | 16.8 / 66.7 | 1.9 / 3.9 | — | ✓ |
-| 600 | typing | 16.7 / 16.8 | 4.0 / 8.3 | — | ✓ |
-| stress | open (cold): first frame (the process's first open: 158.7, parsed, no kept view); the kept view shown in 0 of 0 cold opens | 639.0 / 639.0 | 158.7 / 158.7 | — | ✗ |
-| stress | open: frames during (n 302) | — | 25.1 / 34.6 | | ✗ |
-| stress | open: a press during it, the frame that shows it (n 10) | — | 26.2 / 26.2 | | ✗ |
-| stress | open: complete (wall) | 639.0 | 432.0 / 521.6 | | ✓ |
-| stress | pan 30% | 16.7 / 16.8 | 10.8 / 13.5 | — | ✗ |
-| stress | zoom from 30% | 16.8 / 66.6 | 27.8 / 59.3 | — | ✗ |
-| stress | pan 100% | 16.8 / 16.8 | 11.5 / 19.9 | — | ✗ |
-| stress | drag one | 16.7 / 16.8 | 15.7 / 30.2 | — | ✗ |
-| stress | drag 40 | 16.8 / 33.2 | 13.3 / 20.5 | — | ✗ |
-| stress | undo | 23.6 / 24.0 | 26.3 / 33.1 | — | ✗ |
-| stress | redo | 23.1 / 23.7 | 25.7 / 37.7 | — | ✗ |
-| stress | pen | 16.8 / 100.0 | 11.5 / 28.6 | — | ✗ |
-| stress | typing | 16.8 / 16.8 | 14.3 / 20.7 | — | ✗ |
-| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 49.5 / 49.5 | | |
-| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 164.0 / 164.0 | | |
-| 600 | open again, kept parsed (not judged) | — | 5.2 / 5.2 | | |
-| stress | open again, kept parsed (not judged) | — | 14.5 / 14.5 | | |
+| 600 | open (cold): first frame (the process's first open: 12.2, from the kept view); the kept view shown in 30 of 30 cold opens | 378.0 / 378.0 | 12.2 / 12.2 | — | ✗ |
+| 600 | open: frames during (n 282) | — | 5.1 / 7.6 | | ✓ |
+| 600 | open: a press during it, the frame that shows it (n 10) | — | 9.7 / 9.7 | | ✗ |
+| 600 | open: complete (wall) | 378.0 | 20.1 / 273.6 | | ✓ |
+| 600 | pan 30% | 16.8 / 16.8 | 2.9 / 4.0 | — | ✓ |
+| 600 | zoom from 30% | 16.8 / 33.3 | 3.7 / 4.0 | — | ✓ |
+| 600 | pan 100% | 16.7 / 16.8 | 3.4 / 4.6 | — | ✓ |
+| 600 | drag one | 16.8 / 16.8 | 3.6 / 4.4 | — | ✓ |
+| 600 | drag 40 | 16.7 / 16.8 | 4.7 / 5.4 | — | ✓ |
+| 600 | undo | 21.7 / 23.7 | 5.6 / 9.0 | — | ✓ |
+| 600 | redo | 19.7 / 24.8 | 8.6 / 8.6 | — | ✗ |
+| 600 | pen | 16.7 / 16.8 | 2.1 / 3.5 | — | ✓ |
+| 600 | typing | 16.8 / 16.8 | 3.4 / 7.4 | — | ✓ |
+| stress | open (cold): first frame (the process's first open: 21.5, from the kept view); the kept view shown in 30 of 30 cold opens | 626.0 / 626.0 | 21.5 / 21.5 | — | ✗ |
+| stress | open: frames during (n 1143) | — | 4.5 / 8.1 | | ✓ |
+| stress | open: a press during it, the frame that shows it (n 10) | — | 11.2 / 11.2 | | ✗ |
+| stress | open: complete (wall) | 626.0 | 108.3 / 550.6 | | ✓ |
+| stress | pan 30% | 16.8 / 16.8 | 3.8 / 6.6 | — | ✓ |
+| stress | zoom from 30% | 16.8 / 33.3 | 7.3 / 19.1 | — | ✗ |
+| stress | pan 100% | 16.7 / 16.8 | 3.4 / 4.0 | — | ✓ |
+| stress | drag one | 16.8 / 16.8 | 2.9 / 10.2 | — | ✓ |
+| stress | drag 40 | 16.8 / 33.3 | 2.9 / 7.5 | — | ✓ |
+| stress | undo | 20.4 / 23.0 | 8.3 / 10.0 | — | ✓ |
+| stress | redo | 21.9 / 22.7 | 10.3 / 17.6 | — | ✗ |
+| stress | pen | 16.8 / 100.1 | 2.1 / 4.0 | — | ✓ |
+| stress | typing | 16.7 / 16.8 | 4.3 / 9.7 | — | ✓ |
+| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 44.5 / 44.5 | | |
+| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 159.8 / 159.8 | | |
+| 600 | open again, kept parsed (not judged) | — | 3.7 / 3.7 | | |
+| stress | open again, kept parsed (not judged) | — | 5.9 / 5.9 | | |
 
 | | web | native | |
 |---|---|---|---|
-| cold start: Personal Note's desktop launcher (server + Chromium app window) | not measured ms | 278.7 ms | ✗ |
-| cold start: a fresh Chromium process on the built app | 682.8 ms | 278.7 ms | ✓ |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | — ms | 278.7 ms | |
-| RSS after opening all three kinds | 833.6 MB | 168.6 MB | ✓ |
-| note switch p95 | — | 20.0 ms | ✗ |
-| omnibar open p95 | — | 39.9 ms | ✗ |
+| cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its own server sending the page (D-7992); its window on screen at 386.5 ms | 452.9 ms | 150.9 ms | ✓ |
+| cold start: a fresh Chromium process on the built app | 520.0 ms | 150.9 ms | ✓ |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | — ms | 150.9 ms | |
+| RSS after opening all three kinds | 856.2 MB | 169.4 MB | ✓ |
+| note switch p95 | — | 27.2 ms | ✗ |
+| omnibar open p95 | — | 39.0 ms | ✗ |
 
 Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar: native frame work, no web number (PN measures none).
