@@ -20,6 +20,7 @@
 from std.ffi import external_call, c_int, c_char, c_uint
 from std.sys import CompilationTarget
 from std.memory import Pointer
+from mojoui.clock import now_ns
 from std.memory.alloc import alloc, Layout
 from std.collections import Dict
 from std.os import getenv
@@ -317,6 +318,10 @@ struct FontEngine(Movable):
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
     var kern_round: String  # FONTTEXT_KERN_ROUND, read once (not per glyph)
+    var img_n: Int  # (diagnosis) glyph images rastered, the time in it (ns), runs shaped, the time in it (ns), so far
+    var img_ns: Int
+    var shape_n: Int
+    var shape_ns: Int
     var trace: Bool  # FONTTEXT_TRACE=1: each CoreText run's font and advances (diagnosis)
     var debug: Bool  # FONTTEXT_DEBUG, read once
     # the Mac: CoreText, CoreGraphics, CoreFoundation (by address, dlopen'd as on Linux)
@@ -386,6 +391,10 @@ struct FontEngine(Movable):
         # on the Mac unrounded (Chrome there positions glyphs on subpixels, as CoreText does)
         self.kern_round = getenv("FONTTEXT_KERN_ROUND", "exact" if CompilationTarget.is_macos() else "D")
         self.trace = getenv("FONTTEXT_TRACE") == "1"
+        self.img_n = 0
+        self.img_ns = 0
+        self.shape_n = 0
+        self.shape_ns = 0
         self.debug = getenv("FONTTEXT_DEBUG") != ""
         self.error = ""
         self.mac = List[Int]()
@@ -694,7 +703,11 @@ struct FontEngine(Movable):
 
     def _shape_part(mut self, mut run: Run, inst: Int, text: String, start: Int, length: Int, st: TextStyle, pen0: Float64) -> Float64:
         comptime if CompilationTarget.is_macos():
-            return self._mac_shape_part(run, inst, text, start, length, st, pen0)
+            var t_sh = Int(now_ns())
+            var r = self._mac_shape_part(run, inst, text, start, length, st, pen0)
+            self.shape_n += 1
+            self.shape_ns += Int(now_ns()) - t_sh
+            return r
         var buf = self.hb_buf
         _fn[def(Int) thin abi("C") -> NoneType](self.hb_buffer_clear_contents)(buf)
         _fn[def(Int, Int, c_int, c_uint, c_int) thin abi("C") -> NoneType](self.hb_buffer_add_utf8)(
@@ -1170,6 +1183,7 @@ struct FontEngine(Movable):
         var key = (((inst * 1048576 + gid) * 65536 + s64) << 2) | (subx & 3)
         if key in self.image_of:
             return self.image_of.get(key, 0)
+        var t_img = Int(now_ns())
         var img = GlyphImage()
         var font = self.ct_font(inst, size_dev)
         var color = self.faces[self.insts[inst].face].color
@@ -1219,6 +1233,8 @@ struct FontEngine(Movable):
         _ = rect
         self.images.append(img^)
         self.image_of[key] = len(self.images) - 1
+        self.img_n += 1
+        self.img_ns += Int(now_ns()) - t_img
         return len(self.images) - 1
 
     def _mac_metrics(mut self, st: TextStyle) -> LineMetrics:

@@ -35,6 +35,7 @@ from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
 from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
 from mojoui.gpu2d_merge import merge_runs, append_frame
+from mojoui.fonttext import engine as font_engine
 from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
 from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
 from max.algorithm import parallelize
@@ -1783,6 +1784,11 @@ struct MetalCanvas2D(Movable):
                         done = True
             if not done:
                 var lt0 = Int(now_ns())
+                var fe = font_engine()
+                var im0 = fe[].img_n
+                var ims0 = fe[].img_ns
+                var sh0 = fe[].shape_n
+                var shs0 = fe[].shape_ns
                 if self.merge:
                     fill_layers(self.scratch, sc, self.atlas, self.font, i, i + 1)
                     merge_runs(self.scratch, L.frame)
@@ -1800,7 +1806,8 @@ struct MetalCanvas2D(Movable):
                 L.built_resets = pg[].resets
                 self.rebuilt += 1
                 if self.layer_trace:  # (MOJOUI_LAYER_TRACE=1: each layer built, its ops and time; diagnosis)
-                    print("LAYER: built " + sc.layer_keys[i] + " ops " + String(span[1] - span[0]) + " known " + String(known) + " in " + String(Float64(Int(now_ns()) - lt0) / 1e6) + " ms", flush=True)
+                    print("LAYER: built " + sc.layer_keys[i] + " ops " + String(span[1] - span[0]) + " known " + String(known) + " in " + String(Float64(Int(now_ns()) - lt0) / 1e6) + " ms; glyphs rastered "
+                          + String(fe[].img_n - im0) + " in " + String(Float64(fe[].img_ns - ims0) / 1e6) + " ms, runs shaped " + String(fe[].shape_n - sh0) + " in " + String(Float64(fe[].shape_ns - shs0) / 1e6) + " ms", flush=True)
             L.dx = sc.layer_tx[i]
             L.dy = sc.layer_ty[i]
             L.k = sc.layer_tk[i]
