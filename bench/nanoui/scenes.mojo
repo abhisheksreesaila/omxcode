@@ -1,0 +1,236 @@
+# nanoui's hill-climb scenes (github.com/justrach/nanoui, hillclimb/src/scenes.zig) drawn by omxcode's GPU 2D renderer
+# (mojoui.gpu2d + the GL backend), headless (EGL device platform, no window), so the two can be raced on one machine.
+# Same rules as nanoui's harness: 900×640 points at 2x, 30 warm-up frames, 300 measured, 3 runs, the run with the
+# lowest median frame kept; every frame changes what it shows.
+#
+#   frame CPU = building the frame's Scene (the app's drawing code, positions computed by hand: mojoui has no layout
+#               engine, ROADMAP decision 10) + fill_batches + merge_runs (the renderer's CPU side)
+#   GPU       = GL2D.render (upload + draws + resolve) + glFinish, wall time
+#   cpu raster= execute_cpu: the same frame drawn by the CPU executor (single thread)
+#
+# Not like for like (stated in the results): mojoui's Scene has no Gaussian shadow, so the boxes' and cards' shadows
+# are a flat translucent rect (one instance each, the same count as nanoui's shadow instances, much cheaper pixels).
+#   pixi run mojo run -I . bench/nanoui/scenes.mojo [scene ...]   (HC_SHOT=dir writes the last frame, PNG)
+from std.math import sin
+from std.time import perf_counter_ns
+from std.os import getenv
+from std.sys import argv
+
+from mojoui.canvas import Surface, rgba
+from mojoui.text import Font
+from mojoui.scene import Scene
+from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_batches, execute_cpu
+from mojoui.gpu2d_merge import merge_runs
+from mojoui.gpu2d_gl import GL2D, headless_gl33
+from mojoui.png import encode_png
+from mojoui.fonttext import TextStyle, ALIGN_LEFT, ALIGN_RIGHT
+
+comptime W = 900
+comptime H = 640
+comptime K = 2.0
+comptime PW = 1800
+comptime PH = 1280
+comptime WARMUP = 30
+comptime FRAMES = 300
+comptime REPEAT = 3
+comptime FAMILY = "Noto Sans"
+comptime BG = 0  # set in main (rgba isn't comptime)
+
+
+def hsl(h: Float64) -> UInt32:
+    var sat = 0.7
+    var l = 0.55
+    var a = sat * min(l, 1 - l)
+
+    def f(n: Float64, hh: Float64, a: Float64, l: Float64) -> Int:
+        var kk = (n + hh / 30) % 12
+        var v = l - a * max(-1.0, min(min(kk - 3, 9 - kk), 1.0))
+        return Int(v * 255 + 0.5)
+
+    return rgba(f(0, h, a, l), f(8, h, a, l), f(4, h, a, l))
+
+
+def fmod(x: Float64, m: Float64) -> Float64:
+    return x - m * Float64(Int(x / m)) if x >= 0 else x - m * (Float64(Int(x / m)) - 1)
+
+
+def boxes(mut sc: Scene, frame: Int, t: Float64):
+    var shadow = rgba(0, 0, 0, 40)
+    for r in range(20):
+        for col in range(30):
+            var i = Float64(r * 30 + col)
+            var x = 10.0 + Float64(col) * 28
+            var y = 10.0 + Float64(r) * 28 + 6 * sin(t * 3 + i * 0.1)
+            sc.rect(x - 1, y + 1, 26, 26, shadow, 7)  # flat stand-in for a blur-4 shadow, y 2
+            sc.rect(x, y, 24, 24, hsl(fmod(t * 60 + i * 3, 360)), 6)
+
+
+def text(mut sc: Scene, frame: Int, t: Float64):
+    var st = TextStyle(FAMILY, 400, False, 13)
+    var ink = rgba(29, 29, 31)
+    for r in range(15):
+        for col in range(20):
+            var i = r * 20 + col
+            sc.run(st, String((frame * 7 + i * 13) % 10000), 10.0 + Float64(col) * 44, 10.0 + Float64(r) * 24 + 13, ink, ALIGN_LEFT)
+
+
+def row(mut sc: Scene, i: Int, y: Float64):
+    var ink = rgba(29, 29, 31)
+    sc.run(TextStyle(FAMILY, 400, False, 13), "Row " + String(i) + " — a line of a long list", 12, y + 18.5, ink, ALIGN_LEFT)
+    sc.run(TextStyle(FAMILY, 400, False, 12), String(i * 7 % 100), Float64(W) - 12, y + 18.5, ink, ALIGN_RIGHT)
+
+
+def scroll(mut sc: Scene, frame: Int, t: Float64):
+    """A plain column of 1000 rows, clipped, moving every frame: every row is drawn, as nanoui's scene lays out all
+    1000 (the renderer, not the app, decides what the clip hides)."""
+    var offset = fmod(t * 600, 28.0 * 1000 - 640)
+    sc.push_clip(0, 0, Float64(W), Float64(H))
+    for i in range(1000):
+        row(sc, i, Float64(i) * 28 - offset)
+    sc.pop_clip()
+
+
+def list(mut sc: Scene, frame: Int, t: Float64):
+    """A virtual list of 100 000 rows scrolled to another row each frame: only the rows in view are drawn."""
+    var first = (frame * 3) % (100_000 - 40)
+    for k in range(H // 28 + 1):
+        row(sc, first + k, Float64(k) * 28)
+
+
+def dashboard(mut sc: Scene, frame: Int, t: Float64):
+    var ink = rgba(29, 29, 31)
+    var white = rgba(255, 255, 255)
+    var shadow = rgba(0, 0, 0, 22)
+    var track = rgba(0xE0, 0xE0, 0xE5)
+    var blue = rgba(0x0A, 0x84, 0xFF)
+    for r in range(3):
+        for col in range(4):
+            var i = r * 4 + col
+            var v = 0.5 + 0.5 * sin(t * 2 + Float64(i))
+            var x = 16.0 + Float64(col) * 212
+            var y = 16.0 + Float64(r) * 142
+            sc.rect(x - 2, y + 3, 204, 134, shadow, 14)  # flat stand-in for a blur-16 shadow, y 4
+            sc.rect(x, y, 200, 130, white, 12)
+            sc.run(TextStyle(FAMILY, 400, False, 13), "Metric " + String(i), x + 14, y + 28, ink, ALIGN_LEFT)
+            sc.run(TextStyle(FAMILY, 700, False, 28), String(Int(v * 1000)), x + 14, y + 70, ink, ALIGN_LEFT)
+            sc.rect(x + 14, y + 86, 172, 6, track, 3)
+            sc.rect(x + 14, y + 86, 172 * v, 6, blue, 3)
+            sc.run(TextStyle(FAMILY, 400, False, 11), "updated " + String(frame % 60) + "s ago", x + 14, y + 113, ink, ALIGN_LEFT)
+
+
+def build(which: String, frame: Int) -> Scene:
+    var t = Float64(frame) / 120
+    var sc = Scene(PW, PH, K)
+    sc.begin_layer("ui")
+    sc.layer_transform(0, 0, K)
+    sc.fill(rgba(245, 245, 247))
+    if which == "boxes":
+        boxes(sc, frame, t)
+    elif which == "text":
+        text(sc, frame, t)
+    elif which == "scroll":
+        scroll(sc, frame, t)
+    elif which == "list":
+        list(sc, frame, t)
+    else:
+        dashboard(sc, frame, t)
+    return sc^
+
+
+def median(mut v: List[Float64]) -> Float64:
+    sort(v)
+    return v[len(v) // 2]
+
+
+def p95(mut v: List[Float64]) -> Float64:
+    sort(v)
+    return v[min(len(v) - 1, Int(Float64(len(v)) * 0.95))]
+
+
+def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: Int) raises -> List[Float64]:
+    """One run: [frame CPU median, p95, scene build median, batches median, GPU median, instances]."""
+    var built = Frame2D()
+    var f = Frame2D()
+    var frame_ms = List[Float64]()
+    var build_ms = List[Float64]()
+    var batch_ms = List[Float64]()
+    var gpu_ms = List[Float64]()
+    var ops = 0
+    for i in range(WARMUP + FRAMES):
+        var t0 = perf_counter_ns()
+        var sc = build(which, i)
+        var t1 = perf_counter_ns()
+        fill_batches(built, sc, atlas, font)
+        merge_runs(built, f)
+        var t2 = perf_counter_ns()
+        if not gl.render(f, tex, PW, PH):
+            raise Error("render: " + gl.why)
+        gl.finish()
+        var t3 = perf_counter_ns()
+        if i >= WARMUP:
+            frame_ms.append(Float64(t2 - t0) / 1e6)
+            build_ms.append(Float64(t1 - t0) / 1e6)
+            batch_ms.append(Float64(t2 - t1) / 1e6)
+            gpu_ms.append(Float64(t3 - t2) / 1e6)
+        ops = 0
+        for r in f.runs:
+            ops += r.count
+    var fm = frame_ms.copy()
+    return [median(frame_ms), p95(fm), median(build_ms), median(batch_ms), median(gpu_ms), Float64(ops)]
+
+
+def cpu_raster_ms(which: String, atlas: GlyphAtlas, font: Font) raises -> Float64:
+    """The CPU executor drawing the same frames (60 measured after 10: it is the slow path)."""
+    var px = List[UInt32](length=PW * PH, fill=0)
+    var s = Surface(Int(px.unsafe_ptr()), PW, PH, K)
+    var built = Frame2D()
+    var times = List[Float64]()
+    for i in range(70):
+        var sc = build(which, i)
+        fill_batches(built, sc, atlas, font)
+        var t0 = perf_counter_ns()
+        execute_cpu(built, atlas, s)
+        if i >= 10:
+            times.append(Float64(perf_counter_ns() - t0) / 1e6)
+    _ = len(px)
+    return median(times)
+
+
+def r3(v: Float64) -> String:
+    return String(round(v, 3))
+
+
+def main() raises:
+    var names = List[String]()
+    var args = argv()
+    for i in range(1, len(args)):
+        names.append(String(args[i]))
+    if len(names) == 0:
+        names = ["boxes", "text", "scroll", "list", "dashboard"]
+    var ctx = headless_gl33()
+    if ctx == 0:
+        raise Error("no headless GL 3.3 context")
+    var gl = GL2D()
+    if not gl.start(False):
+        raise Error("GL2D.start: " + gl.why)
+    print("omxcode gpu2d ·", gl.why, "·", FRAMES, "frames after", WARMUP, "of warm-up ·", W, "×", H, "at", K, "x · headless")
+    var font = Font()
+    var atlas = GlyphAtlas(font)
+    gl.upload_atlas(atlas)
+    var tex = gl.make_texture(PW, PH)
+    print("scene      frameCPU  p95     build   batches GPU     cpuRaster instances")
+    for n in names:
+        var best = run_scene(n, gl, atlas, font, tex)
+        for _ in range(REPEAT - 1):
+            var r = run_scene(n, gl, atlas, font, tex)
+            if r[0] < best[0]:
+                best = r^
+        var raster = cpu_raster_ms(n, atlas, font)
+        print(n, "\t", r3(best[0]), "\t", r3(best[1]), "\t", r3(best[2]), "\t", r3(best[3]), "\t", r3(best[4]), "\t", r3(raster), "\t", Int(best[5]))
+        var shot = getenv("HC_SHOT")
+        if shot != "":
+            var px = List[UInt32](length=PW * PH, fill=0)
+            _ = gl.read(tex, PW, PH, Int(px.unsafe_ptr()))
+            with open(shot + "/omx-" + n + ".png", "w") as fh:
+                fh.write_bytes(encode_png(px, PW, PH))
+    gl.delete(17, tex)
