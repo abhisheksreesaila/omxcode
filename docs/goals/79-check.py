@@ -246,13 +246,20 @@ def m1():
         if err:
             probs.append("ref at 2×: " + err)
         else:
-            out_mac, e = mac_run("fontcheck", [], {"PNOTE_FONTCHECK": "1", "FONTTEXT_REF": "{data}/textwidths.json",
+            # (D-7976, ruling A) the Mac's lines against Chrome on the Mac with the Mac's fonts (web faces and fallback
+            # scripts alike): docs/goals/79/macwidths.py measures them in the Mac's own Chrome; the file says which Chrome
+            mw = REF_MAC / "textwidths-macchrome.json"
+            rw = run(["python3", str(ROOT / "docs/goals/79/macwidths.py"), str(FIXTURE), str(mw)], 600)
+            if rw.returncode or not mw.exists():
+                probs.append("Mac: Chrome on the Mac didn't measure the lines: " + tail(rw.stdout + rw.stderr, 300))
+                return "FAIL", "; ".join(probs[:12])
+            out_mac, e = mac_run("fontcheck", [], {"PNOTE_FONTCHECK": "1", "FONTTEXT_REF": "{data}/textwidths-macchrome.json",
                                                     "FONTTEXT_FIXTURE": "{data}/fixture.json", "FONTTEXT_DPR": str(MAC_DPR)},
-                                 [REF_MAC / "textwidths.json", FIXTURE])
+                                 [mw, FIXTURE])
             if e:
                 probs.append("Mac: " + e)
             else:
-                pm, worst_m, crisp_m = judge_fonttext(out_mac, json.loads((REF_MAC / "textwidths.json").read_text())["widths"], "Mac")
+                pm, worst_m, crisp_m = judge_fonttext(out_mac, json.loads(mw.read_text())["widths"], "Mac")
                 probs += pm
                 mac_note = f"; Mac worst {worst_m:.2f} px, crisp {min(crisp_m) if crisp_m else 0:.2f}"
     if probs:
@@ -1215,7 +1222,7 @@ def m7():
                 data.mkdir(parents=True, exist_ok=True)
                 # (fixed 11-22: the Mac half had never run: no `boxes:` step exists (pnote writes its boxes after every frame to
                 # PNOTE_BOXES, as on Linux) and files written to {data} never came back: {out} is fetched into the report)
-                out, e = mac_run(f"look-{s}", ["wait:1200"] + screen_steps(s, REF_MAC) + ["wait:600", "render:desk={out}/" + f"{s}.png"],
+                out, e = mac_run(f"look-{s}", ["wait:800", "window:1440x900", "wait:600"] + screen_steps(s, REF_MAC) + ["wait:600", "render:desk={out}/" + f"{s}.png"],
                                  {"PNOTE_DB": "{data}/pn.db", "PNOTE_SKIN": "night" if s.endswith("night") else "crayon" if s.endswith("crayon") else "paper",
                                   "PNOTE_CHROME": "mac", "PNOTE_BOXES": "{out}/" + f"{s}.boxes.json", "MOJOUI_RENDER_SCALE": str(MAC_DPR)}, [REF_MAC / "pn.db"])
                 if e:

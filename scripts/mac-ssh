@@ -23,7 +23,7 @@ out=build/mac-ssh/$app-$stamp
 mkdir -p "$out"
 tar -czf "$out/src.tar.gz" --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
     mojoui themes hosts "examples/$app" apple vendor fonts bridge/mac_ime.m
-"${ssh_[@]}" "mkdir -p $remote/data && rm -f $remote/data/*.db-wal $remote/data/*.db-shm"  # (a database copied in fresh must not meet the last run's write-ahead log: SQLite would apply it)
+"${ssh_[@]}" "mkdir -p $remote/data && find $remote/data -maxdepth 1 -type f \\( -name '*.db-wal' -o -name '*.db-shm' \\) -exec rm -f {} +"  # (a database copied in fresh must not meet the last run's write-ahead log: SQLite would apply it)
 grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > "$out/steps.txt"  # (a file: ssh's remote shell would split the steps at each ;)
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$out/env.txt" "$@" "$host:$remote/data/"

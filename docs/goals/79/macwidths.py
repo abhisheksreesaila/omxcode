@@ -60,7 +60,9 @@ const lines = {json.dumps(lines)};
         sys.exit(1)
     j = dom.index("</pre>", i)
     widths = json.loads(dom[i + len('<pre id="out">WIDTHS:'):j])
-    pathlib.Path(out).write_text(json.dumps({"dpr": 2, "widths": widths, "by": "Chrome on the Mac (macwidths.py)"}, indent=1))
+    widths = {k: v for k, v in widths.items() if not k.startswith("_")}
+    ver = subprocess.run(ssh + [f'"{chrome}" --version'], capture_output=True, text=True, timeout=60).stdout.strip()
+    pathlib.Path(out).write_text(json.dumps({"dpr": 2, "widths": widths, "by": f"{ver} on the Mac ({host.split('@')[-1]}), macwidths.py"}, indent=1))
     print("MACWIDTHS: " + json.dumps(widths))
 
 

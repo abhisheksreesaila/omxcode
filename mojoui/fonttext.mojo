@@ -8,8 +8,9 @@
 #   var run = shape(st, "Quick note")                           # glyphs, positions and the width, in layout px
 #   draw_run(surface, run, x_dev, baseline_dev, k, color)       # rasterized at k device px per layout px
 #
-# Layout follows headless Chromium on Linux (D-7903): advances are taken at the layout size and rounded to whole layout
-# pixels per glyph (it hints advances; no subpixel positioning), and each glyph lands on a whole device pixel. A
+# Layout follows Chromium on the same machine (D-7976): on Linux (D-7903) advances are taken at the layout size and
+# rounded to whole layout pixels per glyph (it hints advances; no subpixel positioning), and each glyph lands on a whole
+# device pixel; on the Mac advances stay unrounded, as Chrome there lays them out (D-7981). A
 # zoomed canvas asks for its glyphs at the zoomed device size: re-rasterized, never a bitmap scaled.
 #
 # Everything lives in one FontEngine per process (mojoui.shared slot SLOT_FONTS): the libraries' functions by address
@@ -371,7 +372,9 @@ struct FontEngine(Movable):
         self.image_of = Dict[Int, Int]()
         var h = getenv("FONTTEXT_HINT", "light")
         self.hint = FT_LOAD_NO_HINTING if h == "none" else (0 if h == "full" else FT_LOAD_TARGET_LIGHT)
-        self.kern_round = getenv("FONTTEXT_KERN_ROUND", "D")
+        # (D-7981, ruling A) each machine follows its own Chromium: on Linux advances rounded to whole layout px (D-7903),
+        # on the Mac unrounded (Chrome there positions glyphs on subpixels, as CoreText does)
+        self.kern_round = getenv("FONTTEXT_KERN_ROUND", "exact" if CompilationTarget.is_macos() else "D")
         self.debug = getenv("FONTTEXT_DEBUG") != ""
         self.error = ""
         self.mac = List[Int]()
@@ -1036,8 +1039,9 @@ struct FontEngine(Movable):
         return v
 
     def _mac_shape_part(mut self, mut run: Run, inst: Int, text: String, start: Int, length: Int, st: TextStyle, pen0: Float64) -> Float64:
-        """A stretch of one face shaped by CoreText (CTLine: kerning, ligatures, marks), its advances taken as Chromium
-        does (D-7905): the face's own advance rounded, plus the kerning CoreText adds, rounded again."""
+        """A stretch of one face shaped by CoreText (CTLine: kerning, ligatures, marks), its advances taken as Chrome on the
+        Mac takes them (D-7981: unrounded); FONTTEXT_KERN_ROUND=D gives Linux Chromium's rule (D-7905: the face's own
+        advance rounded, plus the kerning CoreText adds, rounded again)."""
         var part = String(text[byte=start:start + length])
         var cfs = self._cfstr(part)
         var font = self.ct_font(inst, st.size)
@@ -1077,7 +1081,7 @@ struct FontEngine(Movable):
                 var fa = Float64(self._mac_advance_units(rinst, gid)) * rk
                 var kern = adv[2 * g] - fa
                 var a = fa + kern
-                if not st.exact:
+                if not st.exact and self.kern_round != "exact":  # (D-7981: on the Mac, Chrome's advances aren't rounded)
                     var ar = Float64(Int(fa + 0.5)) if fa > 0 else 0.0
                     var t = ar + kern
                     a = Float64(Int(t + 0.5)) if t >= 0 else -Float64(Int(-t + 0.5))

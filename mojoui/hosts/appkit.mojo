@@ -11,7 +11,7 @@ from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
 from mojoui.browser import open_url as browser_open_url
-from mojoui.view import FIELD_SECRET, IME_COMMIT, IME_PREEDIT, PASTE
+from mojoui.view import FIELD_SECRET, IME_COMMIT, IME_PREEDIT, PASTE, HOVER
 from mojoui.shared import put_shared, get_shared
 
 comptime SLOT_MAC_IME = 238  # (D-7979) mojoui.shared slot: 1 when the canvas class is an NSTextInputClient (bridge/mac_ime.m)
@@ -3768,6 +3768,18 @@ def pen_pressure(event: Int) -> Float64:
     return min(max(Float64(msg[Float32](event, "pressure")), 0.0), 1.0)
 
 
+def on_canvas_mouse_moved[A: App](view: Int, cmd: Int, event: Int) abi("C"):
+    """(goal 79) The pointer moved over the canvas, no button held: HOVER there (apps draw hover states), as GTK's motion."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var at = event_point(view, event)
+    var b = msg[CGRect](view, "bounds")
+    if at.x < 0 or at.y < 0 or at.x > b.width or at.y > b.height:
+        host[].canvas_send(t[1], HOVER, -1, -1, 0, 0, 1, t[0])
+        return
+    host[].canvas_send(t[1], HOVER, at.x, at.y, 0, 0, 1, t[0])
+
+
 def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     """The button goes down: PRESS there at once (GTK's drag-begin), or DOUBLE on a second click."""
     var t = from_tag(view)
@@ -4740,6 +4752,7 @@ def run_step[A: App](host_addr: Int, step: String):
             var x = nums[0] / 1000.0 * b.width
             var y = nums[1] / 1000.0 * b.height
             host[].canvases[k].moved = False
+            host[].canvas_send(node, HOVER, x, y, 0, 0, 1, host_addr)  # (the pointer got there first, as GTK's tapat: hover states)
             host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
             host[].canvas_send(node, TAP, x, y, 0, 0, 1, host_addr)
         elif len(nums) >= 2:  # drag:K=dx,dy from (10, 10); dragat:K=fx,fy,dx,dy from (fx, fy) thousandths: press, two moves (GTK's)
@@ -5504,6 +5517,7 @@ def run[A: App]() -> c_int:
     add_method(canvas, "acceptsFirstResponder", accepts_first_responder, "B@:")
     add_method(canvas, "acceptsFirstMouse:", accepts_first_mouse, "B@:@")
     add_method(canvas, "mouseDown:", on_canvas_mouse_down[A], "v@:@")
+    add_method(canvas, "mouseMoved:", on_canvas_mouse_moved[A], "v@:@")
     add_method(canvas, "mouseDragged:", on_canvas_mouse_dragged[A], "v@:@")
     add_method(canvas, "mouseUp:", on_canvas_mouse_up[A], "v@:@")
     add_method(canvas, "keyDown:", on_canvas_key[A], "v@:@")
@@ -5553,6 +5567,7 @@ def run[A: App]() -> c_int:
         _ = msg(host[].window, "setIgnoresMouseEvents:", 1)
         _ = msg(host[].window, "orderBack:", 0)
     else:
+        _ = msg(host[].window, "setAcceptsMouseMovedEvents:", 1)  # (the canvas's mouseMoved: → HOVER)
         _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
     if forced != "":  # (a window larger than its screen was shrunk to fit: the runner's screen is 1024 pt wide)
         _ = msg(host[].window, "setContentSize:", Float64(size[0]), Float64(size[1]))
