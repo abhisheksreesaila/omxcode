@@ -77,7 +77,6 @@
   .cols { grid-template-columns: 1fr; } .cols .bar { grid-column: 1; }
   .phones { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 }
-@media (prefers-reduced-motion: reduce) { video[autoplay] { animation: none; } }
 </style>
 <noscript><style>.rv { opacity: 1; transform: none; }</style></noscript>
 </head>
@@ -96,10 +95,10 @@
     <h1 class="rise" data-words data-step="0" data-d0="120">omxome</h1>
     <p class="lede rise"><span data-words data-step="45" data-d0="380">Ask it out loud.</span> <span class="two" data-words data-step="35" data-d0="560">It shows you.</span></p>
     <p class="lede rise">A voice assistant for the kitchen counter. Your day sits on a Stage of live tiles. Ask a question and the chat bar grows into a visual explanation, points at what it means, then folds back to your tiles.</p>
-    <p class="needs rise">Linux and the Mac today · iPhone, iPad and Android soon · MIT licence</p>
+    <p class="needs rise">Linux today · the Stage on the Mac · iPhone, iPad and Android soon · MIT licence</p>
   </div>
   <div class="film rv"><video src="img/omx/clip-tv.mp4" poster="img/omx/clip-tv.jpg" autoplay muted loop playsinline preload="metadata" aria-label="omxome: a question typed in the chat bar; the bar grows into the TV with a word card, a ring points at its parts, then the TV folds back to the tiles"></video></div>
-  <p class="srcline rv">the real app on Linux, answering with a local model</p>
+  <p class="srcline rv">the real app on Linux, answering with a local model · its thinking shown at 4×</p>
 </section>
 
 <section id="story" style="padding-top:80px">
@@ -115,9 +114,9 @@
       <div class="rv"><div class="k">01</div><h3>Glance</h3><p>From across the room, for two seconds: what's next, what changed, what needs you.</p></div>
       <div class="rv"><div class="k">02</div><h3>Talk</h3><p>A real back and forth that remembers what you said a minute ago.</p></div>
       <div class="rv"><div class="k">03</div><h3>Show me</h3><p>The answer as something to look at: a card, a diagram, a map, pointed at as it talks.</p></div>
-      <div class="rv"><div class="k">04</div><h3>Check</h3><p>See what it did and confirm with one tap, without reading a paragraph.</p></div>
+      <div class="rv"><div class="k">04</div><h3>Check</h3><p>When it changes something (a to-do added, a job finished), the card shows you, so you can see it got it right.</p></div>
     </div>
-    <p class="punch rv">Most assistants pick one. <span class="two">omxome does all four on one screen, with no modes to switch: what you say picks it, and quiet folds it back.</span></p>
+    <p class="punch rv">Most assistants pick one. <span class="two">omxome puts all four on one screen, with no modes to switch: what you ask picks it, and quiet folds it back.</span></p>
   </div>
 </section>
 
@@ -151,6 +150,7 @@
     </div>
     <div class="shot rv"><video src="img/omx/clip-tv.mp4" poster="img/omx/clip-tv.jpg" autoplay muted loop playsinline preload="metadata" aria-label="The chat bar grows into the TV, the ring walks the card, the TV folds back"></video></div>
   </div>
+  <div class="wrap"><p class="srcline rv">the real app with the local model: its thinking shown at 4×, the rest in real time · tap marks drawn in</p></div>
 </section>
 
 <section id="tiles">
@@ -158,11 +158,12 @@
     <div>
       <div class="eyebrow rv">Live tiles</div>
       <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Tiles that know <span class="two">what matters now.</span></h2>
-      <p class="body rv">Rain before pickup? The weather leaves the quiet column and takes the big tile, with an umbrella and what to do about it. Game night? A pennant on the game card. When the moment passes, the tile gives its place back, moving like water, never jumping.</p>
-      <p class="body rv">There's no theme picker: omxome notices the day (a school day, a game, Thanksgiving, rain) and hangs one small charm on the card it's about. Drag a tile to reorder it, pull a corner to resize it, drop it on Pinned to keep it. Your own size always beats urgency.</p>
+      <p class="body rv">When something becomes urgent, its tile takes the big spot: rain before pickup moves the weather out of the quiet column, with what to do about it. When the moment passes, the tile gives its place back, moving like water, never jumping. The assistant moves tiles too: it can promote one, add one or change what it says, and the rest stay where they are.</p>
+      <p class="body rv">Instead of themes, the Stage hangs one small charm on the card a day is about: an umbrella for rain, a pennant for game night, a backpack for school. Drag a tile to reorder it, pull a corner to resize it, drop it on Pinned to keep it. Your own size always beats urgency.</p>
     </div>
     <div class="shot rv"><video src="img/omx/clip-tiles.mp4" poster="img/omx/clip-tiles.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Live tiles: rain is coming and the weather tile grows onto the stage with an umbrella charm; then game night with a pennant"></video></div>
   </div>
+  <div class="wrap"><p class="srcline rv">the Stage demo with sample data: each moment picked with its “Try a day” buttons; omxome noticing the day by itself comes next · tap marks drawn in</p></div>
 </section>
 
 <section id="cards">
@@ -176,13 +177,14 @@
     </div>
     <div class="shot rv"><video src="img/omx/clip-cards.mp4" poster="img/omx/clip-cards.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Asked how a heat pump works, the model builds an isometric diagram card and the ring walks its parts"></video></div>
   </div>
+  <div class="wrap"><p class="srcline rv">the real app with the local model: its thinking shown at 6×, the reply's words streaming in cut, the ring's walk in real time</p></div>
 </section>
 
 <section id="hybrid" class="center">
   <div class="wrap">
     <div class="eyebrow rv">Hybrid intelligence</div>
     <h2 class="rv">Local when you want it. <span class="two">Your subscription when you need it.</span></h2>
-    <p class="lede rv">Most of the time, everything happens on your own machine. When you want a bigger brain for one question, ask for it by name, and it uses a subscription you already have.</p>
+    <p class="lede rv">Most of the time, everything happens on your own machine. When you want a bigger brain for one question, ask for it by name, and it uses a subscription you already have: your Claude account today, others to come.</p>
     <div class="lanes">
       <div class="local rv"><div class="k">● local · most of the time</div><h3>On your GPU</h3><p>Qwen3.8-27B runs inside omxome's own process: no server to call, no browser in between. Hearing (Parakeet), speaking (Kokoro) and knowing when you've stopped talking (Silero) run here too. The model keeps the conversation warm on the GPU between turns.</p></div>
       <div class="cloud rv"><div class="k">● your subscription · when you ask</div><h3>Ask for Claude</h3><p>Say “ask Claude…” and that one question goes out through your own Claude sign-in. The whole screen gets an orange frame while it does, so you always know. Only your words leave, never your history, files or camera; anything that looks like a password stays home; and every request is written down first.</p></div>
@@ -206,7 +208,7 @@
       <div class="plats rv"><span><i></i>Linux</span><span><i></i>Mac</span><span class="soon"><i></i>iPhone and iPad · soon</span><span class="soon"><i></i>Android · soon</span></div>
     </div>
     <div class="shot rv" style="margin-top:48px"><img src="img/omx/mac-heatpump.jpg" alt="The Stage on a Mac at night: the heat pump diagram in the TV, the conversation beside it"></div>
-    <p class="srcline rv" style="text-align:center">on a Mac (M4), at night</p>
+    <p class="srcline rv" style="text-align:center">the Stage on a Mac (M4), at night · on the Mac the Stage runs natively today; the voice and the model run on Linux first</p>
     <div class="phones">
       <div class="shot rv"><img src="img/omx/phone-home.jpg" alt="The Stage at phone width: today and pinned stacked above the traffic tile"></div>
       <div class="shot rv"><img src="img/omx/phone-tv.jpg" alt="At phone width: the TV with the ephemeral card above the conversation"></div>
@@ -230,6 +232,7 @@
     <div class="fine"><span>omxome · built on omxcode · MIT licence · Mojo is a trademark of Modular Inc.; Claude is a trademark of Anthropic. omxome is an independent project, not affiliated with or endorsed by either</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
   </div>
 </footer>
+<script>if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelectorAll("video[autoplay]").forEach(v => { v.removeAttribute("autoplay"); v.pause(); });</script>
 <script src="site.js"></script>
 <script src="omxqua/src/omxqua.js" defer></script>
 </body>
