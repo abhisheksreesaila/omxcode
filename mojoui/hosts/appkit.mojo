@@ -834,7 +834,7 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == CANVAS:
             # A MojoCanvas (an NSImageView whose scrollWheel: is Mojo) showing the app's pixels;
             # pan, pinch and click recognisers call back into it.
-            w = msg(msg(cls("MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))
+            w = msg(msg(cls("MojoPassCanvas" if node.size == 2 else "MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))  # (.passthrough(): presses go under it)
             _ = msg(w, "setImageScaling:", 1)  # NSImageScaleAxesIndependently: the pixels fill the view
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             for orientation in range(2):  # its size comes from the layout, never from its picture
@@ -1098,6 +1098,9 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(child, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
                 _ = msg(w, "addSubview:", child)
                 if k == 0:  # the base fills the overlay
+                    for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
+                        _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+                elif self.rt.shown.nodes[c].fills and self.rt.shown.nodes[c].grows:  # a layer that covers the whole overlay (.fill().grow(): the Stage's TV box, mojoui.orb.RimView, the cloud frame), as GTK's (D-7893)
                     for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
                         _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
                 elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the whole width at an edge, no margin (mojoui.stage's TV, D-6711)
@@ -3406,6 +3409,10 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     host[].apply(d, t[0])
 
 
+def hit_nothing(view: Int, cmd: Int, x: Float64, y: Float64) abi("C") -> Int:
+    return 0  # (hitTest: answers nil: a pass-through canvas is never the view a press lands on; the views under it are)
+
+
 def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
     return 1  # a Board's content and a scroll view's clip count y from the top, like every other host
 
@@ -4367,6 +4374,9 @@ def run[A: App]() -> c_int:
     add_method(canvas, "mouseUp:", on_canvas_mouse_up[A], "v@:@")
     add_method(canvas, "keyDown:", on_canvas_key[A], "v@:@")
     register_class(canvas)
+    var pass_canvas = new_class("MojoPassCanvas", "MojoCanvas")  # .passthrough(): it only shows; presses go to what's under it (GTK's can-target off)
+    add_method(pass_canvas, "hitTest:", hit_nothing, "@@:{CGPoint=dd}")
+    register_class(pass_canvas)
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top
     add_method(board, "isFlipped", is_flipped, "B@:")
     register_class(board)
