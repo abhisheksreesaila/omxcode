@@ -17,7 +17,10 @@ const HERE = path.dirname(new URL(import.meta.url).pathname)
 const { chromium } = await import(path.join(PN, 'node_modules/playwright/index.mjs'))
 const [src, mode, runsArg] = process.argv.slice(2)
 const RUNS = Number(runsArg || 5)
-const CHROMIUM = fs.existsSync('/usr/lib/chromium/chromium') ? '/usr/lib/chromium/chromium' : 'chromium'
+// (D-7988) on macOS the Mac's own Chrome (ruling A); PN's own Mac launcher is a WKWebView window with no DevTools port,
+// so only the chromium mode runs there
+const MAC_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const CHROMIUM = process.platform === 'darwin' ? MAC_CHROME : fs.existsSync('/usr/lib/chromium/chromium') ? '/usr/lib/chromium/chromium' : 'chromium'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const WATCH = `new Promise((res) => { const had = !!(document.querySelector('#island-title')?.textContent || '').trim()
   const t = () => { const e = document.querySelector('#island-title'); if (e && e.textContent.trim()) requestAnimationFrame(() => requestAnimationFrame(() => res({ at: performance.timeOrigin + performance.now(), had }))); else requestAnimationFrame(t) }; t() })`
@@ -39,6 +42,10 @@ async function marker(port, deadline) {
 
 function killTree(child) { try { process.kill(-child.pid, 'SIGTERM') } catch {} setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL') } catch {} }, 1500) }
 
+if (process.platform === 'darwin' && mode === 'desktop') {
+  console.log('WEBCOLD desktop median: none (not measurable on macOS: PN\'s Mac launcher is a WKWebView window, no DevTools port to read its first paint)')
+  process.exit(0)
+}
 const times = []
 let api
 if (mode === 'chromium') {

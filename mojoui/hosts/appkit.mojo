@@ -384,6 +384,7 @@ struct AppKitHost[A: App](Movable):
     var g2d_pb: List[CGRect]
     var g2d_pt: List[Int]  # (and when each was committed, ns)
     var g2d_shown_ms: List[Float64]  # commit → handed to Core Animation, per frame shown that way (framebench reads and clears it)
+    var first_draw_age_ms: Float64  # (D-7988) the process's age when its first canvas picture was drawn (firstscreen:)
     var g2d_done: List[Float64]  # the GPU time of each completed frame, in commit order (framebench reads and clears it)
     var g2d_notify: Bool  # the renderer calls on_gpu2d_done when a committed frame completes
     var g2d_failed: Int  # committed GPU frames the GPU didn't complete (counted as GPU frames when committed: framebench moves them to cpu_frames)
@@ -474,6 +475,7 @@ struct AppKitHost[A: App](Movable):
         self.g2d_pt = List[Int]()
         self.g2d_shown_ms = List[Float64]()
         self.g2d_done = List[Float64]()
+        self.first_draw_age_ms = -1
         self.g2d_notify = False
         self.g2d_failed = 0
         self.g2d_parts = List[Float64](length=13, fill=0)
@@ -3097,6 +3099,15 @@ struct AppKitHost[A: App](Movable):
             self.report.note("frames: timer started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO TIMER") + ")")
 
     def draw_canvas(mut self, k: Int, self_addr: Int):
+        """Asks the app to paint canvas k at its real pixel size (if its size or version changed); the first picture
+        drawn notes the process's age (firstscreen:, D-7988)."""
+        var drawn0 = self.canvases[k].drawn
+        var g0 = self.g2d_frames
+        self._draw_canvas(k, self_addr)
+        if self.first_draw_age_ms < 0 and k < len(self.canvases) and (self.canvases[k].drawn != drawn0 or self.g2d_frames != g0):
+            self.first_draw_age_ms = process_age_ms()
+
+    def _draw_canvas(mut self, k: Int, self_addr: Int):
         """Asks the app to paint canvas k at its real pixel size (if its size or version changed)."""
         var view = self.canvases[k].view
         var node = self.canvases[k].node
@@ -3982,6 +3993,68 @@ def ime_install[A: App](canvas_class: Int) -> Bool:
     call(canvas_class, fn_address(ime_marked_cb[A]), fn_address(ime_insert_cb[A]), fn_address(ime_unmark_cb[A]),
          fn_address(ime_marked_range_cb[A]), fn_address(ime_selected_range_cb[A]), fn_address(ime_rect_cb[A]), fn_address(ime_command_cb[A]))
     return True
+
+
+def process_age_ms() -> Float64:
+    """How long ago this process started (ms): its start time from proc_pidinfo (PROC_PIDTBSDINFO's pbi_start_tvsec and
+    _tvusec at bytes 120 and 128 of struct proc_bsdinfo) against the wall clock; -1 when it can't be read."""
+    var buf = List[UInt64](length=17, fill=0)  # (136 bytes)
+    var n = external_call["proc_pidinfo", c_int](c_int(external_call["getpid", c_int]()), c_int(3), UInt64(0), Int(buf.unsafe_ptr()), c_int(136))
+    if Int(n) < 136:
+        return -1.0
+    var tv = List[Int](length=2, fill=0)
+    _ = external_call["gettimeofday", c_int](Int(tv.unsafe_ptr()), 0)
+    var start_us = Int(buf[15]) * 1_000_000 + Int(buf[16])
+    var now_us = tv[0] * 1_000_000 + (tv[1] & 0xFFFFFFFF)
+    return Float64(now_us - start_us) / 1000.0
+
+
+def rss_mb() -> Float64:
+    """This process's resident memory (MB): proc_pidinfo's PROC_PIDTASKINFO (pti_resident_size, bytes 8–16)."""
+    var buf = List[UInt64](length=12, fill=0)  # (struct proc_taskinfo: 96 bytes)
+    var n = external_call["proc_pidinfo", c_int](c_int(external_call["getpid", c_int]()), c_int(4), UInt64(0), Int(buf.unsafe_ptr()), c_int(96))
+    if Int(n) < 96:
+        return -1.0
+    return Float64(Int(buf[1])) / 1048576.0
+
+
+def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
+    """noteswitch:N / omnibar:N / openall: as GTK's (D-7988): App.bench(first canvas, "bench:<what>") changes the app's
+    state N times; each is timed from the call through its frame: the app's step and view, the canvas drawn as the tick
+    draws it, AppKit's display and commit, and the GPU's time on it. Prints `<LABEL>: n= p50= p95= max=` (ms)."""
+    var host = host_at[A](host_addr)
+    if len(host[].canvases) == 0:
+        print(label + ": no canvas", flush=True)
+        return
+    bench_settle[A](host_addr, 500_000_000)
+    var times = List[Float64]()
+    for _ in range(n):
+        var node = host[].canvases[0].node
+        var t0 = Int(now_ns())
+        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        var d = host[].rt.refresh()
+        host[].apply(d, host_addr)
+        var ev = Float64(Int(now_ns()) - t0) / 1e6
+        var done0 = len(host[].g2d_done)
+        var t1 = Int(now_ns())
+        var s0 = slept_ms(host[].g2d)
+        if len(host[].canvases) > 0:
+            host[].g2d_defer = True
+            host[].draw_canvas(0, host_addr)
+            host[].g2d_defer = False
+        _ = msg(host[].window, "layoutIfNeeded")
+        _ = msg(host[].window, "displayIfNeeded")
+        host[].finish_frame()
+        _ = msg(cls("CATransaction"), "flush")
+        var dm = Float64(Int(now_ns()) - t1) / 1e6 - (slept_ms(host[].g2d) - s0)
+        host[].finish_gpu2d(0)
+        var gms = 0.0
+        while len(host[].g2d_done) > done0:
+            gms += host[].g2d_done.pop()
+        times.append(ev + dm + gms)
+        bench_settle[A](host_addr, 300_000_000)
+    print(label + ": n=" + String(len(times)) + " p50=" + one_decimal(pct(times, 0.5)) + " p95=" + one_decimal(pct(times, 0.95))
+          + " max=" + one_decimal(pct(times, 1.0)), flush=True)
 
 
 def bench_settle[A: App](host_addr: Int, ns: Int):
@@ -5088,6 +5161,16 @@ def run_step[A: App](host_addr: Int, step: String):
                 host[].canvas_send(node, WHEEL, b.width / 2, b.height / 2, -dx * 40.0, -dy * 40.0, 1, host_addr)
             else:
                 host[].canvas_send(node, ZOOM, b.width / 2, b.height / 2, 0, 0, 2.0 ** (-dy / 4.0), host_addr)
+    elif verb == "firstscreen":  # firstscreen: the process's age when its first canvas picture was drawn and shown (as GTK's, D-7988)
+        print("FIRSTSCREEN: " + String(round(host[].first_draw_age_ms, 1)), flush=True)
+    elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its drawn frame
+        app_step_bench[A](host_addr, "NOTESWITCH", "switch", max(to_int(rest), 1))
+    elif verb == "omnibar":  # omnibar:N: App.bench("bench:omnibar") N times, each to its drawn frame
+        app_step_bench[A](host_addr, "OMNIBAR", "omnibar", max(to_int(rest), 1))
+    elif verb == "openall":  # openall: App.bench("bench:openall") (a note of each kind in turn), to the frame
+        app_step_bench[A](host_addr, "OPENALL", "openall", 3)
+    elif verb == "rss":  # rss: this process's resident memory (MB), as the kernel reports it (proc_pidinfo)
+        print("RSS: " + String(round(rss_mb(), 1)), flush=True)
     elif verb == "appbench":  # appbench:K=<name>: the app readies a bench step on canvas K (App.bench "bench:<name>"), untimed, as GTK's (D-7984)
         var node = canvas_node_at(host[], kv[0])
         if node < 0:

@@ -1,7 +1,9 @@
 // Goal 79 M6: the web Personal Note's memory after opening a note of each kind (page, canvas, mind map), as the native
 // app's `rss:` is read: Chromium's whole process tree (browser, renderer, GPU, utilities) plus the app's Python API, in MB
 // of resident memory (/proc/<pid>/status VmRSS). Its own dist/ build, a scratch copy of the reference's database.
-// Run from ~/Projects/personalnotev2:  node <mojo-ui>/docs/goals/79/webmem.mjs <pn.db> [--gpu]
+// Run from ~/Projects/personalnotev2:  node <mojo-ui>/docs/goals/79/webmem.mjs <pn.db> [--gpu] [--dpr=N]
+// (D-7988) On macOS: resident memory by `ps -o rss=`, and the Mac's own Chrome (PW_CHANNEL, default chrome; ruling A) with
+// ANGLE on Metal for --gpu (Vulkan there falls back to software, D-7986).
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,6 +12,9 @@ const PN = process.cwd()
 const { chromium } = await import(path.join(PN, 'node_modules/playwright/index.mjs'))
 const src = process.argv[2]
 const gpu = process.argv.includes('--gpu')
+const MAC = process.platform === 'darwin'
+const dprArg = process.argv.find((a) => a.startsWith('--dpr='))
+const DPR = dprArg ? Number(dprArg.slice(6)) : 1.6
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pn-mem-'))
 fs.copyFileSync(src, path.join(scratch, 'v.db'))
 const PORT = 4997
@@ -17,10 +22,12 @@ const api = spawn('.venv/bin/python', ['-m', 'uvicorn', 'main:app', '--host', '1
   { env: { ...process.env, PERSONAL_NOTE_DB: path.join(scratch, 'v.db'), PERSONAL_NOTE_PLUGINS_DIR: path.join(scratch, 'plugins') }, stdio: 'ignore' })
 process.on('exit', () => { try { api.kill() } catch {} })
 for (let i = 0; i < 200; i++) { try { if ((await fetch(`http://127.0.0.1:${PORT}/api/notebooks`)).ok) break } catch {} await new Promise((r) => setTimeout(r, 150)) }
-const rss = (pid) => { try { return Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))[1]) / 1024 } catch { return 0 } }
+const rss = (pid) => { if (MAC) { try { return Number(execSync(`ps -o rss= -p ${pid}`, { encoding: 'utf8' }).trim()) / 1024 } catch { return 0 } } try { return Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))[1]) / 1024 } catch { return 0 } }
 const tree = (pid) => { let out = [pid]; try { for (const c of execSync(`pgrep -P ${pid}`, { encoding: 'utf8' }).split('\n').filter(Boolean)) out = out.concat(tree(Number(c))) } catch {} return out }
-const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage', ...(gpu ? ['--enable-gpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] : [])] })
-const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.6 })).newPage()
+const browser = MAC
+  ? await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || 'chrome', args: gpu ? ['--use-angle=metal', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'] : [] })
+  : await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage', ...(gpu ? ['--enable-gpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] : [])] })
+const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR })).newPage()
 await page.goto(`http://127.0.0.1:${PORT}/notes`)
 await page.locator('#island-title').waitFor()
 await page.waitForTimeout(1500)

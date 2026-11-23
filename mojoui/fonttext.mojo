@@ -310,6 +310,7 @@ struct FontEngine(Movable):
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
     var kern_round: String  # FONTTEXT_KERN_ROUND, read once (not per glyph)
+    var trace: Bool  # FONTTEXT_TRACE=1: each CoreText run's font and advances (diagnosis)
     var debug: Bool  # FONTTEXT_DEBUG, read once
     # the Mac: CoreText, CoreGraphics, CoreFoundation (by address, dlopen'd as on Linux)
     var mac: List[Int]  # function addresses, by the _M_* indices below
@@ -375,6 +376,7 @@ struct FontEngine(Movable):
         # (D-7981, ruling A) each machine follows its own Chromium: on Linux advances rounded to whole layout px (D-7903),
         # on the Mac unrounded (Chrome there positions glyphs on subpixels, as CoreText does)
         self.kern_round = getenv("FONTTEXT_KERN_ROUND", "exact" if CompilationTarget.is_macos() else "D")
+        self.trace = getenv("FONTTEXT_TRACE") == "1"
         self.debug = getenv("FONTTEXT_DEBUG") != ""
         self.error = ""
         self.mac = List[Int]()
@@ -1081,6 +1083,12 @@ struct FontEngine(Movable):
             if rfont != 0 and rfont != font:
                 rinst = self.inst(self._face_from_ctfont(rfont, False), st.weight, st.size)
             var rk = st.size / Float64(self.faces[self.insts[rinst].face].upem)
+            if self.trace:  # (FONTTEXT_TRACE=1, diagnosis: the run's font as CoreText chose it and its advances)
+                var line_t = String("FONTTEXT RUN: ") + self._cf_text(_fn[def(Int) thin abi("C") -> Int](self._m(_M_PSNAME))(rfont if rfont != 0 else font))
+                line_t += " asked " + self._cf_text(_fn[def(Int) thin abi("C") -> Int](self._m(_M_PSNAME))(font)) + " size " + String(st.size) + " n " + String(n) + " adv"
+                for g in range(n):
+                    line_t += " " + String(adv[2 * g]) + "/" + String(Float64(self._mac_advance_units(rinst, Int(glyphs[g]))) * rk)
+                print(line_t, flush=True)
             var unrounded = 0.0
             for g in range(n):
                 var gid = Int(glyphs[g])

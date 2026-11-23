@@ -821,6 +821,13 @@ def page_markdown(db, title):
 # ---------------------------------------------------------------- M6: faster than the web
 
 def m6():
+    if os.environ.get("M6_ONLY") == "mac":  # (D-7988) the Mac's half alone, while iterating there: never a PASS by itself
+        race = OUT / "race"
+        rt = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", "-o", str(race / "test_canvasload"), "tests/test_canvasload.mojo"], 900)
+        rt2 = run([str(race / "test_canvasload")], 300) if rt.returncode == 0 else rt
+        OPEN_TEST_OK[0] = rt2.returncode == 0 and "canvasload: ok" in rt2.stdout  # (the open's contract is the framework's: same test)
+        st, msg = m6_mac(race)
+        return ("FAIL" if st == "PASS" else st), f"Linux half not run (M6_ONLY=mac); Mac {st}: {msg}"
     err = build_linux()
     if err:
         return "FAIL", err
@@ -951,20 +958,123 @@ def m6():
     rows, ok = race_table(web, nat, nstart, shown)
     (ROOT / "docs/goals/79").mkdir(parents=True, exist_ok=True)
     (ROOT / "docs/goals/79/race.md").write_text(rows)
+    linux = "PASS (docs/goals/79/race.md)" if ok else "FAIL: " + "; ".join(l for l in rows.splitlines() if "✗" in l)[:700]
+    # (D-7988) the Mac's half runs whatever Linux's said, and both are reported
+    mst, mmsg = m6_mac(race)
+    if ok and mst == "PASS":
+        return "PASS", "native faster on every step, starts sooner, less memory, silky, on both machines; docs/goals/79/race.md, race-mac.md"
+    status = "FAIL" if (not ok or mst == "FAIL") else "BLOCKED"
+    return status, f"Linux {linux}; Mac {mst}: {mmsg}"
+
+
+def mac_sh(cmd, timeout=3600):
+    """A shell command on the Mac (its login shell, zsh); the CompletedProcess."""
+    return run(["ssh", "-i", MAC_KEY, "-o", "ConnectTimeout=15", "-o", "BatchMode=yes", MAC_SSH, cmd], timeout)
+
+
+def mac_put(local, remote):
+    r = run(["scp", "-q", "-i", MAC_KEY, str(local), f"{MAC_SSH}:{remote}"], 600)
+    return r.returncode == 0
+
+
+def mac_get(remote, local):
+    """A file from the Mac by ssh cat (scp from the Mac closes the connection on some runs)."""
+    r = subprocess.run(["ssh", "-i", MAC_KEY, "-o", "ConnectTimeout=15", "-o", "BatchMode=yes", MAC_SSH, f"cat {remote}"], capture_output=True, timeout=600)
+    if r.returncode == 0:
+        Path(local).write_bytes(r.stdout)
+    return r.returncode == 0
+
+
+MAC_WEB = "omxcode-g79-web"  # (ruling B, D-7977: everything the web side needs on the Mac, listed in docs/goals/79/mac-setup.md)
+
+
+def m6_mac(race):
+    """(D-7988) M6's Mac half, as Linux's: the web at its best on the M4 (benchmark-f034 under macgpu.mjs, memory, a fresh
+    Chrome's cold start) and native pnote on the AppKit host (first opens A/B, the race on both notes, start-up and RSS).
+    (status, message); writes docs/goals/79/race-mac.md."""
+    m = mac_reachable()
+    if m:
+        return "BLOCKED", m
+    if mac_sh(f"test -x {MAC_WEB}/node/bin/node && test -d {MAC_WEB}/pn/node_modules/playwright", 60).returncode:
+        return "BLOCKED", f"the Mac has no ~/{MAC_WEB} (ruling B's setup: docs/goals/79/mac-setup.md)"
+    for note in RACE_NOTES:
+        if not (race / f"race-{note}.db").exists():
+            return "FAIL", f"no {race}/race-{note}.db (Linux's M6 seeds the race notes through the web API first)"
+    err = make_ref(REF_MAC, MAC_DPR) if not (REF_MAC / "pn.db").exists() else ""
+    if err:
+        return "FAIL", "the Mac's reference: " + err
+    rm = OUT / "race-mac"
+    rm.mkdir(parents=True, exist_ok=True)
+    # the web, on the Mac
+    print("(the web's race on the Mac in its own Chrome on Metal: several minutes)", flush=True)
+    mac_sh(f"mkdir -p {MAC_WEB}/pn/.g79 {MAC_WEB}/race-mac", 60)
+    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs"):
+        if not mac_put(ROOT / "docs/goals/79" / f, f"{MAC_WEB}/pn/.g79/{f}"):
+            return "FAIL", f"copying {f} to the Mac"
+    if not mac_put(REF_MAC / "pn.db", f"{MAC_WEB}/race-mac/ref.db"):
+        return "FAIL", "copying the reference database to the Mac"
+    envp = f"cd {MAC_WEB}/pn && export PATH=$HOME/{MAC_WEB}/node/bin:$PATH PW_CHANNEL=chrome && "
+    r = mac_sh(envp + f"node --import ./.g79/macgpu.mjs scripts/benchmark-f034.mjs --gpu --dpr={MAC_DPR:g} --note=both --out=../race-mac/web-f034.json", 3600)
+    (rm / "web-f034.log").write_text(r.stdout + r.stderr)
+    if r.returncode or not mac_get(f"{MAC_WEB}/race-mac/web-f034.json", rm / "web-f034.json"):
+        return "FAIL", f"benchmark-f034 on the Mac, exit {r.returncode}: {tail(r.stdout + r.stderr)}"
+    gpu = re.search(r"MACGPU: (.*)", r.stdout + r.stderr)
+    web = web_race(json.loads((rm / "web-f034.json").read_text()), "")
+    r = mac_sh(envp + f"node .g79/webmem.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)
+    (rm / "web-mem.log").write_text(r.stdout + r.stderr)
+    mm = re.search(r"WEB RSS MB: ([\d.]+)", r.stdout)
+    web["rss_mb"] = float(mm.group(1)) if mm else None
+    for mode in ("desktop", "chromium"):
+        r = mac_sh(envp + f"node .g79/webcold.mjs ../race-mac/ref.db {mode} 5", 900)
+        (rm / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
+        mc = re.search(rf"WEBCOLD {mode} median: ([\d.]+)", r.stdout)
+        web[f"cold_{mode}_ms"] = float(mc.group(1)) if mc else None
+    # native, on the Mac: kept views and settings in the Mac's scratch folder ({data}), never ~/.config
+    nat, snapinfo = {}, {}
+    stamp = time.strftime("%H%M%S")
+    for note in RACE_NOTES:
+        db = race / f"race-{note}.db"
+        other = subprocess.run(["sqlite3", str(db), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"],
+                               capture_output=True, text=True).stdout.strip()
+        base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg", "MOJOUI_SNAP_LOG": "1"}
+        for run_ in ("A", "B"):
+            steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
+            out, e = mac_run(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db])
+            if e:
+                return "FAIL", f"first open {run_} on {note}: {e}"
+            fo = native_race(out).get("open")
+            snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": "SNAP: restored" in out, "saved": "SNAP: saved" in out}
+            if run_ == "B" and fo:
+                nat.setdefault(note, {})["first open"] = dict(fo, snap="SNAP: restored" in out)
+        out, e = mac_run(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db])
+        if e:
+            return "FAIL", f"race on {note}: {e}"
+        if "PNOTE WEB:" not in out:
+            return "FAIL", f"the Mac's race on {note} didn't run pnote's web look"
+        first_ = nat.get(note, {}).get("first open")
+        nat[note] = native_race(out)
+        if first_:
+            nat[note]["first open"] = first_
+        cold = out.split("APPBENCH: coldopens", 1)[-1].split("APPBENCH: keptopens", 1)[0]
+        snapinfo[note]["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
+    starts = []
+    for i in range(5):
+        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"], {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg"}, [REF_MAC / "pn.db"])
+        if e:
+            return "FAIL", f"start-up run {i}: {e}"
+        starts.append(out)
+    nstart = native_start(starts)
+    saved = dict(SNAPINFO)
+    SNAPINFO.clear()
+    SNAPINFO.update(snapinfo)
+    rows, ok = race_table(web, nat, nstart, {}, machine="mac")
+    SNAPINFO.clear()
+    SNAPINFO.update(saved)
+    rows = rows.replace("\n\n", f"\n\nWeb renderer on the Mac: {gpu.group(1) if gpu else 'not reported'}.\n\n", 1)
+    (ROOT / "docs/goals/79/race-mac.md").write_text(rows)
     if not ok:
-        return "FAIL", "see docs/goals/79/race.md: " + "; ".join(l for l in rows.splitlines() if "✗" in l)[:900]
-    mac = mac_reachable()
-    if mac:
-        return "BLOCKED", f"Linux PASS (docs/goals/79/race.md); Mac BLOCKED ({mac})"
-    out_mac, e = mac_run("race", ["wait:800", "window:1440x900"] + NATIVE_RACE, {"PNOTE_DB": "{data}/race-600.db"}, [race / "race-600.db"])
-    if e:
-        return "FAIL", "Mac: " + e
-    if "PNOTE WEB:" not in out_mac:
-        return "FAIL", "Mac: the race didn't run pnote's web look"
-    bad = [f"{k} {v['p95']}/{v['max']}" for k, v in native_race(out_mac).items() if v["p95"] > P95 or v["max"] > MAX or v.get("cpu", 0)]
-    if bad:
-        return "FAIL", "Mac not silky: " + ", ".join(bad)
-    return "PASS", "native faster on every step, starts sooner, less memory, silky; Mac silky; docs/goals/79/race.md"
+        return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if "✗" in l)[:700]
+    return "PASS", "docs/goals/79/race-mac.md"
 
 
 NOTE_DUMP = """
@@ -1082,10 +1192,18 @@ def native_start(outs):
     return {k: med(v) for k, v in vals.items()}
 
 
-def race_table(web, nat, start, shown=None):
+def race_table(web, nat, start, shown=None, machine="linux"):
     shown = shown or {}
     ok = True
-    lines = ["# Goal 79 race: native pnote vs the web Personal Note (generated by docs/goals/79-check.py M6)", "",
+    lines = ["# Goal 79 race: native pnote vs the web Personal Note (generated by docs/goals/79-check.py M6)", ""]
+    if machine == "mac":  # (D-7988) the Mac's half: what differs from the Linux text below
+        lines += [f"**The Mac (M4), 1440×900 at {MAC_DPR}×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own "
+                  "Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by "
+                  "webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; "
+                  "the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No "
+                  "composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its cold start "
+                  "isn't measurable, and that row stays ✗ for the owner to rule on.", ""]
+    lines += [
              f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR}×. "
              "Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, "
              f"the same steps through test mode. Silky = native p95 ≤ {P95} ms and max ≤ {MAX} ms, no CPU frame.", "",
