@@ -17,6 +17,9 @@ scratch database copied in from this checkout.
 | `~/omxcode-g79-web/npm.log`, `ref.log` | install and first-run logs | — |
 | `~/omxcode-g79-web/pw-browsers/` | Playwright's own Chrome Headless Shell 151 (554 MB), downloaded before the race settled on the installed Chrome (D-7986); unused now, delete with the rest | `PLAYWRIGHT_BROWSERS_PATH=~/omxcode-g79-web/pw-browsers npx playwright install chromium` |
 | `~/omxcode-g79-web/pn/.g79/` | macgpu.mjs (the preload that gives PN's benchmark the Apple GPU, D-7986) and two small probe scripts | scp |
+| `~/omxcode-g79-web/pyenv/` (continuation 16) | pywebview 6.2.1, pyobjc-framework-LocalAuthentication 12.2.2, -Security 12.2.2, -Quartz (PN's requirements-desktop.txt, for ruling D's launcher run) | `~/.pixi/bin/pixi add --pypi …` in that folder |
+| `~/omxcode-g79-web/pn/.g79/` (continuation 16) | also desktop_cold_mac.py, webcold.mjs, webmem.mjs, emojiprobe.mjs, fontprobe/kbdprobe/charprobe probes | scp / ssh cat |
+| `$TMPDIR/pn-cold-mac-*`, `$TMPDIR/pn-cold-*`, `$TMPDIR/pn-mem-*` | scratch HOME, databases and Chrome profiles of the web cold-start and memory runs (the system clears $TMPDIR) | webcold.mjs, webmem.mjs |
 | `~/omxcode-g79-web/race-mac/` | the web race's results: benchmark-f034's JSON and log | benchmark-f034.mjs |
 
 ## Also made by goal 79's runs (earlier rounds)
