@@ -4,6 +4,22 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 15: the Mac's web side, its race, its fonts (2026-11-22, night)
+- **Setup.** Ruling B on the Mac: node, Playwright and PN's backend in ~/omxcode-g79-web (every path and a removal line in docs/goals/79/mac-setup.md). The Mac reference now comes from the Mac's own Chrome (made-by.json).
+- **Worked.**
+  - Mac text: Han matches Chrome once Apple's `trak` table is applied (D-7989). Fallback follows the primary face's kind (D-7990). Keycap labels follow the platform (mojoui/keycaps.mojo, D-7985). 18 of 19 fixture lines and every M7 box line up with Chrome on the Mac.
+  - The AppKit host runs every bench step GTK's does (D-7984, D-7988).
+  - PN's benchmark runs on the Mac's GPU through a preload (its Vulkan flags meant software rendering on macOS, D-7986).
+  - First full Mac race (docs/goals/79/race-mac.md): the 600 note is mostly silky and beats the web. Start-up 279 vs 683 ms. RSS 169 vs 834 MB.
+  - Goal 75 M3 on the Mac: no regression against goal 75's own build.
+  - Linux: incremental op index (D-7987). 3 quiet undo reruns: median 7.9, worst 8.7.
+- **Broke / open.**
+  - The stress note on the Mac isn't silky (10–30 ms frames), and kept views don't engage on Metal.
+  - Emoji advance: Chrome is 1 px under CoreText's at 12–24 px, by no rule found. The Mac's two Chrome references disagree on emoji.
+  - PN's Mac launcher (pywebview) has no DevTools port, so its cold start can't be measured.
+  - The Mac dropped off the network twice.
+- **Next.** The Mac's renderer on 5,400 objects and viewsnap on Metal. The emoji rule. The owner's call on the launcher row and on which Mac Chrome measurement is the emoji reference.
+
 ## Goal 79, continuation 13: Linux M6 down to stress undo (2026-11-22, evening)
 - **Setup:** Linux, a quiet machine.
 - **What worked:**
