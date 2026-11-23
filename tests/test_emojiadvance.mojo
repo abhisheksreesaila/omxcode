@@ -1,12 +1,13 @@
 # Goal 79, D-7998: fonttext's Apple Color Emoji advance against the whole table measured in the Mac's own Chrome on the
 # live page (docs/goals/79/emoji-chrome-mac.json, emojiprobe.mjs): every size in it, not the one M1's line uses.
 # `emojiadvance: ok`.   pixi run mojo run -I . -I vendor tests/test_emojiadvance.mojo   (from the repository root)
+from std.os import getenv
 from std.testing import assert_true, assert_equal
 from mojoui.fonttext import apple_emoji_advance
 
 
 def main() raises:
-    var f = open("docs/goals/79/emoji-chrome-mac.json", "r")
+    var f = open(getenv("EMOJI_TABLE", "docs/goals/79/emoji-chrome-mac.json"), "r")
     var t = f.read()
     f.close()
     var at = t.find('"sizes"')

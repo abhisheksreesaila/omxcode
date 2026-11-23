@@ -3,6 +3,7 @@
 # slices, then draws the same text: nothing is left to raster, and every image's pixels equal the first process's. The
 # file holds glyph ids, sizes and fonts, never text. A missing or broken file warms nothing and says so. `glyphwarm: ok`.
 #   B=build/test_glyphwarm; pixi run mojo build -I . -I vendor tests/test_glyphwarm.mojo -o $B && $B make && $B warm
+from std.os import getenv
 from std.sys import argv
 from std.testing import assert_true, assert_equal
 from mojoui.fonttext import engine, shape, TextStyle
@@ -37,7 +38,7 @@ def draw() raises -> Int:
 
 def main() raises:
     var args = argv()
-    if len(args) > 1 and args[1] == "make":
+    if len(args) > 1 and args[1] == "make" or getenv("GW_MODE") == "make":  # (GW_MODE: a runner that passes no arguments, scripts/mac-ssh-test)
         var h = draw()
         var w = GlyphWarm(PATH)
         assert_true(w.save(), "saved")
