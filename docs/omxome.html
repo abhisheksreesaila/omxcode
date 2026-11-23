@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxome · a home assistant that shows you</title>
+<meta name="description" content="omxome, a voice assistant for the kitchen counter built on omxcode: live tiles on a three-column Stage, a chat bar that grows into a visual explanation and points at what it means, cards the model builds as it talks. Local intelligence most of the time, your own subscription when you ask for it. Native on Linux and the Mac.">
+<meta property="og:title" content="omxome: a home assistant that shows you">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/omx/clip-tv.jpg">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<!-- omxome's cover (owner, 2026-11-22). Round two of the owner's notes: the cover explains the product only; the design history,
+     how it's built, the build steps and the limits live in examples/omx/README.md. Motion, not stills, wherever something moves
+     (clips made by scripts/omxomeclip.py from the real app). Name: omxome, the owner's pick ("omx" + home); the assistant inside
+     still answers to omx. -->
+<style>
+.ohero { padding-top: 90px; padding-bottom: 40px; text-align: center; }
+.ohero h1 { font-size: clamp(72px, 12vw, 168px); }
+.ohero .eyebrow { justify-content: center; }
+.ohero .lede { max-width: 820px; margin-left: auto; margin-right: auto; }
+.film { margin: 56px auto 0; width: min(1180px, 94vw); border-radius: 28px; overflow: hidden; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); background: #111; }
+.film video, .film img { display: block; width: 100%; height: auto; }
+.film + .srcline { text-align: center; }
+.needs { font: 12.5px/1.6 var(--mono); color: var(--ink2); margin-top: 14px; }
+.story { max-width: 760px; margin: 0 auto; }
+.story p { font: 500 clamp(19px, 2vw, 23px)/1.55 var(--sans); letter-spacing: -.01em; color: var(--ink2); margin: 0 0 22px; }
+.story p b { color: var(--ink); font-weight: 600; }
+.modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 36px auto 0; max-width: 1040px; text-align: left; }
+.modes > div { border-radius: 20px; padding: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.modes .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.modes h3 { font: 700 24px/1.1 var(--display); letter-spacing: -.02em; margin-top: 8px; }
+.modes p { color: var(--ink2); font-size: 15.5px; margin: 8px 0 0; }
+.punch { font: 600 clamp(22px, 2.6vw, 30px)/1.3 var(--sans); letter-spacing: -.02em; color: var(--ink); max-width: 820px; margin: 40px auto 0; text-align: center; }
+.punch .two { font-weight: 500; }
+.split { display: grid; grid-template-columns: 1fr 1.35fr; gap: 48px; align-items: center; }
+.split.flip { grid-template-columns: 1.35fr 1fr; }
+.split.flip > :first-child { order: 2; }
+.shot { border-radius: 22px; overflow: hidden; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); background: #f4f4f4; }
+.shot img, .shot video { display: block; width: 100%; height: auto; }
+.facts { display: grid; gap: 10px; margin-top: 22px; }
+.facts div { display: flex; gap: 12px; align-items: baseline; color: var(--ink2); font-size: 16px; }
+.facts b { font: 600 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; min-width: 108px; color: var(--ink); }
+.cols { display: grid; grid-template-columns: 1fr 2.2fr 1fr; gap: 12px; margin-top: 40px; text-align: left; }
+.cols > div { border-radius: 18px; padding: 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.cols .mid { background: var(--oq-surface-2); box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); }
+.cols .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.cols h3 { font: 700 22px/1.15 var(--display); letter-spacing: -.02em; margin-top: 8px; }
+.cols p { color: var(--ink2); font-size: 15px; margin: 8px 0 0; }
+.cols .top { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.cols .top p { margin: 0; }
+.cols .bar { grid-column: 2; }
+.lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 44px; text-align: left; }
+.lanes > div { border-radius: 22px; padding: 24px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.lanes .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.lanes .local .k { color: var(--oq-ok, #3ccf6e); } .lanes .cloud .k { color: #f59a3c; }
+.lanes .cloud { box-shadow: 0 0 0 1.5px color-mix(in srgb, #f59a3c 60%, transparent); }
+.lanes h3 { font: 700 28px/1.1 var(--display); letter-spacing: -.03em; margin-top: 10px; }
+.lanes p { color: var(--ink2); font-size: 16px; margin: 10px 0 0; }
+.nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 28px; text-align: left; }
+.nums div { border-radius: 18px; padding: 20px; box-shadow: inset 0 0 0 1px var(--line); }
+.nums b { display: block; font: 700 clamp(28px, 3vw, 40px)/1 var(--display); letter-spacing: -.03em; color: var(--ink); }
+.nums span { display: block; color: var(--ink2); font-size: 15px; margin-top: 10px; }
+.plats { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 30px; }
+.plats span { display: inline-flex; align-items: center; gap: 8px; font: 600 15px var(--sans); padding: 10px 16px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.plats span i { width: 8px; height: 8px; border-radius: 50%; background: var(--oq-ok, #3ccf6e); }
+.plats span.soon { color: var(--ink2); background: transparent; }
+.plats span.soon i { background: var(--soon, #f5a623); }
+.phones { display: grid; grid-template-columns: repeat(3, minmax(0, 240px)); gap: 18px; justify-content: center; margin-top: 40px; }
+.phones .shot { border-radius: 28px; }
+@media (max-width: 860px) {
+  .split, .split.flip, .lanes { grid-template-columns: 1fr; } .split.flip > :first-child { order: 0; }
+  .modes, .nums { grid-template-columns: 1fr 1fr; }
+  .cols { grid-template-columns: 1fr; } .cols .bar { grid-column: 1; }
+  .phones { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { video[autoplay] { animation: none; } }
+</style>
+<noscript><style>.rv { opacity: 1; transform: none; }</style></noscript>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">/ omxome</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#story">Story</a><a href="#stage">Stage</a><a href="#tv">TV</a><a href="#tiles">Tiles</a><a href="#cards">Cards</a><a href="#hybrid">Hybrid</a><a href="#devices">Devices</a></div>
+  <div class="right"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omx">GitHub</a></div>
+</nav>
+
+<main>
+<section class="ohero">
+  <div class="wrap">
+    <div class="eyebrow rise"><span>The third flagship · built on omxcode</span></div>
+    <h1 class="rise" data-words data-step="0" data-d0="120">omxome</h1>
+    <p class="lede rise"><span data-words data-step="45" data-d0="380">Ask it out loud.</span> <span class="two" data-words data-step="35" data-d0="560">It shows you.</span></p>
+    <p class="lede rise">A voice assistant for the kitchen counter. Your day sits on a Stage of live tiles. Ask a question and the chat bar grows into a visual explanation, points at what it means, then folds back to your tiles.</p>
+    <p class="needs rise">Linux and the Mac today · iPhone, iPad and Android soon · MIT licence</p>
+  </div>
+  <div class="film rv"><video src="img/omx/clip-tv.mp4" poster="img/omx/clip-tv.jpg" autoplay muted loop playsinline preload="metadata" aria-label="omxome: a question typed in the chat bar; the bar grows into the TV with a word card, a ring points at its parts, then the TV folds back to the tiles"></video></div>
+  <p class="srcline rv">the real app on Linux, answering with a local model</p>
+</section>
+
+<section id="story" style="padding-top:80px">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow rv">The story</div>
+      <h2 class="rv">A voice in a box <span class="two">can't show you anything.</span></h2>
+    </div>
+    <div class="story" style="margin-top:28px">
+      <p class="rv">Kitchen assistants talk. But half of what a family asks is easier to see than to hear: a word, a route, how a thing works, whether it did what you asked. And a screen on the counter is used four different ways in one morning.</p>
+    </div>
+    <div class="modes">
+      <div class="rv"><div class="k">01</div><h3>Glance</h3><p>From across the room, for two seconds: what's next, what changed, what needs you.</p></div>
+      <div class="rv"><div class="k">02</div><h3>Talk</h3><p>A real back and forth that remembers what you said a minute ago.</p></div>
+      <div class="rv"><div class="k">03</div><h3>Show me</h3><p>The answer as something to look at: a card, a diagram, a map, pointed at as it talks.</p></div>
+      <div class="rv"><div class="k">04</div><h3>Check</h3><p>See what it did and confirm with one tap, without reading a paragraph.</p></div>
+    </div>
+    <p class="punch rv">Most assistants pick one. <span class="two">omxome does all four on one screen, with no modes to switch: what you say picks it, and quiet folds it back.</span></p>
+  </div>
+</section>
+
+<section id="stage">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow rv">The Stage</div>
+      <h2 class="rv">Three columns. <span class="two">Everything in its place.</span></h2>
+      <p class="lede rv">Nothing moves unless it has to, and the most urgent thing is always the biggest thing in the middle.</p>
+    </div>
+    <div class="cols rv">
+      <div class="top"><span class="k">top</span><p><b style="color:var(--ink)">Profiles and settings.</b> Everyone in the house, or one person at a time, and the settings menu beside them.</p></div>
+      <div><div class="k">left · quiet</div><h3>Today and Pinned</h3><p>The clock, things that don't need you yet (the weather, a birthday, the front door), and what you pinned to keep at your side.</p></div>
+      <div class="mid"><div class="k">centre · the stage</div><h3>Live tiles</h3><p>Up to six tiles on an exact grid. The urgent one takes the big spot: “Leave by 8:05, the bridge is slow.” When it's no longer urgent, it moves back to the side.</p></div>
+      <div><div class="k">right · live</div><h3>Ticking things</h3><p>Rows that keep counting: the pasta timer, traffic, a flight. Small, always current, never in the way.</p></div>
+      <div class="mid bar"><div class="k">bottom</div><h3>The chat bar</h3><p>Just talk: it's listening, and shows the words while it talks. Or tap the keyboard and type. It becomes the TV when there's something to see.</p></div>
+    </div>
+    <div class="shot rv" style="margin-top:28px"><img src="img/omx/stage-day.jpg" alt="The Stage: Today and Pinned on the left; the traffic tile big in the centre (Leave by 8:05), to-do, counter camera, calendar and memories beside it; the pasta timer and the flight live on the right"></div>
+    <p class="srcline rv">the school run is urgent, so traffic takes the big tile · sample data</p>
+  </div>
+</section>
+
+<section id="tv">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow rv">The TV</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">The chat bar <span class="two">becomes the explanation.</span></h2>
+      <p class="body rv">Ask, and the bar grows over the whole stage like a TV: the card on the left, the conversation on the right. As it talks, a ring moves to the part it means (the meaning, then the example; the compressor, then the coil), so you can follow from across the kitchen.</p>
+      <p class="body rv">Ask something else and the card swaps in place. Close it, or just stop talking, and it shrinks back to the bar. Your tiles come back exactly where they were.</p>
+      <div class="facts rv"><div><b>motion</b>one soft spring: the box reshapes while the faces crossfade</div><div><b>closes</b>on ×, or after a few seconds of quiet</div><div><b>side columns</b>stay put and keep ticking behind it</div></div>
+    </div>
+    <div class="shot rv"><video src="img/omx/clip-tv.mp4" poster="img/omx/clip-tv.jpg" autoplay muted loop playsinline preload="metadata" aria-label="The chat bar grows into the TV, the ring walks the card, the TV folds back"></video></div>
+  </div>
+</section>
+
+<section id="tiles">
+  <div class="wrap split flip">
+    <div>
+      <div class="eyebrow rv">Live tiles</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Tiles that know <span class="two">what matters now.</span></h2>
+      <p class="body rv">Rain before pickup? The weather leaves the quiet column and takes the big tile, with an umbrella and what to do about it. Game night? A pennant on the game card. When the moment passes, the tile gives its place back, moving like water, never jumping.</p>
+      <p class="body rv">There's no theme picker: omxome notices the day (a school day, a game, Thanksgiving, rain) and hangs one small charm on the card it's about. Drag a tile to reorder it, pull a corner to resize it, drop it on Pinned to keep it. Your own size always beats urgency.</p>
+    </div>
+    <div class="shot rv"><video src="img/omx/clip-tiles.mp4" poster="img/omx/clip-tiles.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Live tiles: rain is coming and the weather tile grows onto the stage with an umbrella charm; then game night with a pennant"></video></div>
+  </div>
+</section>
+
+<section id="cards">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow rv">Interfaces made on the fly</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">The model builds the card. <span class="two">omxcode draws it.</span></h2>
+      <p class="body rv">You can't build an app for everything a family asks, so omxome doesn't. The model describes the card it wants (a word, a diagram, a map, a checklist, a chart) from omxcode's own components, and the app checks it and draws it natively, as the words stream in. Nothing the model sends runs as code.</p>
+      <p class="body rv">It speaks <a href="https://docs.ag-ui.com">AG-UI</a>, the open protocol between agents and apps, so a card already on screen can change in place: one tile moves and the rest stay where they are.</p>
+      <div class="facts rv"><div><b>it can show</b>words, how-it-works diagrams, trips on a real map, the camera with boxes on what it sees, your notes with sources, the to-do list</div><div><b>the camera</b>its pictures never leave the machine</div></div>
+    </div>
+    <div class="shot rv"><video src="img/omx/clip-cards.mp4" poster="img/omx/clip-cards.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Asked how a heat pump works, the model builds an isometric diagram card and the ring walks its parts"></video></div>
+  </div>
+</section>
+
+<section id="hybrid" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Hybrid intelligence</div>
+    <h2 class="rv">Local when you want it. <span class="two">Your subscription when you need it.</span></h2>
+    <p class="lede rv">Most of the time, everything happens on your own machine. When you want a bigger brain for one question, ask for it by name, and it uses a subscription you already have.</p>
+    <div class="lanes">
+      <div class="local rv"><div class="k">● local · most of the time</div><h3>On your GPU</h3><p>Qwen3.8-27B runs inside omxome's own process: no server to call, no browser in between. Hearing (Parakeet), speaking (Kokoro) and knowing when you've stopped talking (Silero) run here too. The model keeps the conversation warm on the GPU between turns.</p></div>
+      <div class="cloud rv"><div class="k">● your subscription · when you ask</div><h3>Ask for Claude</h3><p>Say “ask Claude…” and that one question goes out through your own Claude sign-in. The whole screen gets an orange frame while it does, so you always know. Only your words leave, never your history, files or camera; anything that looks like a password stays home; and every request is written down first.</p></div>
+    </div>
+    <div class="nums">
+      <div class="rv"><b>0.8 s</b><span>from the end of your question to its first spoken word, locally</span></div>
+      <div class="rv"><b>70 ms</b><span>to draw a 40-part screen as it streams in over AG-UI</span></div>
+      <div class="rv"><b>0.2 s</b><span>to stop when you talk over it</span></div>
+      <div class="rv"><b>43</b><span>tokens a second from the 27-billion-parameter model on one RTX 3090</span></div>
+    </div>
+    <p class="srcline rv">measured on one Linux machine with two RTX 3090s, by the checks in the repository</p>
+  </div>
+</section>
+
+<section id="devices">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow rv">Native everywhere</div>
+      <h2 class="rv">One Mojo app. <span class="two">Every screen in the house.</span></h2>
+      <p class="lede rv">Written once in Mojo on omxcode, drawn with each platform's own native controls: GTK on Linux, AppKit on the Mac. No web view. The Stage reflows from three columns on a counter screen to one on a phone.</p>
+      <div class="plats rv"><span><i></i>Linux</span><span><i></i>Mac</span><span class="soon"><i></i>iPhone and iPad · soon</span><span class="soon"><i></i>Android · soon</span></div>
+    </div>
+    <div class="shot rv" style="margin-top:48px"><img src="img/omx/mac-heatpump.jpg" alt="The Stage on a Mac at night: the heat pump diagram in the TV, the conversation beside it"></div>
+    <p class="srcline rv" style="text-align:center">on a Mac (M4), at night</p>
+    <div class="phones">
+      <div class="shot rv"><img src="img/omx/phone-home.jpg" alt="The Stage at phone width: today and pinned stacked above the traffic tile"></div>
+      <div class="shot rv"><img src="img/omx/phone-tv.jpg" alt="At phone width: the TV with the ephemeral card above the conversation"></div>
+      <div class="shot rv"><img src="img/omx/phone-dark.jpg" alt="At phone width at night: the ephemeral card above the conversation"></div>
+    </div>
+    <p class="srcline rv" style="text-align:center">at a phone's width</p>
+  </div>
+</section>
+
+<section class="center" style="padding-top:60px">
+  <div class="wrap">
+    <h2 class="rv">Ask it out loud. <span class="two">It shows you.</span></h2>
+    <div class="ctas rv" style="margin-top:30px"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omx">omxome on GitHub</a><a class="more" href="gallery/">Back to the gallery</a></div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Measured on one Linux machine with NVIDIA RTX 3090s, by scripts in the repository. Mac pictures are from an M4.</p>
+    <div class="fine"><span>omxome · built on omxcode · MIT licence · Mojo is a trademark of Modular Inc.; Claude is a trademark of Anthropic. omxome is an independent project, not affiliated with or endorsed by either</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
+  </div>
+</footer>
+<script src="site.js"></script>
+<script src="omxqua/src/omxqua.js" defer></script>
+</body>
+</html>
