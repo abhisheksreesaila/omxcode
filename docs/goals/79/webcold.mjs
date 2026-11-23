@@ -43,9 +43,40 @@ async function marker(port, deadline) {
 function killTree(child) { try { process.kill(-child.pid, 'SIGTERM') } catch {} setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL') } catch {} }, 1500) }
 
 if (process.platform === 'darwin' && mode === 'desktop') {
-  console.log('WEBCOLD desktop median: none (not measurable on macOS: PN\'s Mac launcher is a WKWebView window, no DevTools port to read its first paint)')
-  process.exit(0)
-}
+  // (D-7992, ruling D) PN's Mac launcher is a WKWebView window with no DevTools port: its first paint's lower bound is the
+  // moment its own server sends the page (desktop_cold_mac.py marks it), from its process's start; when its window first
+  // appears on screen is printed beside. Scratch HOME (PN's Mac data lives under ~/Library/Application Support), database
+  // and folders for every run
+  const lows = [], wins = []
+  for (let i = 0; i < RUNS; i++) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pn-cold-mac-'))
+    fs.copyFileSync(src, path.join(dir, 'd.db'))
+    const env = { ...process.env, HOME: dir, PERSONAL_NOTE_DB: path.join(dir, 'd.db'), PERSONAL_NOTE_PLUGINS_DIR: path.join(dir, 'plugins'),
+      PERSONAL_NOTE_AI_DIR: path.join(dir, 'ai'), PERSONAL_NOTE_VOICE_DIR: path.join(dir, 'voice') }
+    const child = spawn(path.join(PN, '.venv/bin/python'), [path.join(HERE, 'desktop_cold_mac.py'), PN], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+    let buf = ''
+    child.stdout.on('data', (d) => { buf += d })
+    child.stderr.on('data', (d) => { buf += d })
+    const deadline = Date.now() + 30000
+    while (Date.now() < deadline && !(/SERVED_EPOCH_MS/.test(buf) && /WINDOW_EPOCH_MS|WINDOW: no/.test(buf))) await sleep(20)
+    const st = /PROCSTART_EPOCH_MS: ([\d.]+)/.exec(buf), sv = /SERVED_EPOCH_MS: ([\d.]+)/.exec(buf), wn = /WINDOW_EPOCH_MS: ([\d.]+)/.exec(buf)
+    if (st && sv) {
+      const low = Number(sv[1]) - Number(st[1]), win = wn ? Number(wn[1]) - Number(st[1]) : null
+      lows.push(low)
+      if (win !== null) wins.push(win)
+      console.log(`WEBCOLD desktop run ${i}: ${low.toFixed(1)} (lower bound: its server sent the page)${win !== null ? `; window on screen ${win.toFixed(1)}` : ''}`)
+    } else {
+
+      console.log(`WEBCOLD desktop run ${i}: failed (${buf.slice(-300).replace(/\n/g, ' ')})`)
+    }
+    killTree(child)
+    await sleep(2500)
+  }
+  const med = (v) => { const s = [...v].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)].toFixed(1) : 'none' }
+  console.log(`WEBCOLD desktop median: ${med(lows)} (lower bound)`)
+  console.log(`WEBCOLD desktop window median: ${med(wins)}`)
+  setTimeout(() => process.exit(0), 1000)
+} else {
 const times = []
 let api
 if (mode === 'chromium') {
@@ -86,3 +117,4 @@ if (api) killTree(api)
 const sorted = [...times].sort((a, b) => a - b)
 console.log(`WEBCOLD ${mode} median: ${sorted.length ? sorted[Math.floor(sorted.length / 2)].toFixed(1) : 'none'}`)
 setTimeout(() => process.exit(0), 3000)
+}

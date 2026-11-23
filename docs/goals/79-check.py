@@ -1010,7 +1010,7 @@ def m6_mac(race):
     # the web, on the Mac
     print("(the web's race on the Mac in its own Chrome on Metal: several minutes)", flush=True)
     mac_sh(f"mkdir -p {MAC_WEB}/pn/.g79 {MAC_WEB}/race-mac", 60)
-    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs"):
+    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "desktop_cold_mac.py"):
         if not mac_put(ROOT / "docs/goals/79" / f, f"{MAC_WEB}/pn/.g79/{f}"):
             return "FAIL", f"copying {f} to the Mac"
     if not mac_put(REF_MAC / "pn.db", f"{MAC_WEB}/race-mac/ref.db"):
@@ -1031,6 +1031,9 @@ def m6_mac(race):
         (rm / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
         mc = re.search(rf"WEBCOLD {mode} median: ([\d.]+)", r.stdout)
         web[f"cold_{mode}_ms"] = float(mc.group(1)) if mc else None
+        mw_ = re.search(r"WEBCOLD desktop window median: ([\d.]+)", r.stdout)
+        if mode == "desktop":
+            web["cold_desktop_window_ms"] = float(mw_.group(1)) if mw_ else None
     # native, on the Mac: kept views and settings in the Mac's scratch folder ({data}), never ~/.config
     nat, snapinfo = {}, {}
     stamp = time.strftime("%H%M%S")
@@ -1204,8 +1207,9 @@ def race_table(web, nat, start, shown=None, machine="linux"):
                   "Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by "
                   "webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; "
                   "the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No "
-                  "composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its cold start "
-                  "isn't measurable, and that row stays ✗ for the owner to rule on.", ""]
+                  "composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a "
+                  "lower bound of its first paint, process start to its own server sending the page (ruling D, D-7992; desktop_cold_mac.py, "
+                  "scratch HOME, database and folders).", ""]
     lines += [
              f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR}×. "
              "Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, "
@@ -1282,7 +1286,12 @@ def race_table(web, nat, start, shown=None, machine="linux"):
             lines.append(f"| {note} | open again, kept parsed (not judged) | — | {kept['p95']} / {kept['max']} | | |")
     lines += ["", "| | web | native | |", "|---|---|---|---|"]
     n = start.get("first")
-    for wk, label in [("cold_desktop_ms", "cold start: Personal Note's desktop launcher (server + Chromium app window)"),
+    desk_label = "cold start: Personal Note's desktop launcher (server + Chromium app window)"
+    if machine == "mac":  # (D-7992, ruling D)
+        wm = web.get("cold_desktop_window_ms")
+        desk_label = ("cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its "
+                      "own server sending the page (D-7992)" + (f"; its window on screen at {wm} ms" if wm else ""))
+    for wk, label in [("cold_desktop_ms", desk_label),
                       ("cold_chromium_ms", "cold start: a fresh Chromium process on the built app")]:
         w = web.get(wk)
         good = bool(w and n and n < w)
