@@ -866,7 +866,8 @@ struct FontEngine(Movable):
             self.mac.append(a)
         self.k_font_attr = _peek(_dlsym(ct, "kCTFontAttributeName"))
         self.k_var_attr = _peek(_dlsym(ct, "kCTFontVariationAttribute"))
-        self.k_track_attr = _peek(_dlsym(ct, "kCTTrackingAttribute"))
+        var ta = _dlsym(ct, "kCTTrackingAttribute")
+        self.k_track_attr = _peek(ta) if ta != 0 else 0
         self.k_dict_keys = _dlsym(cf, "kCFTypeDictionaryKeyCallBacks")
         self.k_dict_vals = _dlsym(cf, "kCFTypeDictionaryValueCallBacks")
         var dir = fonts_dir()
@@ -1115,7 +1116,9 @@ struct FontEngine(Movable):
                 print(line_t, flush=True)
             var unrounded = 0.0
             ref rtk = self.faces[self.insts[rinst].face].trak
-            var track = trak_units(rtk, st.size) * rk if self.trak_on and not rtk.empty() else 0.0
+            # (a colour bitmap face's advance stays CoreText's: Chrome's emoji advances follow neither the trak table nor
+            # CoreText's (measured 11-22: 1 px under CoreText's at 12–24 px, D-7989), left open)
+            var track = trak_units(rtk, st.size) * rk if self.trak_on and not rtk.empty() and not self.faces[self.insts[rinst].face].color else 0.0
             for g in range(n):
                 var gid = Int(glyphs[g])
                 if gid == 0:
