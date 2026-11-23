@@ -1039,14 +1039,15 @@ def m6_mac(race):
         base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg", "MOJOUI_SNAP_LOG": "1"}
         for run_ in ("A", "B"):
             steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
-            out, e = mac_run(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db])
+            # (D-7994: one build for the Mac's half, the first run's; the kept view names its program, as on Linux)
+            out, e = mac_run(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db], nobuild=not (note == RACE_NOTES[0] and run_ == "A"))
             if e:
                 return "FAIL", f"first open {run_} on {note}: {e}"
             fo = native_race(out).get("open")
             snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": "SNAP: restored" in out, "saved": "SNAP: saved" in out}
             if run_ == "B" and fo:
                 nat.setdefault(note, {})["first open"] = dict(fo, snap="SNAP: restored" in out)
-        out, e = mac_run(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db])
+        out, e = mac_run(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db], nobuild=True)
         if e:
             return "FAIL", f"race on {note}: {e}"
         if "PNOTE WEB:" not in out:
@@ -1059,7 +1060,7 @@ def m6_mac(race):
         snapinfo[note]["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
     starts = []
     for i in range(5):
-        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"], {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg"}, [REF_MAC / "pn.db"])
+        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"], {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg"}, [REF_MAC / "pn.db"], nobuild=True)
         if e:
             return "FAIL", f"start-up run {i}: {e}"
         starts.append(out)
@@ -1312,13 +1313,13 @@ def mac_reachable():
     return "" if r.returncode == 0 else f"the Mac ({MAC_SSH}) isn't reachable"
 
 
-def mac_run(tag, steps, env, data):
-    """pnote on the M4 through scripts/mac-ssh; (stdout, '') or ('', why)."""
+def mac_run(tag, steps, env, data, nobuild=False):
+    """pnote on the M4 through scripts/mac-ssh; (stdout, '') or ('', why). nobuild: the bundle the last run built (D-7994)."""
     print(f"(opening a pnote window on the Mac: {tag}, about a minute)", flush=True)
     sf = OUT / f"mac-{tag}.steps"
     sf.parent.mkdir(parents=True, exist_ok=True)
     sf.write_text("\n".join(steps + ["quit"]) + "\n")
-    e = dict(os.environ, MAC_SSH=MAC_SSH, MAC_ENV=",".join(f"{k}={v}" for k, v in env.items()))
+    e = dict(os.environ, MAC_SSH=MAC_SSH, MAC_ENV=",".join(f"{k}={v}" for k, v in env.items()), MAC_NOBUILD="1" if nobuild else "0")
     r = run(["scripts/mac-ssh", "pnote", str(sf)] + [str(d) for d in data], 3600, env=e)
     lines = (r.stdout + r.stderr).strip().splitlines()
     report = Path(lines[-1]) if lines else None

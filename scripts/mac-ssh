@@ -28,7 +28,7 @@ grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > 
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$out/env.txt" "$@" "$host:$remote/data/"
 rc=0
-"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" FETCH="'${MAC_FETCH:-}'" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
+"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" NOBUILD="${MAC_NOBUILD:-0}" FETCH="'${MAC_FETCH:-}'" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
 set -uo pipefail
 app=$1 settings=${3:-}  # (an empty argument vanishes on its way through ssh)
 cd ~/"$2" && tar -xzf data/src.tar.gz
@@ -39,7 +39,10 @@ echo "OUTDIR: $outd"
 steps=$(cat data/steps.txt)
 export PATH=$HOME/.pixi/bin:$PATH
 pixi install > install.txt 2>&1 || { tail -20 install.txt; exit 1; }
-if ! MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1; then tail -30 build.txt; exit 1; fi
+# MAC_NOBUILD=1: the bundle the last run built, as it is (one build for several runs, as on Linux: a kept view names
+# its program's file, so runs that share a kept view share the program; D-7994)
+if [ "${NOBUILD:-0}" = 1 ] && ls -d build/"$app"/mac/*.app > /dev/null 2>&1; then echo "(MAC_NOBUILD: the last build)"
+elif ! MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1; then tail -30 build.txt; exit 1; fi
 bundle=$(ls -d build/"$app"/mac/*.app | head -1)
 exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
 steps=${steps//\{data\}/$PWD/data}

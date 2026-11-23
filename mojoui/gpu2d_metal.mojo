@@ -36,7 +36,9 @@ from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
 from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
-from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode
+from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
+from max.algorithm import parallelize
+from std.sys.info import num_logical_cores
 
 comptime RTLD_DEFAULT = -2
 comptime PF_BGRA8 = 80  # MTLPixelFormatBGRA8Unorm (the IOSurface's 'BGRA')
@@ -470,6 +472,11 @@ struct Metal2D(Movable):
     var tile_tex: List[Int]  # per tile slot: its texture (TILE_TEX², BGRA8, shared, premultiplied; made on first use)
     var tile_acc: Int  # the accumulator for a tile pass (TILE_TEX², memoryless)
     var cb_open: Int  # a command buffer the next pass encodes into (tile passes went in first), 0: a new one
+    var zero_px: List[UInt32]  # (a tile's worth of transparent pixels: what a restored tile's margins are cleared from)
+    var up_buf: Int  # (D-7993) a shared buffer a restore decodes into; the GPU copies tiles out of it (blit), as GL's unpack buffer
+    var up_cap: Int
+    var zero_buf: Int  # a tile's worth of zeros on the GPU (a restored tile's margins are copied from it)
+    var blit: Int  # the open blit encoder (begin_blit … end_blit), 0: none
     var atlas_w: Int
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last copied into the atlas's dynamic rows
@@ -558,6 +565,11 @@ struct Metal2D(Movable):
         self.tile_tex = List[Int]()
         self.tile_acc = 0
         self.cb_open = 0
+        self.zero_px = List[UInt32]()
+        self.up_buf = 0
+        self.up_cap = 0
+        self.zero_buf = 0
+        self.blit = 0
         self.atlas_w = atlas.width
         self.atlas_dyn = atlas.dyn_y0
         self.pages_version = -1
@@ -1010,6 +1022,58 @@ struct Metal2D(Movable):
         _ = len(u)
         # (the layers after: their uniform again; _draw_layer sets its own transform)
 
+    def upload_map(mut self, n: Int) -> Int:
+        """A shared buffer of at least n bytes to decode tiles into (its storage kept between restores; the caller has
+        drained: no frame still copies from it): its address, 0 when it can't be made."""
+        if n > self.up_cap or self.up_buf == 0:
+            if self.up_buf != 0:
+                _ = msg(self.up_buf, "release")
+            self.up_buf = msg(self.device, "newBufferWithLength:options:", n, 0)  # (Shared)
+            self.up_cap = n if self.up_buf != 0 else 0
+        if self.up_buf == 0:
+            return 0
+        return msg(self.up_buf, "contents")
+
+    def begin_blit(mut self) -> Bool:
+        """A blit encoder on open_frame()'s command buffer (the tile copies go ahead of the frame's passes)."""
+        if self.zero_buf == 0:
+            self.zero_buf = msg(self.device, "newBufferWithLength:options:", TILE_TEX * TILE_TEX * 4, 32)  # (Private: zeroed by Metal)
+            if self.zero_buf == 0:
+                return False
+        self.blit = msg(self.open_frame(), "blitCommandEncoder")
+        return self.blit != 0
+
+    def _copy_in(mut self, buf: Int, offset: Int, tex: Int, x0: Int, y0: Int, w: Int, h: Int):
+        var size: List[Int] = [w, h, 1]  # MTLSize, MTLOrigin (24 bytes each: passed by address)
+        var org: List[Int] = [x0, y0, 0]
+        _ = msg[NoneType](self.blit, "copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:",
+                          buf, offset, w * 4, w * h * 4, Int(size.unsafe_ptr()), tex, 0, 0, Int(org.unsafe_ptr()))
+        _ = len(size)
+        _ = len(org)
+
+    def upload_tile_blit(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, offset: Int) -> Bool:
+        """A restored tile by the GPU: its part copied from upload_map's buffer at `offset` (rows packed) to texture px
+        (x0, y0), the strips around it from zeros. Between begin_blit and end_blit."""
+        var tex = self.tile_texture(slot)
+        if tex == 0 or self.blit == 0:
+            return False
+        var ww = max(w, 0)
+        var hh = max(h, 0)
+        var strips: List[Int] = [0, 0, TILE_TEX, y0, 0, y0 + hh, TILE_TEX, TILE_TEX - y0 - hh, 0, y0, x0, hh, x0 + ww, y0, TILE_TEX - x0 - ww, hh]
+        if ww == 0 or hh == 0:
+            strips = [0, 0, TILE_TEX, TILE_TEX]
+        for q in range(len(strips) // 4):
+            if strips[4 * q + 2] > 0 and strips[4 * q + 3] > 0:
+                self._copy_in(self.zero_buf, 0, tex, strips[4 * q], strips[4 * q + 1], strips[4 * q + 2], strips[4 * q + 3])
+        if ww > 0 and hh > 0:
+            self._copy_in(self.up_buf, offset, tex, x0, y0, ww, hh)
+        return True
+
+    def end_blit(mut self):
+        if self.blit != 0:
+            _ = msg[NoneType](self.blit, "endEncoding")
+            self.blit = 0
+
     def read_tile_part(mut self, slot: Int, x0: Int, y0: Int, w: Int, h: Int, dst: Int) -> Bool:
         """w × h pixels of slot's texture from texture px (x0, y0) into dst (rows packed); the GPU done with it first."""
         if slot < 0 or slot >= len(self.tile_tex) or self.tile_tex[slot] == 0:
@@ -1033,12 +1097,23 @@ struct Metal2D(Movable):
             return False
         var region = List[Int](length=6, fill=0)
         region[5] = 1
-        if not (x0 == 0 and y0 == 0 and w == TILE_TEX and h == TILE_TEX):
-            var zero = List[UInt32](length=TILE_TEX * TILE_TEX, fill=0)
-            region[3] = TILE_TEX
-            region[4] = TILE_TEX
-            _ = msg[NoneType](tex, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, Int(zero.unsafe_ptr()), TILE_TEX * 4)
-            _ = len(zero)
+        if len(self.zero_px) == 0:
+            self.zero_px = List[UInt32](length=TILE_TEX * TILE_TEX, fill=0)
+        var zp = Int(self.zero_px.unsafe_ptr())
+        # (only what the part leaves out is cleared: the strips above, below, left and right of it)
+        var ww = max(w, 0)
+        var hh = max(h, 0)
+        var strips: List[Int] = [0, 0, TILE_TEX, y0, 0, y0 + hh, TILE_TEX, TILE_TEX - y0 - hh, 0, y0, x0, hh, x0 + ww, y0, TILE_TEX - x0 - ww, hh]
+        if ww == 0 or hh == 0:
+            strips = [0, 0, TILE_TEX, TILE_TEX]
+        for q in range(len(strips) // 4):
+            if strips[4 * q + 2] <= 0 or strips[4 * q + 3] <= 0:
+                continue
+            region[0] = strips[4 * q]
+            region[1] = strips[4 * q + 1]
+            region[3] = strips[4 * q + 2]
+            region[4] = strips[4 * q + 3]
+            _ = msg[NoneType](tex, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, zp, TILE_TEX * 4)
         if w > 0 and h > 0:
             region[0] = x0
             region[1] = y0
@@ -1610,6 +1685,9 @@ struct MetalCanvas2D(Movable):
     var more: Bool  # a later frame has tiles to raster or a zoom to settle: the host draws again
     var tile_ms: Float64  # this frame's tile planning, building and encoding (ms)
     var tile_trace: Bool
+    var layer_trace: Bool
+    var prewarmed: Bool  # (D-7961 on Metal) a window's worth of tile textures made and written once, ahead of a restore
+    var frames_drawn: Int
 
     def __init__(out self):
         var font = Font()
@@ -1639,6 +1717,9 @@ struct MetalCanvas2D(Movable):
         self.more = False
         self.tile_ms = 0
         self.tile_trace = getenv("MOJOUI_TILE_TRACE") == "1"
+        self.prewarmed = False
+        self.layer_trace = getenv("MOJOUI_LAYER_TRACE") == "1"
+        self.frames_drawn = 0
         if self.metal.ok:  # (D-7956, D-7993: snapshot keys name the renderer; Metal on this device)
             set_renderer_id(fnv("Metal|" + self.metal.name))
 
@@ -1659,6 +1740,9 @@ struct MetalCanvas2D(Movable):
         var open = 0  # (clips left open by earlier layers)
         var pg = glyph_pages(self.atlas.width)
         var resets0 = pg[].resets
+        self.frames_drawn += 1
+        if not self.prewarmed and self.frames_drawn >= 2 and self.tiles_on and snapshots_expected():
+            self._prewarm(w, h)
         var towner = owner + 1  # (the tile store keys canvases by a nonzero owner; the AppKit host numbers its canvases from 0)
         var tiled = List[Bool](length=n, fill=False)
         for i in range(n):
@@ -1698,6 +1782,7 @@ struct MetalCanvas2D(Movable):
                         self.grown += 1
                         done = True
             if not done:
+                var lt0 = Int(now_ns())
                 if self.merge:
                     fill_layers(self.scratch, sc, self.atlas, self.font, i, i + 1)
                     merge_runs(self.scratch, L.frame)
@@ -1714,6 +1799,8 @@ struct MetalCanvas2D(Movable):
                 L.built_k = sc.layer_tk[i]
                 L.built_resets = pg[].resets
                 self.rebuilt += 1
+                if self.layer_trace:  # (MOJOUI_LAYER_TRACE=1: each layer built, its ops and time; diagnosis)
+                    print("LAYER: built " + sc.layer_keys[i] + " ops " + String(span[1] - span[0]) + " known " + String(known) + " in " + String(Float64(Int(now_ns()) - lt0) / 1e6) + " ms", flush=True)
             L.dx = sc.layer_tx[i]
             L.dy = sc.layer_ty[i]
             L.k = sc.layer_tk[i]
@@ -1794,6 +1881,17 @@ struct MetalCanvas2D(Movable):
                     self.tiles.save_add(rd, 0)
         return ok
 
+    def _prewarm(mut self, w: Int, h: Int):
+        """(D-7961, as GL's) the tile textures a w × h window shows, made and written once now (the first write gives a
+        texture its memory: 7 ms of page faults in the first restore's frame otherwise)."""
+        self.prewarmed = True
+        var t0 = Int(now_ns())
+        var n = (w // TILE + 2) * (h // TILE + 2)
+        for q in range(n):
+            _ = self.metal.upload_tile_part(q, 0, 0, 0, 0, 0)
+        if self.tiles.snap_log:
+            print("SNAP: prewarmed " + String(n) + " tile textures in " + String(Float64(Int(now_ns()) - t0) / 1e6) + " ms", flush=True)
+
     def _raster_plan(mut self, scene: Scene, mut plan: TilePlan, mut used: List[Int]) -> Bool:
         """plan's tiles: each one's batches built (content px at its zoom; a glyph-page reset while building builds
         them all again), planned, uploaded into a buffer set no frame on the GPU reads, and rastered."""
@@ -1838,6 +1936,7 @@ struct MetalCanvas2D(Movable):
         into tile textures as the layer's fallback tiling (Tiles.snap_restored); the GPU done with every slot first."""
         var t0 = Int(now_ns())
         var snap = snap_read(path)
+        var t_read = Float64(Int(now_ns()) - t0) / 1e6
         if not snap.ok:
             if self.tiles.snap_log:
                 print("SNAP: none at " + path, flush=True)
@@ -1865,22 +1964,74 @@ struct MetalCanvas2D(Movable):
                     self.tiles.free.append(sl)
                 return
             slots.append(slot)
+        # every tile decoded at once (a share of the tiles per core) into one buffer, then each put into its texture
+        var count = len(which)
+        var at = List[Int]()
+        var nb = List[Int]()
+        var npx = List[Int]()
+        var off = List[Int]()
+        var total = 0
+        for k in range(count):
+            ref t = snap.tiles[which[k]]
+            at.append(t.at)
+            nb.append(t.n)
+            npx.append(t.w * t.h)
+            off.append(total)
+            total += 4 * t.w * t.h
+        self.metal.drain()  # (no frame still copies from the upload buffer or reads these slots)
+        var buf = List[UInt8]()
+        var base = self.metal.upload_map(max(total, 4))
+        var blit = base != 0 and self.metal.begin_blit()
+        if not blit:  # (no buffer or encoder: decoded into memory, put in by the CPU)
+            self.metal.end_blit()
+            buf = List[UInt8](unsafe_uninit_length=max(total, 4))
+            base = Int(buf.unsafe_ptr())
+        var good = List[Bool](length=max(count, 1), fill=False)
+        var src = Int(snap.bytes.unsafe_ptr())
+        var ap = Int(at.unsafe_ptr())
+        var bp = Int(nb.unsafe_ptr())
+        var pp = Int(npx.unsafe_ptr())
+        var op = Int(off.unsafe_ptr())
+        var gp = Int(good.unsafe_ptr())
+
+        def work(k: Int) {imm}:
+            var a_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=ap)
+            var b_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=bp)
+            var p_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pp)
+            var o_ = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=op)
+            var g_ = Pointer[Bool, MutUntrackedOrigin](unsafe_from_address=gp)
+            g_.unsafe_offset(k)[] = rle_decode(src + a_.unsafe_offset(k)[], b_.unsafe_offset(k)[], base + o_.unsafe_offset(k)[], p_.unsafe_offset(k)[])
+
+        var d0 = Int(now_ns())
+        if count > 0:
+            parallelize(work, count, min(count, num_logical_cores()))
+        var dec_ms = Float64(Int(now_ns()) - d0) / 1e6
+        _ = len(at)
+        _ = len(nb)
+        _ = len(npx)
+        var dr0 = Int(now_ns())
         self.metal.drain()
+        var dr_ms = Float64(Int(now_ns()) - dr0) / 1e6
+        var up0 = Int(now_ns())
         var keys = List[Int]()
         var parts = List[Int]()
-        var src = Int(snap.bytes.unsafe_ptr())
-        for k in range(len(which)):
+        for k in range(count):
             ref t = snap.tiles[which[k]]
-            var px = List[UInt32](length=t.w * t.h, fill=0)
-            if not rle_decode(src + t.at, t.n, Int(px.unsafe_ptr()), t.w * t.h) or not self.metal.upload_tile_part(slots[k], t.x0, t.y0, t.w, t.h, Int(px.unsafe_ptr())):
+            var put = self.metal.upload_tile_blit(slots[k], t.x0, t.y0, t.w, t.h, off[k]) if blit else self.metal.upload_tile_part(slots[k], t.x0, t.y0, t.w, t.h, base + off[k])
+            if not good[k] or not put:
+                self.metal.end_blit()
                 if self.tiles.snap_log:
                     print("SNAP: refused (a tile doesn't decode) " + path, flush=True)
                 for sl in slots:
                     self.tiles.free.append(sl)
                 return
-            _ = len(px)
             keys.append(_pack(t.i, t.j))
             parts += [t.x0, t.y0, t.w, t.h]
+        self.metal.end_blit()
+        _ = len(buf)
+        _ = len(good)
+        if self.tiles.snap_log:
+            print("SNAP: read " + String(t_read) + " decode " + String(dec_ms) + " drain " + String(dr_ms) + " upload " + String(Float64(Int(now_ns()) - up0) / 1e6) + " ms (" + String(min(count, num_logical_cores())) + " cores)", flush=True)
         _ = len(snap.bytes)
         self.tiles.snap_restored(scene, i, owner, w, h, keys, slots, parts)
         if self.tiles.snap_log:

@@ -5183,6 +5183,27 @@ def run_step[A: App](host_addr: Int, step: String):
         print("APPBENCH: " + kv[1], flush=True)
     elif verb == "framebench":  # framebench:K=pan|zoom|draw|finish|type|grow,N: N gestures on canvas K, one frame each; percentiles of a frame's work
         frame_bench[A](host_addr, rest)
+    elif verb == "gpushot":  # gpushot:K=path: the picture canvas K shows now (its layer's IOSurface, every frame in flight done), as a PNG (D-7993)
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0 or host[].canvases[k].layer == 0:
+            host[].report.note("TEST: no GPU picture on " + kv[0])
+            return
+        host[].finish_gpu2d(0)
+        var io = msg(host[].canvases[k].layer, "contents")
+        var w = host[].canvases[k].sw
+        var h = host[].canvases[k].sh
+        if io == 0 or w <= 0 or h <= 0:
+            host[].report.note("TEST: no GPU picture on " + kv[0])
+            return
+        var px = read_iosurface(io, w, h)
+        var png = encode_png(px, w, h)
+        try:
+            with open(kv[1], "w") as f:
+                f.write_bytes(Span(png))
+            print("GPUSHOT: " + kv[0] + " " + String(w) + "x" + String(h) + " " + kv[1], flush=True)
+        except:
+            host[].report.note("TEST: couldn't write " + kv[1])
     elif verb == "gpucheck":  # gpucheck:K: canvas K's Scene drawn by Metal and by gpu2d's CPU executor, compared (goal 75 M3)
         gpu_check[A](host_addr, rest)
     elif verb == "quit":  # quit: the run ends after this step (GTK's word; the app's closing() runs on terminate)
