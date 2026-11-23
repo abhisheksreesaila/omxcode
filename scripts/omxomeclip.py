@@ -49,7 +49,7 @@ WIN = (WIN_PT[0] * SCALE, WIN_PT[1] * SCALE)  # the take's pixels
 OUT = (1600, 1024)
 FPS = 30
 CRF = int(os.environ.get("OMXOME_CRF", "26"))
-NAMES = ["tv", "tiles", "cards", "hybrid"]
+NAMES = ["tv", "tiles", "cards", "hybrid", "map", "live"]
 TODO = '{"items":[{"text":"buy milk","done":false},{"text":"call mum","done":false},{"text":"book the dentist","done":false}]}'
 OPEN = "waitfor:Listening=300000;wait:2500;"  # (the model has loaded; the stage settles)
 
@@ -93,6 +93,16 @@ def plan(name, d):
                  + ";waitfor:Back to the tiles=240000;wait:2500;" + f"regions:{d}/tv.json;"
                  + "waitfor:Listening=240000;wait:2500;tap:Back to the tiles;wait:4000;" + f"shot:{d}/last.png")
         return BUILDS / "build/omx/linux/omx", steps, env, "WAITED: Listening", 900
+    if name == "map":
+        q = os.environ.get("OMXOME_MAP_ASK", "Plan a Saturday in Lisbon: the castle, tram 28 and Belém")
+        steps = (OPEN + f"regions:{d}/home.json;wait:1200;tap:Type;wait:700;" + typed("Type to omx", q)
+                 + ";wait:3000;waitfor:Listening=300000;" + f"regions:{d}/tv.json;"
+                 + "wait:2500;tap:Back to the tiles;wait:4000;" + f"shot:{d}/last.png")
+        return BUILDS / "build/omx/linux/omx", steps, env, "WAITED: Listening", 900
+    if name == "live":
+        steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:5500",
+                          "tap:Fri 7:20 · near the airport", "wait:6000", "tap:7:45 school run", "wait:3500"])
+        return BUILDS / "build/stage/linux/stage", steps, {"STAGE_TRACE": str(d / "trace.txt")}, None, 120
     if name == "hybrid":
         env["OMX_LANE_SWITCH"] = "1"
         steps = OPEN + f"regions:{d}/home.json;wait:1500;tap:Switch lane;wait:3500;tap:Switch lane;wait:3000;shot:{d}/last.png"
@@ -273,6 +283,11 @@ class Clip:
         lo = max(min(t for t, _ in times) - 0.5, 0)
         hi = max(t for t, _ in times) + 0.5
         frames = decode(self.raw, lo, hi)  # every raw frame in [lo, hi] at 30 fps
+        cuts = []  # (out time, seconds left out): each jump forward in the take gets a small "cut" chip, so no cut passes as real time
+        for a, b in zip(self.segs, self.segs[1:]):
+            gap = b[0] - (a[1] if a[2] != 0.0 else a[0])
+            if gap > 0.5:
+                cuts.append((b[3], gap))
         mp4 = IMG / f"clip-{self.name}.mp4"
         enc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OUT[0]}x{OUT[1]}", "-r", str(FPS), "-i", "-",
                                 "-an", "-c:v", "libx264", "-preset", "slow", "-crf", str(CRF), "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(mp4)],
@@ -298,6 +313,9 @@ class Clip:
                 age = st - ts + 0.32  # (the press shows just before the screen answers it, and is gone as it changes)
                 if 0 <= age <= 0.36 and speed != 0.0:
                     im = touch(im, ((tx - x) * OUT[0] / w, (ty - y) * OUT[1] / h), age / 0.36)
+            for (ct, gap) in cuts:
+                if ct <= t <= ct + 1.0:
+                    im = chip(im, f"cut · {gap:.0f} s", min(1.0, (ct + 1.0 - t) / 0.3))
             for (c0, c1, text, top) in self.caps:
                 if c0 - 0.25 <= t <= c1 + 0.25:
                     a = min(1.0, (t - (c0 - 0.25)) / 0.25, ((c1 + 0.25) - t) / 0.25)
@@ -362,6 +380,21 @@ def caption(im, text, alpha, top=False):
     d.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], 22, fill=PAGE + (int(214 * alpha),), outline=LINE + (a,), width=2)
     d.rounded_rectangle([x0 + 26, y0 + 22, x0 + 32, y0 + bh - 22], 3, fill=ACCENT + (a,))
     d.text((x0 + 52, y0 + 15), text, font=f, fill=INK + (a,))
+    return Image.alpha_composite(im, layer)
+
+
+def chip(im, text, alpha):
+    """A small corner tag (top right): where the edit left time out."""
+    from PIL import Image, ImageDraw
+    f = font(26, 600)
+    w = f.getlength(text)
+    x1, y0 = OUT[0] - 28, 28
+    x0 = x1 - w - 36
+    layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    a = int(255 * alpha)
+    d.rounded_rectangle([x0, y0, x1, y0 + 46], 14, fill=PAGE + (int(200 * alpha),), outline=LINE + (a,), width=2)
+    d.text((x0 + 18, y0 + 8), text, font=f, fill=INK + (a,))
     return Image.alpha_composite(im, layer)
 
 
@@ -519,11 +552,13 @@ def tv_close(c, after):
 X_PT = (952, 98)  # the TV's × in the window (points): the head's right end (stagetv.mojo: a 36 pt icon button)
 
 
-def edit_answer(name, rect_of, captions, poster_tag, think_speed=4.0, lead=3.0, linger=1.2, card_secs=None, keep_points=None):
+def edit_answer(name, rect_of, captions, poster_tag, think_speed=4.0, lead=3.0, linger=1.2, card_secs=None, keep_points=None,
+                trim_walk=None):
     """A typed question, the TV opening, the model's thinking at think_speed (said in a caption), the card and the ring at
     real time (pushed in on rect_of(regions)), then the fold back to the tiles; a dissolve closes the loop. card_secs: the
     card's arrival plays that long, then a cut to just before the first point (the reply's words streaming in between);
-    keep_points: the walk is cut after that many points."""
+    keep_points: the walk is cut after that many points; trim_walk: a still stretch between two points longer than this
+    (seconds) is cut down to 1.4 s after the first lands. Every cut shows a small "cut · N s" chip (Clip.render)."""
     c = Clip(name)
     d = WORK / name
     ev, m = omx_marks(name)
@@ -543,6 +578,13 @@ def edit_answer(name, rect_of, captions, poster_tag, think_speed=4.0, lead=3.0, 
     if card_secs and m["points"][0][0] - 0.35 > card + card_secs:
         c.seg(card - 0.1, card + card_secs)  # the card arrives
         c.seg(m["points"][0][0] - 0.35, last_point + linger)  # (cut) the ring walking it
+    elif trim_walk:
+        t = card - 0.1
+        for (pa, _), (pb, _) in zip(m["points"], m["points"][1:]):
+            if pb - pa > trim_walk:
+                c.seg(t, pa + 1.4)  # (to this point's landing)
+                t = pb - 0.3  # (cut) on to just before the next one
+        c.seg(t, last_point + linger)
     else:
         c.seg(card - 0.1, last_point + linger)  # the card, the ring walking it
     o_fold = c.t
@@ -607,6 +649,56 @@ def edit_cards():
 
 
 EDITS["cards"] = edit_cards
+
+
+def edit_map():
+    # the map card (taller than the word card: the map runs to ~530 pt) and the talk beside it, above the caption
+    edit_answer("map", lambda rg: [rg["stage-tv"][0] + 10 * SCALE, rg["stage-tv"][1] - 4 * SCALE, 680 * SCALE, 580 * SCALE],
+                ["Plan a day out", "It flies to each stop as she names it", "Then it folds back"], "stop2",
+                think_speed=6.0, lead=2.0, linger=1.7, trim_walk=3.0)
+
+
+EDITS["map"] = edit_map
+
+
+def edit_live():
+    """The Stage demo's right column: a gentle push-in on Live (the pasta timer ticking each second, the flight row), then
+    "Fri 7:20 · near the airport": the flight leaves Live and takes the stage's big tile (a luggage-tag charm) while Traffic
+    turns to the airport and the timer keeps ticking; then back to the morning. All real time."""
+    c = Clip("live")
+    d = WORK / "live"
+    ev = trace_events(d / "trace.txt")
+    pills = [r for r in pill_boxes(events("live")).get("stage-pill", []) if r[0] > WIN[0] * 0.7]
+    day = {text.split()[1]: t for t, text in ev if text.startswith("DAY ")}
+    off = 0.95
+    # (a big change near the tap: the stage's own tiles turn their faces every few seconds, a small change)
+    t_air = onset(c.raw, day["airport"] - off, before=0.3, after=1.5, least=2000)
+    t_am = onset(c.raw, day["am"] - off, before=0.3, after=1.5, least=2000)
+    col = cam_fit([620 * SCALE, 30 * SCALE, 655 * SCALE, 540 * SCALE], pad=0.0)  # Live, the pills down to the airport, the stage's right half
+    start = t_air - 4.2
+    end = t_am + 2.6
+    c.seg(start, end)
+    o = lambda st: st - start
+    c.cam(0, col)
+    c.cam(o(t_air) + 0.1, col)
+    c.cam(o(t_air) + 1.1, FULL)
+    c.cam(o(t_am) + 0.9, FULL)
+    c.cam(c.t - 0.25, col)  # (back in on the column: the loop's first frame)
+    live = [len(text.split(" live=")[1].split(" ")[0].split(",")) for _, text in ev if text.startswith("FEED ")]
+    pitch = 58 * SCALE
+    at = lambda k, rows: (centre(pills[k])[0], centre(pills[k])[1] + (rows - live[-1]) * pitch)
+    c.taps = [(t_air, *at(6, live[0])), (t_am, *at(0, live[1]))]
+    c.cap(0.4, o(t_air) - 0.6, "Live: things that keep ticking")
+    c.cap(o(t_air) + 0.5, o(t_air) + 4.4, "Urgent? It moves to the stage")
+    c.loop = 0.4
+    c.poster_t = o(t_air) + 3.0
+    c.checks = {"1-tick-a": 0.5, "2-tick-b": 2.5, "3-tap": o(t_air) - 0.15, "4-moving": o(t_air) + 0.35, "5-stage": o(t_air) + 1.6,
+                "6-ticking": o(t_air) + 4.0, "7-back": o(t_am) + 0.6, "8-end": c.t - 0.5}
+    print(f"live: airport {t_air:.2f}, morning {t_am:.2f}", flush=True)
+    c.render(d / "check")
+
+
+EDITS["live"] = edit_live
 
 
 def blank_run(raw, t0, t1, rect):

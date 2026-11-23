@@ -46,9 +46,10 @@ CONSOLE = dict(
 OMX = dict(
     name="omxome", app="omx", kind="The third flagship · a home assistant that shows you",
     line="Ask out loud and it shows you: live tiles on a three-column Stage, a chat bar that grows into a visual explanation and points at what it means, cards the model builds as it talks. Local most of the time, your own subscription when you ask.",
-    shots=[("../img/omx/clip-tv.jpg", "The chat bar grows into the TV: a word card, the ring on what it means"),
+    shots=[("../img/omx/clip-map.jpg", "Plan a Saturday in Lisbon: the map flies to each stop as it names it"),
+           ("../img/omx/clip-tv.jpg", "The chat bar grows into the TV: a word card, the ring on what it means"),
            ("../img/omx/stage-day.jpg", "The Stage: quiet on the left, urgent in the middle, live on the right"),
-           ("../img/omx/clip-tiles.jpg", "Rain before pickup: the weather tile takes the stage"),
+           ("../img/omx/clip-live.jpg", "Near the airport, the flight leaves the Live column for the stage"),
            ("../img/omx/clip-cards.jpg", "A card the model built: how a heat pump works"),
            ("../img/omx/mac-heatpump.jpg", "On a Mac, at night")],
     src="examples/omx", page="../omxome.html", cta="See omxome",
