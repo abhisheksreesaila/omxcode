@@ -28,11 +28,14 @@ grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > 
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$out/env.txt" "$@" "$host:$remote/data/"
 rc=0
-"${ssh_[@]}" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
+"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
 set -uo pipefail
 app=$1 settings=${3:-}  # (an empty argument vanishes on its way through ssh)
 cd ~/"$2" && tar -xzf data/src.tar.gz
 rm -f stdout.txt  # (a failed build mustn't hand back the last run's)
+outd=$PWD/data/out-$(date +%s)  # (what the steps write for the caller: {out}, a fresh folder each run, fetched back as out/)
+mkdir -p "$outd"
+echo "OUTDIR: $outd"
 steps=$(cat data/steps.txt)
 export PATH=$HOME/.pixi/bin:$PATH
 pixi install > install.txt 2>&1 || { tail -20 install.txt; exit 1; }
@@ -40,13 +43,17 @@ if ! MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1; then tai
 bundle=$(ls -d build/"$app"/mac/*.app | head -1)
 exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
 steps=${steps//\{data\}/$PWD/data}
-# scroll bars as a trackpad shows them, for this app only (its own defaults domain: the Mac's own setting is left alone)
-defaults write "$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleIdentifier)" AppleShowScrollBars -string WhenScrolling
+steps=${steps//\{out\}/$outd}
+# scroll bars as a trackpad shows them, for this app only (its own defaults domain), only when asked: MAC_APP_DEFAULTS=1
+# (the owner, 11-22: no `defaults` changes on the Mac; by default the Mac's own setting stands)
+if [ "${APP_DEFAULTS:-0}" = 1 ]; then
+    defaults write "$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleIdentifier)" AppleShowScrollBars -string WhenScrolling
+fi
 before=$(ls -td ~/Desktop/omxcode-report-*/*/ 2>/dev/null | head -1)
 config=$PWD/config-$(date +%s) && mkdir -p "$config"
 [ -z "$settings" ] || echo "$settings" | tr ',' '\n' > "$config/settings.txt"
 envs=()  # MAC_ENV's variables, {data} filled in
-while IFS= read -r kv; do [ -z "$kv" ] || envs+=("${kv//\{data\}/$PWD/data}"); done < data/env.txt
+while IFS= read -r kv; do kv=${kv//\{out\}/$outd}; [ -z "$kv" ] || envs+=("${kv//\{data\}/$PWD/data}"); done < data/env.txt
 env ${envs[@]+"${envs[@]}"} OMX_CONFIG="$config" MOJOUI_TEST="$steps" "$exe" > stdout.txt 2>&1 &
 pid=$! start=$(date +%s)
 while kill -0 "$pid" 2>/dev/null; do
@@ -64,5 +71,7 @@ scp -q -i "$key" "$host:$remote/stdout.txt" "$out/stdout.txt" 2>/dev/null || tru
 report=$(sed -n 's/^REPORT: //p' "$out/run.txt" | tail -1)
 [ -n "$report" ] || { echo "no report: $out/run.txt"; exit 1; }
 scp -q -i "$key" -r "$host:${report// /\\ }*" "$out/"
+outd=$(sed -n 's/^OUTDIR: //p' "$out/run.txt" | tail -1)
+[ -z "$outd" ] || scp -q -i "$key" -r "$host:$outd" "$out/out" 2>/dev/null || true  # ({out}: the files the steps wrote)
 rm -f "$out/src.tar.gz"
 echo "$out"

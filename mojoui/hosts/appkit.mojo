@@ -4686,6 +4686,28 @@ def run_step[A: App](host_addr: Int, step: String):
             presses.append(web_key(name))
         for p in presses:
             canvas_key_step[A](host_addr, kv[0], p, mods)
+    elif verb == "render":  # render:K=path: canvas K painted by the app's draw() (the CPU painter, at the window's backing scale) into a PNG, as GTK's
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            host[].report.note("TEST: no canvas " + kv[0])
+            return
+        var b = msg[CGRect](host[].canvases[k].view, "bounds")
+        var scale = msg[Float64](host[].window, "backingScaleFactor") if host[].window != 0 else 2.0
+        var wpx = Int(b.width * scale + 0.5)
+        var hpx = Int(b.height * scale + 0.5)
+        var px = List[UInt32](length=wpx * hpx, fill=0)
+        var surface = Surface(Int(px.unsafe_ptr()), wpx, hpx, scale)
+        surface.still = True
+        var d = host[].rt.draw(node, surface)
+        host[].apply(d, host_addr)
+        var png = encode_png(px, wpx, hpx)
+        try:
+            with open(kv[1], "w") as f:
+                f.write_bytes(Span(png))
+            print("RENDER: " + kv[0] + " " + String(wpx) + "x" + String(hpx) + " " + kv[1], flush=True)
+        except:
+            host[].report.note("TEST: can't write " + kv[1])
     elif verb == "stroke":  # stroke:K=x,y,p;x,y,p;…: a pen's press, moves and release (canvas points), each carrying its pressure
         var node = canvas_node_at(host[], kv[0])
         var k = host[].canvas_at(node) if node >= 0 else -1

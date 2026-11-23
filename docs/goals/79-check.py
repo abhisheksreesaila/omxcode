@@ -1201,9 +1201,11 @@ def m7():
             for s in M2_SCREENS + M3_SCREENS:
                 data = OUT / "mac" / s
                 data.mkdir(parents=True, exist_ok=True)
-                out, e = mac_run(f"look-{s}", ["wait:1200"] + screen_steps(s, REF_MAC) + ["wait:600", "render:desk={data}/" + f"{s}.png", "boxes:{data}/" + f"{s}.boxes.json"],
+                # (fixed 11-22: the Mac half had never run: no `boxes:` step exists (pnote writes its boxes after every frame to
+                # PNOTE_BOXES, as on Linux) and files written to {data} never came back: {out} is fetched into the report)
+                out, e = mac_run(f"look-{s}", ["wait:1200"] + screen_steps(s, REF_MAC) + ["wait:600", "render:desk={out}/" + f"{s}.png"],
                                  {"PNOTE_DB": "{data}/pn.db", "PNOTE_SKIN": "night" if s.endswith("night") else "crayon" if s.endswith("crayon") else "paper",
-                                  "PNOTE_CHROME": "mac"}, [REF_MAC / "pn.db"])
+                                  "PNOTE_CHROME": "mac", "PNOTE_BOXES": "{out}/" + f"{s}.boxes.json"}, [REF_MAC / "pn.db"])
                 if e:
                     probs.append(f"Mac {s}: {e}")
                     continue
