@@ -10,47 +10,47 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 
 | note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |
 |---|---|---|---|---|---|
-| 600 | open (cold): first frame (the process's first open: 7.2, from the kept view); the kept view shown in 30 of 30 cold opens | 1581.0 / 1581.0 | 11.7 / 11.7 | 10.6 / 10.6 · shown: not measured | ✗ |
-| 600 | open: frames during (n 487) | — | 10.8 / 16.7 | | ✗ |
-| 600 | open: a press during it, the frame that shows it (n 10) | — | 9.3 / 9.3 | | ✗ |
-| 600 | open: complete (wall) | 1581.0 | 231.7 / 346.9 | | ✓ |
-| 600 | pan 30% | 16.8 / 16.8 | 5.2 / 9.0 | 4.6 / 8.1 · shown: not measured | ✓ |
-| 600 | zoom from 30% | 16.7 / 33.3 | 5.9 / 7.9 | 5.2 / 6.0 · shown: not measured | ✓ |
-| 600 | pan 100% | 16.8 / 16.8 | 6.6 / 8.8 | 4.4 / 137.8 · shown: not measured | ✓ |
-| 600 | drag one | 16.7 / 16.8 | 7.3 / 7.8 | 4.7 / 5.8 · shown: not measured | ✓ |
-| 600 | drag 40 | 16.7 / 16.8 | 5.9 / 10.0 | 8.0 / 9.8 · shown: not measured | ✓ |
-| 600 | undo | 16.9 / 17.0 | 7.0 / 7.1 | 10.2 / 10.6 · shown: not measured | ✓ |
-| 600 | redo | 16.8 / 16.9 | 7.0 / 7.0 | 10.5 / 11.2 · shown: not measured | ✓ |
-| 600 | pen | 16.7 / 16.8 | 6.7 / 15.1 | 7.5 / 31.5 · shown: not measured | ✓ |
-| 600 | typing | 16.8 / 16.8 | 5.4 / 6.9 | 7.3 / 7.4 · shown: not measured | ✓ |
-| stress | open (cold): first frame (the process's first open: 13.5, from the kept view); the kept view shown in 30 of 30 cold opens | 1250.0 / 1250.0 | 13.5 / 13.5 | 16.9 / 16.9 · shown: not measured | ✗ |
-| stress | open: frames during (n 936) | — | 4.8 / 10.5 | | ✓ |
-| stress | open: a press during it, the frame that shows it (n 10) | — | 5.8 / 5.8 | | ✓ |
-| stress | open: complete (wall) | 1250.0 | 400.1 / 466.8 | | ✓ |
-| stress | pan 30% | 16.7 / 16.8 | 3.6 / 11.7 | 7.6 / 16.0 · shown: not measured | ✓ |
-| stress | zoom from 30% | 16.8 / 300.0 | 6.8 / 20.9 | 8.7 / 26.0 · shown: not measured | ✗ |
-| stress | pan 100% | 16.7 / 16.8 | 4.1 / 5.4 | 7.5 / 7.6 · shown: not measured | ✓ |
-| stress | drag one | 16.7 / 16.8 | 5.0 / 12.1 | 8.2 / 18.2 · shown: not measured | ✓ |
-| stress | drag 40 | 16.7 / 66.7 | 5.8 / 13.1 | 8.0 / 20.7 · shown: not measured | ✓ |
-| stress | undo | 16.7 / 17.1 | 9.4 / 11.8 | 16.4 / 17.1 · shown: not measured | ✗ |
-| stress | redo | 16.8 / 16.8 | 8.0 / 8.3 | 14.0 / 14.2 · shown: not measured | ✓ |
-| stress | pen | 16.8 / 149.9 | 4.6 / 6.4 | 7.5 / 8.9 · shown: not measured | ✓ |
-| stress | typing | 16.7 / 16.8 | 3.7 / 5.4 | 9.1 / 24.3 · shown: not measured | ✓ |
-| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 46.7 / 46.7 | | |
-| 600 | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 13.6 · 2.9 / 3.9 · 3.2 / 3.2 · 116.6 | | |
-| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 144.5 / 144.5 | | |
-| stress | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 81.2 · 5.7 / 10.3 · 5.0 / 5.0 · 352.3 | | |
-| 600 | open again, kept parsed (not judged) | — | 5.0 / 5.0 | | |
-| stress | open again, kept parsed (not judged) | — | 5.2 / 5.2 | | |
+| 600 | open (cold): first frame (the process's first open: 5.5, from the kept view); the kept view shown in 30 of 30 cold opens | 1249.0 / 1249.0 | 6.2 / 6.2 | 8.6 / 8.6 · 15.1 / 15.1 (20) | ✓ |
+| 600 | open: frames during (n 293) | — | 3.8 / 5.6 | | ✓ |
+| 600 | open: a press during it, the frame that shows it (n 10) | — | 7.2 / 7.2 | | ✓ |
+| 600 | open: complete (wall) | 1249.0 | 116.9 / 351.2 | | ✓ |
+| 600 | pan 30% | 16.8 / 16.8 | 4.0 / 5.0 | 10.5 / 14.2 · 16.1 / 17.4 (120) | ✓ |
+| 600 | zoom from 30% | 16.7 / 16.8 | 3.1 / 4.7 | 7.3 / 8.2 · 16.6 / 17.3 (60) | ✓ |
+| 600 | pan 100% | 16.7 / 16.8 | 3.9 / 7.2 | 8.6 / 14.3 · 16.1 / 17.4 (120) | ✓ |
+| 600 | drag one | 16.8 / 33.4 | 3.1 / 5.9 | 5.9 / 10.8 · 16.0 / 18.1 (62) | ✓ |
+| 600 | drag 40 | 16.8 / 16.8 | 4.6 / 7.0 | 11.2 / 15.2 · 15.7 / 15.7 (62) | ✓ |
+| 600 | undo | 17.1 / 17.1 | 5.3 / 9.9 | 8.9 / 9.1 · 16.0 / 16.6 (25) | ✓ |
+| 600 | redo | 17.1 / 18.2 | 4.6 / 5.4 | 7.4 / 9.0 · 15.7 / 17.1 (25) | ✓ |
+| 600 | pen | 16.8 / 16.8 | 4.7 / 12.1 | 9.9 / 11.6 · 16.1 / 17.7 (300) | ✓ |
+| 600 | typing | 16.8 / 16.8 | 4.1 / 5.3 | 10.5 / 10.8 · 16.1 / 16.7 (80) | ✓ |
+| stress | open (cold): first frame (the process's first open: 8.0, from the kept view); the kept view shown in 30 of 30 cold opens | 1152.0 / 1152.0 | 13.0 / 13.0 | 19.7 / 19.7 · 13.9 / 13.9 (18) | ✗ |
+| stress | open: frames during (n 1106) | — | 5.5 / 13.5 | | ✓ |
+| stress | open: a press during it, the frame that shows it (n 10) | — | 7.9 / 7.9 | | ✓ |
+| stress | open: complete (wall) | 1152.0 | 448.0 / 832.6 | | ✓ |
+| stress | pan 30% | 16.8 / 16.8 | 5.0 / 6.3 | 5.6 / 9.6 · 15.8 / 16.1 (120) | ✓ |
+| stress | zoom from 30% | 33.3 / 216.6 | 9.8 / 17.4 | 10.6 / 25.4 · 16.6 / 17.6 (60) | ✗ |
+| stress | pan 100% | 16.7 / 16.8 | 5.0 / 8.1 | 6.2 / 11.8 · 16.0 / 17.8 (120) | ✓ |
+| stress | drag one | 16.8 / 16.8 | 7.1 / 8.1 | 4.5 / 13.8 · 15.9 / 16.0 (62) | ✓ |
+| stress | drag 40 | 16.8 / 116.6 | 5.1 / 12.1 | 8.1 / 12.4 · 15.9 / 16.2 (62) | ✓ |
+| stress | undo | 16.8 / 16.9 | 13.8 / 15.2 | 9.6 / 11.0 · 13.6 / 13.6 (25) | ✗ |
+| stress | redo | 16.9 / 17.4 | 10.8 / 13.5 | 18.9 / 19.4 · 14.2 / 18.2 (25) | ✗ |
+| stress | pen | 16.8 / 133.3 | 4.8 / 12.5 | 5.6 / 10.2 · 16.0 / 16.9 (300) | ✓ |
+| stress | typing | 16.8 / 33.4 | 4.7 / 5.3 | 6.7 / 8.1 · 16.0 / 16.0 (80) | ✓ |
+| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 42.2 / 42.2 | | |
+| 600 | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 18.5 · 3.5 / 8.5 · 9.8 / 9.8 · 283.1 | | |
+| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 188.4 / 188.4 | | |
+| stress | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | 98.9 · 5.2 / 16.5 · 6.5 / 6.5 · 1172.2 | | |
+| 600 | open again, kept parsed (not judged) | — | 4.1 / 4.1 | | |
+| stress | open again, kept parsed (not judged) | — | 7.8 / 7.8 | | |
 
 | | web | native | |
 |---|---|---|---|
-| cold start: Personal Note's desktop launcher (server + Chromium app window) | 762.2 ms | 290.0 ms | ✓ |
-| cold start: a fresh Chromium process on the built app | 587.1 ms | 290.0 ms | ✓ |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | 267.0 ms | 290.0 ms | |
-| RSS after opening all three kinds | 812.1 MB | 204.4 MB | ✓ |
-| note switch p95 / max (5 runs of 5; p95 the median run's, max the worst) | 83.8 / 125.6 ms | 6.73 / 7.79 ms | ✓ |
-| omnibar open p95 / max (5 runs of 5; p95 the median run's, max the worst) | 38.2 / 59.4 ms | 4.94 / 11.57 ms | ✓ |
-| the app's second start (glyphs of the first readied at idle, mojoui.glyphwarm, D-8002; not judged): note switch · omnibar p95 | — | 4.41 · 2.2 ms | |
+| cold start: Personal Note's desktop launcher (server + Chromium app window) | 800.8 ms | 320.0 ms | ✓ |
+| cold start: a fresh Chromium process on the built app | 584.6 ms | 320.0 ms | ✓ |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | 270.0 ms | 320.0 ms | |
+| RSS after opening all three kinds | 816.1 MB | 202.8 MB | ✓ |
+| note switch p95 / max (5 runs of 5; p95 the median run's, max the worst) | 104.1 / 115.8 ms | 7.24 / 10.66 ms | ✓ |
+| omnibar open p95 / max (5 runs of 5; p95 the median run's, max the worst) | 31.2 / 50.5 ms | 5.05 / 7.38 ms | ✓ |
+| the app's second start (glyphs of the first readied at idle, mojoui.glyphwarm, D-8002; not judged): note switch · omnibar p95 | — | 4.4 · 2.19 ms | |
 
 Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar (D-8001): native, the step's event, view, draw and GPU time (the host's app_step_bench); web, docs/goals/79/webswitch.mjs: the input event's timestamp to the frame after the new title (or the search panel) shows, in Chromium with the GPU: a fresh page per run.
