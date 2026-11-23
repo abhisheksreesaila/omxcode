@@ -10,7 +10,11 @@
 #
 # Not like for like (stated in the results): mojoui's Scene has no Gaussian shadow, so the boxes' and cards' shadows
 # are a flat translucent rect (one instance each, the same count as nanoui's shadow instances, much cheaper pixels).
+# Held-out scenes (goal 80: ours, never the rival's; they must not regress while the race is worked on): whiteboard,
+# canvas (Personal Note's seeded 645-object note), mindmap (200 topics), document (wrapped paragraphs in several faces and
+# scripts, scrolled), table (10 000 rows × 6 columns, scrolled). Each frame pans or scrolls, as the app redraws it.
 #   pixi run mojo run -I . bench/nanoui/scenes.mojo [scene ...]   (HC_SHOT=dir writes the last frame, PNG)
+# Prints a table, and one `RESULT {json}` line per scene (docs/goals/80-check.py reads those).
 from std.math import sin
 from std.time import perf_counter_ns
 from std.os import getenv
@@ -23,6 +27,12 @@ from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_batches, execute_cpu
 from mojoui.gpu2d_merge import merge_runs
 from mojoui.gpu2d_gl import GL2D, headless_gl33
 from mojoui.png import encode_png
+from mojoui.fonttext import measure
+from mojoui.ink import Stroke
+from mojoui.objectlayer import ObjectLayer
+from mojoui.mindmap import MindMap, MapView
+from tests.test_gpu2d import Rng, mindmap_of
+from tests.test_objectlayer import seeded_note
 from mojoui.fonttext import TextStyle, ALIGN_LEFT, ALIGN_RIGHT
 
 comptime W = 900
@@ -118,12 +128,123 @@ def dashboard(mut sc: Scene, frame: Int, t: Float64):
             sc.run(TextStyle(FAMILY, 400, False, 11), "updated " + String(frame % 60) + "s ago", x + 14, y + 113, ink, ALIGN_LEFT)
 
 
-def build(which: String, frame: Int) -> Scene:
+comptime RACE = ["boxes", "text", "scroll", "list", "dashboard"]
+comptime HELD = ["whiteboard", "canvas", "mindmap", "document", "table"]
+
+
+struct Held(Movable):
+    """What the held-out scenes keep between frames, as their apps do: stroke outlines, the note, the map, the
+    document's wrapped lines."""
+
+    var strokes: List[List[Float64]]
+    var colors: List[UInt32]
+    var note: ObjectLayer
+    var map: MindMap
+    var lines: List[String]
+    var styles: List[TextStyle]
+    var ys: List[Float64]  # each line's top, layout px (line pitch 1.4 × its size)
+
+    def __init__(out self, font: Font):
+        self.strokes = List[List[Float64]]()
+        self.colors = List[UInt32]()
+        var rng = Rng(75)
+        var palette: List[UInt32] = [0xFF222222, 0xFFB0602A, 0xFF2A60B0, 0xE02A9040]
+        for i in range(200):
+            var s = Stroke(1.5 + rng.real(0, 5), palette[i % 4])
+            var x = rng.real(0, 1000)
+            var y = rng.real(0, 700)
+            var dx = rng.real(-1, 1)
+            var dy = rng.real(-1, 1)
+            var n = 20 + Int(rng.real(0, 60))
+            for k in range(n):
+                dx += rng.real(-0.4, 0.4)
+                dy += rng.real(-0.4, 0.4)
+                x += dx * 3
+                y += dy * 3
+                s.add(x, y, 0.3 + 0.7 * abs(sin(Float64(k) * 0.15)))
+            self.strokes.append(s.outline())
+            self.colors.append(s.color)
+        self.note = seeded_note()
+        self.map = mindmap_of(200)
+        self.lines = List[String]()
+        self.styles = List[TextStyle]()
+        self.ys = List[Float64]()
+        var faces: List[String] = ["Geist", "Source Serif 4", "IBM Plex Sans", "Literata"]
+        var paras: List[String] = [
+            "The renderer turns a display list into a few instanced draws: rectangles, glyphs, images and polygons, each with its own pipeline and a clip.",
+            "Text is shaped once, kept, and placed from a glyph atlas at device pixels, so a zoomed page stays sharp instead of scaling a bitmap.",
+            "नमस्ते दुनिया — हिंदी में एक पंक्ति, 漢字とかな交じりの文, 한국어 문장 하나, and a few words in English to mix the scripts on one line.",
+            "Numbers change every frame in a live table: 1,204.50, 98.6 %, 3 × 7 = 21, and dates like 2026-11-22 shift as the data moves.",
+        ]
+        for i in range(160):
+            var st = TextStyle(faces[i % 4], 700 if i % 9 == 0 else 400, i % 13 == 5, 22.0 if i % 9 == 0 else 15.0)
+            var words = paras[i % 4].split(" ")
+            var line = String()
+            for w in words:
+                var cand = String(w) if line == "" else line + " " + String(w)
+                if measure(st, cand) > 840 and line != "":
+                    self.lines.append(line)
+                    self.styles.append(st)
+                    line = String(w)
+                else:
+                    line = cand
+            if line != "":
+                self.lines.append(line)
+                self.styles.append(st)
+        var y = 0.0
+        for i in range(len(self.lines)):
+            self.ys.append(y)
+            y += self.styles[i].size * 1.4
+        self.ys.append(y)
+
+
+def held_scene(which: String, frame: Int, t: Float64, mut sc: Scene, mut held: Held, font: Font):
+    var ink = rgba(29, 29, 31)
+    if which == "whiteboard":
+        sc.begin_layer("ink")
+        sc.layer_transform((-40 - 30 * sin(t)) * K, -25 * K, 0.9 * K)
+        for i in range(len(held.strokes)):
+            sc.polygon(held.strokes[i], held.colors[i])
+    elif which == "canvas":
+        var k = 0.45 * K
+        sc.begin_layer("note")
+        held.note.paint(sc, font, 20 + 200 * sin(t), 30, Float64(PW) / k, Float64(PH) / k, k)
+    elif which == "mindmap":
+        sc.begin_layer("map")
+        held.map.paint(sc, font, MapView(Float64(PW) / 2 + 120 * sin(t), Float64(PH) / 2, 0.8 * K))
+    elif which == "document":
+        var y0 = fmod(t * 600, held.ys[len(held.lines)] - Float64(H))
+        var k = 0
+        while held.ys[k + 1] < y0:
+            k += 1
+        while k < len(held.lines) and held.ys[k] < y0 + Float64(H):
+            sc.run(held.styles[k], held.lines[k], 30, held.ys[k] - y0 + held.styles[k].size * 1.1, ink, ALIGN_LEFT)
+            k += 1
+    else:  # table
+        var first = (frame * 3) % (10_000 - 40)
+        var grid = rgba(220, 220, 226)
+        var zebra = rgba(250, 250, 252)
+        var st = TextStyle(FAMILY, 400, False, 12)
+        for k in range(H // 24 + 1):
+            var r = first + k
+            var y = Float64(k) * 24
+            if r % 2 == 1:
+                sc.rect(0, y, Float64(W), 24, zebra, 0)
+            sc.rect(0, y + 23, Float64(W), 1, grid, 0)
+            sc.run(st, String(r), 12, y + 16, ink, ALIGN_LEFT)
+            for c in range(1, 6):
+                var x = Float64(c) * 150
+                sc.rect(x, y, 1, 24, grid, 0)
+                var v = (r * 7919 + c * 104729 + frame * 31) % 1_000_000
+                sc.run(st, String(v // 100) + "." + String(v % 100), x + 138, y + 16, ink, ALIGN_RIGHT)
+
+
+def build(which: String, frame: Int, mut held: Held, font: Font) -> Scene:
     var t = Float64(frame) / 120
     var sc = Scene(PW, PH, K)
     sc.begin_layer("ui")
     sc.layer_transform(0, 0, K)
-    sc.fill(rgba(245, 245, 247))
+    sc.fill(rgba(245, 245, 247) if which != "canvas" and which != "mindmap" and which != "whiteboard" else rgba(255, 255, 255))
     if which == "boxes":
         boxes(sc, frame, t)
     elif which == "text":
@@ -132,8 +253,10 @@ def build(which: String, frame: Int) -> Scene:
         scroll(sc, frame, t)
     elif which == "list":
         list(sc, frame, t)
-    else:
+    elif which == "dashboard":
         dashboard(sc, frame, t)
+    else:
+        held_scene(which, frame, t, sc, held, font)
     return sc^
 
 
@@ -147,8 +270,8 @@ def p95(mut v: List[Float64]) -> Float64:
     return v[min(len(v) - 1, Int(Float64(len(v)) * 0.95))]
 
 
-def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: Int) raises -> List[Float64]:
-    """One run: [frame CPU median, p95, scene build median, batches median, GPU median, instances]."""
+def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: Int, mut held: Held) raises -> List[Float64]:
+    """One run: [frame CPU median, p95, scene build median, batches median, GPU median, GPU p95, instances]."""
     var built = Frame2D()
     var f = Frame2D()
     var frame_ms = List[Float64]()
@@ -158,7 +281,7 @@ def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: I
     var ops = 0
     for i in range(WARMUP + FRAMES):
         var t0 = perf_counter_ns()
-        var sc = build(which, i)
+        var sc = build(which, i, held, font)
         var t1 = perf_counter_ns()
         fill_batches(built, sc, atlas, font)
         merge_runs(built, f)
@@ -176,17 +299,18 @@ def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: I
         for r in f.runs:
             ops += r.count
     var fm = frame_ms.copy()
-    return [median(frame_ms), p95(fm), median(build_ms), median(batch_ms), median(gpu_ms), Float64(ops)]
+    var gm = gpu_ms.copy()
+    return [median(frame_ms), p95(fm), median(build_ms), median(batch_ms), median(gpu_ms), p95(gm), Float64(ops)]
 
 
-def cpu_raster_ms(which: String, atlas: GlyphAtlas, font: Font) raises -> Float64:
+def cpu_raster_ms(which: String, atlas: GlyphAtlas, font: Font, mut held: Held) raises -> Float64:
     """The CPU executor drawing the same frames (60 measured after 10: it is the slow path)."""
     var px = List[UInt32](length=PW * PH, fill=0)
     var s = Surface(Int(px.unsafe_ptr()), PW, PH, K)
     var built = Frame2D()
     var times = List[Float64]()
     for i in range(70):
-        var sc = build(which, i)
+        var sc = build(which, i, held, font)
         fill_batches(built, sc, atlas, font)
         var t0 = perf_counter_ns()
         execute_cpu(built, atlas, s)
@@ -197,7 +321,7 @@ def cpu_raster_ms(which: String, atlas: GlyphAtlas, font: Font) raises -> Float6
 
 
 def r3(v: Float64) -> String:
-    return String(round(v, 3))
+    return String(round(v, 4))
 
 
 def main() raises:
@@ -206,7 +330,10 @@ def main() raises:
     for i in range(1, len(args)):
         names.append(String(args[i]))
     if len(names) == 0:
-        names = ["boxes", "text", "scroll", "list", "dashboard"]
+        for n in materialize[RACE]():
+            names.append(n)
+        for n in materialize[HELD]():
+            names.append(n)
     var ctx = headless_gl33()
     if ctx == 0:
         raise Error("no headless GL 3.3 context")
@@ -217,16 +344,19 @@ def main() raises:
     var font = Font()
     var atlas = GlyphAtlas(font)
     gl.upload_atlas(atlas)
+    var held = Held(font)
     var tex = gl.make_texture(PW, PH)
-    print("scene      frameCPU  p95     build   batches GPU     cpuRaster instances")
+    print("scene      frameCPU  p95     build   batches GPU     GPUp95  cpuRaster instances")
     for n in names:
-        var best = run_scene(n, gl, atlas, font, tex)
+        var best = run_scene(n, gl, atlas, font, tex, held)
         for _ in range(REPEAT - 1):
-            var r = run_scene(n, gl, atlas, font, tex)
+            var r = run_scene(n, gl, atlas, font, tex, held)
             if r[0] < best[0]:
                 best = r^
-        var raster = cpu_raster_ms(n, atlas, font)
-        print(n, "\t", r3(best[0]), "\t", r3(best[1]), "\t", r3(best[2]), "\t", r3(best[3]), "\t", r3(best[4]), "\t", r3(raster), "\t", Int(best[5]))
+        var raster = cpu_raster_ms(n, atlas, font, held)
+        print(n, "\t", r3(best[0]), "\t", r3(best[1]), "\t", r3(best[2]), "\t", r3(best[3]), "\t", r3(best[4]), "\t", r3(best[5]), "\t", r3(raster), "\t", Int(best[6]))
+        print("RESULT {\"scene\": \"" + n + "\", \"frame_med\": " + r3(best[0]) + ", \"frame_p95\": " + r3(best[1]) + ", \"gpu_med\": "
+              + r3(best[4]) + ", \"gpu_p95\": " + r3(best[5]) + ", \"raster_med\": " + r3(raster) + ", \"instances\": " + String(Int(best[6])) + "}")
         var shot = getenv("HC_SHOT")
         if shot != "":
             var px = List[UInt32](length=PW * PH, fill=0)

@@ -1,0 +1,95 @@
+{
+ "commit": "445fa148",
+ "scenes": {
+  "boxes": {
+   "scene": "boxes",
+   "frame_med": 0.0507,
+   "frame_p95": 0.0559,
+   "gpu_med": 0.1456,
+   "gpu_p95": 0.1584,
+   "raster_med": 25.8584,
+   "instances": 1201
+  },
+  "text": {
+   "scene": "text",
+   "frame_med": 0.6638,
+   "frame_p95": 0.7018,
+   "gpu_med": 0.1033,
+   "gpu_p95": 0.1113,
+   "raster_med": 547.3328,
+   "instances": 1201
+  },
+  "scroll": {
+   "scene": "scroll",
+   "frame_med": 5.0956,
+   "frame_p95": 5.2913,
+   "gpu_med": 2.4204,
+   "gpu_p95": 2.4731,
+   "raster_med": 185.0529,
+   "instances": 24791
+  },
+  "list": {
+   "scene": "list",
+   "frame_med": 0.1171,
+   "frame_p95": 0.1237,
+   "gpu_med": 0.2977,
+   "gpu_p95": 0.3088,
+   "raster_med": 194.5401,
+   "instances": 583
+  },
+  "dashboard": {
+   "scene": "dashboard",
+   "frame_med": 0.1009,
+   "frame_p95": 0.1074,
+   "gpu_med": 0.135,
+   "gpu_p95": 0.141,
+   "raster_med": 182.7277,
+   "instances": 325
+  },
+  "whiteboard": {
+   "scene": "whiteboard",
+   "frame_med": 0.7127,
+   "frame_p95": 0.7545,
+   "gpu_med": 0.9768,
+   "gpu_p95": 1.0346,
+   "raster_med": 131.975,
+   "instances": 201
+  },
+  "canvas": {
+   "scene": "canvas",
+   "frame_med": 1.1205,
+   "frame_p95": 1.1689,
+   "gpu_med": 0.8918,
+   "gpu_p95": 0.9016,
+   "raster_med": 53.9677,
+   "instances": 2840
+  },
+  "mindmap": {
+   "scene": "mindmap",
+   "frame_med": 0.3855,
+   "frame_p95": 0.3982,
+   "gpu_med": 0.6062,
+   "gpu_p95": 0.6818,
+   "raster_med": 22.0474,
+   "instances": 2070
+  },
+  "document": {
+   "scene": "document",
+   "frame_med": 0.1273,
+   "frame_p95": 0.1389,
+   "gpu_med": 0.1962,
+   "gpu_p95": 0.2045,
+   "raster_med": 929.3281,
+   "instances": 1568
+  },
+  "table": {
+   "scene": "table",
+   "frame_med": 0.7228,
+   "frame_p95": 0.7683,
+   "gpu_med": 0.548,
+   "gpu_p95": 1.3957,
+   "raster_med": 376.9481,
+   "instances": 1180
+  }
+ }
+}

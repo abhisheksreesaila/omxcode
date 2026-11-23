@@ -94,6 +94,7 @@ pub fn run(gpa: std.mem.Allocator, scene: scenes.Scene, frames: usize) !main.Res
         }
     }
     const cpu = (main.cpuSeconds() - cpu0) * 1000 / @as(f64, @floatFromInt(frames));
+    std.debug.print("RESULT {{\"scene\": \"{s}\", \"frame_med\": {d:.4}, \"frame_p95\": {d:.4}, \"gpu_med\": {d:.4}, \"gpu_p95\": {d:.4}, \"instances\": {d}}}\n", .{ @tagName(scene), main.medianOf(frame_ms), main.p95Of(frame_ms), main.medianOf(encode_ms), main.p95Of(encode_ms), t.instances.items.len });
     return .{
         .fw = "nanoui",
         .scene = @tagName(scene),
