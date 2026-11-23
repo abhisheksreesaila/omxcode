@@ -31,7 +31,7 @@ from std.collections import Dict
 from std.os import getenv
 from mojoui.fonttext import run_for as ft_run_for
 from mojoui.viewsnap import SnapKey, SnapWriter, renderer_id, build_id
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE, OP_SHADOW
 
 comptime TILE = 512  # content px per tile side
 comptime TILE_BORDER = 1
@@ -63,6 +63,9 @@ def op_box(scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
     var d = scene.num(op, 3)
     if kind == OP_RECT or kind == OP_IMAGE:
         return (a, b, a + c, b + d)
+    if kind == OP_SHADOW:  # (goal 80: 3 sigma past its box, blur = 2 sigma)
+        var g = 1.5 * scene.num(op, 5) + 1
+        return (a - g, b - g, a + c + g, b + d + g)
     if kind == OP_CIRCLE:
         return (a - c, b - c, a + c, b + c)
     if kind == OP_LINE:

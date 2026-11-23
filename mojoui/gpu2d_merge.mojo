@@ -19,7 +19,7 @@
 # SEARCH groups back (the cost stays linear).
 
 from mojoui.gpu2d import (Frame2D, Run, Layer2D, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
-                          IMAGE_FLOATS, POLY_FLOATS, SHAPE_CAPSULE, NO_CLIP)
+                          IMAGE_FLOATS, POLY_FLOATS, SHAPE_CAPSULE, SHAPE_SHADOW, NO_CLIP)
 
 comptime PAD = 4.0  # pixels around each instance's box (see above)
 comptime SEARCH = 64  # groups looked back through for one to join
@@ -51,6 +51,12 @@ def _box(f: Frame2D, pipe: Int, i: Int, pad: Float32) -> SIMD[DType.float32, 4]:
             y0 = min(f.quads[at + 1], f.quads[at + 3]) - hw
             x1 = max(f.quads[at], f.quads[at + 2]) + hw
             y1 = max(f.quads[at + 1], f.quads[at + 3]) + hw
+        elif Int(f.quads[at + 5]) == SHAPE_SHADOW:  # (goal 80: a shadow reaches 3 sigma past its box)
+            var g = 3 * f.quads[at + 7] + 1
+            x0 = f.quads[at] - g
+            y0 = f.quads[at + 1] - g
+            x1 = f.quads[at] + f.quads[at + 2] + g
+            y1 = f.quads[at + 1] + f.quads[at + 3] + g
         else:
             x0 = f.quads[at]
             y0 = f.quads[at + 1]

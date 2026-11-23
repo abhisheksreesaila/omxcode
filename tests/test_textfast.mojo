@@ -7,7 +7,7 @@
 #   pixi run mojo run -I . tests/test_textfast.mojo
 from std.testing import assert_true, assert_equal
 
-from mojoui.fonttext import TextStyle, Run, engine, run_for, fast_shape
+from mojoui.fonttext import TextStyle, Run, engine, run_for, fast_shape, FAST_STYLES
 from tests.test_gpu2d import Rng
 
 comptime TOL = 1.0 / 64
@@ -78,6 +78,27 @@ def main() raises:
                     same(run_for(st, t)[], want, fam + " " + String(size) + " " + String(w) + " run_for '" + t + "'")
                     total += 1
         print("  ", fam, ": fast path", fast_fam, "of", len(strings) * len(sizes) * len(weights))
+    # italics, letter spacing and unrounded advances (canvas text): the fast path again against the shaper
+    var variants = 0
+    for fam in families:
+        for mode in range(3):
+            var st = TextStyle(fam, 400, mode == 0, 14)
+            if mode == 1:
+                st.letter_spacing = 0.7
+            if mode == 2:
+                st.exact = True
+            for t in strings:
+                var want = e[].shape(st, t)
+                if fast_shape(st, t, out):
+                    variants += 1
+                    same(out, want, fam + " variant " + String(mode) + " '" + t + "'")
+    print("VARIANTS", variants, "fast runs in italic, letter-spaced and unrounded styles match the shaper")
+    # styles are bounded: 600 sizes in a row keep at most FAST_STYLES, and the runs handed out stay right
+    for i in range(600):
+        var st = TextStyle("Geist", 400, False, 9 + Float64(i) * 0.05)
+        same(run_for(st, "Row 12")[], e[].shape(st, "Row 12"), "style " + String(i))
+        same(run_for(st, "a line that is longer than twenty-four bytes")[], e[].shape(st, "a line that is longer than twenty-four bytes"), "long, style " + String(i))
+    assert_true(len(e[].fast) <= FAST_STYLES, "styles kept: " + String(len(e[].fast)))
     # the cache: a family's strings asked twice in a row are shaped at most once (within a generation, 4 096 runs)
     for fam in families:
         var st = TextStyle(fam, 400, False, 15)

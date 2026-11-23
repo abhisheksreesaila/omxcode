@@ -13,6 +13,7 @@
 from std.collections import Dict
 from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon, blend
+from mojoui.shadow import draw_shadow, shadow_reach
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
 from mojoui.fonttext import TextStyle, shape, draw_run, Clip, run_x
@@ -28,6 +29,7 @@ comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a vid
 comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
 comptime OP_STROKE = 11  # first point, points, width (the points in Scene.path): a polyline with round caps and joins (D-7940)
 comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spacing (+ "family\x1ftext"): a run in a real face (mojoui.fonttext, goal 79)
+comptime OP_SHADOW = 12  # x, y, w, h, radius, blur (CSS's blur radius, 2 sigma): a rounded box's Gaussian shadow (goal 80, mojoui.shadow)
 comptime STRIDE = 6  # floats per op
 
 
@@ -176,6 +178,11 @@ trait Painter:
         ...
 
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
+        ...
+
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        """(goal 80) The Gaussian shadow of the rounded box (x, y, w, h): `blur` is CSS's blur radius (2 sigma); the
+        shadow reaches 1.5 × blur past the box. Offsets and spread are the caller's: pass the shadow's own box."""
         ...
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
@@ -346,6 +353,10 @@ struct SurfacePainter(Painter, Movable):
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
         var k = self.tk
         rect(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, color, radius * k)
+
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        var k = self.tk
+        draw_shadow(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, radius * k, blur / 2 * k, color)
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         self.rect(x, y, w, h, color, radius)
@@ -795,6 +806,11 @@ struct Scene(Painter, Movable, Copyable):
             return
         self._op(OP_RECT, x, y, w, h, radius, 0, color, -1)
 
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        if w <= 0 or h <= 0:
+            return
+        self._op(OP_SHADOW, x, y, w, h, radius, max(blur, 0.0), color, -1)
+
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         if w <= 0 or h <= 0:
             return
@@ -959,6 +975,9 @@ struct Scene(Painter, Movable, Copyable):
             out = [x0 - hw, y0 - hw, x1 + hw, y1 + hw]
         elif kind == OP_RECT or kind == OP_IMAGE:
             out = [self.num(op, 0), self.num(op, 1), self.num(op, 0) + self.num(op, 2), self.num(op, 1) + self.num(op, 3)]
+        elif kind == OP_SHADOW:
+            var g = shadow_reach(self.num(op, 5) / 2)
+            out = [self.num(op, 0) - g, self.num(op, 1) - g, self.num(op, 0) + self.num(op, 2) + g, self.num(op, 1) + self.num(op, 3) + g]
         elif kind == OP_CIRCLE:
             var r = self.num(op, 2)
             out = [self.num(op, 0) - r, self.num(op, 1) - r, self.num(op, 0) + r, self.num(op, 1) + r]
@@ -1064,6 +1083,24 @@ struct Scene(Painter, Movable, Copyable):
                     h = y1 - y
                 if w > 0 and h > 0:
                     rect(s, x, y, w, h, c, self.num(op, 4) * tk)
+            elif kind == OP_SHADOW:
+                var cut = len(clips) > 0
+                var keep0 = s.clip_x0
+                var keep1 = s.clip_y0
+                var keep2 = s.clip_x1
+                var keep3 = s.clip_y1
+                if cut:
+                    ref q = clips[len(clips) - 1]
+                    s.clip_x0 = max(keep0, Int(q[0] + 0.5))
+                    s.clip_y0 = max(keep1, Int(q[1] + 0.5))
+                    s.clip_x1 = min(keep2, Int(q[2] + 0.5))
+                    s.clip_y1 = min(keep3, Int(q[3] + 0.5))
+                draw_shadow(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk, self.num(op, 4) * tk,
+                            self.num(op, 5) / 2 * tk, c)
+                s.clip_x0 = keep0
+                s.clip_y0 = keep1
+                s.clip_x1 = keep2
+                s.clip_y1 = keep3
             elif kind == OP_CIRCLE:
                 circle(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c)
             elif kind == OP_LINE:

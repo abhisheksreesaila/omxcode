@@ -75,12 +75,16 @@ from std.math import sqrt, ceil, floor
 from mojoui.canvas import Surface
 from mojoui.draw import blend
 from mojoui.text import Font, Face, LEFT, CENTRE, RIGHT
+from mojoui.shadow import shadow_alpha, shadow_reach, shadow_columns, shadow_row, shadow_at
 from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage
 from mojoui.shared import get_shared, put_shared
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 from std.collections import Dict
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE
+from std.atomic import Atomic
+from std.sys.info import num_logical_cores
+from mojoui import libc
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE, OP_SHADOW
 
 comptime PIPE_QUAD = 0
 comptime PIPE_GLYPH = 1
@@ -88,6 +92,7 @@ comptime PIPE_IMAGE = 2
 comptime PIPE_POLY = 3
 
 comptime QUAD_FLOATS = 16
+comptime SHAPE_SHADOW = 2  # (goal 80) a rounded box's Gaussian shadow: float 7 holds sigma (mojoui.shadow)
 comptime GLYPH_FLOATS = 20
 comptime IMAGE_FLOATS = 12
 comptime POLY_FLOATS = 16
@@ -315,6 +320,28 @@ struct GlyphAtlas(Movable):
             return Float64(Int(pg[].bytes[(y - self.dyn_y0) * self.width + x])) / 255.0
         return Float64(Int(self.bytes[y * self.width + x])) / 255.0
 
+    @always_inline
+    def at_in(self, x: Int, y: Int, own: Pointer[UInt8, MutUntrackedOrigin], dyn: Pointer[UInt8, MutUntrackedOrigin]) -> Float64:
+        """at() with both byte stores' addresses in hand (goal 80: at() looked GlyphPages up in the process's registry
+        for every texel, ~0.4 µs: text on the CPU took half a second a frame)."""
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return 0
+        if y >= self.dyn_y0:
+            return Float64(Int(dyn.unsafe_offset((y - self.dyn_y0) * self.width + x)[])) / 255.0
+        return Float64(Int(own.unsafe_offset(y * self.width + x)[])) / 255.0
+
+    @always_inline
+    def coverage_in(self, x: Float64, y: Float64, own: Pointer[UInt8, MutUntrackedOrigin], dyn: Pointer[UInt8, MutUntrackedOrigin]) -> Float64:
+        var x0 = Int(floor(x - 0.5))
+        var y0 = Int(floor(y - 0.5))
+        var fx = x - 0.5 - Float64(x0)
+        var fy = y - 0.5 - Float64(y0)
+        var a = self.at_in(x0, y0, own, dyn)
+        var b = self.at_in(x0 + 1, y0, own, dyn)
+        var c = self.at_in(x0, y0 + 1, own, dyn)
+        var d = self.at_in(x0 + 1, y0 + 1, own, dyn)
+        return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
     def coverage(self, x: Float64, y: Float64) -> Float64:
         """Bilinear coverage (0–1) at a point in texels (texel centres at +0.5), as a GPU's linear filter."""
         var x0 = Int(floor(x - 0.5))
@@ -420,7 +447,7 @@ def _clip4(mut out: List[Float32], c0: Float64, c1: Float64, c2: Float64, c3: Fl
 
 
 def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64, radius: Float64, shape: Int, color: UInt32,
-          c0: Float64, c1: Float64, c2: Float64, c3: Float64, hole: Float64 = 0):
+          c0: Float64, c1: Float64, c2: Float64, c3: Float64, hole: Float64 = 0, sigma: Float64 = 0):
     out.append(Float32(a))
     out.append(Float32(b))
     out.append(Float32(c))
@@ -428,7 +455,7 @@ def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64
     out.append(Float32(radius))
     out.append(Float32(shape))
     out.append(Float32(hole))  # (D-7973: the middle a box may leave out, its units)
-    out.append(0)
+    out.append(Float32(sigma))  # (goal 80: a shadow's sigma, its units)
     _color(out, color)
     _clip4(out, c0, c1, c2, c3)
 
@@ -599,6 +626,9 @@ def _op_meets(scene: Scene, op: Int, kind: Int, rx0: Float64, ry0: Float64, rx1:
     var e = Float64(scene.nums[base + 4])
     if kind == OP_RECT or kind == OP_IMAGE:
         return _box_meets(a - pad, b - pad, a + c + pad, b + d + pad, rx0, ry0, rx1, ry1)
+    if kind == OP_SHADOW:
+        var g = 1.5 * Float64(scene.nums[base + 5]) + pad  # (3 sigma)
+        return _box_meets(a - g, b - g, a + c + g, b + d + g, rx0, ry0, rx1, ry1)
     if kind == OP_CIRCLE:
         return _box_meets(a - c - pad, b - c - pad, a + c + pad, b + c + pad, rx0, ry0, rx1, ry1)
     if kind == OP_LINE:
@@ -935,6 +965,11 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
                         _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
                         added = 4
+                elif kind == OP_SHADOW:  # (goal 80) e = corner radius, nums[5] = CSS blur (2 sigma)
+                    if c > 0 and d > 0:
+                        _quad(f.quads, a, b, c, d, e, SHAPE_SHADOW, color, c0, c1, c2, c3, 0, max(Float64(scene.nums[base + 5]) / 2, 0.25 * ik))
+                    else:
+                        added = 0
                 elif kind == OP_CIRCLE:
                     _quad(f.quads, a, b, a, b, c, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                 elif kind == OP_LINE:
@@ -999,13 +1034,40 @@ def _u32(r: Float32, g: Float32, b: Float32, a: Float32) -> UInt32:
             | (UInt32(Int(Float64(a) * 255.0 + 0.5)) << 24))
 
 
-def _cpu_quad(mut s: Surface, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, mode: Int):
+def _cpu_quad(mut s: Surface, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, mode: Int, r0: Int, r1: Int):
     var color = _u32(q[at + 8], q[at + 9], q[at + 10], q[at + 11])
     var xlo = _lo(Float64(q[at + 12]), tx, tk, s.width)
-    var ylo = _lo(Float64(q[at + 13]), ty, tk, s.height)
+    var ylo = max(_lo(Float64(q[at + 13]), ty, tk, s.height), r0)
     var xhi = _hi(Float64(q[at + 14]), tx, tk, s.width)
-    var yhi = _hi(Float64(q[at + 15]), ty, tk, s.height)
+    var yhi = min(_hi(Float64(q[at + 15]), ty, tk, s.height), r1)
     var p = s.pixels()
+    if Int(q[at + 5]) == SHAPE_SHADOW:  # (goal 80: mojoui.shadow's math, as the shaders)
+        var x = Float64(q[at]) * tk + tx
+        var y = Float64(q[at + 1]) * tk + ty
+        var w = Float64(q[at + 2]) * tk
+        var h = Float64(q[at + 3]) * tk
+        if w <= 0 or h <= 0:
+            return
+        var sg = max(Float64(q[at + 7]) * tk, 0.25)
+        var hx = w / 2
+        var hy = h / 2
+        var r = min(Float64(q[at + 4]) * tk, min(hx, hy))
+        var g = shadow_reach(sg)
+        var x0 = max(Int(floor(x - g)), xlo)
+        var y0 = max(Int(floor(y - g)), ylo)
+        var x1 = min(Int(floor(x + w + g)) + 1, xhi)
+        var y1 = min(Int(floor(y + h + g)) + 1, yhi)
+        if y1 <= y0 or x1 <= x0:
+            return
+        var cols = shadow_columns(x0, x1, x + hx, hx, hy, r, sg)  # (what a column needs, once, not per pixel)
+        for py in range(y0, y1):
+            var row = shadow_row(Float64(py) + 0.5 - (y + hy), hy, r, sg)
+            for px in range(x0, x1):
+                var cov = shadow_at(Float64(px) + 0.5 - (x + hx), Float64(py) + 0.5 - (y + hy), hx, hy, r, sg, cols[px - x0], row)
+                if cov > 0:
+                    var d = p.unsafe_offset(py * s.width + px)
+                    d[] = color if mode == BLEND_REPLACE else blend(d[], color, min(cov, 1.0))
+        return
     if Int(q[at + 5]) == SHAPE_BOX:
         var x = Float64(q[at]) * tk + tx
         var y = Float64(q[at + 1]) * tk + ty
@@ -1021,7 +1083,25 @@ def _cpu_quad(mut s: Surface, q: List[Float32], at: Int, tx: Float64, ty: Float6
         for py in range(y0, y1):
             var cy = Float64(py) + 0.5
             var vy = min(cy - y, y + h - cy) + 0.5
+            # (goal 80) the row's solid stretch [fill0, fill1): pixels wholly inside, not beside a corner: no per-pixel
+            # coverage. A solid colour (or a replace) is stored, anything else blended at coverage 1, as below.
+            var fill0 = x1
+            var fill1 = x1
+            if vy >= 1.0:
+                var inset = 0.5 if (r <= 0 or (cy >= y + r and cy <= y + h - r)) else max(r, 0.5)
+                fill0 = min(max(Int(ceil(x + inset - 0.5)), x0), x1)
+                fill1 = max(min(Int(floor(x + w - inset - 0.5)) + 1, x1), fill0)
+                if mode == BLEND_REPLACE or (color >> 24) == 255:
+                    for px in range(fill0, fill1):
+                        var d = p.unsafe_offset(py * s.width + px)
+                        d[] = color if mode == BLEND_REPLACE else ((color & 0x00FFFFFF) | (d[] & 0xFF000000))
+                else:
+                    for px in range(fill0, fill1):
+                        var d = p.unsafe_offset(py * s.width + px)
+                        d[] = blend(d[], color, 1.0)
             for px in range(x0, x1):
+                if px >= fill0 and px < fill1:
+                    continue
                 var cx = Float64(px) + 0.5
                 var cov = min(min(cx - x, x + w - cx) + 0.5, vy)
                 if r > 0:
@@ -1058,7 +1138,8 @@ def _cpu_quad(mut s: Surface, q: List[Float32], at: Int, tx: Float64, ty: Float6
                     d[] = color if mode == BLEND_REPLACE else blend(d[], color, min(cov, 1.0))
 
 
-def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64):
+def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, r0: Int, r1: Int,
+               own: Pointer[UInt8, MutUntrackedOrigin], dyn: Pointer[UInt8, MutUntrackedOrigin]):
     var left = Float64(q[at]) * tk + tx
     var top = Float64(q[at + 1]) * tk + ty
     var gw = Float64(q[at + 6] - q[at + 4])
@@ -1075,9 +1156,9 @@ def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx:
     var slant = Float64(q[at + 12])
     var baseline = Float64(q[at + 13]) * tk + ty
     var xlo = _lo(Float64(q[at + 16]), tx, tk, s.width)
-    var ylo = _lo(Float64(q[at + 17]), ty, tk, s.height)
+    var ylo = max(_lo(Float64(q[at + 17]), ty, tk, s.height), r0)
     var xhi = _hi(Float64(q[at + 18]), tx, tk, s.width)
-    var yhi = _hi(Float64(q[at + 19]), ty, tk, s.height)
+    var yhi = min(_hi(Float64(q[at + 19]), ty, tk, s.height), r1)
     var sub = 2 if sc < 0.75 else 1
     var lean_top = slant * (baseline - top)
     var lean_bottom = slant * (baseline - top - gh * sc)
@@ -1095,7 +1176,7 @@ def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx:
                     var ax = (Float64(px) + (Float64(sx) + 0.5) / Float64(sub) - row_left) / sc
                     var ay = (Float64(py) + (Float64(sy) + 0.5) / Float64(sub) - top) / sc
                     if ax >= 0.0 and ax < gw and ay >= 0.0 and ay < gh:
-                        cov += atlas.coverage(u0 + ax, v0 + ay)
+                        cov += atlas.coverage_in(u0 + ax, v0 + ay, own, dyn)
             cov = cov / Float64(sub * sub) * alpha
             if cov <= 0.003:
                 continue
@@ -1107,7 +1188,7 @@ def _cpu_glyph(mut s: Surface, atlas: GlyphAtlas, q: List[Float32], at: Int, tx:
             dp[] = nr | (ng << 8) | (nb << 16) | (d & 0xFF000000)
 
 
-def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, mode: Int = BLEND_REPLACE):
+def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Float64, ty: Float64, tk: Float64, mode: Int, r0: Int, r1: Int):
     var x = Float64(q[at]) * tk + tx
     var y = Float64(q[at + 1]) * tk + ty
     var w = Float64(q[at + 2]) * tk
@@ -1123,7 +1204,7 @@ def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Fl
     var x1 = min(Int(ceil(x + w - 0.5)), _hi(Float64(q[at + 10]), tx, tk, s.width))
     var y1 = min(Int(ceil(y + h - 0.5)), _hi(Float64(q[at + 11]), ty, tk, s.height))
     var p = s.pixels()
-    for py in range(max(y0, 0), min(y1, s.height)):
+    for py in range(max(y0, r0), min(y1, r1)):
         var sy = min(ph - 1, Int(floor((Float64(py) + 0.5 - y) / h * Float64(ph))))
         for qx in range(max(x0, 0), min(x1, s.width)):
             var sx = min(pw - 1, Int(floor((Float64(qx) + 0.5 - x) / w * Float64(pw))))
@@ -1168,7 +1249,7 @@ struct _PolyScratch(Movable):
         self.cd = List[Int](capacity=64)
 
 
-def _cpu_poly(mut s: Surface, frame: Frame2D, at: Int, tx: Float64, ty: Float64, tk: Float64, mut sc: _PolyScratch):
+def _cpu_poly(mut s: Surface, frame: Frame2D, at: Int, tx: Float64, ty: Float64, tk: Float64, mut sc: _PolyScratch, r0: Int, r1: Int):
     ref q = frame.polys
     var first = Int(q[at + 2])
     var n = Int(q[at + 3])
@@ -1176,9 +1257,9 @@ def _cpu_poly(mut s: Surface, frame: Frame2D, at: Int, tx: Float64, ty: Float64,
         return
     var color = _u32(q[at + 4], q[at + 5], q[at + 6], q[at + 7])
     var xlo = _lo(Float64(q[at + 12]), tx, tk, s.width)
-    var ylo = _lo(Float64(q[at + 13]), ty, tk, s.height)
+    var ylo = max(_lo(Float64(q[at + 13]), ty, tk, s.height), r0)
     var xhi = _hi(Float64(q[at + 14]), tx, tk, s.width)
-    var yhi = _hi(Float64(q[at + 15]), ty, tk, s.height)
+    var yhi = min(_hi(Float64(q[at + 15]), ty, tk, s.height), r1)
     sc.xs.clear()
     sc.ys.clear()
     var bx0 = 1e30
@@ -1250,10 +1331,87 @@ def _cpu_poly(mut s: Surface, frame: Frame2D, at: Int, tx: Float64, ty: Float64,
                     d[] = blend(d[], color, min(cv, 1.0))
 
 
-def execute_cpu(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface):
-    """Draws the frame's runs into the surface, in order, each layer through its transform, with the shaders' math
-    (top of this file): the reference for a GPU backend's readback, and the fallback."""
-    var scratch = _PolyScratch()
+comptime BAND_ROWS = 16  # rows a thread takes at a time
+comptime CPU_THREADS_MAX = 16  # (more gained nothing on a 12-core, 24-thread machine: the hardware threads share their cores)
+
+
+struct _BandJob:
+    """What every thread of one execute_cpu shares, on the caller's stack until all have joined."""
+
+    var frame: Int
+    var atlas: Int
+    var pixels: Int
+    var width: Int
+    var height: Int
+    var scale: Float64
+    var rows: Int  # each instance's device rows in paint order: y0, y1 (Int32 pairs)
+    var dyn: Int
+    var next: Int64  # the next band to take
+
+    def __init__(out self, frame: Int, atlas: Int, pixels: Int, width: Int, height: Int, scale: Float64, rows: Int, dyn: Int):
+        self.frame = frame
+        self.atlas = atlas
+        self.pixels = pixels
+        self.width = width
+        self.height = height
+        self.scale = scale
+        self.rows = rows
+        self.dyn = dyn
+        self.next = 0
+
+
+def _instance_rows(frame: Frame2D, height: Int) -> List[Int32]:
+    """Every instance's device rows [y0, y1), conservative, in paint order: a band skips what isn't in it."""
+    var out = List[Int32]()
+    for li in range(len(frame.layers)):
+        ref layer = frame.layers[li]
+        var ty = layer.dy
+        var tk = layer.k
+        for ri in range(layer.first_run, layer.first_run + layer.runs):
+            var run = frame.runs[ri]
+            for i in range(run.first, run.first + run.count):
+                var y0: Float64
+                var y1: Float64
+                if run.pipe == PIPE_QUAD:
+                    var q = i * QUAD_FLOATS
+                    var b = Float64(frame.quads[q + 1])
+                    var d = Float64(frame.quads[q + 3])
+                    var shape = Int(frame.quads[q + 5])
+                    if shape == SHAPE_CAPSULE:
+                        var hw = Float64(frame.quads[q + 4])
+                        y0 = min(b, d) - hw
+                        y1 = max(b, d) + hw
+                    else:
+                        y0 = b
+                        y1 = b + d
+                        if shape == SHAPE_SHADOW:
+                            var g = 3 * max(Float64(frame.quads[q + 7]), 0.25 / tk if tk > 0 else 0.25)
+                            y0 -= g
+                            y1 += g
+                elif run.pipe == PIPE_GLYPH:
+                    var q = i * GLYPH_FLOATS
+                    y0 = Float64(frame.glyphs[q + 1])
+                    y1 = y0 + Float64(frame.glyphs[q + 3])
+                elif run.pipe == PIPE_IMAGE:
+                    var q = i * IMAGE_FLOATS
+                    y0 = Float64(frame.images[q + 1])
+                    y1 = y0 + Float64(frame.images[q + 3])
+                else:
+                    var q = i * POLY_FLOATS
+                    y0 = Float64(frame.polys[q + 9])
+                    y1 = Float64(frame.polys[q + 11])
+                var a = min(y0 * tk, y1 * tk) + ty - 3
+                var z = max(y0 * tk, y1 * tk) + ty + 3
+                out.append(Int32(Int(min(max(floor(a), 0.0), Float64(height)))))
+                out.append(Int32(Int(min(max(ceil(z), 0.0), Float64(height)))))
+    return out^
+
+
+def _execute_rows(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface, r0: Int, r1: Int, rows: Pointer[Int32, MutUntrackedOrigin],
+                  dyn: Pointer[UInt8, MutUntrackedOrigin], mut scratch: _PolyScratch):
+    """The frame's runs in paint order, only the surface's rows [r0, r1)."""
+    var own = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(atlas.bytes.unsafe_ptr()))
+    var k = 0
     for li in range(len(frame.layers)):
         ref layer = frame.layers[li]
         var tx = layer.dx
@@ -1262,11 +1420,65 @@ def execute_cpu(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface):
         for ri in range(layer.first_run, layer.first_run + layer.runs):
             var run = frame.runs[ri]
             for i in range(run.first, run.first + run.count):
+                var at = k
+                k += 1
+                if Int(rows.unsafe_offset(2 * at)[]) >= r1 or Int(rows.unsafe_offset(2 * at + 1)[]) <= r0:
+                    continue
                 if run.pipe == PIPE_QUAD:
-                    _cpu_quad(surface, frame.quads, i * QUAD_FLOATS, tx, ty, tk, run.blend)
+                    _cpu_quad(surface, frame.quads, i * QUAD_FLOATS, tx, ty, tk, run.blend, r0, r1)
                 elif run.pipe == PIPE_GLYPH:
-                    _cpu_glyph(surface, atlas, frame.glyphs, i * GLYPH_FLOATS, tx, ty, tk)
+                    _cpu_glyph(surface, atlas, frame.glyphs, i * GLYPH_FLOATS, tx, ty, tk, r0, r1, own, dyn)
                 elif run.pipe == PIPE_IMAGE:
-                    _cpu_image(surface, frame, frame.images, i * IMAGE_FLOATS, tx, ty, tk, run.blend)
+                    _cpu_image(surface, frame, frame.images, i * IMAGE_FLOATS, tx, ty, tk, run.blend, r0, r1)
                 else:
-                    _cpu_poly(surface, frame, i * POLY_FLOATS, tx, ty, tk, scratch)
+                    _cpu_poly(surface, frame, i * POLY_FLOATS, tx, ty, tk, scratch, r0, r1)
+
+
+def _bands(addr: Int):
+    """Takes bands of rows until none are left (each thread of an execute_cpu runs this)."""
+    ref job = Pointer[_BandJob, MutUntrackedOrigin](unsafe_from_address=addr)[]
+    ref frame = Pointer[Frame2D, MutUntrackedOrigin](unsafe_from_address=job.frame)[]
+    ref atlas = Pointer[GlyphAtlas, MutUntrackedOrigin](unsafe_from_address=job.atlas)[]
+    var s = Surface(job.pixels, job.width, job.height, job.scale)
+    var rows = Pointer[Int32, MutUntrackedOrigin](unsafe_from_address=job.rows)
+    var dyn = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=job.dyn)
+    var scratch = _PolyScratch()
+    while True:
+        var band = Int(Atomic[Scalar[DType.int64]].fetch_add(Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=job.next))), 1))
+        var r0 = band * BAND_ROWS
+        if r0 >= job.height:
+            return
+        _execute_rows(frame, atlas, s, r0, min(r0 + BAND_ROWS, job.height), rows, dyn, scratch)
+
+
+def _band_thread(arg: libc.ThreadArg) -> libc.ThreadArg:
+    _bands(Int(arg))
+    return libc.null_arg()
+
+
+def execute_cpu(frame: Frame2D, atlas: GlyphAtlas, mut surface: Surface, threads: Int = 0):
+    """Draws the frame's runs into the surface, in order, each layer through its transform, with the shaders' math
+    (top of this file): the reference for a GPU backend's readback, and the fallback. (Goal 80) The rows are split in
+    bands that `threads` threads take in turn (0: one per core, at most CPU_THREADS_MAX; small frames and 1: this thread alone): every band
+    draws every instance that meets it in paint order, so the picture is the same for any number (tests/test_cpu_threads).
+    Plain pthreads, joined before this returns: no runtime pool, so it works on any thread and every platform."""
+    var rows = _instance_rows(frame, surface.height)
+    var dyn = Int(glyph_pages(atlas.width)[].bytes.unsafe_ptr())
+    var n = threads
+    if n <= 0:
+        n = 1 if surface.width * surface.height < 65536 else num_logical_cores()
+    n = max(1, min(min(n, CPU_THREADS_MAX), (surface.height + BAND_ROWS - 1) // BAND_ROWS))
+    var job = _BandJob(Int(Pointer(to=frame)), Int(Pointer(to=atlas)), surface.address, surface.width, surface.height, surface.scale,
+                       Int(rows.unsafe_ptr()), dyn)
+    var addr = Int(Pointer(to=job))
+    var tids = List[Int](length=n, fill=0)
+    var started = 0
+    for i in range(n - 1):
+        if libc.pthread_create[_band_thread](addr, Int(tids.unsafe_ptr()) + 8 * started) == 0:
+            started += 1
+    _bands(addr)
+    for i in range(started):
+        _ = libc.pthread_join(tids[i])
+    _ = job.height  # (the job, the rows and the frame live until every thread has joined)
+    _ = len(rows)
+    _ = len(tids)

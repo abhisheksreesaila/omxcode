@@ -254,7 +254,22 @@ void main() {
     // modulation), the box first cut to the clip and to the scissor (lim): pixels outside them were discarded anyway
     vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);
     vec2 p;
-    if (a_par.y < 0.5) {
+    if (a_par.y > 1.5) {  // (goal 80) a shadow: the box grown by 3 sigma, sigma (px) in v_hole
+        float x = a_geom.x * k + t.x;
+        float y = a_geom.y * k + t.y;
+        float w = a_geom.z * k;
+        float h = a_geom.w * k;
+        float sg = max(a_par.w * k, 0.25);
+        v_geom = vec4(x, y, w, h);
+        v_par = vec2(min(a_par.x * k, min(w, h) * 0.5), 2.0);
+        v_hole = sg;
+        if (w <= 0.0 || h <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        float g = 3.0 * sg + 1.5;
+        vec2 lo = max(vec2(x, y) - g, v_clip.xy - 0.5);
+        vec2 hi = min(vec2(x + w, y + h) + g, v_clip.zw + 0.5);
+        if (hi.x <= lo.x || hi.y <= lo.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        p = mix(lo, hi, corner);
+    } else if (a_par.y < 0.5) {
         float x = a_geom.x * k + t.x;
         float y = a_geom.y * k + t.y;
         float w = a_geom.z * k;
@@ -305,7 +320,22 @@ void main() {
     v_col = a_col;
     vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);  // (one triangle holding the box)
     vec2 p;
-    if (a_par.y < 0.5) {
+    if (a_par.y > 1.5) {  // (goal 80) a shadow: the box grown by 3 sigma, sigma (px) in v_hole
+        float x = a_geom.x * k + t.x;
+        float y = a_geom.y * k + t.y;
+        float w = a_geom.z * k;
+        float h = a_geom.w * k;
+        float sg = max(a_par.w * k, 0.25);
+        v_geom = vec4(x, y, w, h);
+        v_par = vec2(min(a_par.x * k, min(w, h) * 0.5), 2.0);
+        v_hole = sg;
+        if (w <= 0.0 || h <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        float g = 3.0 * sg + 1.5;
+        vec2 lo = max(vec2(x, y) - g, v_clip.xy - 0.5);
+        vec2 hi = min(vec2(x + w, y + h) + g, v_clip.zw + 0.5);
+        if (hi.x <= lo.x || hi.y <= lo.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        p = mix(lo, hi, corner);
+    } else if (a_par.y < 0.5) {
         float x = a_geom.x * k + t.x;
         float y = a_geom.y * k + t.y;
         float w = a_geom.z * k;
@@ -378,11 +408,56 @@ flat in vec4 v_clip;
 flat in float v_hole;
 uniform int replace;
 out vec4 o;
+// (goal 80) Gaussian shadows of rounded rectangles, as mojoui.shadow: GPUI's formula, exact along the straight middle too
+float erf1(float x) {
+    float a = abs(x);
+    float t = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+    t *= t;
+    return sign(x) * (1.0 - 1.0 / (t * t));
+}
+float blur_x(float x, float y, float sigma, float corner, vec2 hs) {
+    float delta = min(hs.y - corner - abs(y), 0.0);
+    float curved = hs.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+    float lo = 0.5 + 0.5 * erf1((x - curved) * (0.70710678 / sigma));
+    float hi = 0.5 + 0.5 * erf1((x + curved) * (0.70710678 / sigma));
+    return hi - lo;
+}
+float shadow_alpha(vec2 p, vec2 hs, float corner, float sigma) {
+    // (goal 80) exact across x (erf) and along the straight middle (erf); only the corner bands sampled, 8 midpoints each
+    float c = min(abs(corner), min(hs.x, hs.y));
+    float reach = 3.0 * sigma;
+    vec2 ap = abs(p);
+    if (ap.x > hs.x + reach + 1.0 || ap.y > hs.y + reach + 1.0) return 0.0;
+    float k = 0.70710678 / sigma;
+    if (ap.x + reach <= hs.x - c) return 0.5 * (erf1((p.y + hs.y) * k) - erf1((p.y - hs.y) * k));  // (full-width rows only)
+    float s = hs.y - c;
+    float alpha = blur_x(p.x, 0.0, sigma, c, hs) * 0.5 * (erf1((p.y + s) * k) - erf1((p.y - s) * k));
+    if (c > 0.0) {
+        for (int side = 0; side < 2; side++) {
+            float lo = side == 0 ? s : -hs.y;
+            float hi = side == 0 ? hs.y : -s;
+            lo = max(lo, p.y - reach);
+            hi = min(hi, p.y + reach);
+            if (hi <= lo) continue;
+            float step = (hi - lo) / 8.0;
+            float yr = lo + step * 0.5;
+            for (int i = 0; i < 8; i++) {
+                float d = p.y - yr;
+                alpha += blur_x(p.x, yr, sigma, c, hs) * exp(-(d * d) / (2.0 * sigma * sigma)) * 0.39894228 / sigma * step;
+                yr += step;
+            }
+        }
+    }
+    return clamp(alpha, 0.0, 1.0);
+}
 void main() {
     vec2 c = gl_FragCoord.xy;
     if (c.x < v_clip.x || c.y < v_clip.y || c.x >= v_clip.z || c.y >= v_clip.w) discard;
     float cov;
-    if (v_par.y < 0.5) {
+    if (v_par.y > 1.5) {
+        vec2 hs = v_geom.zw * 0.5;
+        cov = shadow_alpha(c - (v_geom.xy + hs), hs, v_par.x, v_hole);
+    } else if (v_par.y < 0.5) {
         float x = v_geom.x;
         float y = v_geom.y;
         float w = v_geom.z;

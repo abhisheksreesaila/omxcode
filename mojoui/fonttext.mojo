@@ -1408,17 +1408,22 @@ def engine() -> Pointer[FontEngine, MutUntrackedOrigin]:
 
 # ---------- (goal 80) runs without shaping: the simple-text fast path and the run cache ----------
 #
-# Borrowed from nanoui's shaper.zig (and GPUI's line-layout cache): text redrawn every frame with other digits should
-# cost lookups, not a shaper call. Per style, each printable ASCII character's glyph, face and advance, and each pair's
+# Text redrawn every frame with other digits should cost lookups, not a shaper call (where the idea is from: NOTICE). Per style, each printable ASCII character's glyph, face and advance, and each pair's
 # kerning, are learned once, lazily, from FontEngine.shape itself (HarfBuzz on Linux, CoreText on the Mac), so the fast
-# path places glyphs exactly as the shaper does: a pair the shaper turns into anything but its two glyphs at the learned
+# path places glyphs as the shaper does: a pair the shaper turns into anything but its two glyphs at the learned
 # advance plus one kerning (a ligature, a contextual alternate, a mark) is "complex", and a string holding one (or any
 # byte outside printable ASCII) goes to the shaper. Each consecutive triple is checked once too: a face whose triples
-# disagree with its pairs substitutes by wider context (a handwriting face's alternates) and leaves the fast path. tests/test_textfast compares the two on a corpus in every face.
+# disagree with its pairs substitutes by wider context (a handwriting face's alternates) and leaves the fast path.
+# What this can't see: a face that substitutes over four or more characters and never over three. tests/test_textfast
+# compares the fast path with the shaper on a corpus in every bundled face; a system face is only checked by its triples.
+# Only short strings (FAST_BYTES) take it: they are what changes every frame, and a long line learned character by
+# character costs more on its first frame than shaping it once and keeping it.
 # Everything else is cached by (style, text hash) in two generations: a hit hands out a pointer, nothing is copied.
 
 comptime _FAST_N = 95  # printable ASCII, 0x20–0x7E
 comptime RUN_GENERATION = 4096  # runs per cache generation
+comptime FAST_BYTES = 24  # the longest string the fast path takes (longer ones: the cache, then the shaper)
+comptime FAST_STYLES = 128  # styles kept (each ~90 KB); a full list starts again, with the runs keyed by its indices
 
 
 struct FastStyle(Movable):
@@ -1476,6 +1481,10 @@ def _style_index(mut e: FontEngine, st: TextStyle) -> Int:
         if _same_style(e.fast[i].st, st):
             e.fast_last = i
             return i
+    if len(e.fast) >= FAST_STYLES:  # (an app that animates a font size makes a style per frame: bounded)
+        e.fast.clear()
+        e.run_cur = Dict[Int, CachedRun]()
+        e.run_prev = Dict[Int, CachedRun]()
     e.fast.append(FastStyle(st))
     e.fast_last = len(e.fast) - 1
     return e.fast_last
@@ -1613,7 +1622,7 @@ def run_in(e: Pointer[FontEngine, MutUntrackedOrigin], st: TextStyle, text: Stri
     """run_for with the engine already in hand: a loop over many runs looks it up once (engine() reads the process's
     registry, ~0.4 µs, mostly getpid; a frame of 300 labels paid it 300 times)."""
     var si = _style_index(e[], st)
-    if _fast_shape(e[], si, text, e[].fast_run):
+    if text.byte_length() <= FAST_BYTES and _fast_shape(e[], si, text, e[].fast_run):
         e[].fast_hits += 1
         return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].fast_run)))
     var key = _run_key(si, text)

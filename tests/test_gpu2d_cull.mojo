@@ -85,7 +85,13 @@ def inside(name: String, scene: Scene, f: Frame2D) raises:
                     var b = Float64(f.quads[q + 1])
                     var c = Float64(f.quads[q + 2])
                     var d = Float64(f.quads[q + 3])
-                    if Int(f.quads[q + 5]) == 0:  # SHAPE_BOX
+                    if Int(f.quads[q + 5]) == 2:  # SHAPE_SHADOW (goal 80 M4): 3 sigma past its box
+                        var g = 3 * Float64(f.quads[q + 7]) + 1
+                        x0 = a - g
+                        y0 = b - g
+                        x1 = a + c + g
+                        y1 = b + d + g
+                    elif Int(f.quads[q + 5]) == 0:  # SHAPE_BOX
                         x0 = a
                         y0 = b
                         x1 = a + c
@@ -158,7 +164,7 @@ def random_scene(seed: Int, font: Font, img: List[UInt32]) -> Scene:
             var x = rng.real(-250, 450)
             var y = rng.real(-200, 350)
             var col = rgba(Int(rng.real(0, 255)), Int(rng.real(0, 255)), Int(rng.real(0, 255)), 120 + Int(rng.real(0, 135)))
-            var which = Int(rng.real(0, 11))
+            var which = Int(rng.real(0, 12))
             if not fixed and which == 9 and depth < 3:
                 sc.push_clip(rng.real(-40, 200), rng.real(-40, 140), rng.real(10, 200), rng.real(10, 140))
                 depth += 1
@@ -169,6 +175,8 @@ def random_scene(seed: Int, font: Font, img: List[UInt32]) -> Scene:
                 continue
             if which == 0:
                 sc.rect(x, y, rng.real(1, 90), rng.real(1, 60), col, rng.real(0, 12))
+            elif which == 11:
+                sc.shadow(x, y, rng.real(4, 90), rng.real(4, 60), rng.real(0, 14), rng.real(0, 30), col)
             elif which == 1:
                 sc.circle(x, y, rng.real(1, 30), col)
             elif which == 2:

@@ -9,8 +9,7 @@
 #   GPU       = GL2D.render (upload + draws + resolve) + glFinish, wall time
 #   cpu raster= execute_cpu: the same frame drawn by the CPU executor (single thread)
 #
-# Not like for like (stated in the results): mojoui's Scene has no Gaussian shadow, so the boxes' and cards' shadows
-# are a flat translucent rect (one instance each, the same count as nanoui's shadow instances, much cheaper pixels).
+# Shadows are Gaussian (Painter.shadow, goal 80 M4) with nanoui's own colours, blurs and offsets.
 # Held-out scenes (goal 80: ours, never the rival's; they must not regress while the race is worked on): whiteboard,
 # canvas (Personal Note's seeded 645-object note), mindmap (200 topics), document (wrapped paragraphs in several faces and
 # scripts, scrolled), table (10 000 rows × 6 columns, scrolled). Each frame pans or scrolls, as the app redraws it.
@@ -68,13 +67,13 @@ def fmod(x: Float64, m: Float64) -> Float64:
 
 
 def boxes(mut sc: Scene, frame: Int, t: Float64):
-    var shadow = rgba(0, 0, 0, 40)
+    var shadow = rgba(0, 0, 0, 51)  # (nanoui's: black at 0.2, blur 4, 2 down)
     for r in range(20):
         for col in range(30):
             var i = Float64(r * 30 + col)
             var x = 10.0 + Float64(col) * 28
             var y = 10.0 + Float64(r) * 28 + 6 * sin(t * 3 + i * 0.1)
-            sc.rect(x - 1, y + 1, 26, 26, shadow, 7)  # flat stand-in for a blur-4 shadow, y 2
+            sc.shadow(x, y + 2, 24, 24, 6, 4, shadow)
             sc.rect(x, y, 24, 24, hsl(fmod(t * 60 + i * 3, 360)), 6)
 
 
@@ -113,7 +112,7 @@ def list(mut sc: Scene, frame: Int, t: Float64):
 def dashboard(mut sc: Scene, frame: Int, t: Float64):
     var ink = rgba(29, 29, 31)
     var white = rgba(255, 255, 255)
-    var shadow = rgba(0, 0, 0, 22)
+    var shadow = rgba(0, 0, 0, 31)  # (nanoui's: black at 0.12, blur 16, 4 down)
     var track = rgba(0xE0, 0xE0, 0xE5)
     var blue = rgba(0x0A, 0x84, 0xFF)
     for r in range(3):
@@ -122,7 +121,7 @@ def dashboard(mut sc: Scene, frame: Int, t: Float64):
             var v = 0.5 + 0.5 * sin(t * 2 + Float64(i))
             var x = 16.0 + Float64(col) * 212
             var y = 16.0 + Float64(r) * 142
-            sc.rect(x - 2, y + 3, 204, 134, shadow, 14)  # flat stand-in for a blur-16 shadow, y 4
+            sc.shadow(x, y + 4, 200, 130, 12, 16, shadow)
             sc.rect(x, y, 200, 130, white, 12)
             sc.run(TextStyle(FAMILY, 400, False, 13), "Metric " + String(i), x + 14, y + 28, ink, ALIGN_LEFT)
             sc.run(TextStyle(FAMILY, 700, False, 28), String(Int(v * 1000)), x + 14, y + 70, ink, ALIGN_LEFT)

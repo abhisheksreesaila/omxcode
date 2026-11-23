@@ -32,7 +32,7 @@ from mojoui.gpu2d_gl import GPU2D
 from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE, OP_SHADOW
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
@@ -4094,6 +4094,10 @@ struct GtkHost[A: App](Movable):
             var c = sc.colors[op]
             if kind == OP_FILL or kind == OP_RECT:
                 self.snap_rect(snap, sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3), c, sc.num(op, 4) if kind == OP_RECT else 0)
+            elif kind == OP_SHADOW:  # (goal 80) GTK's own Gaussian blur of the rounded box (GSK: sigma = radius / 2, as CSS)
+                external_call["gtk_snapshot_push_blur", NoneType](snap, Float64(sc.num(op, 5)))
+                self.snap_rect(snap, sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3), c, sc.num(op, 4))
+                external_call["gtk_snapshot_pop", NoneType](snap)
             elif kind == OP_CIRCLE:
                 var rr = sc.num(op, 2)
                 self.snap_rect(snap, sc.num(op, 0) - rr, sc.num(op, 1) - rr, 2 * rr, 2 * rr, c, rr)

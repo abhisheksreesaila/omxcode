@@ -74,6 +74,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | Canvas: scroll pans | `Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Scene: polygon fill | `Painter.polygon (non-zero, antialiased)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
 | Scene: layer transform | `Painter.layer_transform (pan/zoom moves a kept layer)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
+| Scene: Gaussian shadow | `Painter.shadow(x, y, w, h, radius, blur, color): GPUI's analytic rounded-box blur (gpu2d GL/Metal/CPU; GTK's blur node); tests/test_gpu2d_shadow, no app draws one yet` | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
 | Canvas: keys (focus on press) | `on_gesture: KEY (event.text, modifiers)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | TextField: Escape cancels | `TextField(on_cancel=)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Editor that echoes the grid's typing | `TextField(…).echo()` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -294,12 +295,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 206 | 11 | 0 |
-| Web | 174 | 26 | 17 |
-| Android | 19 | 77 | 121 |
-| Mac (AppKit) | 8 | 182 | 27 |
-| iPhone (UIKit) | 0 | 148 | 69 |
-| Agent (MCP) | 66 | 55 | 96 |
+| Linux (GTK) | 206 | 12 | 0 |
+| Web | 174 | 27 | 17 |
+| Android | 19 | 78 | 121 |
+| Mac (AppKit) | 8 | 183 | 27 |
+| iPhone (UIKit) | 0 | 149 | 69 |
+| Agent (MCP) | 66 | 56 | 96 |
 
 ## Inside one app, not components yet (the debt)
 

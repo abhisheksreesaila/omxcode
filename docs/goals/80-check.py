@@ -67,6 +67,15 @@ def results(text):
     return out
 
 
+RUNS = 3              # (D-8012) interleaved race runs per side; each metric's lowest is kept
+
+
+def best_of(runs):
+    """(D-8012) Per scene, each metric's lowest over the runs: unchanged code read 3.4x apart on the GPU between runs
+    (its clocks move between P8 and P0 under this light load), so one run proves nothing either way. Both sides alike."""
+    return {s: {k: (v if k == "scene" else min(r[s][k] for r in runs)) for k, v in runs[0][s].items()} for s in runs[0]}
+
+
 # ---------- builds (once per checker run) ----------
 _cache = {}
 
@@ -114,56 +123,70 @@ def build_omx():
     return _cache["omx"]
 
 
-def race_nanoui():
-    """nanoui on GL (frame CPU, GPU) and on its CPU raster (the fallback's median): {scene: {...}}."""
-    if "rn" in _cache:
-        return _cache["rn"]
-    err = build_nanoui()
-    if err:
-        _cache["rn"] = (None, err)
-        return _cache["rn"]
-    shots = OUT / "shots"
-    shots.mkdir(exist_ok=True)
+def _nanoui_gl():
     exe = str(NANOUI / "hillclimb" / "zig-out" / "bin" / "hillclimb")
-    args = ["--only", "nanoui", "--no-history", "--scene", ",".join(RACE)]
-    g = run([exe] + args, 3600, env={"HC_GL": "1", "HC_SHOT": str(shots)})
-    res = results(g.stdout + g.stderr)
-    if len(res) != len(RACE):
-        _cache["rn"] = (None, "nanoui GL run: " + tail(g.stdout + g.stderr, 600))
-        return _cache["rn"]
-    c = run([exe] + args, 3600)
-    plain = re.sub(r"\x1b\[[0-9;]*[mK]", "", c.stdout + c.stderr)
-    scene = None
-    for line in plain.splitlines():
-        m = re.match(r"^(\w+)\s+frame CPU \(median\)", line)
-        if m:
-            scene = m.group(1)
-        m = re.match(r"^\s+encode CPU\s+([\d.]+)", line)
-        if m and scene in res:
-            res[scene]["raster_med"] = float(m.group(1))
-    if any("raster_med" not in res[s] for s in RACE):
-        _cache["rn"] = (None, "nanoui CPU run: " + tail(plain, 600))
-        return _cache["rn"]
-    _cache["rn"] = (res, None)
-    return _cache["rn"]
+    g = run([exe, "--only", "nanoui", "--no-history", "--scene", ",".join(RACE)], 3600, env={"HC_GL": "1", "HC_SHOT": str(OUT / "shots")})
+    # (it repeats each scene 3 times itself and keeps the lowest median; glrun.zig prints all three: the lowest is kept)
+    out = {}
+    for line in (g.stdout + g.stderr).splitlines():
+        i = line.find("RESULT {")
+        if i >= 0:
+            d = json.loads(line[i + 7:])
+            if d["scene"] not in out or d["frame_med"] < out[d["scene"]]["frame_med"]:
+                out[d["scene"]] = d
+    return out, tail(g.stdout + g.stderr, 600)
+
+
+def _omx_run():
+    r = run(["pixi", "run", str(OMX)] + RACE + HELD, 7200, env={"HC_SHOT": str(OUT / "shots")})
+    return results(r.stdout), tail(r.stdout + r.stderr, 600)
+
+
+def races():
+    """(nanoui, omxcode, error): RUNS interleaved runs of both, each metric's lowest."""
+    if "races" in _cache:
+        return _cache["races"]
+    err = build_nanoui() or build_omx()
+    if err:
+        _cache["races"] = (None, None, err)
+        return _cache["races"]
+    (OUT / "shots").mkdir(parents=True, exist_ok=True)
+    ns, os_ = [], []
+    for _ in range(RUNS):
+        n, said = _nanoui_gl()
+        if len(n) != len(RACE):
+            _cache["races"] = (None, None, "nanoui GL run: " + said)
+            return _cache["races"]
+        c = run([str(NANOUI / "hillclimb" / "zig-out" / "bin" / "hillclimb"), "--only", "nanoui", "--no-history", "--scene", ",".join(RACE)], 3600)
+        scene = None
+        for line in re.sub(r"\x1b\[[0-9;]*[mK]", "", c.stdout + c.stderr).splitlines():
+            m = re.search(r"(\w+)\s+frame CPU \(median\)", line)
+            if m:
+                scene = m.group(1)
+            m = re.match(r"^\s+encode CPU\s+([\d.]+)", line)
+            if m and scene in n:
+                n[scene]["raster_med"] = float(m.group(1))
+        if any("raster_med" not in n[s] for s in RACE):
+            _cache["races"] = (None, None, "nanoui CPU run: " + tail(c.stdout + c.stderr, 600))
+            return _cache["races"]
+        o, said = _omx_run()
+        if len(o) != len(RACE) + len(HELD):
+            _cache["races"] = (None, None, "omx run: " + said)
+            return _cache["races"]
+        ns.append(n)
+        os_.append(o)
+    _cache["races"] = (best_of(ns), best_of(os_), None)
+    return _cache["races"]
+
+
+def race_nanoui():
+    n, _, err = races()
+    return n, err
 
 
 def race_omx():
-    if "ro" in _cache:
-        return _cache["ro"]
-    err = build_omx()
-    if err:
-        _cache["ro"] = (None, err)
-        return _cache["ro"]
-    shots = OUT / "shots"
-    shots.mkdir(parents=True, exist_ok=True)
-    r = run(["pixi", "run", str(OMX)] + RACE + HELD, 7200, env={"HC_SHOT": str(shots)})
-    res = results(r.stdout)
-    if len(res) != len(RACE) + len(HELD):
-        _cache["ro"] = (None, "omx run: " + tail(r.stdout + r.stderr, 600))
-        return _cache["ro"]
-    _cache["ro"] = (res, None)
-    return _cache["ro"]
+    _, o, err = races()
+    return o, err
 
 
 def write_race(n, o):
