@@ -458,20 +458,37 @@ struct BoardLook(Movable):
         else:
             # (D-7974) the same view as the kept ops and every change since known by id: a patch: changed (and new)
             # objects painted again, every other object's kept ops replayed, the order the layer's own (z)
-            var patch = self.keep_ops and self.patch_on and token == self.kept_token and self.kept.ok and self.dirty_known
+            var patch = self.keep_ops and self.patch_on and token == self.kept_token and self.kept.ok and self.dirty_known and p.ops_mark() >= 0
             var mark = p.ops_mark()
             var segs = List[Int]()  # per object painted: id, first op, end op (from mark)
+            var run_a = -1  # kept ops waiting to be replayed: [run_a, run_b) (a patch only goes to a painter that can: it kept them)
+            var run_b = -1
             for i in layer.query(tx0, ty0, tx1, ty1):
                 if any_lift and layer.objs[i].id in self.lift_set:
                     up.append(i)
                     continue
                 var id = layer.objs[i].id
-                var s0 = p.ops_mark()
                 var sg = self.seg_at.get(id, -1) if patch and not (id in self.dirty_ids) else -1
-                if sg < 0 or not p.ops_replay_range(self.kept, self.seg_a[sg], self.seg_b[sg]):
-                    self.paint_obj(p, layer, i)
+                if sg >= 0:  # (D-7999: unchanged neighbours' kept ops replayed as one run)
+                    if self.seg_a[sg] != run_b:
+                        if run_b > run_a:
+                            _ = p.ops_replay_range(self.kept, run_a, run_b)
+                        run_a = self.seg_a[sg]
+                        run_b = run_a
+                    var at = p.ops_mark() + (run_b - run_a) - mark
+                    run_b = self.seg_b[sg]
+                    segs += [id, at, at + self.seg_b[sg] - self.seg_a[sg]]
+                    continue
+                if run_b > run_a:
+                    _ = p.ops_replay_range(self.kept, run_a, run_b)
+                    run_a = -1
+                    run_b = -1
+                var s0 = p.ops_mark()
+                self.paint_obj(p, layer, i)
                 if mark >= 0:
                     segs += [id, s0 - mark, p.ops_mark() - mark]
+            if run_b > run_a:
+                _ = p.ops_replay_range(self.kept, run_a, run_b)
             if patch:
                 self.patches += 1
             var keep_now = token == self.last_token and not inside_changed
@@ -568,6 +585,15 @@ struct BoardLook(Movable):
                     else:
                         var bx = self.paint_box(o)
                         rects += self.snap.append(o.id, _obj_key(o), bx[0], bx[1], bx[2], bx[3])
+                if getenv("MOJOUI_TILE_TRACE") == "1":
+                    var t = String("BOARDLOG: ids " + String(len(done)) + " rects")
+                    for q in range(len(rects) // 4):
+                        t += " " + String(Int(rects[4 * q + 2] - rects[4 * q])) + "x" + String(Int(rects[4 * q + 3] - rects[4 * q + 1])) + "@" + String(Int(rects[4 * q])) + "," + String(Int(rects[4 * q + 1]))
+                    for id in done:
+                        var q = layer.index(id)
+                        if q >= 0:
+                            t += " kind" + String(layer.objs[q].kind)
+                    print(t, flush=True)
                 if len(rects) > 0:
                     self.since = self.board_version
                     self.board_version += 1

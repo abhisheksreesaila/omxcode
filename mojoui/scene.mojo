@@ -72,6 +72,58 @@ struct KeptOps(Copyable, Movable):
         return len(self.kinds)
 
 
+def _copy_ops(sk: List[UInt8], sn: List[Float32], sc: List[UInt32], st: List[Int32], stexts: List[String], simgs: List[List[UInt32]], spath: List[Float32],
+              a: Int, b: Int, mut dk: List[UInt8], mut dn: List[Float32], mut dc: List[UInt32], mut dt: List[Int32], mut dtexts: List[String],
+              mut dimgs: List[List[UInt32]], mut dpath: List[Float32]):
+    """Ops [a, b) appended to another op list (D-7999: in bulk): numbers as they are, their texts and path points copied
+    run by run (ops name them in order) and renumbered, an image copied once however many ops draw it."""
+    var nb = len(dn)
+    dk.extend(Span(sk)[a:b])
+    dn.extend(Span(sn)[a * STRIDE : b * STRIDE])
+    dc.extend(Span(sc)[a:b])
+    var t0 = -1  # the run of texts being gathered: [t0, t0 + tn) in the source
+    var tn = 0
+    var tb = len(dtexts)  # (where that run lands)
+    var p0 = -1  # the run of path points: [p0, p0 + pn)
+    var pn = 0
+    var pb = len(dpath) // 2
+    var imap = Dict[Int, Int]()
+    for op in range(a, b):
+        var t = Int(st[op])
+        if t < 0:
+            dt.append(-1)
+        else:
+            if t0 < 0 or t != t0 + tn:
+                if tn > 0:
+                    dtexts.extend(Span(stexts)[t0 : t0 + tn])
+                t0 = t
+                tn = 0
+                tb = len(dtexts)
+            dt.append(Int32(tb + tn))
+            tn += 1
+        var kind = Int(sk[op])
+        if kind == OP_IMAGE:
+            var im = Int(sn[op * STRIDE + 4])
+            if im not in imap:
+                imap[im] = len(dimgs)
+                dimgs.append(simgs[im].copy())
+            dn[nb + (op - a) * STRIDE + 4] = Float32(imap.get(im, 0))
+        elif kind == OP_POLY or kind == OP_STROKE:
+            var first = Int(sn[op * STRIDE])
+            if p0 < 0 or first != p0 + pn:
+                if pn > 0:
+                    dpath.extend(Span(spath)[2 * p0 : 2 * (p0 + pn)])
+                p0 = first
+                pn = 0
+                pb = len(dpath) // 2
+            dn[nb + (op - a) * STRIDE] = Float32(pb + pn)
+            pn += Int(sn[op * STRIDE + 1])
+    if tn > 0:
+        dtexts.extend(Span(stexts)[t0 : t0 + tn])
+    if pn > 0:
+        dpath.extend(Span(spath)[2 * p0 : 2 * (p0 + pn)])
+
+
 trait Painter:
     """What drawing code paints with: pixels (SurfacePainter) or a display list (Scene). Sizes are pixels."""
 
@@ -562,33 +614,8 @@ struct Scene(Painter, Movable, Copyable):
             var li = len(self.layer_keys) - 1
             k.from_v = self.layer_opsv[li] if self.layer_opsv[li] >= 0 else self.layer_versions[li]
             k.layer_off = from_op - self.layer_range(li)[0]
-        var n = len(self.kinds)
-        var imap = Dict[Int, Int]()
-        for op in range(from_op, n):
-            var kind = Int(self.kinds[op])
-            k.kinds.append(self.kinds[op])
-            for c in range(STRIDE):
-                k.nums.append(self.nums[op * STRIDE + c])
-            k.colors.append(self.colors[op])
-            var t = Int(self.text_of[op])
-            if t >= 0:
-                k.text_of.append(Int32(len(k.texts)))
-                k.texts.append(self.texts[t])
-            else:
-                k.text_of.append(-1)
-            var b = (op - from_op) * STRIDE
-            if kind == OP_IMAGE:
-                var im = Int(self.nums[op * STRIDE + 4])
-                if im not in imap:
-                    imap[im] = len(k.images)
-                    k.images.append(self.images[im].copy())
-                k.nums[b + 4] = Float32(imap.get(im, 0))
-            elif kind == OP_POLY or kind == OP_STROKE:
-                var first = Int(self.nums[op * STRIDE])
-                var cnt = Int(self.nums[op * STRIDE + 1])
-                k.nums[b] = Float32(len(k.path) // 2)
-                for q in range(2 * first, 2 * (first + cnt)):
-                    k.path.append(self.path[q])
+        _copy_ops(self.kinds, self.nums, self.colors, self.text_of, self.texts, self.images, self.path, from_op, len(self.kinds),
+                  k.kinds, k.nums, k.colors, k.text_of, k.texts, k.images, k.path)
         for q in range(len(self.note_ops)):
             if self.note_ops[q] >= from_op:
                 k.note_ops.append(self.note_ops[q] - from_op)
@@ -602,29 +629,8 @@ struct Scene(Painter, Movable, Copyable):
             self.begin_layer("")
         var base = len(self.kinds)
         self._reused(kept, base, a, b - a)
-        var nb = len(self.nums)
-        for op in range(a, b):
-            var kind = Int(kept.kinds[op])
-            self.kinds.append(kept.kinds[op])
-            for c in range(STRIDE):
-                self.nums.append(kept.nums[op * STRIDE + c])
-            self.colors.append(kept.colors[op])
-            var t = Int(kept.text_of[op])
-            if t >= 0:
-                self.text_of.append(Int32(len(self.texts)))
-                self.texts.append(kept.texts[t])
-            else:
-                self.text_of.append(-1)
-            var at = nb + (op - a) * STRIDE
-            if kind == OP_IMAGE:
-                self.nums[at + 4] = Float32(len(self.images))
-                self.images.append(kept.images[Int(kept.nums[op * STRIDE + 4])].copy())
-            elif kind == OP_POLY or kind == OP_STROKE:
-                var first = Int(kept.nums[op * STRIDE])
-                var cnt = Int(kept.nums[op * STRIDE + 1])
-                self.nums[at] = Float32(len(self.path) // 2)
-                for q in range(2 * first, 2 * (first + cnt)):
-                    self.path.append(kept.path[q])
+        _copy_ops(kept.kinds, kept.nums, kept.colors, kept.text_of, kept.texts, kept.images, kept.path, a, b,
+                  self.kinds, self.nums, self.colors, self.text_of, self.texts, self.images, self.path)
         var lo = 0  # (notes are kept in op order: the first at or after a, by halves)
         var hi = len(kept.note_ops)
         while lo < hi:

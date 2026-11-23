@@ -98,6 +98,9 @@ def op_box(scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
     return (-1e300, -1e300, 1e300, 1e300)  # (fills, clips: everywhere; a tiled layer has none)
 
 
+comptime EXTRA_MAX = 512  # (D-7999) ops drawn again kept beside the grid before it's built whole
+
+
 struct OpBins(Movable):
     """A tiled layer's ops binned by where they draw (offsets from the layer's first op): built once per (version,
     extent, op count), queried per tile."""
@@ -120,10 +123,18 @@ struct OpBins(Movable):
     var widths: Dict[Int, Float64]  # a run's shaped width by a hash of its text and style (kept across builds)
     var incremental: Bool  # (D-7987) boxes of replayed ops taken from the last build (MOJOUI_BINS_INCREMENTAL=0: all measured)
     var reused: Int  # how many boxes the last build took from the one before
+    var in_place: Bool  # (D-7999) MOJOUI_BINS_INPLACE=0: the grid built whole each time (the comparison)
+    var extra: List[Int]  # ops drawn again since the grid was built, looked through by every query
+    var in_extra: Dict[Int, Bool]
+    var patched: Int  # builds done in place so far
 
     def __init__(out self):
         self.widths = Dict[Int, Float64]()
         self.incremental = getenv("MOJOUI_BINS_INCREMENTAL") != "0"
+        self.in_place = getenv("MOJOUI_BINS_INPLACE") != "0"
+        self.extra = List[Int]()
+        self.in_extra = Dict[Int, Bool]()
+        self.patched = 0
         self.reused = 0
         self.version = -999
         self.ext = List[Float64]()
@@ -155,6 +166,10 @@ struct OpBins(Movable):
     def build(mut self, scene: Scene, i: Int):
         var span = scene.layer_range(i)
         var n = span[1] - span[0]
+        if self._patch(scene, i, span[0], n):
+            return
+        self.extra.clear()
+        self.in_extra = Dict[Int, Bool]()
         # (D-7987) ops replayed from the version this index was built from keep their boxes: only the ops drawn again
         # (an edit's objects) are measured; the grid is rebuilt from the boxes either way
         var src = List[Int]()
@@ -249,6 +264,43 @@ struct OpBins(Movable):
                     at[c] += 1
         self.start = counts^
 
+    def _patch(mut self, scene: Scene, i: Int, first: Int, n: Int) -> Bool:
+        """(D-7999) The index brought up to date in place: the layer's ops are the ones it was built from, at the same
+        places, but for a few drawn again (a moved object): those are measured again and kept in `extra`, which every
+        query looks through (the grid still lists them where they were; the box decides). False: build it whole."""
+        if not self.incremental or not self.in_place or self.version < 0 or scene.layer_reuse_v[i] != self.version or n != self.nops or len(self.bx0) != n or self.nx == 0:
+            return False
+        for c in range(4):
+            if len(self.ext) != 4 or self.ext[c] != scene.layer_ext[4 * i + c]:
+                return False
+        var runs = scene.reuse_of(i)
+        var at = 0  # (ops before this one are accounted for)
+        var changed = List[Int]()
+        for q in range(len(runs) // 3):
+            var d = runs[3 * q]
+            if d != runs[3 * q + 1] or d < at or d - at + len(changed) + len(self.extra) > EXTRA_MAX:
+                return False
+            for o in range(at, d):
+                changed.append(o)
+            at = d + runs[3 * q + 2]
+        if at > n or n - at + len(changed) + len(self.extra) > EXTRA_MAX:
+            return False
+        for o in range(at, n):
+            changed.append(o)
+        for o in changed:
+            var b = self.run_box(scene, first + o) if Int(scene.kinds[first + o]) == OP_RUN else op_box(scene, first + o)
+            self.bx0[o] = Float32(b[0])
+            self.by0[o] = Float32(b[1])
+            self.bx1[o] = Float32(b[2])
+            self.by1[o] = Float32(b[3])
+            if o not in self.in_extra:
+                self.in_extra[o] = True
+                self.extra.append(o)
+        self.reused = n - len(changed)
+        self.patched += 1
+        self.version = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]
+        return True
+
     def run_box(mut self, scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
         """An OP_RUN's box from its shaped width (fonttext's run cache, then kept here by a hash of the run): from its
         start by its alignment, a third of an em more either side (overhangs, swashes), an em above and below."""
@@ -292,6 +344,11 @@ struct OpBins(Movable):
                     if Float64(self.bx1[o]) < x0 or Float64(self.bx0[o]) > x1 or Float64(self.by1[o]) < y0 or Float64(self.by0[o]) > y1:
                         continue
                     out.append(o)
+        for o in self.extra:  # (D-7999: the ops drawn again since the grid was built: anywhere)
+            if self.stamp[o] == self.stamp_now or Float64(self.bx1[o]) < x0 or Float64(self.bx0[o]) > x1 or Float64(self.by1[o]) < y0 or Float64(self.by0[o]) > y1:
+                continue
+            self.stamp[o] = self.stamp_now
+            out.append(o)
         sort(out)
         return out^
 

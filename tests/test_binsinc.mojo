@@ -54,12 +54,15 @@ def same_bins(mut a: OpBins, mut b: OpBins, what: String) raises:
     assert_equal(a.nops, b.nops, what + ": ops")
     for o in range(a.nops):
         assert_true(a.bx0[o] == b.bx0[o] and a.by0[o] == b.by0[o] and a.bx1[o] == b.bx1[o] and a.by1[o] == b.by1[o], what + ": box of op " + String(o))
-    assert_true(a.nx == b.nx and a.ny == b.ny and a.cell == b.cell and a.gx0 == b.gx0 and a.gy0 == b.gy0, what + ": grid")
-    assert_true(a.start == b.start and a.items == b.items, what + ": cells")
-    for q in range(12):
-        var x = -400.0 + Float64(q % 4) * 700
-        var y = -300.0 + Float64(q // 4) * 500
-        assert_true(a.query(x, y, x + 512, y + 512) == b.query(x, y, x + 512, y + 512), what + ": query " + String(q))
+    if len(a.extra) == 0:
+        assert_true(a.nx == b.nx and a.ny == b.ny and a.cell == b.cell and a.gx0 == b.gx0 and a.gy0 == b.gy0, what + ": grid")
+    if len(a.extra) == 0:  # (built whole: the same grid; patched in place, D-7999, it keeps the old grid and `extra`)
+        assert_true(a.start == b.start and a.items == b.items, what + ": cells")
+    for q in range(240):  # (what it answers is what counts: rects of every size, the whole board to a few px)
+        var x = -900.0 + Float64((q * 7919) % 4200)
+        var y = -700.0 + Float64((q * 104729) % 3000)
+        var w = 8.0 * Float64(1 << (q % 10))
+        assert_true(a.query(x, y, x + w, y + w * 0.7) == b.query(x, y, x + w, y + w * 0.7), what + ": query " + String(q))
 
 
 def rnd(mut seed: UInt64) -> Int:
@@ -116,6 +119,8 @@ def main() raises:
         measured += inc.nops - inc.reused
         if inc.reused > 0:
             builds += 1
+    print("   patched in place (D-7999): " + String(inc.patched))
+    assert_true(inc.patched >= 5, "some edits keep every op's place: patched in place")
     print("   40 edits: " + String(builds) + " builds took boxes from the one before; " + String(reused) + " boxes kept, " + String(measured) + " measured")
     assert_true(builds >= 30, "most builds incremental")
     assert_true(reused > 10 * measured, "most boxes kept")

@@ -815,8 +815,18 @@ struct ObjectLayer(Movable):
         return o.to_page(-o.w / 2, 0)
 
     def _route(mut self, c: Int):
+        """Connector objs[c] routed again (_route_ends); the change log names it only when that moved it (D-7999: an undo
+        routes every connector of the board, and named hundreds that stayed where they were)."""
+        ref o0 = self.objs[c]
+        var was = (o0.ax, o0.ay, o0.bx, o0.by)
+        var box = (o0.x, o0.y, o0.w, o0.h)
+        self._route_ends(c)
+        ref o = self.objs[c]
+        if (o.ax != was[0] or o.ay != was[1] or o.bx != was[2] or o.by != was[3] or o.x != box[0] or o.y != box[1] or o.w != box[2] or o.h != box[3]):
+            self._log(o.id)
+
+    def _route_ends(mut self, c: Int):
         """Connector objs[c]: its ends at the nearest pair of side midpoints (or the side nearest its free end)."""
-        self._log(self.objs[c].id)
         var fp = self.index(self.objs[c].from_id)
         var tp = self.index(self.objs[c].to_id)
         if fp < 0:
