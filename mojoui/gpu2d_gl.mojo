@@ -195,6 +195,13 @@ comptime C_BYTES = 0  # (D-7965) counters after the entry points'
 comptime C_MULTI = 1
 comptime C_EXT = 2
 comptime C_BASE = 3
+comptime BOX_VERTS = 3  # a quad's or glyph's box: one triangle holding it (D-7972: cut to clip and scissor)
+comptime KIND_QUAD = 0  # (D-7971) GPU time kinds
+comptime KIND_GLYPH = 1
+comptime KIND_POLY = 2
+comptime KIND_IMAGE = 3
+comptime KIND_CLEAR = 4
+comptime KIND_TILES = 5
 comptime GL_PIXEL_UNPACK_BUFFER = 0x88EC
 comptime GL_MAP_WRITE_BIT = 0x0002
 comptime GL_MAP_INVALIDATE_BUFFER_BIT = 0x0008
@@ -230,11 +237,67 @@ layout(location = 2) in vec4 a_col;
 layout(location = 3) in vec4 a_clip;
 uniform vec2 vp;
 uniform vec3 xf;
+uniform vec4 lim;
 flat out vec4 v_geom;
 flat out vec2 v_par;
 flat out vec4 v_col;
 flat out vec4 v_clip;
+flat out float v_hole;
 void main() {
+    v_hole = 0.0;
+    float k = xf.z;
+    vec2 t = xf.xy;
+    v_clip = a_clip * k + vec4(t, t);
+    v_col = a_col;
+    // (D-7972) one triangle holding the box (it must: a seam between two would blend twice under coverage
+    // modulation), the box first cut to the clip and to the scissor (lim): pixels outside them were discarded anyway
+    vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);
+    vec2 p;
+    if (a_par.y < 0.5) {
+        float x = a_geom.x * k + t.x;
+        float y = a_geom.y * k + t.y;
+        float w = a_geom.z * k;
+        float h = a_geom.w * k;
+        v_geom = vec4(x, y, w, h);
+        v_par = vec2(min(a_par.x * k, min(w, h) * 0.5), 0.0);
+        v_hole = a_par.z * k;
+        if (w <= 0.0 || h <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        vec2 lo = max(max(vec2(x, y) - 1.5, v_clip.xy - 0.5), lim.xy - 0.5);
+        vec2 hi = min(min(vec2(x + w, y + h) + 1.5, v_clip.zw + 0.5), lim.zw + 0.5);
+        if (hi.x <= lo.x || hi.y <= lo.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        p = mix(lo, hi, corner);
+    } else {
+        vec2 A = a_geom.xy * k + t;
+        vec2 B = a_geom.zw * k + t;
+        float hw = a_par.x * k;
+        v_geom = vec4(A, B);
+        v_par = vec2(hw, 1.0);
+        vec2 d = B - A;
+        float L = length(d);
+        vec2 u = L > 1e-6 ? d / L : vec2(1.0, 0.0);
+        vec2 n = vec2(-u.y, u.x);
+        float e = hw + 1.5;
+        p = A - u * e + u * ((L + 2.0 * e) * corner.x) + n * (e * (corner.y * 2.0 - 1.0));
+    }
+    gl_Position = vec4(p / vp * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+# (D-7972) the shaders before two-triangle boxes: MOJOUI_GL_ONE_TRI=1 (the comparison tests/test_boxverts draws)
+comptime QUAD_VS_ONE_TRI = """
+layout(location = 0) in vec4 a_geom;
+layout(location = 1) in vec4 a_par;
+layout(location = 2) in vec4 a_col;
+layout(location = 3) in vec4 a_clip;
+uniform vec2 vp;
+uniform vec3 xf;
+flat out vec4 v_geom;
+flat out vec2 v_par;
+flat out vec4 v_col;
+flat out vec4 v_clip;
+flat out float v_hole;
+void main() {
+    v_hole = 0.0;
     float k = xf.z;
     vec2 t = xf.xy;
     v_clip = a_clip * k + vec4(t, t);
@@ -267,44 +330,7 @@ void main() {
 }
 """
 
-comptime QUAD_FS = """
-flat in vec4 v_geom;
-flat in vec2 v_par;
-flat in vec4 v_col;
-flat in vec4 v_clip;
-uniform int replace;
-out vec4 o;
-void main() {
-    vec2 c = gl_FragCoord.xy;
-    if (c.x < v_clip.x || c.y < v_clip.y || c.x >= v_clip.z || c.y >= v_clip.w) discard;
-    float cov;
-    if (v_par.y < 0.5) {
-        float x = v_geom.x;
-        float y = v_geom.y;
-        float w = v_geom.z;
-        float h = v_geom.w;
-        float r = v_par.x;
-        float vy = min(c.y - y, y + h - c.y) + 0.5;
-        cov = min(min(c.x - x, x + w - c.x) + 0.5, vy);
-        if (r > 0.0) {
-            float dx = max(max(x + r - c.x, c.x - (x + w - r)), 0.0);
-            float dy = max(max(y + r - c.y, c.y - (y + h - r)), 0.0);
-            if (dx > 0.0 && dy > 0.0) cov = min(cov, r - sqrt(dx * dx + dy * dy) + 0.5);
-        }
-    } else {
-        vec2 A = v_geom.xy;
-        vec2 d = v_geom.zw - A;
-        float l2 = dot(d, d);
-        float s = l2 == 0.0 ? 0.0 : clamp(dot(c - A, d) / l2, 0.0, 1.0);
-        cov = v_par.x + 0.5 - length(c - (A + s * d));
-    }
-    if (cov <= 0.0) discard;
-    o = replace != 0 ? v_col : vec4(v_col.rgb, v_col.a * min(cov, 1.0));
-}
-"""
-
-# GLYPH: 0 x,y,w,h  1 u0,v0,u1,v1  2 colour  3 slant,baseline  4 clip
-comptime GLYPH_VS = """
+comptime GLYPH_VS_ONE_TRI = """
 layout(location = 0) in vec4 a_box;
 layout(location = 1) in vec4 a_uv;
 layout(location = 2) in vec4 a_col;
@@ -338,6 +364,89 @@ void main() {
     vec2 lo = vec2(left + min(lean_bottom, 0.0), top) - 1.5;
     vec2 hi = vec2(left + gw * sc + max(lean_top, 0.0), top + gh * sc) + 1.5;
     vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);  // (one triangle holding the box)
+    vec2 p = mix(lo, hi, corner);
+    gl_Position = vec4(p / vp * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+comptime QUAD_FS = """
+flat in vec4 v_geom;
+flat in vec2 v_par;
+flat in vec4 v_col;
+flat in vec4 v_clip;
+flat in float v_hole;
+uniform int replace;
+out vec4 o;
+void main() {
+    vec2 c = gl_FragCoord.xy;
+    if (c.x < v_clip.x || c.y < v_clip.y || c.x >= v_clip.z || c.y >= v_clip.w) discard;
+    float cov;
+    if (v_par.y < 0.5) {
+        float x = v_geom.x;
+        float y = v_geom.y;
+        float w = v_geom.z;
+        float h = v_geom.w;
+        // (D-7973) the middle an opaque cover will hide: left out
+        if (v_hole > 0.0 && c.x > x + v_hole + 0.5 && c.x < x + w - v_hole - 0.5 && c.y > y + v_hole + 0.5 && c.y < y + h - v_hole - 0.5) discard;
+        float r = v_par.x;
+        float vy = min(c.y - y, y + h - c.y) + 0.5;
+        cov = min(min(c.x - x, x + w - c.x) + 0.5, vy);
+        if (r > 0.0) {
+            float dx = max(max(x + r - c.x, c.x - (x + w - r)), 0.0);
+            float dy = max(max(y + r - c.y, c.y - (y + h - r)), 0.0);
+            if (dx > 0.0 && dy > 0.0) cov = min(cov, r - sqrt(dx * dx + dy * dy) + 0.5);
+        }
+    } else {
+        vec2 A = v_geom.xy;
+        vec2 d = v_geom.zw - A;
+        float l2 = dot(d, d);
+        float s = l2 == 0.0 ? 0.0 : clamp(dot(c - A, d) / l2, 0.0, 1.0);
+        cov = v_par.x + 0.5 - length(c - (A + s * d));
+    }
+    if (cov <= 0.0) discard;
+    o = replace != 0 ? v_col : vec4(v_col.rgb, v_col.a * min(cov, 1.0));
+}
+"""
+
+# GLYPH: 0 x,y,w,h  1 u0,v0,u1,v1  2 colour  3 slant,baseline  4 clip
+comptime GLYPH_VS = """
+layout(location = 0) in vec4 a_box;
+layout(location = 1) in vec4 a_uv;
+layout(location = 2) in vec4 a_col;
+layout(location = 3) in vec4 a_sl;
+layout(location = 4) in vec4 a_clip;
+uniform vec2 vp;
+uniform vec3 xf;
+uniform vec4 lim;
+flat out vec4 g_box;
+flat out vec4 g_uv;
+flat out float g_base;
+flat out vec4 v_col;
+flat out vec4 v_clip;
+void main() {
+    float k = xf.z;
+    vec2 t = xf.xy;
+    float left = a_box.x * k + t.x;
+    float top = a_box.y * k + t.y;
+    float gw = a_uv.z - a_uv.x;
+    float gh = a_uv.w - a_uv.y;
+    float sc = gw > 0.0 ? a_box.z * k / gw : 1.0;
+    float slant = a_sl.x;
+    float base = a_sl.y * k + t.y;
+    g_box = vec4(left, top, sc, slant);
+    g_uv = vec4(a_uv.xy, gw, gh);
+    g_base = base;
+    v_col = a_col;
+    v_clip = a_clip * k + vec4(t, t);
+    if (gw <= 0.0 || gh <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    float lean_top = slant * (base - top);
+    float lean_bottom = slant * (base - top - gh * sc);
+    vec2 lo = vec2(left + min(lean_bottom, 0.0), top) - 1.5;
+    vec2 hi = vec2(left + gw * sc + max(lean_top, 0.0), top + gh * sc) + 1.5;
+    vec2 corner = vec2(gl_VertexID == 1 ? 2.0 : 0.0, gl_VertexID == 2 ? 2.0 : 0.0);  // (D-7972: one triangle over the box cut to clip and scissor)
+    lo = max(max(lo, v_clip.xy - 0.5), lim.xy - 0.5);
+    hi = min(min(hi, v_clip.zw + 0.5), lim.zw + 0.5);
+    if (hi.x <= lo.x || hi.y <= lo.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     vec2 p = mix(lo, hi, corner);
     gl_Position = vec4(p / vp * 2.0 - 1.0, 0.0, 1.0);
 }
@@ -562,6 +671,8 @@ struct GL2D(Movable):
     var prog: List[Int]
     var loc_vp: List[Int]
     var loc_xf: List[Int]
+    var loc_lim: List[Int]  # (D-7972) each program's scissor-rect uniform (-1: none), and what was sent to it
+    var lim_set: List[Float32]
     var loc_replace: Int
     var loc_atlas: Int
     var loc_img: Int
@@ -643,6 +754,7 @@ struct GL2D(Movable):
     var tile_ds: Int
     var tile_color: Int
     var tile_tex: List[Int]  # by tile slot (0: not made yet)
+    var box_verts: Int  # (D-7972) vertices per quad/glyph box (6; 3 with MOJOUI_GL_ONE_TRI=1)
     var state_cache: Bool  # (D-7966) MOJOUI_GL_CACHE=0: every run sets all its state (the comparison)
     var base_instance: Int  # glDrawArraysInstancedBaseInstance (GL_ARB_base_instance), 0: none
     var run_vao: Int  # within a layer's runs: the vertex array, array buffer, attribute base, replace flag and
@@ -651,6 +763,11 @@ struct GL2D(Movable):
     var run_replace: Int
     var run_tex: Int
     var vao_buf: List[Int]  # (D-7966) per vertex array: the buffer its attributes point at from offset 0 (-1: unknown)
+    var kinds_on: Bool  # (D-7971) MOJOUI_GPU_KINDS=1: GPU timestamps round each run and clear, summed per kind
+    var kq: List[Int]  # timestamp queries: pairs (before, after) and the pair's kind
+    var kk: List[Int]
+    var kn: Int  # pairs used this frame
+    var kqc: Int  # glQueryCounter
     var counting: Bool  # (D-7965) MOJOUI_GL_COUNT=1
     var counts: List[Int]
     var unpack_buf: Int  # (D-7956) the pixel-unpack buffer a snapshot's tiles are decoded into (0: not made yet)
@@ -672,6 +789,8 @@ struct GL2D(Movable):
         self.prog = List[Int](length=PROGRAMS, fill=0)
         self.loc_vp = List[Int](length=PROGRAMS, fill=-1)
         self.loc_xf = List[Int](length=PROGRAMS, fill=-1)
+        self.loc_lim = List[Int](length=PROGRAMS, fill=-1)
+        self.lim_set = List[Float32](length=4 * PROGRAMS, fill=-1e30)
         self.loc_replace = -1
         self.loc_atlas = -1
         self.loc_img = -1
@@ -749,7 +868,13 @@ struct GL2D(Movable):
         self.tile_tex = List[Int]()
         self.unpack_buf = 0
         self.counting = getenv("MOJOUI_GL_COUNT") == "1"
+        self.kinds_on = getenv("MOJOUI_GPU_KINDS") == "1"
+        self.kq = List[Int]()
+        self.kk = List[Int]()
+        self.kn = 0
+        self.kqc = 0
         self.state_cache = getenv("MOJOUI_GL_CACHE") != "0"
+        self.box_verts = BOX_VERTS
         self.base_instance = 0
         self.run_vao = -1
         self.run_buf = -1
@@ -778,6 +903,54 @@ struct GL2D(Movable):
         (other extension calls)."""
         if self.counting:
             Pointer[Int, MutUntrackedOrigin](unsafe_from_address=Int(self.counts.unsafe_ptr()) + 8 * (F_COUNT + slot))[] += n
+
+    def kind_mark(mut self) -> Int:
+        """(D-7971) A GPU timestamp now; its query's index (-1 when off)."""
+        if not self.kinds_on or len(self.timer) != 4:
+            return -1
+        if self.kqc == 0:
+            self.kqc = gl_proc("glQueryCounter")
+        if self.kn >= len(self.kq):
+            self.out[0] = 0
+            fcall[NoneType](self.timer[0], c_int(1), self.at(0))
+            self.kq.append(Int(self.out[0] & 0xFFFFFFFF))
+            self.kk.append(-1)
+        var q = self.kn
+        self.kn += 1
+        fcall[NoneType](self.kqc, c_uint(self.kq[q]), c_uint(0x8E28))
+        return q
+
+    def kind_end(mut self, q0: Int, kind: Int):
+        """The span from mark q0 to now counts for `kind` (KIND_*)."""
+        if q0 < 0:
+            return
+        var q1 = self.kind_mark()
+        self.kk[q0] = kind
+        self.kk[q1] = -2  # (an end mark)
+
+    def kinds_line(mut self) -> String:
+        """This frame's GPU time per kind (waits for the GPU), then the marks are reset."""
+        var sums = List[Int](length=6, fill=0)
+        var counts = List[Int](length=6, fill=0)
+        var q = 0
+        while q + 1 < self.kn:
+            if self.kk[q] >= 0:
+                self.out[0] = 0
+                fcall[NoneType](self.timer[3], c_uint(self.kq[q]), c_uint(0x8866), self.at(0))
+                var a = self.out[0]
+                self.out[0] = 0
+                fcall[NoneType](self.timer[3], c_uint(self.kq[q + 1]), c_uint(0x8866), self.at(0))
+                sums[self.kk[q]] += self.out[0] - a
+                counts[self.kk[q]] += 1
+                q += 2
+            else:
+                q += 1
+        self.kn = 0
+        var names = ["quad", "glyph", "poly", "image", "clear", "tiles"]
+        var line = String("GPUKINDS:")
+        for k in range(6):
+            line += " " + names[k] + "=" + String(Float64(sums[k]) / 1e6) + "ms/" + String(counts[k])
+        return line
 
     def counts_reset(mut self):
         for q in range(len(self.counts)):
@@ -893,7 +1066,9 @@ struct GL2D(Movable):
         self.samples = max(min(want, most), 1)
         _ = self.error()
         var head = String(HEAD_ES) if es else String(HEAD_CORE)
-        var srcs: List[String] = [String(QUAD_VS), String(QUAD_FS), String(GLYPH_VS), String(GLYPH_FS), String(IMAGE_VS), String(IMAGE_FS),
+        var one_tri = getenv("MOJOUI_GL_ONE_TRI") == "1"
+        self.box_verts = 3 if one_tri else BOX_VERTS
+        var srcs: List[String] = [String(QUAD_VS_ONE_TRI) if one_tri else String(QUAD_VS), String(QUAD_FS), String(GLYPH_VS_ONE_TRI) if one_tri else String(GLYPH_VS), String(GLYPH_FS), String(IMAGE_VS), String(IMAGE_FS),
                                   String(FAN_VS), String(FAN_FS), String(COVER_VS), String(COVER_FS)]
         for p in range(PROGRAMS):
             var prog = self.compile(head + srcs[2 * p], head + srcs[2 * p + 1])
@@ -902,6 +1077,7 @@ struct GL2D(Movable):
             self.prog[p] = prog
             self.loc_vp[p] = self.uniform(prog, "vp")
             self.loc_xf[p] = self.uniform(prog, "xf")
+            self.loc_lim[p] = self.uniform(prog, "lim")
         self.loc_replace = self.uniform(self.prog[P_QUAD], "replace")
         self.loc_atlas = self.uniform(self.prog[P_GLYPH], "atlas")
         self.loc_img = self.uniform(self.prog[P_IMAGE], "img")
@@ -1212,13 +1388,13 @@ struct GL2D(Movable):
                 fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(bufid))
                 self.point(b, 0)
                 self.vao_buf[b] = bufid
-            fcall[NoneType](self.base_instance, c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(count), c_uint(first))
+            fcall[NoneType](self.base_instance, c_uint(GL_TRIANGLES), c_int(0), c_int(self.box_verts), c_int(count), c_uint(first))
             self.count_extra(C_BASE, 1)
         else:
             fcall[NoneType](self.f(F_BIND_BUFFER), c_uint(GL_ARRAY_BUFFER), c_uint(bufid))
             self.point(b, first)
             self.vao_buf[b] = -1
-            fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(count))
+            fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(self.box_verts), c_int(count))
         self.draws += 1
 
     def vao_point(mut self, b: Int, bufid: Int) -> Bool:
@@ -1244,6 +1420,23 @@ struct GL2D(Movable):
         self.xf_set[3 * p + 1] = ty
         self.xf_set[3 * p + 2] = tk
         fcall[NoneType](self.f(F_UNIFORM_3F), c_int(self.loc_xf[p]), tx, ty, tk)
+
+    def set_lim(mut self, p: Int):
+        """(D-7972) Program p's (current) scissor rect: a partial raster's part, else the whole target: boxes are cut to
+        it before the triangle that holds them is built."""
+        if self.loc_lim[p] < 0:
+            return
+        var x0 = Float32(self.lim[0]) if len(self.lim) == 4 else Float32(0)
+        var y0 = Float32(self.lim[1]) if len(self.lim) == 4 else Float32(0)
+        var x1 = Float32(self.lim[2]) if len(self.lim) == 4 else Float32(self.cw)
+        var y1 = Float32(self.lim[3]) if len(self.lim) == 4 else Float32(self.ch)
+        if self.lim_set[4 * p] == x0 and self.lim_set[4 * p + 1] == y0 and self.lim_set[4 * p + 2] == x1 and self.lim_set[4 * p + 3] == y1:
+            return
+        self.lim_set[4 * p] = x0
+        self.lim_set[4 * p + 1] = y0
+        self.lim_set[4 * p + 2] = x1
+        self.lim_set[4 * p + 3] = y1
+        fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.loc_lim[p]), x0, y0, x1, y1)
 
     def set_sizes(mut self, w: Int, h: Int):
         """Every program's `vp` (the target's size), when it changed."""
@@ -1377,9 +1570,12 @@ struct GL2D(Movable):
                 if run.blend != self.cur_blend:
                     self.cur_blend = run.blend
                     fcall[NoneType](self.f(F_ENABLE if run.blend == BLEND_OVER else F_DISABLE), c_uint(GL_BLEND))
+                var km = self.kind_mark()
+                var kind_of = KIND_QUAD if run.pipe == PIPE_QUAD else (KIND_GLYPH if run.pipe == PIPE_GLYPH else (KIND_IMAGE if run.pipe == PIPE_IMAGE else KIND_POLY))
                 if run.pipe == PIPE_QUAD:
                     self.use(P_QUAD, w, h, cur)
                     self.set_xf(P_QUAD, tx, ty, tk)
+                    self.set_lim(P_QUAD)
                     var rep = 1 if run.blend == BLEND_REPLACE else 0
                     if not self.state_cache or rep != self.run_replace:
                         fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.loc_replace), c_int(rep))
@@ -1388,6 +1584,7 @@ struct GL2D(Movable):
                 elif run.pipe == PIPE_GLYPH:
                     self.use(P_GLYPH, w, h, cur)
                     self.set_xf(P_GLYPH, tx, ty, tk)
+                    self.set_lim(P_GLYPH)
                     if not self.state_cache or self.run_tex != self.atlas_tex:
                         fcall[NoneType](self.f(F_ACTIVE_TEXTURE), c_uint(GL_TEXTURE0))
                         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
@@ -1412,6 +1609,7 @@ struct GL2D(Movable):
                 else:
                     self.polys(set, ri, tx, ty, tk, w, h, cur)
                     self._run_forget()
+                self.kind_end(km, kind_of)
         self.cur_prog = cur
         self._run_forget()
 
@@ -1499,9 +1697,11 @@ struct GL2D(Movable):
             self.lim = [rx0, ry0, rx1, ry1]
             fcall[NoneType](self.f(F_ENABLE), c_uint(GL_SCISSOR_TEST))
             fcall[NoneType](self.f(F_SCISSOR), c_int(rx0), c_int(ry0), c_int(rx1 - rx0), c_int(ry1 - ry0))
+        var kc = self.kind_mark()
         fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
         fcall[NoneType](self.f(F_CLEAR_STENCIL), c_int(0))
         fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
+        self.kind_end(kc, KIND_CLEAR)
         fcall[NoneType](self.f(F_BLEND_FUNC_SEPARATE), c_uint(GL_SRC_ALPHA), c_uint(GL_ONE_MINUS_SRC_ALPHA), c_uint(GL_ONE), c_uint(GL_ONE_MINUS_SRC_ALPHA))
         self.cur_prog = -1
         self.cur_blend = -1
@@ -2658,7 +2858,9 @@ struct GPU2D(Movable):
             self._stamp(0)
         for i in range(n):
             if tiled[i]:
+                var kt = self.gl.kind_mark()
                 self.gl.draw_tiles(tile_draws[i])
+                self.gl.kind_end(kt, KIND_TILES)
             else:
                 self.gl.layer(self.frames[i], self.sets[i], dirty[i], grew[i])
             if self.layer_times:
@@ -2672,6 +2874,8 @@ struct GPU2D(Movable):
             self._stamp(PASS_END)
             self._stamps(scene, n)
         _ = self.gl.fence(slot)
+        if self.gl.kinds_on:
+            print(self.gl.kinds_line() + " · tiles rastered " + String(self.tiles.rastered), flush=True)
         if self.gl.counting:
             print("GLCOUNT: " + self.gl.counts_line() + " · tiles rastered " + String(self.tiles.rastered) + " layers rebuilt " + String(self.rebuilt)
                   + " cpu " + String(Float64(Int(perf_counter_ns() - t0)) / 1e6) + " ms", flush=True)

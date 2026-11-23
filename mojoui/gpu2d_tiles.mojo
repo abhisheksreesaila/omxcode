@@ -406,6 +406,11 @@ struct Tiles(Movable):
         self.drawn = 0
         self.damaged = 0
         self.budget_ops = TILE_BUDGET_OPS
+        try:
+            if getenv("MOJOUI_TILE_BUDGET") != "":  # (an A/B of the per-frame raster budget)
+                self.budget_ops = Int(getenv("MOJOUI_TILE_BUDGET"))
+        except:
+            pass
         self.settle_ns = TILE_SETTLE_NS
         self.planned_ops = 0
         self.trace = getenv("MOJOUI_TILE_TRACE") == "1"

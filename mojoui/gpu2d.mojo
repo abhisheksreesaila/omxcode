@@ -21,7 +21,8 @@
 #   0–3  a, b, c, d     SHAPE_BOX: x, y, w, h.   SHAPE_CAPSULE: x0, y0, x1, y1 (the segment's ends)
 #   4    radius         BOX: corner radius (clamped to min(w, h)/2 in the shader).   CAPSULE: half the width
 #   5    shape          SHAPE_BOX (0) or SHAPE_CAPSULE (1)
-#   6–7  (0, 0)         reserved
+#   6    hole           (D-7973) BOX: > 0, pixels inside the box shrunk by it may be skipped (an opaque cover comes)
+#   7    (0)            reserved
 #   8–11 r, g, b, a
 #   12–15 clip x0, y0, x1, y1 (±NO_CLIP: none)
 #   Coverage (pixels, after the transform): BOX = min(distance to the nearest edge + 0.5, in a corner r − distance to
@@ -402,14 +403,14 @@ def _clip4(mut out: List[Float32], c0: Float64, c1: Float64, c2: Float64, c3: Fl
 
 
 def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64, radius: Float64, shape: Int, color: UInt32,
-          c0: Float64, c1: Float64, c2: Float64, c3: Float64):
+          c0: Float64, c1: Float64, c2: Float64, c3: Float64, hole: Float64 = 0):
     out.append(Float32(a))
     out.append(Float32(b))
     out.append(Float32(c))
     out.append(Float32(d))
     out.append(Float32(radius))
     out.append(Float32(shape))
-    out.append(0)
+    out.append(Float32(hole))  # (D-7973: the middle a box may leave out, its units)
     out.append(0)
     _color(out, color)
     _clip4(out, c0, c1, c2, c3)
@@ -803,7 +804,19 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 before = len(f.quads) // QUAD_FLOATS
                 added = 1
                 if kind == OP_RECT:
-                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, c3)
+                    var hole = Float64(scene.nums[op * 6 + 5])
+                    if hole <= 0:
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, c3)
+                    else:  # (D-7973) the box minus its middle as up to four clipped bands: no pixel of the middle is made
+                        var hx0 = a + hole
+                        var hy0 = b + hole
+                        var hx1 = a + c - hole
+                        var hy1 = b + d - hole
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), c2, c3)
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
+                        added = 4
                 elif kind == OP_CIRCLE:
                     _quad(f.quads, a, b, a, b, c, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                 elif kind == OP_LINE:

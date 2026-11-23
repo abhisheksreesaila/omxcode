@@ -17,7 +17,7 @@ from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
 from mojoui.fonttext import TextStyle, shape, draw_run, Clip, run_x
 
-comptime OP_RECT = 1  # x, y, w, h, radius
+comptime OP_RECT = 1  # x, y, w, h, radius, hole (D-7973: > 0 the middle, inside the box shrunk by it, may be left out)
 comptime OP_CIRCLE = 2  # x, y, radius
 comptime OP_LINE = 3  # x0, y0, x1, y1, width
 comptime OP_TEXT = 4  # x, baseline, size, slant, weight, align (+ the text)
@@ -168,6 +168,11 @@ trait Painter:
         ...
 
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
+        ...
+
+    def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
+        """(D-7973) A rounded rect a caller will cover, inside the box shrunk by `hole`, with something opaque: a
+        painter may leave that middle out (the same picture, less fill). The CPU painter draws it whole."""
         ...
 
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
@@ -330,6 +335,9 @@ struct SurfacePainter(Painter, Movable):
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
         var k = self.tk
         rect(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, color, radius * k)
+
+    def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
+        self.rect(x, y, w, h, color, radius)
 
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
         var k = self.tk
@@ -685,6 +693,12 @@ struct Scene(Painter, Movable, Copyable):
         if w <= 0 or h <= 0:
             return
         self._op(OP_RECT, x, y, w, h, radius, 0, color, -1)
+
+    def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
+        if w <= 0 or h <= 0:
+            return
+        var hl = hole if hole > 0 and w - 2 * hole > 1 and h - 2 * hole > 1 else 0.0  # (no middle worth leaving out: 0)
+        self._op(OP_RECT, x, y, w, h, radius, hl, color, -1)
 
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
         self._op(OP_LINE, x0, y0, x1, y1, width, 0, color, -1)

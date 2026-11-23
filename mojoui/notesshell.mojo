@@ -145,13 +145,22 @@ def _esc(s: String) -> String:
 
 # ------------------------------------------------ surfaces
 
-def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, shadows: List[Shadow]):
+def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, shadows: List[Shadow],
+                             hole_margin: Float64 = -1):
     """CSS box-shadows under a rounded rect: a spread ring as one rect, a blurred one as layered rects whose summed alpha
-    follows the Gaussian's falloff (σ = blur / 2), so the same picture reaches the CPU painter and the GPU."""
+    follows the Gaussian's falloff (σ = blur / 2), so the same picture reaches the CPU painter and the GPU.
+    hole_margin ≥ 0 (D-7973): the caller covers the box, inset by hole_margin, with something opaque right after: each
+    layer leaves out its middle that lies inside that (Painter.rect_hole): the same picture with a fraction of the fill."""
     for s in shadows:
         var a = Float64(Int((s.color >> 24) & 0xFF)) / 255.0
+        var off = max(abs(s.dx), abs(s.dy))
         if s.blur <= 0:
-            p.rect(x - s.spread + s.dx, y - s.spread + s.dy, w + 2 * s.spread, h + 2 * s.spread, s.color, radius + s.spread)
+            var rx = x - s.spread + s.dx
+            var ry = y - s.spread + s.dy
+            if hole_margin >= 0:
+                p.rect_hole(rx, ry, w + 2 * s.spread, h + 2 * s.spread, s.color, radius + s.spread, s.spread + hole_margin + off)
+            else:
+                p.rect(rx, ry, w + 2 * s.spread, h + 2 * s.spread, s.color, radius + s.spread)
             continue
         var sigma = s.blur / 2
         comptime N = 10
@@ -165,7 +174,10 @@ def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Fl
             if la <= 0.002:
                 continue
             var e = d + s.spread
-            p.rect(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e))
+            if hole_margin >= 0:
+                p.rect_hole(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e), e + hole_margin + off)
+            else:
+                p.rect(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e))
 
 
 def _erfc(x: Float64) -> Float64:

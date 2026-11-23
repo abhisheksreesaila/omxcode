@@ -286,6 +286,7 @@ struct BoardLook(Movable):
     var cull: List[Float64]
     var last_token: String
     var keep_ops: Bool  # MOJOUI_KEEP_OPS=0: walk every paint (an A/B)
+    var shadow_holes: Bool  # (D-7973) MOJOUI_SHADOW_HOLE=0: shadows drawn whole (the comparison)
     var hold_skip: Bool  # MOJOUI_HOLD_SKIP=0 / MOJOUI_FILL_KEEP=0: A/B switches for D-7969
     var fill_keep: Bool
     var kept_ver: Int
@@ -327,6 +328,7 @@ struct BoardLook(Movable):
         self.replays = 0
         self.held_paints = 0
         self.hold_skip = getenv("MOJOUI_HOLD_SKIP") != "0"
+        self.shadow_holes = getenv("MOJOUI_SHADOW_HOLE") != "0"
         self.fill_keep = getenv("MOJOUI_FILL_KEEP") != "0"
         self.kept_ver = -1
         self.keep_ops = getenv("MOJOUI_KEEP_OPS") != "0"
@@ -583,7 +585,9 @@ struct BoardLook(Movable):
             p.note("object text " + String(o.id))
         elif kind == STICKY:
             ref o = layer.objs[i]
-            draw_shadows(p, o.x, o.y, o.w, o.h, 6, [Shadow(0, 9, 16, 0, rgba(0, 0, 0, 66))])
+            # (D-7973) an opaque sticky hides its shadow's middle: inset 10 page px stays inside its 24 px corner
+            var hm = 10.0 if self.shadow_holes and ((o.color >> 24) & 0xFF) == 0xFF else -1.0
+            draw_shadows(p, o.x, o.y, o.w, o.h, 6, [Shadow(0, 9, 16, 0, rgba(0, 0, 0, 66))], hm)
             p.polygon(corner_rect(o.x, o.y, o.w, o.h, 4, 4, 24, 4), o.color)
             self._words(p, o, o.x + STICKY_PAD, o.y + STICKY_PAD, o.w - 2 * STICKY_PAD, o.ink)
             p.note("object sticky " + String(o.id))
