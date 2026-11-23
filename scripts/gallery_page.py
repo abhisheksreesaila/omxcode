@@ -42,7 +42,7 @@ CONSOLE = dict(
          ("Mac", download_url("omxconsole", "Mac"), "Apple Silicon · macOS 15 or later")])
 # the third flagship (owner, 2026-11-22: "this has to go into the omxcode gallery… just like omxplorer and omxconsole, this needs
 # its own cover page"): omx, the kitchen-counter assistant on the Stage (goals 72 and 77). No download yet: it needs Qwen3.8-27B
-# on a 24 GB GPU, so the card says so and links its page, which has the build steps.
+# and NVIDIA GPUs, so the card says so and links its page, which has the build steps.
 OMX = dict(
     name="omx", app="omx", kind="The third flagship · a home assistant that shows you",
     line="Ask out loud and it shows you: live tiles on a three-column Stage, a chat bar that grows into a visual explanation and points at what it means, cards the model builds from omxcode's components over AG-UI. A local model, in the app's own process.",
@@ -52,7 +52,7 @@ OMX = dict(
            ("../img/omx/charm-rain.jpg", "Rain before pickup: the weather tile takes the stage"),
            ("../img/omx/mac-thanksgiving.jpg", "The Stage on a Mac, at night")],
     src="examples/omx", page="../omx.html", cta="See omx",
-    needs="Build from source for now: omx needs a 24 GB NVIDIA GPU on Linux; the Stage alone also runs on the Mac.",
+    needs="Build from source for now: omx runs on Linux with NVIDIA GPUs (measured on two RTX 3090s); the Stage alone also runs on the Mac.",
     get=[])
 STARS = [STAR, CONSOLE, OMX]
 

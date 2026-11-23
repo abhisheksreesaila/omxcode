@@ -109,7 +109,7 @@
     <p class="lede rise"><span data-words data-step="45" data-d0="380">Ask it out loud.</span> <span class="two" data-words data-step="35" data-d0="560">It shows you.</span></p>
     <p class="lede rise">A voice assistant for the kitchen counter. Your day sits on a Stage of live tiles. Ask a question and the chat bar grows into a full, visual explanation, points at the part it means, then folds back to your tiles. The model runs on this machine, inside the app.</p>
     <div class="ctas rise"><a class="cta" href="#run">Build it from source</a><a class="more" href="#story">Read the story</a></div>
-    <p class="needs rise">Linux with an NVIDIA GPU with 24 GB of memory · the Stage itself also runs on the Mac · MIT licence</p>
+    <p class="needs rise">Linux with NVIDIA GPUs (we use two RTX 3090s) · the Stage itself also runs on the Mac · MIT licence</p>
   </div>
   <div class="film rv"><img src="img/omx/stage-tv-heatpump.jpg" alt="The Stage with the TV open: a heat pump explained as an isometric diagram on the left, the conversation on the right, today's tiles and live timers in the side columns"></div>
   <p class="srcline rv">the Stage on Linux: “How does a heat pump work?” opened the TV over the centre · the Stage demo, sample data</p>
@@ -122,7 +122,7 @@
       <p class="rv">It began as a voice loop on a kitchen counter: talk, and a local model talks back in under a second. It worked. It was also just a voice in a box, and <b>a voice can't show you anything.</b></p>
       <p class="rv">Then the question changed. What should a screen on the counter look like when the thing behind it is a model that can draw any card it wants? A dashboard is passive. A chat is a conversation. Some days you want it to <b>show you something</b>, and some days you just want to <b>check</b> that it did the right thing. Most assistants pick one of these. A kitchen needs all four, on one screen, without asking you to switch modes.</p>
       <p class="turn rv">So we designed it fourteen times before writing a line of it.</p>
-      <p class="rv">Each version was a working prototype we lived with and threw away: glass, then solid; a mind map; an orbit; a photo frame; themes for every mood; a grid of squares. Every one taught us one thing. Version fourteen, the <b>Stage</b>, is the one we built: three columns, live tiles that keep their place, and a chat bar that turns into a TV when there is something to see.</p>
+      <p class="rv">Each version was a working prototype we lived with and threw away: glass, then solid; a mind map; an orbit; a photo frame; themes for every mood; a grid of squares. Every one taught us one thing. Version fourteen, the <b>Stage</b> with its TV, is the one we built: three columns, live tiles that keep their place, and a chat bar that turns into a TV when there is something to see.</p>
       <p class="rv">Then every piece of it went into omxcode first, as a component any app can use: the Stage, the live tiles, the TV, the charms, the pointer. omx only puts them together.</p>
     </div>
   </div>
@@ -132,22 +132,20 @@
   <div class="wrap">
     <div class="eyebrow rv">How we got here</div>
     <h2 class="rv">Fourteen versions. <span class="two">One Stage.</span></h2>
-    <p class="lede rv">Each line is a real prototype and the one lesson it left behind.</p>
+    <p class="lede rv">Fourteen prototype versions, grouped here by what each one taught us.</p>
     <ol class="rail">
-      <li class="rv"><div class="v">01</div><div><b>Glass on the wallpaper</b><span>A translucent sidebar over a photo, soft cards. Lovely to look at. Then the rule: no glass, no shimmer. The look should be solid; only the <i>motion</i> is liquid.</span></div></li>
-      <li class="rv"><div class="v">02</div><div><b>Three ideas, three problems</b><span>A stage, a sidebar and a board. Each solved one mode and broke the others.</span></div></li>
-      <li class="rv"><div class="v">03</div><div><b>One surface</b><span>Glance, Jam, Show me, Check: what you say picks the mode, and silence folds it back onto the board. <span class="q">“Much better design.”</span></span></div></li>
-      <li class="rv"><div class="v">04</div><div><b>Voice first</b><span>The always-on chat pill hid the cards. Voice became a small orb in the corner; words appear only while she talks.</span></div></li>
-      <li class="rv"><div class="v">05</div><div><b>Frame, River, Orbit, Companion</b><span>Four different structures, not four colours: a photo frame, a timeline of the day, cards orbiting in depth, cards held up to you.</span></div></li>
-      <li class="rv"><div class="v">06</div><div><b>Live tiles and a mind map</b><span>Tiles that grow when something matters won the home screen. The mind map became Plans, opened from the to-do tile.</span></div></li>
-      <li class="rv"><div class="v">07</div><div><b>Solid tiles, real springs</b><span>A spring sampled into the motion curve; the tile resizes but its words never stretch. And the pointing ring, which stayed in every version after.</span></div></li>
-      <li class="rv"><div class="v">08</div><div><b>Drag, resize, urgency</b><span>Move tiles with a finger or a mouse, snap them through four sizes, and let urgency grow a tile: near the airport, the flight goes big.</span></div></li>
-      <li class="rv"><div class="v">09</div><div><b>Themes and profiles</b><span>A theme per person, a voice per person, a kid-safe model for the child.</span></div></li>
-      <li class="rv"><div class="v">10</div><div><b>Flat, and every touch answers</b><span>Depth dropped: <span class="q">“tvOS is for a remote; this is touch.”</span> Every press sinks in and springs back, then does something.</span></div></li>
-      <li class="rv"><div class="v">11</div><div><b>No theme picker</b><span>omx picks the moment instead: a school day, a game night, Thanksgiving. Never a makeover, just one small charm on the card it's about.</span></div></li>
-      <li class="rv"><div class="v">12</div><div><b>The free grid felt off</b><span>Tiles placed anywhere looked uneven. It needed structure.</span></div></li>
-      <li class="rv"><div class="v">13</div><div><b>The Stage</b><span>Three columns: what's quiet on the left, the stage in the middle on an exact grid, what's live on the right. Profiles and settings on top.</span></div></li>
-      <li class="rv"><div class="v">14</div><div><b>The TV</b><span>When it explains, the chat bar grows over the whole stage like a TV: the visual on the left, the conversation on the right. Quiet, and it shrinks back to the bar. Approved.</span></div></li>
+      <li class="rv"><div class="v">before</div><div><b>Glass on the wallpaper</b><span>The first counter app: a translucent sidebar over a photo, soft cards. Lovely to look at. Then the rule: no glass, no shimmer. The look should be solid; only the <i>motion</i> is liquid.</span></div></li>
+      <li class="rv"><div class="v">A–C</div><div><b>Three ideas, three problems</b><span>A stage, a sidebar and a board. Each solved one mode and broke the others.</span></div></li>
+      <li class="rv"><div class="v">D</div><div><b>One surface</b><span>Glance, Jam, Show me, Check: what you say picks the mode, and silence folds it back onto the board. <span class="q">“Much better design.”</span> Then voice first: the always-on chat pill hid the cards, so voice became a small orb in the corner.</span></div></li>
+      <li class="rv"><div class="v">E–H</div><div><b>Frame, River, Orbit, Companion</b><span>Four different structures, not four colours: a photo frame, a timeline of the day, cards orbiting in depth, cards held up to you.</span></div></li>
+      <li class="rv"><div class="v">I · J</div><div><b>Live tiles and a mind map</b><span>Tiles that grow when something matters won the home screen. The mind map became Plans, opened from the to-do tile.</span></div></li>
+      <li class="rv"><div class="v">v8</div><div><b>Solid tiles, real springs</b><span>A spring sampled into the motion curve; the tile resizes but its words never stretch. And the pointing ring, which stayed in every version after.</span></div></li>
+      <li class="rv"><div class="v">v9</div><div><b>Drag, resize, urgency</b><span>Move tiles with a finger or a mouse, snap them through four sizes, and let urgency grow a tile: near the airport, the flight goes big.</span></div></li>
+      <li class="rv"><div class="v">v10</div><div><b>Themes and profiles</b><span>A theme per person, a voice per person, a kid-safe model for the child.</span></div></li>
+      <li class="rv"><div class="v">v11</div><div><b>Flat, and every touch answers</b><span>Depth dropped: <span class="q">“tvOS is for a remote; this is touch.”</span> Every press sinks in and springs back, then does something.</span></div></li>
+      <li class="rv"><div class="v">v12</div><div><b>No theme picker</b><span>omx picks the moment instead: a school day, a game night, Thanksgiving. Never a makeover, just one small charm on the card it's about.</span></div></li>
+      <li class="rv"><div class="v">v13</div><div><b>The Stage</b><span>Tiles placed anywhere looked uneven, so: three columns. What's quiet on the left, the stage in the middle on an exact grid, what's live on the right. Profiles and settings on top.</span></div></li>
+      <li class="rv"><div class="v">v14</div><div><b>The TV</b><span>When it explains, the chat bar grows over the whole stage like a TV: the visual on the left, the conversation on the right. Quiet, and it shrinks back to the bar. The one we built.</span></div></li>
       <li class="rv built"><div class="v">built</div><div><b>Into omxcode, piece by piece</b><span>Six milestones, each one a framework component with its own test: the Stage shell, live tiles, tiles the agent can move, the TV, sides with pins and charms, then omx on top.</span></div></li>
     </ol>
   </div>
@@ -165,7 +163,7 @@
       <div><div class="k">left · quiet</div><h3>Today and Pinned</h3><p>The clock, things that don't need you yet (the weather, a birthday, the front door), and what you pinned to keep at your side.</p></div>
       <div class="mid"><div class="k">centre · the stage</div><h3>Live tiles</h3><p>Up to six tiles on an exact grid. The urgent one takes the big spot: “Leave by 8:05, the bridge is slow.” When it's no longer urgent, it moves back to the side.</p></div>
       <div><div class="k">right · live</div><h3>Ticking things</h3><p>Rows that keep counting: the pasta timer, traffic, a flight. Small, always current, never in the way.</p></div>
-      <div class="mid bar"><div class="k">bottom</div><h3>The chat bar</h3><p>Say “omx” or tap the mic. It shows her words while she talks, and becomes the TV when there's something to see.</p></div>
+      <div class="mid bar"><div class="k">bottom</div><h3>The chat bar</h3><p>Just talk: it's listening, and shows her words while she talks. Or tap the keyboard and type. It becomes the TV when there's something to see.</p></div>
     </div>
     <div class="shot rv" style="margin-top:28px"><img src="img/omx/stage-day.jpg" alt="The Stage: Today and Pinned on the left; the traffic tile big in the centre (Leave by 8:05), to-do, counter camera, calendar and memories beside it; the pasta timer and the flight live on the right"></div>
     <p class="srcline rv">the Stage on Linux: the school run is urgent, so traffic takes the big tile · the Stage demo, sample data</p>
@@ -264,8 +262,8 @@
   <div class="wrap">
     <div class="eyebrow rv">Local</div>
     <h2 class="rv">Your kitchen. <span class="two">Your GPU. Your model.</span></h2>
-    <p class="lede rv">Every omx answer on this page came from Qwen3.8-27B running on one RTX 3090 in the room, inside omx's own process: no server to call, no browser in between. Hearing (Parakeet), speaking (Kokoro) and knowing when you've stopped talking (Silero) run here too. It goes to a cloud model only if you ask for Claude by name, and then the whole screen gets an orange frame so you always know.</p>
-    <p class="body rv">One process holds everything. The model and its memory of the conversation stay warm on the GPU between turns; the cards are checked and laid out on the CPU right beside it. That's why a card appears as the words are still arriving.</p>
+    <p class="lede rv">Every omx answer on this page came from Qwen3.8-27B on an RTX 3090 in the room, inside omx's own process: no server to call, no browser in between. Hearing (Parakeet), speaking (Kokoro) and knowing when you've stopped talking (Silero) run on a second card in the same machine. It goes to a cloud model only if you ask for Claude by name, and then the whole screen gets an orange frame so you always know.</p>
+    <p class="body rv">One process holds everything. The model and its memory of the conversation stay warm on the GPU between turns; the cards are checked and laid out on the CPU right beside it, and drawn as the model's words stream in, not after.</p>
     <div class="nums">
       <div class="rv"><b>0.8 s</b><span>from the end of your question to omx's first spoken word</span></div>
       <div class="rv"><b>70 ms</b><span>to draw a 40-component screen as it streams in over AG-UI; the first part shows in 12 ms</span></div>
@@ -288,7 +286,7 @@
     </div>
     <div class="split" style="margin-top:56px">
       <div>
-        <p class="body rv" style="margin-top:0">On the Mac, the Stage runs natively on an M4: the TV opens, swaps cards and closes, in light and dark. omx with its model and voice runs on Linux today.</p>
+        <p class="body rv" style="margin-top:0">On the Mac, the Stage runs natively on an M4: the TV opens, swaps cards and closes. omx with its model and voice runs on Linux today.</p>
         <p class="body rv">On a phone, the columns stack: today and pinned first, then the stage. The TV takes the whole screen.</p>
       </div>
       <div class="shot rv"><img src="img/omx/mac-heatpump.jpg" alt="The Stage on the Mac at night: the heat pump diagram in the TV, the conversation beside it"></div>
@@ -325,7 +323,7 @@
   <div class="wrap">
     <div class="eyebrow rv">Try it</div>
     <h2 class="rv">Build it <span class="two">on your machine.</span></h2>
-    <p class="lede rv">The Stage runs anywhere omxcode does, with sample data and canned answers. omx itself needs the models on a 24 GB NVIDIA GPU.</p>
+    <p class="lede rv">The Stage runs anywhere omxcode does, with sample data and canned answers. omx itself needs its models and NVIDIA GPUs: we run it on two RTX 3090s, the model on one and the voice on the other.</p>
     <div class="card install rv">
 <pre id="cmds">git clone https://github.com/abhisheksreesaila/omxcode
 cd omxcode &amp;&amp; pixi install
@@ -338,7 +336,7 @@ scripts/build.sh omx linux &amp;&amp; build/omx/linux/omx</pre>
     <p class="rv" style="font: 12px/1.6 var(--mono); color: var(--ink2); max-width: 720px; margin: 14px auto 0">omx looks for Qwen3.8-27B-UD-Q4_K_M.gguf and parakeet-tdt-0.6b-v3 in <code>OMX_MODELS</code>; the full list of settings is at the top of examples/omx/app.mojo</p>
     <div class="edges">
       <div><b>Honest edges.</b> It's an alpha, and there is no download yet: one comes once the app can carry its models.</div>
-      <div>omx with its model and voice runs on Linux with a 24 GB NVIDIA GPU. On the Mac, the Stage runs natively; the model hasn't run there yet.</div>
+      <div>omx with its model and voice runs on Linux, measured on two RTX 3090s; a single-card setup hasn't been measured. On the Mac, the Stage runs natively; the model hasn't run there yet.</div>
       <div>iPhone and iPad: the host is built but hasn't run on a device yet. Android: not started for omx.</div>
       <div>The tiles' calendar, weather, photos and door are sample data; real connectors come later.</div>
       <div>A rare crash showed up in long test runs: 3 in 16 before a fix, none in 32 since. Its root cause isn't found yet.</div>

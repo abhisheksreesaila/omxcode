@@ -1,5 +1,7 @@
 # Goal 77 report: omx shows and points (M7: the Stage)
 
+**Update 2026-11-22: done and merged (main 9c47cc75).** The ring measures were re-based on the ring's own rect (owner: "yes"); themes are built once per scheme (D-7889), after which 32 of 32 picture runs were clean (the crash's root cause is still open); the final M7F on the merged tree passed (G72 M3–M6, G77 M1–M6, four picture runs, 77-check M7F; build/g77/final-proof/, docs/journal.md 2026-11-22); the Stage then ran on the owner's M4 after two Apple-host fixes (D-7893, D-7894). The rest of this report is the 2026-11-19 state.
+
 **State (2026-11-19 evening):** M0–M6 passed earlier (commit 057460f4). M7a–M7e PASS. M7f FAIL on two points that need the owner (below). Not merged to main, not pushed (reviewer: NEEDS WORK).
 
 ## M7: the Stage, built from the owner-approved prototype (docs/goals/77/stage-prototype.html)
