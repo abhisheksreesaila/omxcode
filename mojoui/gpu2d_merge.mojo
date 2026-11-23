@@ -144,7 +144,6 @@ def _plan(f: Frame2D, layer: Layer2D) -> _Plan:
     var pad = Float32(PAD / layer.k) if layer.k > 0 else Float32(PAD)
     p.box_first.reserve(layer.runs + 1)
     p.hull.reserve(layer.runs)
-    p.boxes.reserve(2 * layer.runs)
     for r in range(layer.runs):
         var run = f.runs[layer.first_run + r]
         p.box_first.append(len(p.boxes))

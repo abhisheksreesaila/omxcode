@@ -187,6 +187,8 @@ def random_scene(seed: Int, font: Font, img: List[UInt32]) -> Scene:
             elif which == 4 or which == 5:
                 var al = [ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT][Int(rng.real(0, 3))]
                 var st = TextStyle(faces[Int(rng.real(0, 4))], 700 if rng.real(0, 1) < 0.3 else 400, rng.real(0, 1) < 0.25, rng.real(9, 36))
+                if rng.real(0, 1) < 0.4:
+                    st.letter_spacing = rng.real(-2.5, 2.5) * st.size  # (pulled so far together that it runs backwards, or wide apart)
                 sc.run(st, words[Int(rng.real(0, Float64(len(words))))] + " " + String(seed), x, y, col, al)
             elif which == 6 and not fixed:
                 sc.image(img, 40, 30, x, y, rng.real(5, 80), rng.real(5, 60))
@@ -288,6 +290,14 @@ def main() raises:
     scenes += 200
     print("  200 random scenes: IDENTICAL; instances culled", dropped, "of", total)
     print("IDENTICAL", scenes, "/", scenes)
+    # polygons with too few points, an odd coordinate or none: recorded as nothing, or as their whole points, never out of step
+    var odd = Scene(200, 120, 1.0)
+    odd.fill(rgba(255, 255, 255))
+    odd.polygon(List[Float64](), rgba(0, 0, 0))
+    odd.polygon([10.0, 10.0, 60.0, 10.0], rgba(0, 0, 0))
+    odd.polygon([10.0, 10.0, 60.0, 10.0, 60.0, 60.0, 99.0], rgba(200, 0, 0))
+    odd.polygon([100.0, 10.0, 160.0, 10.0, 130.0, 70.0], rgba(0, 0, 200))
+    _ = same("polygons with too few or odd points", odd, atlas, font)
     # (c) the oracle
     var full = build_batches(column(1000, False, font), atlas, font)
     var oracle = build_batches(column(1000, True, font), atlas, font)

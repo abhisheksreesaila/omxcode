@@ -1435,9 +1435,9 @@ struct GL2D(Movable):
         _ = len(data)
 
     def stream_raw(mut self, set: Int, b: Int, addr: Int, n: Int, append: Bool = False):
-        """n bytes at addr into buffer b of set `set`. Whole (append False): the store orphaned (a fresh one, half as big
-        again as needed, so later appends fit; no wait on draws still reading the old one), then filled. append: only
-        what's past what the buffer holds (a layer that grew), written after it; the whole when it doesn't fit."""
+        """n bytes at addr into buffer b of set `set`. Whole (append False): written in place into the store it has when it
+        fits (goal 80, D-8019), else a new store half as big again as needed, so later writes fit. append: only what's
+        past what the buffer holds (a layer that grew), written after it; the whole when it doesn't fit."""
         _ = self.buf(set, b)
         var i = BUFFERS * set + b
         var target = c_uint(0x8F3F if b == B_INDIRECT else GL_ARRAY_BUFFER)  # (GL_DRAW_INDIRECT_BUFFER)

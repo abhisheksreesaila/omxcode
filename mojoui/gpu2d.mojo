@@ -710,6 +710,8 @@ def _op_meets(scene: Scene, op: Int, kind: Int, rx0: Float64, ry0: Float64, rx1:
         if b + size + pad < ry0 or b - 2 * size - pad > ry1:
             return False
         var align = Int(scene.nums[base + 5]) if kind == OP_TEXT else scene.run_align(op)
+        if kind == OP_RUN and scene.nums[base + 5] < 0:
+            return True  # (letters pulled together may run back past their start: only the per-glyph test can say)
         if align == LEFT and a - size - lean - pad > rx1:
             return False
         if align == RIGHT and a + size + lean + pad < rx0:
@@ -951,6 +953,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 before = len(f.polys) // POLY_FLOATS
                 var first = Int(a)
                 var n = Int(b)
+                if n < 3:  # (Scene.polygon never records one: the block writes below need three points)
+                    continue
                 var p0 = first * 2
                 var pt0 = len(f.points) // 2
                 var fan0 = len(f.fan) // 2

@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+
+## Goal 80 (2026-11-23): the 2D renderer raced against nanoui
+Setup: Linux, Ryzen 5900X, RTX 3090; nanoui cfe6000 (Zig 0.17) on its own five scenes, both headless GL. What worked:
+culling before shaping, learned ASCII text, block-written batches, polygon bounds, Gaussian shadows, CPU executor on
+threads: frame CPU and the no-GPU fallback ahead on all five scenes, GPU level. What broke: two of our own changes slowed
+our apps' scenes and were caught by them (walking ink points; mapped buffers), the first baseline was unfair, the machine
+hard-stopped twice. Not done: M6 by the letter, the Mac (unreachable), a second review. Next small step: the owner's
+ruling on how the held-out scenes are compared, then the Mac. Report: docs/goals/80-report.md.
+
 ## Goal 79, continuation 15: the Mac's web side, its race, its fonts (2026-11-22, night)
 - **Setup.** Ruling B on the Mac: node, Playwright and PN's backend in ~/omxcode-g79-web (every path and a removal line in docs/goals/79/mac-setup.md). The Mac reference now comes from the Mac's own Chrome (made-by.json).
 - **Worked.**

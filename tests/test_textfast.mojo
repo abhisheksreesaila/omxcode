@@ -50,6 +50,7 @@ def same(a: Run, b: Run, what: String) raises:
         ref y = b.glyphs[i]
         assert_true(x.gid == y.gid and x.face == y.face and x.inst == y.inst and x.cluster == y.cluster, what + ": glyph " + String(i))
         assert_true(abs(x.x - y.x) <= TOL and abs(x.y - y.y) <= TOL, what + ": position of glyph " + String(i) + " " + String(x.x) + " vs " + String(y.x))
+    assert_true(a.ascent == b.ascent and a.descent == b.descent and a.size == b.size and a.missing == b.missing, what + ": ascent, descent, size or missing")
     assert_true(abs(a.width - b.width) <= TOL, what + ": width " + String(a.width) + " vs " + String(b.width))
 
 

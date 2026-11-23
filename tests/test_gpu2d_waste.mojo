@@ -3,8 +3,8 @@
 #   (a) a scene (rects, text runs in several faces, an image, polygons) drawn twice: the second frame uploads no texture
 #       and allocates nothing (no buffer store, no target);
 #   (b) the same scene with one glyph never drawn before: only that glyph's rows of the atlas go up;
-#   (c) instance data goes up once per frame: each buffer written once, by a mapped (INVALIDATE_BUFFER) write into the
-#       store it has, no glBufferData;
+#   (c) instance data goes up once per frame: each buffer written exactly once, in place into the store it has (D-8019),
+#       no glBufferData;
 #   (d) the picture is still the CPU executor's (within goal 75's bounds), after the buffers were reused.
 #   pixi run mojo run -I . tests/test_gpu2d_waste.mojo
 from std.testing import assert_true, assert_equal
@@ -98,7 +98,18 @@ def main() raises:
     assert_equal(c2.buffer_data - c1.buffer_data, 0, "glBufferData on the second frame")
     var written = c2.maps - c1.maps + c2.sub - c1.sub
     var lists = (1 if len(f2.quads) > 0 else 0) + (1 if len(f2.glyphs) > 0 else 0)
-    assert_true(written >= lists and written <= lists + 4, "instance buffers written " + String(written) + " times for " + String(lists) + " instance lists (+ polygon data)")
+    assert_equal(written, lists + 2, "buffer writes on the second frame: one per instance list, and the polygons' fan and covers")
+    # an image whose pixels changed is sent again, once; unchanged again, it isn't
+    var other = img.copy()
+    other[7] = other[7] ^ 0x00FF00FF
+    _ = draw(gl, scene("", other), atlas, font, tex)
+    var ci = Counts(gl)
+    assert_equal(ci.tex - c2.tex, 1, "a changed image goes up once")
+    _ = draw(gl, scene("", other), atlas, font, tex)
+    assert_equal(Counts(gl).tex - ci.tex, 0, "the same image again isn't sent")
+    _ = draw(gl, scene("", img), atlas, font, tex)
+    assert_equal(Counts(gl).tex - ci.tex, 1, "back to the first picture: sent again")
+    c2 = Counts(gl)
     # (b) one new glyph
     var pg = glyph_pages(atlas.width)
     var used0 = pg[].used
@@ -120,5 +131,20 @@ def main() raises:
     var d = diff(cpu_of(f4, atlas), got)
     print("  picture after reuse: mean", round(d.mean, 4), "levels,", round(d.far, 4), "% far")
     assert_true(d.mean <= 1.5 and d.far <= 0.5, "the GL picture after buffer reuse differs from the CPU executor")
+    # a second renderer on the same glyph pages gets every glyph, whatever the first one has synced
+    var gl2 = GL2D()
+    assert_true(gl2.start(False), gl2.why)
+    gl2.upload_atlas(atlas)
+    var tex2 = gl2.make_texture(640, 400)
+    assert_true(gl2.render(f4, tex2, 640, 400), gl2.why)
+    gl2.finish()
+    var got2 = List[UInt32](length=640 * 400, fill=0)
+    assert_true(gl2.read(tex2, 640, 400, Int(got2.unsafe_ptr())), "read back")
+    var differ = 0
+    for i in range(len(got)):
+        if got[i] != got2[i]:
+            differ += 1
+    assert_equal(differ, 0, "a second renderer's picture differs")
+    gl2.delete(17, tex2)
     gl.delete(17, tex)
     print("gpu2d waste: ok")

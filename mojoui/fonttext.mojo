@@ -1553,17 +1553,15 @@ def _learn_triple(mut e: FontEngine, si: Int, a: Int, b: Int, c: Int) -> Bool:
     return good
 
 
-def _fast_shape(mut e: FontEngine, si: Int, text: String, mut out: Run) -> Bool:
-    """The run of `text` from style si's learned characters and pairs into `out`; False (out undefined) when a byte isn't
-    printable ASCII or a character or pair isn't simple. Characters and pairs not seen yet are learned on the way."""
+def _fast_ready(mut e: FontEngine, si: Int, text: String) -> Bool:
+    """Whether `text` is all simple in style si: printable ASCII whose characters, pairs and triples are learned (those not
+    seen yet are learned here, which may shape)."""
     var bytes = text.as_bytes()
     var n = len(bytes)
-    if n == 0:
-        return False
-    if e.fast[si].contextual:
+    if n == 0 or e.fast[si].contextual:
         return False
     var bp = bytes.unsafe_ptr()
-    for i in range(n):  # (learning first: it may shape, which grows e's lists; the reading below holds raw pointers)
+    for i in range(n):
         var c = Int(bp[i]) - 0x20
         if c < 0 or c >= _FAST_N:
             return False
@@ -1575,7 +1573,14 @@ def _fast_shape(mut e: FontEngine, si: Int, text: String, mut out: Run) -> Bool:
                 return False
         if i > 1 and not _learn_triple(e, si, Int(bp[i - 2]) - 0x20, Int(bp[i - 1]) - 0x20, c):
             return False
-    ref fs = e.fast[si]
+    return True
+
+
+def _fast_fill(fs: FastStyle, text: String, mut out: Run):
+    """The run of `text`, every part of it learned (_fast_ready), into `out`."""
+    var bytes = text.as_bytes()
+    var n = len(bytes)
+    var bp = bytes.unsafe_ptr()
     var gid = fs.gid.unsafe_ptr()
     var face = fs.face.unsafe_ptr()
     var inst = fs.inst.unsafe_ptr()
@@ -1597,13 +1602,16 @@ def _fast_shape(mut e: FontEngine, si: Int, text: String, mut out: Run) -> Bool:
     out.ascent = fs.ascent
     out.descent = fs.descent
     out.size = fs.st.size
-    return True
 
 
 def fast_shape(st: TextStyle, text: String, mut out: Run) -> Bool:
     """(tests) The fast path alone: True and the run in `out` when it applies."""
     var e = engine()
-    return _fast_shape(e[], _style_index(e[], st), text, out)
+    var si = _style_index(e[], st)
+    if not _fast_ready(e[], si, text):
+        return False
+    _fast_fill(e[].fast[si], text, out)
+    return True
 
 
 def _run_key(si: Int, text: String) -> Int:
@@ -1623,7 +1631,8 @@ def run_in(e: Pointer[FontEngine, MutUntrackedOrigin], st: TextStyle, text: Stri
     """run_for with the engine already in hand: a loop over many runs looks it up once (engine() reads the process's
     registry, ~0.4 µs, mostly getpid; a frame of 300 labels paid it 300 times)."""
     var si = _style_index(e[], st)
-    if text.byte_length() <= FAST_BYTES and _fast_shape(e[], si, text, e[].fast_run):
+    if text.byte_length() <= FAST_BYTES and _fast_ready(e[], si, text):
+        _fast_fill(e[].fast[si], text, e[].fast_run)  # (two fields of the engine, not the engine and its own field)
         e[].fast_hits += 1
         return Pointer[Run, MutUntrackedOrigin](unsafe_from_address=Int(Pointer(to=e[].fast_run)))
     var key = _run_key(si, text)
