@@ -1,8 +1,11 @@
 # Goal 79, D-7987: a tiled layer's op index (OpBins) built incrementally: the ops an edit's patch replays from the kept
 # board keep their boxes from the index built for the version they were kept at; only the objects drawn again are
 # measured. After the same 40 random edits as test_keptpatch (moves, new texts and stickies, deletes, colours, to front,
-# undo, redo) the incremental index equals a fresh build each time: every box, the grid, and the ops a set of rects
-# query. `binsinc: ok`.
+# undo, redo) and 20 objects carried far across the board, the index equals a fresh build each time (every box, and the ops
+# 240 rects of every size query); it also answers as a scan of every op box by box. Run twice: patched in place (D-7999),
+# and with that off, when the grid and cells must equal too (the strict equality this test always had). A mutant that
+# forgets the ops kept beside the grid fails it (tried 11-23).
+# `binsinc: ok`.
 #   pixi run mojo build -I . -I vendor tests/test_binsinc.mojo -o build/test_binsinc && build/test_binsinc
 from std.testing import assert_true, assert_equal
 from mojoui.scene import Scene, OP_RUN
@@ -107,12 +110,18 @@ def edits(in_place: Bool) raises:
     var scanned = 0
     var seed: UInt64 = 79
     var kinds = List[Int](length=7, fill=0)
-    for step in range(40):
+    for step in range(60):
         var vis = BoardTools().visible_objects(layer, v, 1440, 900)
         var kind = rnd(seed) % 7
         kinds[kind] += 1
         var id = layer.objs[vis[rnd(seed) % len(vis)]].id
-        if kind == 0:  # a move
+        if step >= 40:  # (twenty more: one object carried far, across many of the grid's cells, so an index that kept it
+            # only where it was would miss it)
+            layer.select(id, False)
+            layer.begin_gesture(CH_MOVE)
+            layer.move_by(Float64(rnd(seed) % 1400 - 700), Float64(rnd(seed) % 900 - 450))
+            layer.end_gesture()
+        elif kind == 0:  # a move
             layer.select(id, False)
             layer.begin_gesture(CH_MOVE)
             layer.move_by(Float64(rnd(seed) % 40 - 20), Float64(rnd(seed) % 30 - 15))
@@ -153,7 +162,7 @@ def edits(in_place: Bool) raises:
     else:
         assert_equal(inc.patched, 0, "built whole every time")
     assert_true(scanned >= 10, "checked against a scan of every op")
-    print("   40 edits: " + String(builds) + " builds took boxes from the one before; " + String(reused) + " boxes kept, " + String(measured) + " measured")
+    print("   60 edits: " + String(builds) + " builds took boxes from the one before; " + String(reused) + " boxes kept, " + String(measured) + " measured")
     assert_true(builds >= 30, "most builds incremental")
     assert_true(reused > 10 * measured, "most boxes kept")
 
