@@ -1,7 +1,8 @@
 # nanoui's hill-climb scenes (github.com/justrach/nanoui, hillclimb/src/scenes.zig) drawn by omxcode's GPU 2D renderer
 # (mojoui.gpu2d + the GL backend), headless (EGL device platform, no window), so the two can be raced on one machine.
 # Same rules as nanoui's harness: 900×640 points at 2x, 30 warm-up frames, 300 measured, 3 runs, the run with the
-# lowest median frame kept; every frame changes what it shows.
+# lowest median frame kept; every frame changes what it shows. Both sides first draw 300 ms of frames unmeasured (the
+# GPU's clocks fall while nothing draws, goal 80).
 #
 #   frame CPU = building the frame's Scene (the app's drawing code, positions computed by hand: mojoui has no layout
 #               engine, ROADMAP decision 10) + fill_batches + merge_runs (the renderer's CPU side)
@@ -25,7 +26,9 @@ from mojoui.text import Font
 from mojoui.scene import Scene
 from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_batches, execute_cpu
 from mojoui.gpu2d_merge import merge_runs
-from mojoui.gpu2d_gl import GL2D, headless_gl33
+from mojoui.gpu2d_gl import GL2D, headless_gl33, gl_proc, B_QUAD, B_GLYPH
+from mojoui.present import fcall
+from std.ffi import c_uint, c_int
 from mojoui.png import encode_png
 from mojoui.fonttext import measure
 from mojoui.ink import Stroke
@@ -260,6 +263,30 @@ def build(which: String, frame: Int, mut held: Held, font: Font) -> Scene:
     return sc^
 
 
+struct Stamps(Movable):
+    """GL timestamp queries (glQueryCounter, core GL 3.3) at the frame's stage boundaries: start, after the uploads,
+    after the draws, after the resolve. Read after glFinish."""
+
+    var ids: List[UInt32]
+    var counter: Int
+    var get: Int
+
+    def __init__(out self):
+        self.ids = List[UInt32](length=4, fill=0)
+        self.counter = gl_proc("glQueryCounter")
+        self.get = gl_proc("glGetQueryObjectui64v")
+        fcall[NoneType](gl_proc("glGenQueries"), c_int(4), Int(self.ids.unsafe_ptr()))
+
+    def mark(self, i: Int):
+        fcall[NoneType](self.counter, c_uint(self.ids[i]), c_uint(0x8E28))  # GL_TIMESTAMP
+
+    def ms(self, i: Int, j: Int) -> Float64:
+        var a = List[UInt64](length=2, fill=0)
+        fcall[NoneType](self.get, c_uint(self.ids[i]), c_uint(0x8866), Int(a.unsafe_ptr()))  # GL_QUERY_RESULT
+        fcall[NoneType](self.get, c_uint(self.ids[j]), c_uint(0x8866), Int(a.unsafe_ptr()) + 8)
+        return Float64(Int(a[1]) - Int(a[0])) / 1e6
+
+
 def median(mut v: List[Float64]) -> Float64:
     sort(v)
     return v[len(v) // 2]
@@ -278,7 +305,22 @@ def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: I
     var build_ms = List[Float64]()
     var batch_ms = List[Float64]()
     var gpu_ms = List[Float64]()
+    var up_ms = List[Float64]()
+    var draw_ms = List[Float64]()
+    var res_ms = List[Float64]()
+    var stamps = Stamps()
     var ops = 0
+    # (goal 80) the GPU drops to idle clocks while nothing draws (the CPU raster between scenes): 300 ms of frames first,
+    # unmeasured, so every run starts at the clocks the work keeps it at. glrun.zig does the same for nanoui.
+    var warm0 = perf_counter_ns()
+    var wi = 0
+    while perf_counter_ns() - warm0 < 300_000_000:
+        var sc = build(which, wi, held, font)
+        fill_batches(built, sc, atlas, font)
+        merge_runs(built, f)
+        _ = gl.render(f, tex, PW, PH)
+        gl.finish()
+        wi += 1
     for i in range(WARMUP + FRAMES):
         var t0 = perf_counter_ns()
         var sc = build(which, i, held, font)
@@ -290,6 +332,22 @@ def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: I
             raise Error("render: " + gl.why)
         gl.finish()
         var t3 = perf_counter_ns()
+        if i >= WARMUP and i % 10 == 0:  # (every 10th frame again, in stages, timestamped on the GPU: the split)
+            stamps.mark(0)
+            gl.sync_pages()
+            _ = gl.begin(tex, PW, PH)
+            gl.stream(0, B_QUAD, f.quads)
+            gl.stream(0, B_GLYPH, f.glyphs)
+            gl.plan_polys(f, 0)
+            stamps.mark(1)
+            gl.layer(f, 0, False)
+            stamps.mark(2)
+            _ = gl.end(tex, PW, PH)
+            stamps.mark(3)
+            gl.finish()
+            up_ms.append(stamps.ms(0, 1))
+            draw_ms.append(stamps.ms(1, 2))
+            res_ms.append(stamps.ms(2, 3))
         if i >= WARMUP:
             frame_ms.append(Float64(t2 - t0) / 1e6)
             build_ms.append(Float64(t1 - t0) / 1e6)
@@ -300,7 +358,8 @@ def run_scene(which: String, mut gl: GL2D, atlas: GlyphAtlas, font: Font, tex: I
             ops += r.count
     var fm = frame_ms.copy()
     var gm = gpu_ms.copy()
-    return [median(frame_ms), p95(fm), median(build_ms), median(batch_ms), median(gpu_ms), p95(gm), Float64(ops)]
+    return [median(frame_ms), p95(fm), median(build_ms), median(batch_ms), median(gpu_ms), p95(gm), Float64(ops), median(up_ms), median(draw_ms),
+            median(res_ms)]
 
 
 def cpu_raster_ms(which: String, atlas: GlyphAtlas, font: Font, mut held: Held) raises -> Float64:
@@ -356,7 +415,8 @@ def main() raises:
         var raster = cpu_raster_ms(n, atlas, font, held)
         print(n, "\t", r3(best[0]), "\t", r3(best[1]), "\t", r3(best[2]), "\t", r3(best[3]), "\t", r3(best[4]), "\t", r3(best[5]), "\t", r3(raster), "\t", Int(best[6]))
         print("RESULT {\"scene\": \"" + n + "\", \"frame_med\": " + r3(best[0]) + ", \"frame_p95\": " + r3(best[1]) + ", \"gpu_med\": "
-              + r3(best[4]) + ", \"gpu_p95\": " + r3(best[5]) + ", \"raster_med\": " + r3(raster) + ", \"instances\": " + String(Int(best[6])) + "}")
+              + r3(best[4]) + ", \"gpu_p95\": " + r3(best[5]) + ", \"raster_med\": " + r3(raster) + ", \"instances\": " + String(Int(best[6]))
+              + ", \"gpu_upload\": " + r3(best[7]) + ", \"gpu_draw\": " + r3(best[8]) + ", \"gpu_resolve\": " + r3(best[9]) + "}")
         var shot = getenv("HC_SHOT")
         if shot != "":
             var px = List[UInt32](length=PW * PH, fill=0)

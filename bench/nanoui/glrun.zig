@@ -59,6 +59,19 @@ pub fn run(gpa: std.mem.Allocator, scene: scenes.Scene, frames: usize) !main.Res
     for (&phases) |*ph| ph.* = try gpa.alloc(f64, frames);
     defer for (phases) |ph| gpa.free(ph);
     var cpu0: f64 = 0;
+    // (omxcode benchmark) 300 ms of frames first, unmeasured: the GPU's clocks fall while nothing draws, so every run
+    // starts at the clocks the work keeps it at (scenes.mojo does the same on our side).
+    const warm0 = ui.clock.now();
+    var wi: usize = 0;
+    while (ui.clock.now() - warm0 < 0.3) : (wi += 1) {
+        state.frame = wi;
+        state.time = @as(f32, @floatFromInt(wi)) / 120;
+        t.time = state.time;
+        t.frame();
+        r.sync(t.text.atlas.mask(), t.text.atlas.generation, t.text.images.pictures(), t.text.images.generation);
+        r.draw(t.instances.items, t.size, t.scale, t.theme.background, 0, t.ctx.time);
+        finish_fn.?();
+    }
     for (0..main.warmup + frames) |i| {
         if (i == main.warmup) cpu0 = main.cpuSeconds();
         state.frame = i;

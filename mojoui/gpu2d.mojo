@@ -110,7 +110,8 @@ comptime SLOT_GLYPH_PAGES = 232  # mojoui.shared slot: the process's GlyphPages
 struct GlyphPages(Movable):
     """fonttext's glyphs (coverage, rasterized at device px by the platform's engine) packed in shelves into the atlas's
     dynamic rows, once per (face, instance, glyph, device size, subpixel x): keyed by fonttext's own image index. One per
-    process, shared by every canvas; a backend uploads rows [0, used) again whenever `version` moves (D-7910)."""
+    process, shared by every canvas; a backend uploads the rows written since the version it last synced (rows_since,
+    goal 80: one new glyph sends its rows, not every row in use; D-7910 sent rows [0, used) on every change)."""
     var width: Int
     var bytes: List[UInt8]
     var slot_of: Dict[Int, Int]
@@ -122,6 +123,7 @@ struct GlyphPages(Movable):
     var used: Int  # rows holding glyphs
     var version: Int
     var resets: Int
+    var row_v: List[Int]  # (goal 80) the version that last wrote each row
     var straight_of: Dict[Int, Int]  # a colour glyph (engine image × 256 + the run's alpha) → its straight-alpha pixels
     var straight_px: List[List[UInt32]]
 
@@ -137,6 +139,7 @@ struct GlyphPages(Movable):
         self.used = 0
         self.version = 0
         self.resets = 0
+        self.row_v = List[Int](length=DYN_ROWS, fill=0)
         self.straight_of = Dict[Int, Int]()
         self.straight_px = List[List[UInt32]]()
 
@@ -184,6 +187,8 @@ struct GlyphPages(Movable):
             self.shelf_y = 1
             self.shelf_h = 0
             self.resets += 1
+            for r in range(DYN_ROWS):  # (every row was cleared: all go up again)
+                self.row_v[r] = self.version + 1
         var x = self.shelf_x
         var y = self.shelf_y
         for yy in range(h):
@@ -196,7 +201,19 @@ struct GlyphPages(Movable):
         self.sy.append(y)
         self.slot_of[key] = len(self.sx) - 1
         self.version += 1
+        for r in range(y, min(y + h + 1, DYN_ROWS)):
+            self.row_v[r] = self.version
         return len(self.sx) - 1
+
+    def rows_since(self, v: Int) -> Tuple[Int, Int]:
+        """(goal 80) The rows [lo, hi) written after version v ((0, 0): none): what a backend that synced at v uploads."""
+        var lo = DYN_ROWS
+        var hi = 0
+        for r in range(DYN_ROWS):
+            if self.row_v[r] > v:
+                lo = min(lo, r)
+                hi = r + 1
+        return (lo, hi) if hi > lo else (0, 0)
 
 
 @fieldwise_init

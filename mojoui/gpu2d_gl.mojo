@@ -37,6 +37,7 @@
 
 from std.ffi import c_int, c_uint, c_char
 from std.memory import Pointer
+from mojoui.libc import _sym as libc_sym
 from std.os import getenv
 from std.time import perf_counter_ns
 from mojoui.present import fcall, dl_open, dl_sym, c_text
@@ -658,6 +659,15 @@ def _covers_meet(b: List[Float32], i: Int, j: Int, pad: Float32) -> Bool:
     return _tri_meets(pj[4], pj[5], pj[6] - pj[4], pj[7] - pj[5], pi[0] - e, pi[1] - e, pi[2] + e, pi[3] + e)
 
 
+def _pixels_hash(px: List[UInt32], n: Int) -> UInt64:
+    """(goal 80) A 64-bit hash of an image's first n pixels (FNV-1a over 32-bit words, its length mixed in), never 0."""
+    var h = UInt64(14695981039346656037) ^ UInt64(n)
+    var p = px.unsafe_ptr()
+    for i in range(min(n, len(px))):
+        h = (h ^ UInt64(p[i])) * 1099511628211
+    return h | 1
+
+
 struct GL2D(Movable):
     """The GL backend over the current context. ok: start() worked (why says what it found, or why not)."""
 
@@ -706,6 +716,12 @@ struct GL2D(Movable):
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last uploaded into the atlas's dynamic rows (goal 79)
     var img_tex: List[Int]
+    var img_hash: List[UInt64]  # (goal 80) each image texture's pixels' hash: unchanged pixels aren't sent again
+    var tex_uploads: Int  # (goal 80, always on) texture uploads, the bytes they sent, buffer stores (re)allocated and
+    var tex_upload_bytes: Int  # render targets allocated, since the context started: a frame's waste is the difference
+    var buf_allocs: Int  # (tests/test_gpu2d_waste)
+    var target_allocs: Int
+    var memcpy_fn: Int  # libc's memcpy, looked up once (std has none to call here)
     var img_w: List[Int]
     var img_h: List[Int]
     var samples: Int  # stencil (raster) samples per pixel; MSAA mode: colour samples too
@@ -820,6 +836,12 @@ struct GL2D(Movable):
         self.atlas_w = 0
         self.atlas_dyn = 0
         self.img_tex = List[Int]()
+        self.img_hash = List[UInt64]()
+        self.tex_uploads = 0
+        self.tex_upload_bytes = 0
+        self.buf_allocs = 0
+        self.target_allocs = 0
+        self.memcpy_fn = 0
         self.img_w = List[Int]()
         self.img_h = List[Int]()
         self.samples = 8
@@ -1181,12 +1203,18 @@ struct GL2D(Movable):
         if self.atlas_tex == 0:
             return
         var pg = glyph_pages(self.atlas_w)
-        if pg[].version == self.pages_version or pg[].used == 0:
+        if pg[].version == self.pages_version:
+            return
+        var rows = pg[].rows_since(self.pages_version)  # (goal 80: only the rows written since this context last synced)
+        if rows[1] <= rows[0]:
+            self.pages_version = pg[].version
             return
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.atlas_tex))
         fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(1))
-        fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(0), c_int(self.atlas_dyn), c_int(self.atlas_w), c_int(min(pg[].used, DYN_ROWS)),
-                        c_uint(GL_RED), c_uint(GL_UNSIGNED_BYTE), Int(pg[].bytes.unsafe_ptr()))
+        fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(0), c_int(self.atlas_dyn + rows[0]), c_int(self.atlas_w),
+                        c_int(rows[1] - rows[0]), c_uint(GL_RED), c_uint(GL_UNSIGNED_BYTE), Int(pg[].bytes.unsafe_ptr()) + rows[0] * self.atlas_w)
+        self.tex_uploads += 1
+        self.tex_upload_bytes += (rows[1] - rows[0]) * self.atlas_w
         fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
         self.pages_version = pg[].version
@@ -1286,6 +1314,7 @@ struct GL2D(Movable):
         """The MSAA colour + depth/stencil target of w × h (remade when the size changes)."""
         if self.mw == w and self.mh == h and self.msaa_ds != 0:
             return True
+        self.target_allocs += 1
         self.delete(F_DELETE_RENDERBUFFERS, self.msaa_color)
         self.delete(F_DELETE_RENDERBUFFERS, self.msaa_ds)
         self.msaa_color = 0
@@ -1345,6 +1374,22 @@ struct GL2D(Movable):
                 fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, have, n - have, addr + have)
                 self.count_extra(C_BYTES, n - have)
                 self.uploaded += n - have
+        elif n > 0 and n <= self.lcap[i] and self.fp[F_MAP_BUFFER_RANGE] != 0:
+            # (goal 80) the store it has is big enough: mapped with INVALIDATE_BUFFER (the driver hands a fresh copy if
+            # draws still read the old one; no wait) and written, not a new store every frame
+            var p = fcall[Int](self.f(F_MAP_BUFFER_RANGE), target, 0, n, c_uint(0x0002 | 0x0008))  # WRITE | INVALIDATE_BUFFER
+            if self.memcpy_fn == 0:
+                self.memcpy_fn = libc_sym("memcpy")
+            if p != 0 and self.memcpy_fn != 0:
+                _ = fcall[Int](self.memcpy_fn, p, addr, n)
+                _ = fcall[UInt8](self.f(F_UNMAP_BUFFER), target)
+            elif p != 0:
+                _ = fcall[UInt8](self.f(F_UNMAP_BUFFER), target)
+                fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
+            else:
+                fcall[NoneType](self.f(F_BUFFER_SUB_DATA), target, 0, n, addr)
+            self.count_extra(C_BYTES, n)
+            self.uploaded += n
         elif n > 0:
             var cap = max(n + n // 2, 65536)
             fcall[NoneType](self.f(F_BUFFER_DATA), target, cap, 0, c_uint(GL_STREAM_DRAW))
@@ -1352,6 +1397,7 @@ struct GL2D(Movable):
             self.count_extra(C_BYTES, n)
             self.lcap[i] = cap
             self.uploaded += n
+            self.buf_allocs += 1
         self.lsize[i] = n
         if b == B_INDIRECT:
             fcall[NoneType](self.f(F_BIND_BUFFER), target, c_uint(0))
@@ -1453,12 +1499,14 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.loc_img), c_int(0))
 
     def images(mut self, frame: Frame2D):
-        """The frame's images as textures (re-filled each frame: they're few and small)."""
+        """The frame's images as textures, each sent again only when its pixels changed (goal 80: their hash; they were
+        re-sent every frame)."""
         for i in range(len(frame.pixels)):
             if i >= len(self.img_tex):
                 self.img_tex.append(0)
                 self.img_w.append(0)
                 self.img_h.append(0)
+                self.img_hash.append(0)
         # (sizes come from the instances: pw, ph)
         var n = len(frame.images) // IMAGE_FLOATS
         for j in range(n):
@@ -1477,9 +1525,16 @@ struct GL2D(Movable):
                 self.img_tex[which] = t
                 self.img_w[which] = pw
                 self.img_h[which] = ph
+                self.img_hash[which] = 0
+            var hsh = _pixels_hash(frame.pixels[which], pw * ph)  # (goal 80: the same pixels aren't sent again)
+            if hsh == self.img_hash[which]:
+                continue
+            self.img_hash[which] = hsh
             fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.img_tex[which]))
             fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(0), c_int(0), c_int(pw), c_int(ph),
                             c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), Int(frame.pixels[which].unsafe_ptr()))
+            self.tex_uploads += 1
+            self.tex_upload_bytes += pw * ph * 4
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
 
     def render(mut self, frame: Frame2D, tex: Int, w: Int, h: Int) -> Bool:
