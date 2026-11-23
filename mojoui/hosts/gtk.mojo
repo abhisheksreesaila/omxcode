@@ -5255,9 +5255,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             y = sp[1]
             drag_x0 = x
             drag_y0 = y
-            host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
-            settle()
-            bench_wait[A](host_addr, ci, 200_000_000)
+            count += 2  # (D-8000: the press that lifts and the drop are timed too, as benchmark-f034's dragPath times them)
     var syncs = List[Float64]()
     var rasters = List[Float64]()
     var during = List[Float64]()  # (open, D-7944) the frames after an open's first, while it is still coming in
@@ -5320,12 +5318,19 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                     c_uint(gdk_keyval(ch)), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
             _ = len(handled)
         elif what == "dragone" or what == "drag40":  # (benchmark-f034's dragPath: to +160,+90 (40: +120,+70), a sine of 40 across it)
-            var t = Float64(i + 1) / Float64(count)
-            var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
-            var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
-            host[].canvas_send(ci, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
-            x = tx
-            y = ty
+            if i == 0:
+                kind = PRESS
+                host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
+            elif i == count - 1:
+                kind = RELEASE
+                host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+            else:
+                var t = Float64(i) / Float64(count - 2)
+                var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
+                var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
+                host[].canvas_send(ci, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
+                x = tx
+                y = ty
         elif what == "undoredo" or what == "open" or what == "openpress" or what == "undo" or what == "redo":  # (undo, redo, undo…: ctrl+z / ctrl+shift+z through the key controller; undo / redo: one way each frame; open: the app reopens)
             if what == "open" or what == "openpress":
                 _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
@@ -5492,7 +5497,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             if what == "openpress" and press_draw >= 0 and press_draw >= len(host[].canvases[ci].draw_log):
                 presses.append(-1)  # (the press never reached a frame: reported, and the row fails)
             completes.append(Float64(Int(last_done) - Int(t0)) / 1e6)
-    if what == "pan" or what == "erase" or what == "dragone" or what == "drag40":
+    if what == "pan" or what == "erase":
         host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
         settle()
     if what == "draw":

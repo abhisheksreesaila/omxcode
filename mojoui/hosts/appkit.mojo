@@ -4372,10 +4372,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             y = sp[1]
             drag_x0 = x
             drag_y0 = y
-            host[].canvases[k].moved = False
-            host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
-            host[].canvases[k].moved = True
-            bench_settle[A](host_addr, 200_000_000)
+            count += 2  # (D-8000: the press that lifts and the drop are timed too, as on GTK)
     if what == "draw" or what == "pan":  # (a drag: press, the moves, release; the app's tool decides what it does)
         host[].canvases[k].moved = False
         host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
@@ -4425,12 +4422,19 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             else:
                 host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.5)
         elif what == "dragone" or what == "drag40":  # (benchmark-f034's dragPath, as GTK's: to +160,+90 (40: +120,+70), a sine of 40 across it)
-            var t = Float64(i + 1) / Float64(count)
-            var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
-            var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
-            host[].canvas_send(node, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
-            x = tx
-            y = ty
+            if i == 0:
+                host[].canvases[k].moved = False
+                host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
+            elif i == count - 1:
+                host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr)
+            else:
+                host[].canvases[k].moved = True
+                var t = Float64(i) / Float64(count - 2)
+                var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
+                var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
+                host[].canvas_send(node, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
+                x = tx
+                y = ty
         elif what == "undo" or what == "redo" or what == "undoredo":  # (⌘Z / ⇧⌘Z: one step back or forth each frame; undoredo alternates)
             host[].canvas_key(node, "z", 2 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 3, host_addr)
         elif what == "open" or what == "openpress":  # (the app reopens the note, cold: its first frame is this frame's)
@@ -4565,7 +4569,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             completes.append(Float64(last_done - t0) / 1e6)
         pump_run_loop(0)  # (the window server's events, untimed)
     node = canvas_node_at(host[], tag)
-    if node >= 0 and (what == "pan" or what == "draw" or what == "dragone" or what == "drag40"):
+    if node >= 0 and (what == "pan" or what == "draw"):
         host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
     host[].finish_gpu2d(0)  # (the step's last frames: shown, their GPU times known)
     var failed = host[].g2d_failed - failed0  # (committed, but the GPU didn't complete them: the CPU executor drew what was shown)
