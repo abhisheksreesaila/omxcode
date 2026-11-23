@@ -971,6 +971,9 @@ def m6():
             return "FAIL", f"native start-up run didn't run pnote's web look (no 'PNOTE WEB:' line): {tail(r.stdout + r.stderr)}"
         starts.append(r.stdout + r.stderr)
     nstart = native_start(starts)
+    # (D-8002) a second start in the same folder (the glyphs of the first one readied while nothing happens): printed, not judged
+    r = run(["scripts/testscreen", str(APP)], 600, env=env)
+    nstart["second"] = native_start([r.stdout + r.stderr])
     # (D-7950, set by the main session) cold start, like with like: Personal Note's own desktop launcher cold, and a
     # fresh Chromium process on the built app, each from its process's start to the title island painted
     for mode in ("desktop", "chromium"):
@@ -1088,12 +1091,14 @@ def m6_mac(race):
         cold = out.split("APPBENCH: coldopens", 1)[-1].split("APPBENCH: keptopens", 1)[0]
         snapinfo[note]["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
     starts = []
-    for i in range(5):
-        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"], {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg"}, [REF_MAC / "pn.db"], nobuild=True)
+    for i in range(6):  # (D-8002: five first starts, each with a settings folder of its own, as on Linux; then a second start, printed)
+        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"],
+                         {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-start-" + stamp + f"-{min(i, 4)}"}, [REF_MAC / "pn.db"], nobuild=True)
         if e:
             return "FAIL", f"start-up run {i}: {e}"
         starts.append(out)
-    nstart = native_start(starts)
+    nstart = native_start(starts[:5])
+    nstart["second"] = native_start(starts[5:])
     saved = dict(SNAPINFO)
     SNAPINFO.clear()
     SNAPINFO.update(snapinfo)
@@ -1344,6 +1349,10 @@ def race_table(web, nat, start, shown=None, machine="linux"):
         ok = ok and good
         lines.append(f"| {'note switch' if k == 'switch' else 'omnibar open'} p95 / max (5 runs of 5; p95 the median run's, max the worst) | "
                      f"{f'{w} / {wm}' if w else 'not measured'} ms | {f'{n} / {nm}' if n is not None else '—'} ms | {'✓' if good else '✗'} |")
+    sec = start.get("second") or {}
+    if sec.get("switch") is not None:
+        lines.append(f"| the app's second start (glyphs of the first readied at idle, mojoui.glyphwarm, D-8002; not judged): note switch · omnibar p95 | — | "
+                     f"{sec['switch']} · {sec['omnibar']} ms | |")
     lines += ["", "Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the "
               "title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools "
               "port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment "
