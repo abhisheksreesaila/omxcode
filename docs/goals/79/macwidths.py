@@ -4,6 +4,7 @@ fallback fonts for scripts the web faces lack (Hindi, Tamil, Arabic, CJK, emoji)
 falls back to the Mac's. The same page as ref.mjs's (the web faces by @font-face, each line in a span, its width × the
 device scale) is opened by the Mac's own Chrome (/Applications, already there: nothing installed), headless, with a
 throwaway profile in the run's data folder, at device scale 2; the widths come back in the dumped DOM.
+  (D-7991, ruling C: no longer used for M1 references; --dump-dom is a headless layout mode, the live page counts)
   macwidths.py <fixture.json> <out.json>     (MAC_SSH, MAC_SSH_KEY as scripts/mac-ssh)"""
 import json, os, subprocess, sys, tempfile, pathlib, html
 

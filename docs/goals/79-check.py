@@ -257,13 +257,15 @@ def m1():
             probs.append("ref at 2×: " + err)
         else:
             # (D-7976, ruling A) the Mac's lines against Chrome on the Mac with the Mac's fonts (web faces and fallback
-            # scripts alike): docs/goals/79/macwidths.py measures them in the Mac's own Chrome; the file says which Chrome
-            mw = REF_MAC / "textwidths-macchrome.json"
-            rw = run(["python3", str(ROOT / "docs/goals/79/macwidths.py"), str(FIXTURE), str(mw)], 600)
-            if rw.returncode or not mw.exists():
-                probs.append("Mac: Chrome on the Mac didn't measure the lines: " + tail(rw.stdout + rw.stderr, 300))
+            # scripts alike). (D-7991, ruling C) measured on the live page by M0's tool: ref.mjs in the Mac's own Chrome
+            # through Playwright (macref.py), its textwidths.json; made-by.json must name the Mac. macwidths.py's
+            # --dump-dom (a headless layout mode) is no longer used for references
+            mw = REF_MAC / "textwidths.json"
+            made = json.loads((REF_MAC / "made-by.json").read_text()) if (REF_MAC / "made-by.json").exists() else {}
+            if not mw.exists() or made.get("platform") != "darwin":
+                probs.append(f"Mac: no page measurement from Chrome on the Mac (REF_MAC made by {made or 'nothing'})")
                 return "FAIL", "; ".join(probs[:12])
-            out_mac, e = mac_run("fontcheck", [], {"PNOTE_FONTCHECK": "1", "FONTTEXT_REF": "{data}/textwidths-macchrome.json",
+            out_mac, e = mac_run("fontcheck", [], {"PNOTE_FONTCHECK": "1", "FONTTEXT_REF": "{data}/textwidths.json",
                                                     "FONTTEXT_FIXTURE": "{data}/fixture.json", "FONTTEXT_DPR": str(MAC_DPR)},
                                  [mw, FIXTURE])
             if e:
