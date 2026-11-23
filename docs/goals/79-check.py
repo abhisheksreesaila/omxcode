@@ -1015,7 +1015,7 @@ def m6_mac(race):
             return "FAIL", f"copying {f} to the Mac"
     if not mac_put(REF_MAC / "pn.db", f"{MAC_WEB}/race-mac/ref.db"):
         return "FAIL", "copying the reference database to the Mac"
-    envp = f"cd {MAC_WEB}/pn && export PATH=$HOME/{MAC_WEB}/node/bin:$PATH PW_CHANNEL=chrome && "
+    envp = f"cd {MAC_WEB}/pn && export PATH=$HOME/{MAC_WEB}/node/bin:$PATH PW_CHANNEL=chrome PN_PYTHON=$HOME/{MAC_WEB}/pyenv/.pixi/envs/default/bin/python && "
     r = mac_sh(envp + f"node --import ./.g79/macgpu.mjs scripts/benchmark-f034.mjs --gpu --dpr={MAC_DPR:g} --note=both --out=../race-mac/web-f034.json", 3600)
     (rm / "web-f034.log").write_text(r.stdout + r.stderr)
     if r.returncode or not mac_get(f"{MAC_WEB}/race-mac/web-f034.json", rm / "web-f034.json"):
@@ -1331,11 +1331,18 @@ def mac_run(tag, steps, env, data, nobuild=False):
     sf.parent.mkdir(parents=True, exist_ok=True)
     sf.write_text("\n".join(steps + ["quit"]) + "\n")
     e = dict(os.environ, MAC_SSH=MAC_SSH, MAC_ENV=",".join(f"{k}={v}" for k, v in env.items()), MAC_NOBUILD="1" if nobuild else "0")
-    r = run(["scripts/mac-ssh", "pnote", str(sf)] + [str(d) for d in data], 3600, env=e)
-    lines = (r.stdout + r.stderr).strip().splitlines()
-    report = Path(lines[-1]) if lines else None
-    if r.returncode or not report or not (ROOT / report / "stdout.txt").exists():
-        return "", f"mac-ssh exit {r.returncode}: {tail(r.stdout + r.stderr, 400)}"
+    for attempt in range(3):  # (D-7995: the Mac drops off the network for minutes at a time; a run that brought no report back is run again once it answers)
+        r = run(["scripts/mac-ssh", "pnote", str(sf)] + [str(d) for d in data], 3600, env=e)
+        lines = (r.stdout + r.stderr).strip().splitlines()
+        report = Path(lines[-1]) if lines else None
+        if not r.returncode and report and (ROOT / report / "stdout.txt").exists():
+            break
+        if attempt == 2:
+            return "", f"mac-ssh exit {r.returncode}: {tail(r.stdout + r.stderr, 400)}"
+        for _ in range(40):
+            if not mac_reachable():
+                break
+            time.sleep(15)
     out = (ROOT / report / "stdout.txt").read_text()
     (OUT / f"mac-{tag}.log").write_text(out)
     return out, ""

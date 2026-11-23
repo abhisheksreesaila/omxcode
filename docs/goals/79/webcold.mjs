@@ -53,7 +53,8 @@ if (process.platform === 'darwin' && mode === 'desktop') {
     fs.copyFileSync(src, path.join(dir, 'd.db'))
     const env = { ...process.env, HOME: dir, PERSONAL_NOTE_DB: path.join(dir, 'd.db'), PERSONAL_NOTE_PLUGINS_DIR: path.join(dir, 'plugins'),
       PERSONAL_NOTE_AI_DIR: path.join(dir, 'ai'), PERSONAL_NOTE_VOICE_DIR: path.join(dir, 'voice') }
-    const child = spawn(path.join(PN, '.venv/bin/python'), [path.join(HERE, 'desktop_cold_mac.py'), PN], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+    // (PN_PYTHON: the interpreter itself; .venv/bin/python may find its target through HOME, which is scratch here)
+    const child = spawn(process.env.PN_PYTHON || path.join(PN, '.venv/bin/python'), [path.join(HERE, 'desktop_cold_mac.py'), PN], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
     let buf = ''
     child.stdout.on('data', (d) => { buf += d })
     child.stderr.on('data', (d) => { buf += d })
