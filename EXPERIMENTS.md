@@ -4,6 +4,20 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 16: raster tiles on Metal (2026-11-22, night)
+- **Setup.** Rulings C (the emoji reference is the live page) and D (PN's Mac launcher judged by a lower bound) written as D-7991 and D-7992. The Mac kept dropping off the network, so Mac runs now retry.
+- **Worked.**
+  - Metal draws tiled layers from raster tiles on gpu2d_tiles' shared plan, with kept views read back and restored (D-7993, D-7994). Mac stress pan 16.1 → 3.4, undo 26.3 → 8.3, open 82.9 → first frame 21.5 (kept view in 30 of 30 cold opens).
+  - gpucheck stays within M1's bounds. A first frame from a kept view equals the loaded frame pixel for pixel.
+  - Under ruling D, native starts in 151 ms against the launcher's lower bound of 453 ms.
+  - The emoji gap is located: 21 vs 22 css px per emoji, with no spacing difference.
+- **Broke / open.**
+  - Mac rows still failing: the open's first frame, the press during an open, stress zoom, redo, note switch and omnibar (CoreText's first-use cost per glyph and run).
+  - The rule behind Chrome's emoji advance is still unknown.
+  - Linux stress undo is at the bar (median 9.1 with the full prelude).
+  - One M7 run was void: the Mac reference had been replaced by Linux's (fixed, D-7997).
+- **Next.** The Mac's first frame (layer builds on open), redo and zoom on Metal, glyph warm-up, the emoji rule.
+
 ## Goal 79, continuation 15: the Mac's web side, its race, its fonts (2026-11-22, night)
 - **Setup.** Ruling B on the Mac: node, Playwright and PN's backend in ~/omxcode-g79-web (every path and a removal line in docs/goals/79/mac-setup.md). The Mac reference now comes from the Mac's own Chrome (made-by.json).
 - **Worked.**
