@@ -1033,6 +1033,8 @@ def m6_mac(race):
     rm.mkdir(parents=True, exist_ok=True)
     # the web, on the Mac
     print("(the web's race on the Mac in its own Chrome on Metal: several minutes)", flush=True)
+    lock = MacLock().__enter__()
+    mac_quiet("web race")
     mac_sh(f"mkdir -p {MAC_WEB}/pn/.g79 {MAC_WEB}/race-mac", 60)
     for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "webswitch.mjs", "desktop_cold_mac.py"):
         if not mac_put(ROOT / "docs/goals/79" / f, f"{MAC_WEB}/pn/.g79/{f}"):
@@ -1046,6 +1048,7 @@ def m6_mac(race):
         return "FAIL", f"benchmark-f034 on the Mac, exit {r.returncode}: {tail(r.stdout + r.stderr)}"
     gpu = re.search(r"MACGPU: (.*)", r.stdout + r.stderr)
     web = web_race(json.loads((rm / "web-f034.json").read_text()), "")
+    mac_quiet("web memory and switch")
     r = mac_sh(envp + f"node .g79/webmem.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)
     (rm / "web-mem.log").write_text(r.stdout + r.stderr)
     mm = re.search(r"WEB RSS MB: ([\d.]+)", r.stdout)
@@ -1061,25 +1064,33 @@ def m6_mac(race):
         mw_ = re.search(r"WEBCOLD desktop window median: ([\d.]+)", r.stdout)
         if mode == "desktop":
             web["cold_desktop_window_ms"] = float(mw_.group(1)) if mw_ else None
+    lock.__exit__()
+    # (D-8002) built once, then every native run from that bundle, the machine held for one note's runs at a time
+    lock = MacLock().__enter__()
+    out, e = mac_run("build", ["wait:300"], {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-build"}, [REF_MAC / "pn.db"])
+    if e:
+        return "FAIL", f"building on the Mac: {e}"
+    lock.__exit__()
     # native, on the Mac: kept views and settings in the Mac's scratch folder ({data}), never ~/.config
     nat, snapinfo = {}, {}
     stamp = time.strftime("%H%M%S")
     for note in RACE_NOTES:
+        lock = MacLock().__enter__()
         db = race / f"race-{note}.db"
         other = subprocess.run(["sqlite3", str(db), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"],
                                capture_output=True, text=True).stdout.strip()
-        base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg", "MOJOUI_SNAP_LOG": "1"}
+        base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg-race-" + stamp, "MOJOUI_SNAP_LOG": "1"}
         for run_ in ("A", "B"):
             steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
             # (D-7994: one build for the Mac's half, the first run's; the kept view names its program, as on Linux)
-            out, e = mac_run(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db], nobuild=not (note == RACE_NOTES[0] and run_ == "A"))
+            out, e = mac_measured(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db])
             if e:
                 return "FAIL", f"first open {run_} on {note}: {e}"
             fo = native_race(out).get("open")
             snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": "SNAP: restored" in out, "saved": "SNAP: saved" in out}
             if run_ == "B" and fo:
                 nat.setdefault(note, {})["first open"] = dict(fo, snap="SNAP: restored" in out)
-        out, e = mac_run(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db], nobuild=True)
+        out, e = mac_measured(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db])
         if e:
             return "FAIL", f"race on {note}: {e}"
         if "PNOTE WEB:" not in out:
@@ -1090,13 +1101,16 @@ def m6_mac(race):
             nat[note]["first open"] = first_
         cold = out.split("APPBENCH: coldopens", 1)[-1].split("APPBENCH: keptopens", 1)[0]
         snapinfo[note]["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
+        lock.__exit__()
+    lock = MacLock().__enter__()
     starts = []
     for i in range(6):  # (D-8002: five first starts, each with a settings folder of its own, as on Linux; then a second start, printed)
-        out, e = mac_run(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"],
-                         {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-start-" + stamp + f"-{min(i, 4)}"}, [REF_MAC / "pn.db"], nobuild=True)
+        out, e = mac_measured(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"],
+                         {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-start-" + stamp + f"-{min(i, 4)}"}, [REF_MAC / "pn.db"])
         if e:
             return "FAIL", f"start-up run {i}: {e}"
         starts.append(out)
+    lock.__exit__()
     nstart = native_start(starts[:5])
     nstart["second"] = native_start(starts[5:])
     saved = dict(SNAPINFO)
@@ -1106,6 +1120,7 @@ def m6_mac(race):
     SNAPINFO.clear()
     SNAPINFO.update(saved)
     rows = rows.replace("\n\n", f"\n\nWeb renderer on the Mac: {gpu.group(1) if gpu else 'not reported'}.\n\n", 1)
+    rows += "\nThe Mac while measured (load, busiest processes at each measured run's start; void ones named):\n" + "\n".join("- " + l for l in MAC_LOAD) + "\n"
     (ROOT / "docs/goals/79/race-mac.md").write_text(rows)
     if not ok:
         return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if l.startswith("|") and l.rstrip().endswith("✗ |"))[:900]
@@ -1371,6 +1386,62 @@ def mac_reachable():
     return "" if r.returncode == 0 else f"the Mac ({MAC_SSH}) isn't reachable"
 
 
+class MacLock:
+    """The Mac held for one batch (scripts/mac-ssh's ~/.cache/omx-mac.lock, shared with goal 80's checker): its runs and
+    ssh commands inside don't take it again."""
+
+    def __enter__(self):
+        import fcntl
+        self.f = open(os.path.expanduser("~/.cache/omx-mac.lock"), "a")
+        end = time.time() + 5400
+        while True:
+            try:
+                fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() > end:
+                    raise TimeoutError("~/.cache/omx-mac.lock held for 90 minutes")
+                time.sleep(5)
+        os.environ["OMX_MAC_LOCKED"] = "1"
+        return self
+
+    def __exit__(self, *exc):
+        os.environ.pop("OMX_MAC_LOCKED", None)
+        self.f.close()
+
+
+def mac_quiet(what, limit=3.0, wait=600):
+    """Waits (up to `wait` s) for the Mac's load to fall under `limit`; its uptime and busiest processes, printed and kept."""
+    end = time.time() + wait
+    while True:
+        r = mac_sh("sysctl -n vm.loadavg | awk '{print $2}'; uptime; ps -Ao pcpu,comm -r | awk 'NR>1 && NR<5{printf \"%s %s; \",$1,$2}'", 60)
+        load = float((r.stdout.split() or ["99"])[0])
+        if load < limit or time.time() > end:
+            line = f"{what}: load {load} {' '.join(r.stdout.split(chr(10))[1:]).strip()[:160]}{'' if load < limit else ' (NOT QUIET)'}"
+            MAC_LOAD.append(line)
+            print("  MAC " + line, flush=True)
+            return load < limit
+        time.sleep(15)
+
+
+def mac_measured(tag, steps, env, data, tries=3):
+    """A run on the Mac whose timing counts: the bundle built beforehand, the machine quiet when it starts. A run that
+    started on a loaded machine is void and run again (3×)."""
+    for _ in range(tries):
+        mac_quiet(tag)
+        n = len(MAC_LOAD)
+        out, e = mac_run(tag, steps, env, data, nobuild=True)
+        loads = [float(m.group(1)) for l in MAC_LOAD[n:] for m in [re.search(r"load averages?: ([\d.]+)", l)] if m]
+        if e or not loads or loads[-1] < 3.0:
+            return out, e
+        MAC_LOAD.append(f"{tag}: VOID (load {loads[-1]} at the start), run again")
+        print(f"  MAC {tag}: void, load {loads[-1]}", flush=True)
+    return "", f"{tag}: the Mac was never quiet ({loads[-1]})"
+
+
+MAC_LOAD = []  # (MACLOAD: lines of the Mac runs so far, for race-mac.md)
+
+
 def mac_run(tag, steps, env, data, nobuild=False):
     """pnote on the M4 through scripts/mac-ssh; (stdout, '') or ('', why). nobuild: the bundle the last run built (D-7994)."""
     print(f"(opening a pnote window on the Mac: {tag}, about a minute)", flush=True)
@@ -1392,6 +1463,10 @@ def mac_run(tag, steps, env, data, nobuild=False):
             time.sleep(15)
     out = (ROOT / report / "stdout.txt").read_text()
     (OUT / f"mac-{tag}.log").write_text(out)
+    for line in (r.stdout + r.stderr).splitlines():
+        if line.startswith("MACLOAD:"):
+            MAC_LOAD.append(f"{tag}: {line[9:]}")
+            print(f"  {line[:200]}", flush=True)
     return out, ""
 
 

@@ -10,8 +10,15 @@
 # MAC_ENV (e.g. "PNOTE_SCENE=canvas,PNOTE_IMPORT={data}/bench-note.json"): variables for the app, comma-separated; `{data}`
 # in a value is the Mac's data folder, as in the steps. The app's stdout and stderr come back as stdout.txt in the report.
 # MAC_SSH (user@host, required) and MAC_SSH_KEY (default ~/.ssh/edx_mac) name the Mac.
+# One machine, two worktrees' checkers: a run holds ~/.cache/omx-mac.lock (flock, this box) from build to report; a caller
+# holding it for a whole batch sets OMX_MAC_LOCKED=1. After a build the app waits for the Mac's load to fall under 3 (a
+# measured run right after its own build times the build's tail), and prints uptime and the busiest processes: MACLOAD.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [ "${OMX_MAC_LOCKED:-0}" != 1 ]; then
+    mkdir -p "$HOME/.cache"
+    exec env OMX_MAC_LOCKED=1 flock -w 5400 "$HOME/.cache/omx-mac.lock" "$0" "$@"
+fi
 app=$1 steps_file=$2
 shift 2
 host=${MAC_SSH:?set MAC_SSH=user@host (the Mac to run on)}
@@ -28,7 +35,7 @@ grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > 
 { [ -z "${MAC_ENV:-}" ] || echo "$MAC_ENV" | tr ',' '\n'; } > "$out/env.txt"  # (a file too: an empty argument vanishes through ssh, a space splits one)
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$out/env.txt" "$@" "$host:$remote/data/"
 rc=0
-"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" NOBUILD="${MAC_NOBUILD:-0}" FETCH="'${MAC_FETCH:-}'" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
+"${ssh_[@]}" APP_DEFAULTS="${MAC_APP_DEFAULTS:-0}" NOBUILD="${MAC_NOBUILD:-0}" QUIET="${MAC_QUIET:-1}" FETCH="'${MAC_FETCH:-}'" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt" || rc=$?
 set -uo pipefail
 app=$1 settings=${3:-}  # (an empty argument vanishes on its way through ssh)
 cd ~/"$2" && tar -xzf data/src.tar.gz
@@ -57,7 +64,16 @@ config=$PWD/config-$(date +%s) && mkdir -p "$config"
 [ -z "$settings" ] || echo "$settings" | tr ',' '\n' > "$config/settings.txt"
 envs=()  # MAC_ENV's variables, {data} filled in
 while IFS= read -r kv; do kv=${kv//\{out\}/$outd}; [ -z "$kv" ] || envs+=("${kv//\{data\}/$PWD/data}"); done < data/env.txt
-env ${envs[@]+"${envs[@]}"} OMX_CONFIG="$config" MOJOUI_TEST="$steps" "$exe" > stdout.txt 2>&1 &
+for kv in ${envs[@]+"${envs[@]}"}; do case "$kv" in OMX_CONFIG=*) mkdir -p "${kv#OMX_CONFIG=}" ;; esac; done
+if [ "${QUIET:-1}" = 1 ]; then  # (a measured run waits for a quiet machine, at most 4 minutes; what it finally saw is printed)
+    for _ in $(seq 1 48); do
+        ld=$(sysctl -n vm.loadavg | awk '{print $2}')
+        awk "BEGIN{exit !($ld < 3)}" && break
+        sleep 5
+    done
+fi
+echo "MACLOAD: $(uptime | sed 's/^ *//') | top: $(ps -Ao pcpu,comm -r | awk 'NR>1 && NR<5{printf "%s %s; ",$1,$2}')"
+env OMX_CONFIG="$config" ${envs[@]+"${envs[@]}"} MOJOUI_TEST="$steps" "$exe" > stdout.txt 2>&1 &
 pid=$! start=$(date +%s)
 while kill -0 "$pid" 2>/dev/null; do
     [ $(( $(date +%s) - start )) -gt 300 ] && { echo "TIMEOUT"; kill "$pid"; break; }
