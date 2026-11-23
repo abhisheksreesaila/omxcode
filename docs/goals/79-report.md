@@ -8,6 +8,22 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## For the reviewer (standing list)
+Places where a proof, a checker or a test of this goal changed, or where a claim was wrong and corrected:
+- **tests/test_binsinc.mojo (continuation 17).** The whole-grid equality (grid and cells equal a fresh build) became conditional when the op index learned to patch itself in place (D-7999): a patched index keeps its old grid by design. The old strict equality still runs, in the same test run, with the in-place path off (`MOJOUI_BINS_INPLACE=0`'s code path). The patched one is held to: every box equal, 240 rects of every size equal to a fresh build, and equal to a brute-force scan of every op's box measured from the scene. 20 far moves were added after a mutant (an index that forgets its extra ops) survived the first version; it now fails.
+- **The race's drags (D-8000)** time the lift and the drop (they never did): a strengthening; older drag rows are understated.
+- **Note switch and omnibar (D-8001)** are raced against the web and have a max; they had only a silky p95.
+- **The Mac's start-up runs (D-8002)** each get a fresh settings folder (they shared one): a strengthening.
+- **M1's Mac reference (D-7991)** switched from macwidths.py to the live page: the main session's ruling.
+- **Wrong claim, corrected (continuation 17):** "each undo step moves 40 objects back" in continuation 16's report and journal. It walks one 6×4 px one-object move back.
+- **Attribution:** D-7976, D-7977, D-7991, D-7992 and D-7998 are the main session's, not the owner's; d59ebc57's commit message still says otherwise.
+- **The Apple Color Emoji rule (D-7998)** is a rule derived from Chrome's whole-size table (31 sizes, 10–40 px), not verified on the Mac or at fractional or zoomed sizes.
+
+## Continuations 14–17 (2026-11-22 to 11-23, autopilot)
+Decisions D-7976–D-8002; journal "continuation 14" to "continuation 17"; EXPERIMENTS likewise. In short:
+- **Mac:** NSTextInputClient (M5 PASS), the Mac's own Chrome as reference and the race on the Mac's GPU, AppKit bench steps, PingFang and kern-round rules, the tracking table (`trak`), Menlo fallback; raster tiles and kept views on Metal (D-7993, D-7994); the launcher's lower bound (D-7996).
+- **Linux:** the incremental op index (D-7987), a patch-in-place index, real re-routes only in the change log and bulk replay (D-7999); the glyph warm-up (D-8002).
+
 ## Continuation 13 (2026-11-22, evening, autopilot): the retained-scene patch, the open's spike; Linux M6 down to one row
 Decisions D-7974–D-7975; journal "continuation 13". The race (18:04–18:11) and the reruns ran on a quiet machine (goal 77
 idle in all 14 samples, load ~1).
