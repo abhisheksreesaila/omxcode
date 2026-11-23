@@ -76,7 +76,7 @@ from mojoui.canvas import Surface
 from mojoui.draw import blend
 from mojoui.text import Font, Face, LEFT, CENTRE, RIGHT
 from mojoui.shadow import shadow_alpha, shadow_reach, shadow_columns, shadow_row, shadow_at
-from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage
+from mojoui.fonttext import engine as font_engine, shape as ft_shape, run_in as ft_run_in, run_x, GlyphImage, TextStyle
 from mojoui.shared import get_shared, put_shared
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
@@ -103,6 +103,7 @@ comptime SHAPE_CAPSULE = 1
 comptime BLEND_REPLACE = 0
 comptime BLEND_OVER = 1
 
+comptime SLOT_KEYS = 1 << 20  # glyph keys kept in a list (GlyphPages.slot_of); others in a hash
 comptime NO_CLIP = 1.0e30  # a clip edge this far out (or further) means no clip on that side
 comptime POLY_SUB = 4  # scan lines per pixel row for polygons (draw.polygon's)
 comptime FACES = 5  # Font.pick's faces: 0 regular, 1 medium, 2 display, 3 mono, 4 mono bold
@@ -119,7 +120,8 @@ struct GlyphPages(Movable):
     goal 80: one new glyph sends its rows, not every row in use; D-7910 sent rows [0, used) on every change)."""
     var width: Int
     var bytes: List[UInt8]
-    var slot_of: Dict[Int, Int]
+    var slot_of: List[Int32]  # engine image index → slot (-1: not placed): image indices are dense, so a list, not a hash (goal 80)
+    var slot_other: Dict[Int, Int]  # any other key (negative, or past SLOT_KEYS)
     var sx: List[Int]
     var sy: List[Int]
     var shelf_x: Int
@@ -135,7 +137,8 @@ struct GlyphPages(Movable):
     def __init__(out self, width: Int):
         self.width = width
         self.bytes = List[UInt8](length=width * DYN_ROWS, fill=0)
-        self.slot_of = Dict[Int, Int]()
+        self.slot_of = List[Int32]()
+        self.slot_other = Dict[Int, Int]()
         self.sx = List[Int]()
         self.sy = List[Int]()
         self.shelf_x = 1
@@ -174,8 +177,16 @@ struct GlyphPages(Movable):
 
     def place(mut self, key: Int, img: GlyphImage) -> Int:
         """The glyph's slot (packing it on first use, a column and a row of zeros around it)."""
-        if key in self.slot_of:
-            return self.slot_of.get(key, 0)
+        var dense = key >= 0 and key < SLOT_KEYS
+        if dense:
+            if key < len(self.slot_of):
+                var have = Int(self.slot_of[key])
+                if have >= 0:
+                    return have
+        else:
+            var have = self.slot_other.get(key, -1)
+            if have >= 0:
+                return have
         var w = img.w
         var h = img.h
         if self.shelf_x + w + 1 > self.width:
@@ -185,7 +196,9 @@ struct GlyphPages(Movable):
         if self.shelf_y + h + 1 > DYN_ROWS:  # full: start again (glyphs pack again as they're drawn)
             for i in range(len(self.bytes)):
                 self.bytes[i] = 0
-            self.slot_of = Dict[Int, Int]()
+            for i in range(len(self.slot_of)):
+                self.slot_of[i] = -1
+            self.slot_other = Dict[Int, Int]()
             self.sx.clear()
             self.sy.clear()
             self.shelf_x = 1
@@ -204,7 +217,12 @@ struct GlyphPages(Movable):
         self.used = max(self.used, y + h + 1)
         self.sx.append(x)
         self.sy.append(y)
-        self.slot_of[key] = len(self.sx) - 1
+        if dense:
+            while len(self.slot_of) <= key:
+                self.slot_of.append(-1)
+            self.slot_of[key] = Int32(len(self.sx) - 1)
+        else:
+            self.slot_other[key] = len(self.sx) - 1
         self.version += 1
         for r in range(y, min(y + h + 1, DYN_ROWS)):
             self.row_v[r] = self.version
@@ -432,6 +450,33 @@ struct Frame2D(Movable):
         return len(self.polys) // POLY_FLOATS
 
 
+@always_inline
+def _grow(mut out: List[Float32], n: Int) -> Pointer[Float32, MutUntrackedOrigin]:
+    """n more floats on the list, uninitialized; the address of the first (goal 80: an instance written at once, not by
+    16–20 appends, each checking the list's capacity). Grown by half again, so the next ones fit."""
+    var at = len(out)
+    if at + n > out.capacity():
+        out.reserve(at + n + (at + n) // 2)
+    out.resize(unsafe_uninit_length=at + n)
+    return Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(out.unsafe_ptr()) + 4 * at)
+
+
+@always_inline
+def _put_color(p: Pointer[Float32, MutUntrackedOrigin], at: Int, c: UInt32):
+    p.unsafe_offset(at)[] = Float32(Int(c & 0xFF)) / 255.0
+    p.unsafe_offset(at + 1)[] = Float32(Int((c >> 8) & 0xFF)) / 255.0
+    p.unsafe_offset(at + 2)[] = Float32(Int((c >> 16) & 0xFF)) / 255.0
+    p.unsafe_offset(at + 3)[] = Float32(Int((c >> 24) & 0xFF)) / 255.0
+
+
+@always_inline
+def _put_clip(p: Pointer[Float32, MutUntrackedOrigin], at: Int, c0: Float64, c1: Float64, c2: Float64, c3: Float64):
+    p.unsafe_offset(at)[] = Float32(c0)
+    p.unsafe_offset(at + 1)[] = Float32(c1)
+    p.unsafe_offset(at + 2)[] = Float32(c2)
+    p.unsafe_offset(at + 3)[] = Float32(c3)
+
+
 def _color(mut out: List[Float32], c: UInt32):
     out.append(Float32(Int(c & 0xFF)) / 255.0)
     out.append(Float32(Int((c >> 8) & 0xFF)) / 255.0)
@@ -448,16 +493,17 @@ def _clip4(mut out: List[Float32], c0: Float64, c1: Float64, c2: Float64, c3: Fl
 
 def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64, radius: Float64, shape: Int, color: UInt32,
           c0: Float64, c1: Float64, c2: Float64, c3: Float64, hole: Float64 = 0, sigma: Float64 = 0):
-    out.append(Float32(a))
-    out.append(Float32(b))
-    out.append(Float32(c))
-    out.append(Float32(d))
-    out.append(Float32(radius))
-    out.append(Float32(shape))
-    out.append(Float32(hole))  # (D-7973: the middle a box may leave out, its units)
-    out.append(Float32(sigma))  # (goal 80: a shadow's sigma, its units)
-    _color(out, color)
-    _clip4(out, c0, c1, c2, c3)
+    var p = _grow(out, QUAD_FLOATS)
+    p[] = Float32(a)
+    p.unsafe_offset(1)[] = Float32(b)
+    p.unsafe_offset(2)[] = Float32(c)
+    p.unsafe_offset(3)[] = Float32(d)
+    p.unsafe_offset(4)[] = Float32(radius)
+    p.unsafe_offset(5)[] = Float32(shape)
+    p.unsafe_offset(6)[] = Float32(hole)  # (D-7973: the middle a box may leave out, its units)
+    p.unsafe_offset(7)[] = Float32(sigma)  # (goal 80: a shadow's sigma, its units)
+    _put_color(p, 8, color)
+    _put_clip(p, 12, c0, c1, c2, c3)
 
 
 def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, x: Float64, baseline: Float64, size: Float64,
@@ -590,6 +636,22 @@ def _zigzag_start(path: List[Float32], p0: Int, n: Int) -> Int:
 
 
 @always_inline
+def _style_is[O: Origin](st: TextStyle, family: Pointer[UInt8, O], n: Int, size: Float64, weight: Float64, flags: Float64, spacing: Float64) -> Bool:
+    """Whether an OP_RUN's numbers (Scene.run_style's fields) and family are the style in hand."""
+    if st.size != size or Float64(st.weight) != weight or st.letter_spacing != spacing:
+        return False
+    if st.italic != ((Int(flags) & 1) == 1) or st.exact != ((Int(flags) & 2) == 2):
+        return False
+    var fb = st.family.as_bytes()
+    if len(fb) != n:
+        return False
+    for i in range(n):
+        if fb[i] != family.unsafe_offset(i)[]:
+            return False
+    return True
+
+
+@always_inline
 def _box_meets(x0: Float64, y0: Float64, x1: Float64, y1: Float64, rx0: Float64, ry0: Float64, rx1: Float64, ry1: Float64) -> Bool:
     return x1 >= rx0 and x0 <= rx1 and y1 >= ry0 and y0 <= ry1
 
@@ -645,8 +707,8 @@ def _op_meets(scene: Scene, op: Int, kind: Int, rx0: Float64, ry0: Float64, rx1:
         if align == RIGHT and a + size + lean + pad < rx0:
             return False
         return True
-    if kind == OP_POLY:
-        return _path_meets(scene, Int(a), Int(b), pad, rx0, ry0, rx1, ry1)
+    if kind == OP_POLY:  # (its bounds, kept by Scene.polygon)
+        return _box_meets(c - pad, d - pad, e + pad, Float64(scene.nums[base + 5]) + pad, rx0, ry0, rx1, ry1)
     if kind == OP_STROKE:
         return _path_meets(scene, Int(a), Int(b), c / 2 + pad, rx0, ry0, rx1, ry1)
     return True
@@ -673,6 +735,7 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
     if content_k <= 0:  # (a tile's layer has no OP_IMAGE: its only pixels are colour glyphs, added as they come)
         for ref px in scene.images:
             f.pixels.append(px.copy())
+    var st = TextStyle("", 0, False, 0)  # (the last run's style: made again only when the next one's differs)
     var eng = font_engine()  # (goal 80: looked up once per build, not per text op: each lookup costs ~0.4 µs)
     var pg = glyph_pages(atlas.width)
     var clips = List[Float64](capacity=64)  # the clip stack in pixels, x0, y0, x1, y1 per entry (already intersected)
@@ -781,8 +844,14 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     _glyphs(f.glyphs, font.mono_bold, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 added = len(f.glyphs) // GLYPH_FLOATS - before
             elif kind == OP_RUN:  # (goal 79) fonttext's shaped run: coverage glyphs from GlyphPages, colour ones as images
-                var st = scene.run_style(op)
-                var rp = ft_run_in(eng, st, scene.run_text(op))  # (goal 80: not copied; valid until the next run_in)
+                ref full = scene.texts[Int(scene.text_of[op])]  # ("family\x1ftext", read in place)
+                var fb = full.as_bytes()
+                var cut = 0
+                while cut < len(fb) and fb[cut] != 0x1F:
+                    cut += 1
+                if not _style_is(st, fb.unsafe_ptr(), cut, c, d, e, Float64(scene.nums[base + 5])):
+                    st = scene.run_style(op)
+                var rp = ft_run_in(eng, st, String(full[byte=cut + 1:]))  # (goal 80: not copied; valid until the next run_in)
                 ref r = rp[]
                 var xl = run_x(r, a, scene.run_align(op))
                 var size_dev = st.size * tk
@@ -823,20 +892,21 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         var slot = pg[].place(ii, eng[].images[ii])
                         var u0 = pg[].sx[slot]
                         var v0 = atlas.dyn_y0 + pg[].sy[slot]
-                        f.glyphs.append(Float32(x_l))
-                        f.glyphs.append(Float32(y_l))
-                        f.glyphs.append(Float32(Float64(iw) * ik))
-                        f.glyphs.append(Float32(Float64(ih) * ik))
-                        f.glyphs.append(Float32(u0))
-                        f.glyphs.append(Float32(v0))
-                        f.glyphs.append(Float32(u0 + iw))
-                        f.glyphs.append(Float32(v0 + ih))
-                        _color(f.glyphs, color)
-                        f.glyphs.append(0)
-                        f.glyphs.append(Float32(b))
-                        f.glyphs.append(0)
-                        f.glyphs.append(0)
-                        _clip4(f.glyphs, c0, c1, c2, c3)
+                        var gp = _grow(f.glyphs, GLYPH_FLOATS)
+                        gp[] = Float32(x_l)
+                        gp.unsafe_offset(1)[] = Float32(y_l)
+                        gp.unsafe_offset(2)[] = Float32(Float64(iw) * ik)
+                        gp.unsafe_offset(3)[] = Float32(Float64(ih) * ik)
+                        gp.unsafe_offset(4)[] = Float32(u0)
+                        gp.unsafe_offset(5)[] = Float32(v0)
+                        gp.unsafe_offset(6)[] = Float32(u0 + iw)
+                        gp.unsafe_offset(7)[] = Float32(v0 + ih)
+                        _put_color(gp, 8, color)
+                        gp.unsafe_offset(12)[] = 0
+                        gp.unsafe_offset(13)[] = Float32(b)
+                        gp.unsafe_offset(14)[] = 0
+                        gp.unsafe_offset(15)[] = 0
+                        _put_clip(gp, 16, c0, c1, c2, c3)
                 var ng = len(f.glyphs) // GLYPH_FLOATS - g0
                 var ni = len(f.images) // IMAGE_FLOATS - i0
                 if ng > 0:
@@ -862,19 +932,14 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 var p0 = first * 2
                 var pt0 = len(f.points) // 2
                 var fan0 = len(f.fan) // 2
-                var bx0 = scene.path[p0]
-                var by0 = scene.path[p0 + 1]
-                var bx1 = bx0
-                var by1 = by0
-                for z in range(n):
-                    var x = scene.path[p0 + 2 * z]
-                    var y = scene.path[p0 + 2 * z + 1]
-                    f.points.append(x)
-                    f.points.append(y)
-                    bx0 = min(bx0, x)
-                    by0 = min(by0, y)
-                    bx1 = max(bx1, x)
-                    by1 = max(by1, y)
+                var bx0 = scene.nums[base + 2]  # (its bounds, kept by Scene.polygon)
+                var by0 = scene.nums[base + 3]
+                var bx1 = scene.nums[base + 4]
+                var by1 = scene.nums[base + 5]
+                var pp = _grow(f.points, 2 * n)
+                var sp = scene.path.unsafe_ptr()
+                for z in range(2 * n):
+                    pp.unsafe_offset(z)[] = sp.unsafe_offset(p0 + z)[]
                 # n − 2 triangles zig-zagging in from both ends ((lo, lo+1, hi), then (lo, hi−1, hi), …): their edges
                 # inside the polygon cancel in pairs, so their signed windings add up to the polygon's (like a fan from
                 # p0), but a ribbon (an ink outline: one side out, the other back) is covered about once instead of
@@ -887,6 +952,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 var lo = rot
                 var hi = rot + n - 1
                 var upper = True
+                var fp = _grow(f.fan, 6 * (n - 2))
+                var w = 0
                 while hi - lo >= 2:
                     var ia: Int
                     var ib: Int
@@ -899,23 +966,22 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         ib = hi
                         hi -= 1
                     var ic = hi if upper else lo
-                    ia = ia % n
-                    ib = ib % n
-                    ic = ic % n
-                    if upper:
-                        f.fan.append(scene.path[p0 + 2 * ia])
-                        f.fan.append(scene.path[p0 + 2 * ia + 1])
-                        f.fan.append(scene.path[p0 + 2 * ib])
-                        f.fan.append(scene.path[p0 + 2 * ib + 1])
-                        f.fan.append(scene.path[p0 + 2 * ic])
-                        f.fan.append(scene.path[p0 + 2 * ic + 1])
-                    else:
-                        f.fan.append(scene.path[p0 + 2 * ic])
-                        f.fan.append(scene.path[p0 + 2 * ic + 1])
-                        f.fan.append(scene.path[p0 + 2 * ia])
-                        f.fan.append(scene.path[p0 + 2 * ia + 1])
-                        f.fan.append(scene.path[p0 + 2 * ib])
-                        f.fan.append(scene.path[p0 + 2 * ib + 1])
+                    if ia >= n:
+                        ia -= n
+                    if ib >= n:
+                        ib -= n
+                    if ic >= n:
+                        ic -= n
+                    var v0 = ia if upper else ic  # (the same three corners, in the order that keeps the winding)
+                    var v1 = ib if upper else ia
+                    var v2 = ic if upper else ib
+                    fp.unsafe_offset(w)[] = sp.unsafe_offset(p0 + 2 * v0)[]
+                    fp.unsafe_offset(w + 1)[] = sp.unsafe_offset(p0 + 2 * v0 + 1)[]
+                    fp.unsafe_offset(w + 2)[] = sp.unsafe_offset(p0 + 2 * v1)[]
+                    fp.unsafe_offset(w + 3)[] = sp.unsafe_offset(p0 + 2 * v1 + 1)[]
+                    fp.unsafe_offset(w + 4)[] = sp.unsafe_offset(p0 + 2 * v2)[]
+                    fp.unsafe_offset(w + 5)[] = sp.unsafe_offset(p0 + 2 * v2 + 1)[]
+                    w += 6
                     upper = not upper
                 f.polys.append(Float32(fan0))
                 f.polys.append(Float32(3 * (n - 2)))

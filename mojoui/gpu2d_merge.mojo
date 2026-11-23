@@ -18,7 +18,7 @@
 # Within a group runs keep their order; groups keep the order of their first run. A group is searched for at most
 # SEARCH groups back (the cost stays linear).
 
-from mojoui.gpu2d import (Frame2D, Run, Layer2D, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
+from mojoui.gpu2d import (_grow, Frame2D, Run, Layer2D, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
                           IMAGE_FLOATS, POLY_FLOATS, SHAPE_CAPSULE, SHAPE_SHADOW, NO_CLIP)
 
 comptime PAD = 4.0  # pixels around each instance's box (see above)
@@ -186,8 +186,10 @@ def _plan(f: Frame2D, layer: Layer2D) -> _Plan:
 
 
 def _copy(mut dst: List[Float32], src: List[Float32], first: Int, n: Int):
-    for i in range(first, first + n):
-        dst.append(src[i])
+    var p = _grow(dst, n)
+    var q = src.unsafe_ptr()
+    for i in range(n):
+        p.unsafe_offset(i)[] = q.unsafe_offset(first + i)[]
 
 
 def merge_runs(mut src: Frame2D, mut dst: Frame2D):

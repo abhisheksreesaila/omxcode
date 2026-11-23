@@ -797,8 +797,9 @@ struct FontEngine(Movable):
             return self._mac_image(inst, gid, size_dev, subx)
         var s64 = Int(size_dev * 64 + 0.5)
         var key = (((inst * 1048576 + gid) * 65536 + s64) << 2) | (subx & 3)
-        if key in self.image_of:
-            return self.image_of.get(key, 0)
+        var known = self.image_of.get(key, -1)
+        if known >= 0:
+            return known
         ref ins = self.insts[inst]
         var fi = ins.face
         var img = GlyphImage()

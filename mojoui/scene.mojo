@@ -26,7 +26,7 @@ comptime OP_FILL = 5  # the whole canvas, one colour (set, not blended)
 comptime OP_CLIP = 6  # x, y, w, h: what follows (until OP_UNCLIP) is cut to this rect
 comptime OP_UNCLIP = 7
 comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a video frame), scaled to the rect
-comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
+comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40); 2–5: its bounds x0, y0, x1, y1 (goal 80)
 comptime OP_STROKE = 11  # first point, points, width (the points in Scene.path): a polyline with round caps and joins (D-7940)
 comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spacing (+ "family\x1ftext"): a run in a real face (mojoui.fonttext, goal 79)
 comptime OP_SHADOW = 12  # x, y, w, h, radius, blur (CSS's blur radius, 2 sigma): a rounded box's Gaussian shadow (goal 80, mojoui.shadow)
@@ -828,9 +828,23 @@ struct Scene(Painter, Movable, Copyable):
         if n < 3:
             return
         var first = len(self.path) // 2
-        for v in pts:
-            self.path.append(Float32(v))
-        self._op(OP_POLY, Float64(first), Float64(n), 0, 0, 0, 0, color, -1)
+        var at = len(self.path)
+        var total = at + 2 * n
+        if total > self.path.capacity():
+            self.path.reserve(total + total // 2)
+        self.path.resize(unsafe_uninit_length=total)
+        var q = self.path.unsafe_ptr()
+        var p = pts.unsafe_ptr()
+        # (goal 80: the bounds are taken while the points go by, in pairs; batching and culling read them)
+        var lo = SIMD[DType.float32, 2](Float32(pts[0]), Float32(pts[1]))
+        var hi = lo
+        for z in range(n):
+            var v = SIMD[DType.float32, 2](Float32(p.unsafe_offset(2 * z)[]), Float32(p.unsafe_offset(2 * z + 1)[]))
+            lo = min(lo, v)
+            hi = max(hi, v)
+            q.unsafe_offset(at + 2 * z)[] = v[0]
+            q.unsafe_offset(at + 2 * z + 1)[] = v[1]
+        self._op(OP_POLY, Float64(first), Float64(n), Float64(lo[0]), Float64(lo[1]), Float64(hi[0]), Float64(hi[1]), color, -1)
 
     def stroke(mut self, pts: List[Float64], width: Float64, color: UInt32):
         var n = len(pts) // 2
