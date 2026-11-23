@@ -41,7 +41,7 @@ installed nothing system-wide. Status per milestone on the Mac:
 | M1 | **FAIL** | Web faces, CJK and emoji match exactly; the fallback scripts (Hindi, Tamil, Arabic, Korean) use Apple's faces where the reference (Chromium on Linux) used Noto. The decision is open: ship the Noto faces, or judge those lines against the Mac's Chrome (macwidths.py measures them; Chrome's own web-face widths differ per platform too) |
 | M5 | **FAIL** | The AppKit host has no NSTextInputClient yet (struct-returning methods to solve on arm64) |
 | GPU | present | gpu2d draws on Metal (Apple M4) |
-| M6 | **FAIL / BLOCKED** | Native: zoom p95 9.2 / max 12.9 on Metal; every other row n=0 (the AppKit framebench lacks those bench kinds). Web race: needs node + Playwright on the Mac (not installed: the owner's call) |
+| M6 | **FAIL / BLOCKED** | Native: zoom p95 9.2 / max 12.9 on Metal; every other row n=0 (the AppKit framebench lacks those bench kinds). Web race: needs node + Playwright on the Mac (not installed: the main session's call, since given: D-7977) |
 | M7 | **FAIL** | The shots come back now (render step, PNOTE_BOXES, fetched {out}). Open: renders at 1× (the screen's scale) vs the 2× reference; the notes panel rows come out in another order; goal 75's compare.png; components.md fonttext ✅ on the Mac |
 
 ## Continuation 12 (2026-11-22, evening, autopilot): where undo's GPU time goes, shadows thinned
@@ -268,7 +268,7 @@ Treat its single-spike rows as suspect, not as proof.
 
 **Read it honestly.** Where the kept view can be used, the first frame meets D-7946 (a) on the 600 note (7.8 ms). On the
 stress note it comes close (11.7 ms; ~9.6 ms p95 in quieter probes). The first open of a note ever, with nothing kept,
-still parses: 27.7 and 112.7 ms. If the owner rules that this is the open D-7946 (a) judges (D-7958), (a) can't pass on
+still parses: 27.7 and 112.7 ms. If the main session rules that this is the open D-7946 (a) judges (D-7958), (a) can't pass on
 the stress note. The cost of the new path is a press during the open: it must finish the whole load (D-7952), which now
 includes waiting for the job, so it takes 60 ms. The stress frames during the open (12.6 / 16.6) are the paint walk plus
 damage tracking over ~5,000 objects each slice, plus slices. Next: edits on a partial board (attack D-7952's

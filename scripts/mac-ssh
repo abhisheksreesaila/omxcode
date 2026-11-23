@@ -48,7 +48,7 @@ exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" C
 steps=${steps//\{data\}/$PWD/data}
 steps=${steps//\{out\}/$outd}
 # scroll bars as a trackpad shows them, for this app only (its own defaults domain), only when asked: MAC_APP_DEFAULTS=1
-# (the owner, 11-22: no `defaults` changes on the Mac; by default the Mac's own setting stands)
+# (the main session, 11-22: no `defaults` changes on the Mac; by default the Mac's own setting stands)
 if [ "${APP_DEFAULTS:-0}" = 1 ]; then
     defaults write "$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleIdentifier)" AppleShowScrollBars -string WhenScrolling
 fi

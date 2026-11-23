@@ -32,7 +32,7 @@ A dated record of what was tried, what happened, and what it means. Newest first
   - Emoji advance: Chrome is 1 px under CoreText's at 12–24 px, by no rule found. The Mac's two Chrome references disagree on emoji.
   - PN's Mac launcher (pywebview) has no DevTools port, so its cold start can't be measured.
   - The Mac dropped off the network twice.
-- **Next.** The Mac's renderer on 5,400 objects and viewsnap on Metal. The emoji rule. The owner's call on the launcher row and on which Mac Chrome measurement is the emoji reference.
+- **Next.** The Mac's renderer on 5,400 objects and viewsnap on Metal. The emoji rule. The main session's call on the launcher row and on which Mac Chrome measurement is the emoji reference.
 
 ## Goal 79, continuation 13: Linux M6 down to stress undo (2026-11-22, evening)
 - **Setup:** Linux, a quiet machine.
