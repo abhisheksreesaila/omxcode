@@ -1073,7 +1073,7 @@ def m6_mac(race):
     rows = rows.replace("\n\n", f"\n\nWeb renderer on the Mac: {gpu.group(1) if gpu else 'not reported'}.\n\n", 1)
     (ROOT / "docs/goals/79/race-mac.md").write_text(rows)
     if not ok:
-        return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if "✗" in l)[:700]
+        return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if l.startswith("|") and l.rstrip().endswith("✗ |"))[:900]
     return "PASS", "docs/goals/79/race-mac.md"
 
 
