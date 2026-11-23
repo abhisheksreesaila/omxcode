@@ -31,7 +31,7 @@
 /* the film: steps on the left scroll; the window on the right stays */
 .film2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 8fr); gap: 56px; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
 .steps { padding: 10svh 0 30svh; }
-.step { min-height: 78svh; display: flex; flex-direction: column; justify-content: center; opacity: .28; transition: opacity .5s var(--ease); }
+.step { min-height: 78svh; display: flex; flex-direction: column; justify-content: center; opacity: .55; transition: opacity .5s var(--ease); }
 .step.now { opacity: 1; }
 .step .k { font: 600 12.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--word); }
 .step h2 { font: 800 clamp(30px, 3.4vw, 48px)/1.04 var(--display); letter-spacing: -.04em; margin: 12px 0 0; }
@@ -45,15 +45,6 @@
 .face.on { opacity: 1; scale: 1; visibility: visible; z-index: 1;
   transition: opacity .42s var(--ease) .16s, scale .7s var(--oq-spring, var(--ease)) .16s, visibility 0s; }
 .face img, .face video { display: block; width: 100%; height: 100%; object-fit: cover; }
-/* the three-column map: one highlight glides between the Stage's regions (the still is 1280×820: top bar to y 66, left column to
-   x 281, the right column from x 999, the chat bar from y 742) */
-.hl { position: absolute; z-index: 2; border-radius: 16px; pointer-events: none; opacity: 0;
-  box-shadow: 0 0 0 3px #2fb8a6, 0 0 0 9999px rgb(10 10 14 / .5);
-  transition: left .7s var(--oq-spring, var(--ease)), top .7s var(--oq-spring, var(--ease)), width .7s var(--oq-spring, var(--ease)), height .7s var(--oq-spring, var(--ease)), opacity .3s var(--ease); }
-.frame[data-beat="0"] .hl { opacity: 1; left: .6%; top: .6%; width: 98.8%; height: 7.4%; }
-.frame[data-beat="1"] .hl { opacity: 1; left: .6%; top: 8.6%; width: 21%; height: 90.6%; }
-.frame[data-beat="2"] .hl { opacity: 1; left: 22.4%; top: 8.6%; width: 55.4%; height: 81%; }
-.frame[data-beat="3"] .hl { opacity: 1; left: 22.4%; top: 89.6%; width: 55.4%; height: 9.6%; }
 
 .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 44px; text-align: left; }
 .lanes > div { border-radius: 22px; padding: 24px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
@@ -75,6 +66,7 @@
 .devs .shot { border-radius: 20px; overflow: hidden; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); }
 .devs .shot img { display: block; width: 100%; height: auto; }
 .devs .ph { border-radius: 26px; }
+@media (prefers-reduced-motion: reduce) { .face, .face.on, .step { transition: none; } .face { scale: 1; } }
 @media (max-width: 860px) {
   .film2 { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px; }
   .pin { order: -1; top: 56px; height: auto; z-index: 3; padding: 10px 0 14px; background: linear-gradient(#000 85%, transparent); }
@@ -109,25 +101,17 @@
 <section id="film" style="padding:0">
   <div class="film2">
     <div class="steps">
-      <article class="step now" data-k="0"><div class="k">The Stage</div><h2>Your day on one screen.</h2><p>Profiles and settings along the top: everyone in the house, or one person at a time. Below, three columns, so you always know where to look.</p><div class="src">sample data</div></article>
-      <article class="step" data-k="1"><div class="k">Left · quiet</div><h2>What can wait.</h2><p>The clock, things that don't need you yet (the weather, a birthday, the front door), and what you pinned to keep at your side.</p></article>
-      <article class="step" data-k="2"><div class="k">Centre · the stage</div><h2>What matters now.</h2><p>Up to six live tiles on an exact grid. The most urgent one is always the biggest: “Leave by 8:05, the bridge is slow.”</p></article>
-      <article class="step" data-k="3"><div class="k">Bottom · the chat bar</div><h2>Just talk.</h2><p>It's listening, and shows the words while it answers. Or tap the keyboard and type.</p></article>
-      <article class="step" data-k="4"><div class="k">Right · live</div><h2>Things that keep ticking.</h2><p>The pasta timer, traffic, a flight: small rows, always current. When one becomes urgent, it leaves the column and takes the big tile. Near the airport, the flight shows your gate and boarding time, and the timer keeps counting.</p><div class="src">the Stage demo with sample data: moments picked with its “Try a day” buttons · tap marks drawn in</div></article>
-      <article class="step" data-k="5"><div class="k">Live tiles</div><h2>It dresses for the day. A little.</h2><p>Rain before pickup moves the weather onto the stage with an umbrella; game night hangs a pennant on the game card. One small charm, never a makeover. When the moment passes, the tile gives its place back, like water.</p><div class="src">the Stage demo with sample data, moments picked by hand · tap marks drawn in</div></article>
-      <article class="step" data-k="6"><div class="k">Show me</div><h2>The chat bar becomes the explanation.</h2><p>Ask for a Saturday in Lisbon and the bar grows over the stage like a TV, with a real map. It flies to each stop as it names it, then folds back to your tiles.</p><div class="src">the real app with a local model · thinking shown at 6×, two pauses cut (marked)</div></article>
-      <article class="step" data-k="7"><div class="k">It points</div><h2>“This part.”</h2><p>As it talks, a ring moves to what it means: the word, then the meaning, then the example. You follow from across the kitchen without reading a line.</p><div class="src">the real app with a local model · thinking shown at 4×, pauses cut (marked) · tap marks drawn in</div></article>
-      <article class="step" data-k="8"><div class="k">Made on the fly</div><h2>The model builds the card. omxcode draws it.</h2><p>No app for every question: the model describes the card it needs from omxcode's own components (a diagram, a map, a checklist, a chart) and the app draws it natively, over <a href="https://docs.ag-ui.com">AG-UI</a>. Nothing it sends runs as code.</p><div class="src">the real app with a local model · thinking shown at 6×, cuts marked</div></article>
+      <article class="step now" data-k="0"><div class="k">The Stage</div><h2>Your day on one screen.</h2><p>What you pinned on the left. What matters now in the middle. What's live on the right. And a chat bar at the bottom: just talk, or tap to type.</p><div class="src">the Stage with sample data</div></article>
+      <article class="step" data-k="1"><div class="k">Ask anything</div><h2>The chat takes the stage to explain it.</h2><p>Ask for a Saturday in Lisbon, how a heat pump works, what a word means. The chat bar grows over the stage like a TV and the model builds the card it needs: a real map, a diagram, a word card. A ring points at each part as it talks, then it all folds back to your tiles.</p><div class="src">the real app with a local model · thinking shown at 6×, two pauses cut (marked)</div></article>
+      <article class="step" data-k="2"><div class="k">Left · pinned</div><h2>Keep what you want at your side.</h2><p>Drag any tile onto Pinned and it stays on the left, out of the way but in sight. The stage closes the gap. Unpin it and it comes back.</p><div class="src">the Stage demo with sample data · drag marks drawn in</div></article>
+      <article class="step" data-k="3"><div class="k">Right · live</div><h2>What keeps changing, as it changes.</h2><p>A game's score, a flight landing, the pasta timer: small rows that update on their own. When one needs you, it moves to the big tile in the middle.</p><div class="src">the Stage demo with sample data: the score, the landing and the timer are made up, and tick on their own</div></article>
     </div>
     <div class="pin">
       <div class="frame" data-beat="0">
-        <figure class="face on" data-k="0 1 2 3"><img src="img/omx/stage-day.jpg" alt="The Stage: profiles on top; Today and Pinned on the left; live tiles in the centre with traffic big; the pasta timer and the flight on the right; the chat bar at the bottom"></figure>
-        <figure class="face" data-k="4"><video src="img/omx/clip-live.mp4" poster="img/omx/clip-live.jpg" muted loop playsinline preload="metadata" aria-label="The Live column: the pasta timer ticks; near the airport the flight leaves the column and becomes the big tile"></video></figure>
-        <figure class="face" data-k="5"><video src="img/omx/clip-tiles.mp4" poster="img/omx/clip-tiles.jpg" muted loop playsinline preload="none" aria-label="Rain at 4: the weather tile takes the stage with an umbrella; game night with a pennant"></video></figure>
-        <figure class="face" data-k="6"><video src="img/omx/clip-map.mp4" poster="img/omx/clip-map.jpg" muted loop playsinline preload="none" aria-label="Plan a Saturday in Lisbon: the TV opens with a map that flies to each stop"></video></figure>
-        <figure class="face" data-k="7"><video src="img/omx/clip-tv.mp4" poster="img/omx/clip-tv.jpg" muted loop playsinline preload="none" aria-label="What does ephemeral mean: the word card, the ring on the word, the meaning, the example"></video></figure>
-        <figure class="face" data-k="8"><video src="img/omx/clip-cards.mp4" poster="img/omx/clip-cards.jpg" muted loop playsinline preload="none" aria-label="How does a heat pump work: the model's diagram card, the ring walking its parts"></video></figure>
-        <div class="hl" aria-hidden="true"></div>
+        <figure class="face on" data-k="0"><img src="img/omx/stage-day.jpg" alt="The Stage: Today and Pinned on the left; live tiles in the centre with traffic big; the pasta timer, a game's score and a landing on the right; the chat bar at the bottom"></figure>
+        <figure class="face" data-k="1"><video src="img/omx/clip-map.mp4" poster="img/omx/clip-map.jpg" muted loop playsinline preload="metadata" aria-label="Plan a Saturday in Lisbon: the chat bar grows into the TV with a map that flies to each stop, then folds back"></video></figure>
+        <figure class="face" data-k="2"><video src="img/omx/clip-pin.mp4" poster="img/omx/clip-pin.jpg" muted loop playsinline preload="none" aria-label="A tile dragged from the stage onto Pinned on the left; the stage closes the gap"></video></figure>
+        <figure class="face" data-k="3"><video src="img/omx/clip-live.mp4" poster="img/omx/clip-live.jpg" muted loop playsinline preload="none" aria-label="The Live column: the pasta timer ticks, the game's score changes, a flight landing"></video></figure>
       </div>
     </div>
   </div>
@@ -206,6 +190,8 @@
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) setBeat(+e.target.dataset.k); }), { rootMargin: matchMedia('(max-width: 860px)').matches ? '-60% 0px -32% 0px' : '-45% 0px -45% 0px' });  // (a phone: the window sits on top, so a step counts once its words are below it)
   steps.forEach((s) => io.observe(s));
   setBeat(0);
+  // the tour off screen: its clip rests; back on screen, the step's clip plays again
+  new IntersectionObserver((es) => es.forEach((e) => frame.querySelectorAll('.face.on video').forEach((v) => { if (!e.isIntersecting) v.pause(); else if (!calm) v.play().catch(() => {}); }))).observe(document.getElementById('film'));
 })();
 </script>
 <script src="site.js"></script>

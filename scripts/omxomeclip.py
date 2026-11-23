@@ -31,6 +31,7 @@ edit: 1600×1024 (the window's shape, as the stills were), a camera that eases i
   loops. H.264, yuv420p, +faststart, no audio, crf 26; the poster is the payoff frame.
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -49,7 +50,7 @@ WIN = (WIN_PT[0] * SCALE, WIN_PT[1] * SCALE)  # the take's pixels
 OUT = (1600, 1024)
 FPS = 30
 CRF = int(os.environ.get("OMXOME_CRF", "26"))
-NAMES = ["tv", "tiles", "cards", "hybrid", "map", "live"]
+NAMES = ["tv", "tiles", "cards", "hybrid", "map", "live", "pin"]
 TODO = '{"items":[{"text":"buy milk","done":false},{"text":"call mum","done":false},{"text":"book the dentist","done":false}]}'
 OPEN = "waitfor:Listening=300000;wait:2500;"  # (the model has loaded; the stage settles)
 
@@ -100,9 +101,14 @@ def plan(name, d):
                  + "wait:2500;tap:Back to the tiles;wait:4000;" + f"shot:{d}/last.png")
         return BUILDS / "build/omx/linux/omx", steps, env, "WAITED: Listening", 900
     if name == "live":
-        steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:5500",
+        # (the plain morning long enough for the timer and a score change in Live, then the airport, then the morning)
+        steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:17000",
                           "tap:Fri 7:20 · near the airport", "wait:6000", "tap:7:45 school run", "wait:3500"])
         return BUILDS / "build/stage/linux/stage", steps, {"STAGE_TRACE": str(d / "trace.txt")}, None, 120
+    if name == "pin":
+        # no test steps: GTK's gestures ignore real pointer input while MOJOUI_TEST drives (a first take's XTest drag never
+        # moved the tile), so the whole take is real X input (drag_to_pinned), as scripts/live.py drives an app
+        return BUILDS / "build/stage/linux/stage", None, {"STAGE_TRACE": str(d / "trace.txt"), "MOJOUI_LIVE_REPORT": "1"}, None, 60
     if name == "hybrid":
         env["OMX_LANE_SWITCH"] = "1"
         steps = OPEN + f"regions:{d}/home.json;wait:1500;tap:Switch lane;wait:3500;tap:Switch lane;wait:3000;shot:{d}/last.png"
@@ -121,7 +127,11 @@ def take(name):
     sys.path.insert(0, str(BUILDS / "scripts"))
     import headless
     headless.ensure()
-    env = dict(os.environ, GDK_SCALE=str(SCALE), MOJOUI_WINDOW=f"{WIN_PT[0]}x{WIN_PT[1]}", MOJOUI_TEST=steps)
+    env = dict(os.environ, GDK_SCALE=str(SCALE), MOJOUI_WINDOW=f"{WIN_PT[0]}x{WIN_PT[1]}")
+    if steps is not None:
+        env["MOJOUI_TEST"] = steps
+    else:
+        env.pop("MOJOUI_TEST", None)
     sink = None
     if binary.name == "omx":
         m = g72()
@@ -145,6 +155,8 @@ def take(name):
     if start_on is None:
         time.sleep(0.8)
         start_recording()
+    if name == "pin":
+        threading.Thread(target=drag_to_pinned, args=(d, t_rec, app, lines), daemon=True).start()
     killer = threading.Timer(timeout, app.kill)
     killer.start()
     try:
@@ -165,6 +177,103 @@ def take(name):
             sink.__exit__(None, None, None)
     (d / "events.json").write_text(json.dumps([l for l in lines if not l[1].startswith(("LABEL:", "ICON:"))], indent=0))
     print(f"take {name}: exit {app.returncode}, {d / 'raw.mp4'}", flush=True)
+
+
+def drag_to_pinned(d, t_rec, app, lines, at=3.0, carry=1.4, tile="todo", hold=5.0):
+    """A person's drag, as real X input: press on the to-do tile, carry it over `carry` seconds onto Pinned (left column),
+    let go. Aimed as scripts/g77_stage_sides_check.py aims its drag: the app's own record (STAGE_TRACE: the last EV ZONES,
+    the pinned box in the tiles canvas's points and the canvas in the window's; the last EV TILES, each tile's box in canvas
+    points). Then `hold` seconds with the card in Pinned, a click on its pin-off button (found from the app's own report:
+    SIGUSR1 with MOJOUI_LIVE_REPORT=1 prints BOX: lines; the lowest stage-unpin is the new card's), 3 s more, and the app
+    is closed. Every pointer position goes to pointer.json with its time into the recording (the edit draws the dot)."""
+    import signal
+    from Xlib import X, display
+    from Xlib.ext import xtest
+    trace = d / "trace.txt"
+    zone = canvas = box = None
+    while time.monotonic() < t_rec[0] + at:
+        if trace.exists():
+            for line in trace.read_text().splitlines():
+                m = re.search(r"EV \d+ ZONES pinned=(-?\d+),(-?\d+),(\d+),(\d+) canvas=(\d+),(\d+),(\d+),(\d+)", line)
+                if m:
+                    v = [int(x) for x in m.groups()]
+                    zone, canvas = v[:4], v[4:]
+                if " TILES " in line:
+                    mm = re.search(rf"[ ;]{tile} ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+)", line)
+                    if mm:
+                        box = [float(x) for x in mm.groups()]
+        time.sleep(0.1)
+    if not (zone and canvas and box):
+        print(f"drag: no ZONES / TILES record to aim at ({zone}, {canvas}, {box})", flush=True)
+        return
+    x0, y0 = (canvas[0] + box[0] + box[2] / 2) * SCALE, (canvas[1] + box[1] + box[3] / 2) * SCALE
+    x1, y1 = (canvas[0] + zone[0] + zone[2] / 2) * SCALE, (canvas[1] + zone[1] + min(zone[3] / 2, 60)) * SCALE
+    dpy = display.Display(os.environ["DISPLAY"])
+    log = []
+
+    def move(x, y):
+        xtest.fake_input(dpy, X.MotionNotify, x=int(x), y=int(y))
+        dpy.sync()
+        log.append([round(time.monotonic() - t_rec[0], 3), round(x), round(y), down[0]])
+
+    down = [0]
+    move(x0, y0)
+    time.sleep(0.35)
+    xtest.fake_input(dpy, X.ButtonPress, 1)
+    dpy.sync()
+    down[0] = 1
+    move(x0, y0)
+    time.sleep(0.2)
+    n = int(carry * 60)
+    for k in range(1, n + 1):
+        u = ease(k / n)
+        move(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u - 40 * SCALE * math.sin(math.pi * u))  # (a hand's arc, not a ruler line)
+        time.sleep(carry / n)
+    time.sleep(0.25)
+    xtest.fake_input(dpy, X.ButtonRelease, 1)
+    dpy.sync()
+    down[0] = 0
+    move(x1, y1)
+    print(f"drag: {tile} ({x0:.0f},{y0:.0f}) -> Pinned ({x1:.0f},{y1:.0f}), {len(log)} moves", flush=True)
+    time.sleep(1.5)
+    n0 = len(lines)
+    os.kill(app.pid, signal.SIGUSR1)  # (the widgets' report: where the pinned card's pin-off button is)
+    time.sleep(1.0)
+    unpins = []
+    for _, line in lines[n0:]:
+        m = re.match(r"BOX: stage-unpin ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+)", line)
+        if m:
+            unpins.append([float(v) for v in m.groups()])
+    clicks = []
+    if unpins:
+        b = max(unpins, key=lambda r: r[1])
+        ux, uy = (b[0] + b[2] / 2) * SCALE, (b[1] + b[3] / 2) * SCALE
+        time.sleep(max(hold - 3.0, 0.3))
+        for k in range(1, 25):  # (the hand goes to the button and presses at once: resting on it opens its tooltip, which
+            u = ease(k / 24)     # Xvfb draws as a black box, no compositor)
+            move(x1 + (ux - x1) * u, y1 + (uy - y1) * u)
+            time.sleep(0.4 / 24)
+        xtest.fake_input(dpy, X.ButtonPress, 1)
+        dpy.sync()
+        down[0] = 1
+        move(ux, uy)
+        time.sleep(0.08)
+        xtest.fake_input(dpy, X.ButtonRelease, 1)
+        dpy.sync()
+        down[0] = 0
+        move(ux, uy)
+        clicks.append([log[-1][0], ux, uy])
+        away = (ux - 160 * SCALE, uy + 120 * SCALE)  # (and leaves it, before a tooltip can open)
+        for k in range(1, 13):
+            u = ease(k / 12)
+            move(ux + (away[0] - ux) * u, uy + (away[1] - uy) * u)
+            time.sleep(0.25 / 12)
+        print(f"unpin: clicked ({ux:.0f},{uy:.0f})", flush=True)
+    else:
+        print("unpin: no stage-unpin in the report", flush=True)
+    (d / "pointer.json").write_text(json.dumps({"from": [x0, y0], "to": [x1, y1], "moves": log, "clicks": clicks}))
+    time.sleep(3.5)
+    app.terminate()
 
 
 # ------------------------------------------------------------------------------------------------------------------ edit
@@ -229,6 +338,7 @@ class Clip:
         self.checks = {}  # name -> out_t
         self.loop = 0.0  # the last seconds dissolve into the first frame, so the loop has no jump
         self.blank = None  # a rect (take pixels) that must never show flat: such a frame is replaced by the last good one
+        self.path = []  # (src_t, x, y, down): a real pointer's moves (take pixels); drawn as a dot while the button is down
 
     def seg(self, t0, t1, speed=1.0):
         self.segs.append((t0, t1, speed, self.t))
@@ -309,6 +419,8 @@ class Clip:
             cam = self.camera(t)
             x, y, w, h = cam
             im = Image.fromarray(frames[k]).crop((int(x), int(y), int(x + w), int(y + h))).resize(OUT, Image.LANCZOS).convert("RGBA")
+            if self.path:
+                im = carry_dot(im, self.path, st, cam)
             for (ts, tx, ty) in self.taps:
                 age = st - ts + 0.32  # (the press shows just before the screen answers it, and is gone as it changes)
                 if 0 <= age <= 0.36 and speed != 0.0:
@@ -395,6 +507,32 @@ def chip(im, text, alpha):
     a = int(255 * alpha)
     d.rounded_rectangle([x0, y0, x1, y0 + 46], 14, fill=PAGE + (int(200 * alpha),), outline=LINE + (a,), width=2)
     d.text((x0 + 18, y0 + 8), text, font=f, fill=INK + (a,))
+    return Image.alpha_composite(im, layer)
+
+
+def carry_dot(im, path, st, cam):
+    """The pointer while it holds the button (a drag): a firm dot that follows the take's own moves, fading in at the
+    press and out after the release."""
+    from PIL import Image, ImageDraw
+    k = max((i for i, p in enumerate(path) if p[0] <= st), default=-1)
+    if k < 0:
+        return im
+    downs = [p[0] for p in path if p[3] == 1]
+    if not downs:
+        return im
+    t_press = downs[0]
+    t_release = next((p[0] for p in path if p[0] > t_press and p[3] == 0), downs[-1])
+    if st < t_press - 0.05 or st > t_release + 0.3:
+        return im
+    a = min(1.0, (st - t_press + 0.05) / 0.15) * (1.0 if st <= t_release else max(0.0, 1 - (st - t_release) / 0.3))
+    x, y = path[k][1], path[k][2]
+    cx, cy, cw, ch = cam
+    ox, oy = (x - cx) * OUT[0] / cw, (y - cy) * OUT[1] / ch
+    layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
+    dr = ImageDraw.Draw(layer)
+    r = 22
+    dr.ellipse([ox - r - 8, oy - r - 8, ox + r + 8, oy + r + 8], fill=(30, 30, 36, int(40 * a)))
+    dr.ellipse([ox - r, oy - r, ox + r, oy + r], fill=(30, 30, 36, int(110 * a)), outline=(255, 255, 255, int(200 * a)), width=3)
     return Image.alpha_composite(im, layer)
 
 
@@ -662,43 +800,74 @@ EDITS["map"] = edit_map
 
 
 def edit_live():
-    """The Stage demo's right column: a gentle push-in on Live (the pasta timer ticking each second, the flight row), then
-    "Fri 7:20 · near the airport": the flight leaves Live and takes the stage's big tile (a luggage-tag charm) while Traffic
-    turns to the airport and the timer keeps ticking; then back to the morning. All real time."""
+    """The Stage demo's Live column on the plain morning, the star: a slow push-in on its three rows (the pasta timer
+    ticking each second, Hoops' score moving as the home and away sides score, Mum's landing time), all real time, about
+    12 s so the timer and the score both change on screen; the loop dissolves back to the first frame. (The airport moment
+    doesn't fit in 15 s without a cut: left out.)"""
     c = Clip("live")
     d = WORK / "live"
-    ev = trace_events(d / "trace.txt")
-    pills = [r for r in pill_boxes(events("live")).get("stage-pill", []) if r[0] > WIN[0] * 0.7]
-    day = {text.split()[1]: t for t, text in ev if text.startswith("DAY ")}
-    off = 0.95
-    # (a big change near the tap: the stage's own tiles turn their faces every few seconds, a small change)
-    t_air = onset(c.raw, day["airport"] - off, before=0.3, after=1.5, least=2000)
-    t_am = onset(c.raw, day["am"] - off, before=0.3, after=1.5, least=2000)
-    col = cam_fit([620 * SCALE, 30 * SCALE, 655 * SCALE, 540 * SCALE], pad=0.0)  # Live, the pills down to the airport, the stage's right half
-    start = t_air - 4.2
-    end = t_am + 2.6
-    c.seg(start, end)
-    o = lambda st: st - start
-    c.cam(0, col)
-    c.cam(o(t_air) + 0.1, col)
-    c.cam(o(t_air) + 1.1, FULL)
-    c.cam(o(t_am) + 0.9, FULL)
-    c.cam(c.t - 0.25, col)  # (back in on the column: the loop's first frame)
-    live = [len(text.split(" live=")[1].split(" ")[0].split(",")) for _, text in ev if text.startswith("FEED ")]
-    pitch = 58 * SCALE
-    at = lambda k, rows: (centre(pills[k])[0], centre(pills[k])[1] + (rows - live[-1]) * pitch)
-    c.taps = [(t_air, *at(6, live[0])), (t_am, *at(0, live[1]))]
-    c.cap(0.4, o(t_air) - 0.6, "Live: things that keep ticking")
-    c.cap(o(t_air) + 0.5, o(t_air) + 4.4, "Urgent? It moves to the stage")
-    c.loop = 0.4
-    c.poster_t = o(t_air) + 3.0
-    c.checks = {"1-tick-a": 0.5, "2-tick-b": 2.5, "3-tap": o(t_air) - 0.15, "4-moving": o(t_air) + 0.35, "5-stage": o(t_air) + 1.6,
-                "6-ticking": o(t_air) + 4.0, "7-back": o(t_am) + 0.6, "8-end": c.t - 0.5}
-    print(f"live: airport {t_air:.2f}, morning {t_am:.2f}", flush=True)
+    rg = regions(d / "regions.json")
+    right = rg["stage-right"]
+    wide = cam_fit([right[0] - 300 * SCALE, 0, right[2] + 300 * SCALE + 18 * SCALE, 430 * SCALE], pad=0.0)  # Live, the stage's edge
+    tight = cam_fit([right[0] - 110 * SCALE, 24 * SCALE, right[2] + 110 * SCALE + 18 * SCALE, 290 * SCALE], pad=0.0)  # the three rows
+    start = 1.6
+    c.seg(start, start + 11.6)
+    c.cam(0, wide)
+    c.cam(c.t - 0.5, tight)
+    c.cap(0.6, 9.5, "Live: what keeps changing")
+    c.loop = 0.5
+    c.poster_t = 9.0
+    c.checks = {f"t{k:02d}": k + 0.5 for k in range(12)}
     c.render(d / "check")
 
 
 EDITS["live"] = edit_live
+
+
+def edit_pin():
+    """The Stage demo's left column: the to-do tile dragged by hand (real X input) from the stage onto Pinned; it joins
+    Pinned and the grid closes the gap; its pin-off button puts it back. All real time; the pointer is drawn as a dot while
+    it carries the tile (pointer.json: the take's own moves). The tiles canvas can't draw outside itself, so the carried
+    tile is cut off at the stage's edge before it lands in Pinned: that is how the app looks, not an edit."""
+    c = Clip("pin")
+    d = WORK / "pin"
+    ptr = json.loads((d / "pointer.json").read_text())
+    moves = ptr["moves"]
+    press = next(m[0] for m in moves if m[3] == 1)
+    release = next(m[0] for m in moves if m[0] > press and m[3] == 0)
+    click = ptr["clicks"][0][0] if ptr["clicks"] else release + 5.0
+    drop = onset(c.raw, release, before=0.1, after=1.5, least=2000)
+    unpin = onset(c.raw, click, before=0.05, after=1.5, least=2000)
+    start = press - 1.6
+    end = min(unpin + 2.4, ffprobe_duration(c.raw) - 0.6)
+    c.seg(start, end)
+    o = lambda st: st - start
+    wide = cam_fit([0, 20 * SCALE, 1000 * SCALE, 640 * SCALE], pad=0.0)  # the left column and the stage
+    near = cam_fit([0, 250 * SCALE, 781 * SCALE, 500 * SCALE], pad=0.0)  # Pinned (mid-frame, above the caption) and the stage
+    c.cam(0, wide)
+    c.cam(o(drop) + 0.3, wide)
+    c.cam(o(drop) + 1.2, near)
+    c.cam(o(unpin) - 1.1, near)
+    c.cam(o(unpin) - 0.2, wide)
+    c.path = [(m[0], m[1], m[2], m[3]) for m in moves]
+    c.taps = [(unpin, ptr["clicks"][0][1], ptr["clicks"][0][2])] if ptr["clicks"] else []
+    c.cap(o(press) + 0.2, o(unpin) - 0.6, "Pin what you want at your side")
+    c.cap(o(unpin) + 0.3, c.t - 0.5, "Unpin it, and it goes back")
+    c.loop = 0.6
+    c.poster_t = o(drop) + 2.6
+    c.checks = {"1-start": 0.3, "2-press": o(press) + 0.1, "3-carry-a": o(press) + 0.6, "4-carry-b": o(press) + 1.1,
+                "5-carry-c": o(release) - 0.15, "6-dropped": o(drop) + 0.5, "7-pinned": o(drop) + 2.6, "8-unpin": o(unpin) - 0.1,
+                "9-back": o(unpin) + 1.2, "10-end": c.t - 0.3}
+    print(f"pin: press {press:.2f}, release {release:.2f}, drop {drop:.2f}, unpin {unpin:.2f}", flush=True)
+    c.render(d / "check")
+
+
+def ffprobe_duration(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    return float(r.stdout.strip() or 0)
+
+
+EDITS["pin"] = edit_pin
 
 
 def blank_run(raw, t0, t1, rect):

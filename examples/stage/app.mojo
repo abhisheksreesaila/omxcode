@@ -45,7 +45,7 @@ from mojoui.clock import now_ns
 from mojoui.png import encode_png
 from mojoui.shared import environment
 from themes.omxqua import omxqua_counter, counter_palette, counter_ground, counter_tv_look
-from days import Moment, moments, ranked, day_tiles, clock_text
+from days import Moment, moments, ranked, day_tiles, clock_text, TIMER_START
 
 comptime TILES_CANVAS = 1
 comptime ORB_CANVAS = 2
@@ -72,7 +72,6 @@ comptime WORD_BASE = 1000  # the cards' own messages and canvases (mojoui.genui)
 comptime ISO_BASE = 2000
 comptime WORD_CANVAS = 100
 comptime ISO_CANVAS = 200
-comptime TIMER_START = 440  # the pasta timer, seconds (7:20)
 
 comptime Q_WORD = "What does ephemeral mean?"
 comptime Q_ISO = "How does a heat pump work?"

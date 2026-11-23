@@ -4,6 +4,8 @@
 from mojoui.livetiles import Tile, Face
 from mojoui.stagefeed import FeedTile, FEED_CENTRE, FEED_PASSIVE, FEED_LIVE
 
+comptime TIMER_START = 440  # the pasta timer, seconds (7:20); the morning's game clock runs off the same tick
+
 
 struct Moment(Copyable, Movable):
     """A moment of the day: its tiles most important first, the urgent one and why, its occasion (and the tile it is
@@ -32,7 +34,7 @@ struct Moment(Copyable, Movable):
 def moments() -> List[Moment]:
     var out = List[Moment]()
     out.append(Moment("am", "7:45 school run", "you leave in 20 minutes", "", "", False,
-                      ["traffic", "todo", "cal", "weather", "timer", "photos", "bday", "flight", "home", "cam", "lisbon"]))
+                      ["traffic", "todo", "cal", "weather", "timer", "game", "arrival", "photos", "bday", "home", "cam", "lisbon"]))
     out.append(Moment("school", "First day of school", "it's the first day of school", "school", "school", False,
                       ["school", "traffic", "todo", "weather", "cal", "timer", "photos", "bday", "home", "cam", "lisbon"]))
     out.append(Moment("rain", "2:30 rain at 4", "rain starts before pickup", "rain", "weather", False,
@@ -52,7 +54,7 @@ def kind_of(id: String) -> String:
     """Where a tile belongs when it isn't urgent (the prototype's KIND)."""
     if id == "weather" or id == "cal" or id == "bday" or id == "home" or id == "photos" or id == "lisbon":
         return FEED_PASSIVE
-    if id == "timer" or id == "traffic" or id == "flight" or id == "game":
+    if id == "timer" or id == "traffic" or id == "flight" or id == "game" or id == "arrival":
         return FEED_LIVE
     return FEED_CENTRE
 
@@ -137,9 +139,16 @@ def day_tiles(m: Moment, timer_s: Int) -> List[Tile]:
             if m.id == "game":
                 t = _tile(id, "green", "trophy", "Game night", "Kick-off 7:30", "Home v Away · on the TV")
                 t.faces.append(Face("The score", "goes up here the moment it starts"))
+            elif m.id == "am":  # (last night's late game on the west coast, still on: a live score that moves while you watch)
+                var e = max(TIMER_START - timer_s, 0)
+                t = _tile(id, "green", "trophy", "Hoops", "Home " + String(98 + 2 * ((e + 5) // 9)) + " · Away " + String(95 + 3 * ((e + 2) // 13)),
+                          "Q4 · " + clock_text(max(151 - e, 0)) + " left")
             else:
                 t = _tile(id, "green", "trophy", "Game night", "Sat 3:00", "Home v Away")
             t.actions = ["Remind me at 7:15", "Check the scores"]
+        elif id == "arrival":
+            t = _tile(id, "indigo", "plane", "Mum lands", "9:42 · on time", "TP1350 from Lisbon · gate 14")
+            t.faces.append(Face("Baggage belt 5", "about 15 min after landing"))
         elif id == "school":
             t = _tile(id, "blue", "backpack", "School", "First day!", "bag packed · lunch in the fridge · leave by 8:05")
             t.faces.append(Face("Homework", "reading log · 10 minutes tonight"))
