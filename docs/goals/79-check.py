@@ -1079,7 +1079,7 @@ def m6_mac(race):
         db = race / f"race-{note}.db"
         other = subprocess.run(["sqlite3", str(db), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"],
                                capture_output=True, text=True).stdout.strip()
-        base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg-race-" + stamp, "MOJOUI_SNAP_LOG": "1"}
+        base = {"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg-first-" + note + "-" + stamp, "MOJOUI_SNAP_LOG": "1"}
         for run_ in ("A", "B"):
             steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
             # (D-7994: one build for the Mac's half, the first run's; the kept view names its program, as on Linux)
@@ -1090,7 +1090,7 @@ def m6_mac(race):
             snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": "SNAP: restored" in out, "saved": "SNAP: saved" in out}
             if run_ == "B" and fo:
                 nat.setdefault(note, {})["first open"] = dict(fo, snap="SNAP: restored" in out)
-        out, e = mac_measured(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, base, [db])
+        out, e = mac_measured(f"race-{note}", ["wait:800", "window:1440x900"] + NATIVE_RACE, dict(base, OMX_CONFIG="{data}/cfg-race-" + note + "-" + stamp), [db])  # (a fresh folder, as Linux's race: no glyphs kept)
         if e:
             return "FAIL", f"race on {note}: {e}"
         if "PNOTE WEB:" not in out:

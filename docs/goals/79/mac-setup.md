@@ -23,7 +23,7 @@ scratch database copied in from this checkout.
 | `~/omxcode-g79-web/race-mac/` | the web race's results: benchmark-f034's JSON and log | benchmark-f034.mjs |
 
 ## Also made by goal 79's runs (earlier rounds)
-- `~/omxcode-g54/data/snaps-<note>/`, `~/omxcode-g54/data/cfg/`, `~/omxcode-g54/data/cfg-start-*`: the native race's kept views and settings (so nothing lands in ~/.config).
+- `~/omxcode-g54/data/snaps-<note>/`, `~/omxcode-g54/data/cfg*`: the native race's kept views and settings (so nothing lands in ~/.config).
 - `~/omxcode-g54/data/out-<time>/`: each scripts/mac-ssh run's output folder; `~/omxcode-g54/data/widths/` (macwidths.py: a
   page, a fonts copy, a throwaway Chrome profile `widths/profile`); scratch databases copied in (`pn.db`, `race-600.db`).
 - `~/Desktop/omxcode-report-Personal Note/<time>/`: the app's own test reports (pictures and view dumps), as every
