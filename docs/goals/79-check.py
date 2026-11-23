@@ -106,18 +106,36 @@ def make_ref(out=REF, dpr=LINUX_DPR):
     if not PN.exists() or not (PN / "node_modules" / "playwright").exists():
         _ref_done[key] = f"{PN} (with node_modules/playwright) isn't there"
         return _ref_done[key]
-    if out.exists():
-        shutil.rmtree(out)
-    if out == REF_MAC and not mac_reachable():
-        # (D-7983, ruling A) the Mac's reference: the web app in the Mac's own Chrome at 2.0 (ruling B's setup there)
-        print("(shooting the web app on the Mac in its own Chrome at 2.0: about two minutes)", flush=True)
-        r = run(["python3", str(ROOT / "docs/goals/79/macref.py"), str(out)], 1500)
-        if r.returncode == 0 and (out / "made-by.json").exists():
+    if out == REF_MAC:
+        # (D-7983, ruling A) the Mac's reference: the web app in the Mac's own Chrome at 2.0 (ruling B's setup there),
+        # made into a fresh folder first. (D-7997) The Mac drops off the network for minutes: it is tried 3×, and a
+        # Mac-made reference already there is kept rather than replaced by Linux Chromium's (which made a whole M7 run
+        # judge the Mac against Linux's labels); Linux Chromium at 2.0 only when there is no Mac-made one at all
+        new = out.with_name(out.name + "-new")
+        for attempt in range(3):
+            if mac_reachable():
+                for _ in range(40):
+                    time.sleep(15)
+                    if not mac_reachable():
+                        break
+            if new.exists():
+                shutil.rmtree(new)
+            print("(shooting the web app on the Mac in its own Chrome at 2.0: about two minutes)", flush=True)
+            r = run(["python3", str(ROOT / "docs/goals/79/macref.py"), str(new)], 1500)
+            if r.returncode == 0 and (new / "made-by.json").exists():
+                if out.exists():
+                    shutil.rmtree(out)
+                new.rename(out)
+                _ref_done[key] = ""
+                return ""
+        made = json.loads((out / "made-by.json").read_text()) if (out / "made-by.json").exists() else {}
+        if made.get("platform") == "darwin":
+            print("(the Mac couldn't make a new reference: " + tail(r.stdout + r.stderr, 200) + "; the last Mac-made one kept)", flush=True)
             _ref_done[key] = ""
             return ""
         print("(no Mac reference: " + tail(r.stdout + r.stderr, 200) + "; Linux Chromium at 2.0 instead, said so)", flush=True)
-        if out.exists():
-            shutil.rmtree(out)
+    if out.exists():
+        shutil.rmtree(out)
     print(f"(shooting the web app at {dpr}×: about a minute)", flush=True)
     r = run(["node", str(ROOT / "docs/goals/79/ref.mjs"), str(out), f"--dpr={dpr}"], 900, cwd=PN)
     _ref_done[key] = "" if r.returncode == 0 else f"ref.mjs exit {r.returncode}: {tail(r.stdout + r.stderr)}"
