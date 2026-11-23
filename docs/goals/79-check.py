@@ -121,7 +121,8 @@ def make_ref(out=REF, dpr=LINUX_DPR):
             if new.exists():
                 shutil.rmtree(new)
             print("(shooting the web app on the Mac in its own Chrome at 2.0: about two minutes)", flush=True)
-            r = run(["python3", str(ROOT / "docs/goals/79/macref.py"), str(new)], 1500)
+            with MacLock():
+                r = run(["python3", str(ROOT / "docs/goals/79/macref.py"), str(new)], 1500)
             if r.returncode == 0 and (new / "made-by.json").exists():
                 if out.exists():
                     shutil.rmtree(out)
