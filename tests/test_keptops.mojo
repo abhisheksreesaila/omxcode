@@ -10,6 +10,7 @@ from mojoui.scene import Scene, SurfacePainter, KeptOps, OP_IMAGE, OP_POLY, OP_S
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CH_MOVE
+from mojoui.canvasload import OpenBoard
 
 comptime W = 2304
 comptime H = 1440
@@ -140,6 +141,35 @@ def main() raises:
     var lb = Scene(W, H, 1.0)
     walk.paint(lb, layer, v, 1440, 900, K, lifted)
     same_ops(la, lb, "lifted")
+    # (5) a progressive open: the kept look against a walking look, slice by slice
+    var text = String("")
+    try:
+        var f = open("build/g79/race/note-stress.json", "r")
+        text = f.read()
+        f.close()
+    except:
+        pass
+    if text != "":
+        var ob = OpenBoard()
+        var vo = DeskView(-300, -200, 1.0)
+        assert_equal(ob.open(text, -900, -700, 2300, 1500, 6), "")
+        var lk = BoardLook()
+        var lw = BoardLook()
+        lw.keep_ops = False
+        var slices = 0
+        var r_open = lk.replays
+        while True:
+            var a = scene_of(lk, ob.layer, vo)
+            var b = scene_of(lw, ob.layer, vo)
+            same_ops(a, b, "open slice " + String(slices))
+            slices += 1
+            if not ob.step(-900, -700, 2300, 1500, 800):
+                break
+        var a2 = scene_of(lk, ob.layer, vo)
+        var b2 = scene_of(lw, ob.layer, vo)
+        same_ops(a2, b2, "open complete")
+        print("   a progressive open: " + String(slices) + " slices, " + String(lk.replays - r_open) + " replayed, each op for op with a walk")
+        assert_true(lk.replays - r_open > 0, "slices outside the view replay the kept ops")
     # the CPU painter keeps nothing
     var buf = List[UInt32](length=64 * 64, fill=0)
     var sp = SurfacePainter(Surface(Int(buf.unsafe_ptr()), 64, 64, 1.0))

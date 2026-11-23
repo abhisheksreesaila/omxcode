@@ -281,8 +281,15 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
+    var ops_clean: Bool  # (D-7969) nothing inside the cull rect changed since the kept ops were taken
+    var fill_outside: Bool  # the last look found only adoptions, none meeting the cull rect
+    var cull: List[Float64]
     var last_token: String
     var keep_ops: Bool  # MOJOUI_KEEP_OPS=0: walk every paint (an A/B)
+    var hold_skip: Bool  # MOJOUI_HOLD_SKIP=0 / MOJOUI_FILL_KEEP=0: A/B switches for D-7969
+    var fill_keep: Bool
+    var kept_ver: Int
+    var held_paints: Int  # (D-7969) paints that walked nothing while holding
     var replays: Int  # paints that replayed the kept ops (nothing walked)
     var fills: Int  # (D-7960) looks that found only adoptions (damage from those objects alone, nothing walked)
     var keep_note: String  # the app's words kept in the file's head (kept_note() reads them back first)
@@ -313,8 +320,15 @@ struct BoardLook(Movable):
         self.fills = 0
         self.kept = KeptOps()
         self.kept_token = ""
+        self.ops_clean = False
+        self.fill_outside = False
+        self.cull = List[Float64]()
         self.last_token = ""
         self.replays = 0
+        self.held_paints = 0
+        self.hold_skip = getenv("MOJOUI_HOLD_SKIP") != "0"
+        self.fill_keep = getenv("MOJOUI_FILL_KEEP") != "0"
+        self.kept_ver = -1
         self.keep_ops = getenv("MOJOUI_KEEP_OPS") != "0"
         self.build = build_id()
 
@@ -388,7 +402,12 @@ struct BoardLook(Movable):
         var tx1 = cull[2]
         var ty1 = cull[3]
         self._lift(layer, lifted)
+        self.cull = [tx0, ty0, tx1, ty1]
+        var ver0 = self.board_version
         self._track(layer, len(lifted) > 0)
+        var inside_changed = self.board_version != ver0 and not self.fill_outside
+        if inside_changed:
+            self.ops_clean = False  # (D-7969) something inside the cull rect may have changed since the ops were kept
         p.begin_layer("board")
         p.layer_version(self.board_version)
         p.layer_transform(v.x * k, v.y * k, v.scale * k)
@@ -402,11 +421,17 @@ struct BoardLook(Movable):
         var any_lift = len(self.lift_ids) > 0
         var up = List[Int]()
         # (D-7963) the same board, cull rect, lift, look and zoom as the last paint: its ops again, nothing walked
-        var token = String(self.board_version) + "|" + String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1) + "|" + String(k) + "|" + String(v.scale)
+        # (D-7969) the token leaves the board's version out: the ops stay good while every change since they were kept
+        # was objects adopted outside the cull rect (a progressive open filling in round the view: ops_clean)
+        var token = String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1) + "|" + String(k) + "|" + String(v.scale)
         for id in self.lift_key:
             token += "," + String(id)
-        if self.keep_ops and token == self.kept_token and p.ops_replay(self.kept):
+        if self.hold_skip and self.keep_hold and self.keep_path != "" and self.keep_tag != "":
+            # (D-7969) holding: the renderer shows the kept view and rasters nothing from these ops; none are walked
+            self.held_paints += 1
+        elif self.keep_ops and token == self.kept_token and (self.ops_clean if self.fill_keep else self.kept_ver == self.board_version) and p.ops_replay(self.kept):
             self.replays += 1
+            p.layer_ops_version(self.kept_ver)  # (D-7969: the same ops as at kept_ver: a renderer keeps its bins)
         else:
             var mark = p.ops_mark()
             for i in layer.query(tx0, ty0, tx1, ty1):
@@ -414,9 +439,11 @@ struct BoardLook(Movable):
                     up.append(i)
                     continue
                 self.paint_obj(p, layer, i)
-            if self.keep_ops and mark >= 0 and token == self.last_token:  # (kept once it held two paints: frames that change don't pay a copy)
+            if self.keep_ops and mark >= 0 and token == self.last_token and not inside_changed:  # (kept once it held two paints: frames that change don't pay a copy)
                 self.kept = p.ops_capture(mark)
                 self.kept_token = token
+                self.kept_ver = self.board_version
+                self.ops_clean = True
             self.last_token = token
         if any_lift:  # (the lifted objects: all of them, wherever they are, over the board)
             p.begin_layer("board-lift")
@@ -458,6 +485,7 @@ struct BoardLook(Movable):
         compared with the last snapshot (lifted ones left out, as if gone); a new version only when something did. A
         drag that keeps its lift only moves lifted things: nothing to compare."""
         self.dmg.clear()
+        self.fill_outside = False
         var lift_changed = self.lift_key != self.snap_lift
         if layer.version == self.seen_doc and self.generation == self.seen_gen and not lift_changed:
             return
@@ -470,12 +498,16 @@ struct BoardLook(Movable):
             if ad:
                 self.seen_doc = layer.version
                 self.fills += 1
+                self.fill_outside = True
                 var rects = List[Float64]()
                 for id in ad.value():
                     var q = layer.index(id)
                     if q < 0:
                         continue
                     ref o = layer.objs[q]
+                    var ob = o.bounds()  # (D-7969: what the cull query tests: meets the cull rect, its ops change)
+                    if len(self.cull) == 4 and ob[2] >= self.cull[0] and ob[0] <= self.cull[2] and ob[3] >= self.cull[1] and ob[1] <= self.cull[3]:
+                        self.fill_outside = False
                     if o.kind == CONNECTOR:
                         rects += self.snap.append(o.id, _obj_key(o), o.ax, o.ay, o.bx, o.by, o.line_width + CONNECTOR_HEAD + 9)
                     else:

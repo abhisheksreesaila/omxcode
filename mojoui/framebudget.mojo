@@ -21,6 +21,7 @@ struct FrameBudget(Copyable, Movable):
     var slice: Int  # this frame's slice time so far
     var other_us: Int  # the last frame's work besides its slices (-1: none measured yet)
     var trace: Bool
+    var max_override: Int  # MOJOUI_SLICE_MAX_US (an A/B of the cap)
 
     def __init__(out self, target_us: Int):
         self.target_us = target_us
@@ -33,6 +34,12 @@ struct FrameBudget(Copyable, Movable):
         self.slice = 0
         self.other_us = -1
         self.trace = getenv("MOJOUI_FRAME_TRACE") == "1"
+        self.max_override = 0
+        try:
+            if getenv("MOJOUI_SLICE_MAX_US") != "":
+                self.max_override = Int(getenv("MOJOUI_SLICE_MAX_US"))
+        except:
+            pass
 
     def begin(mut self):
         self.t0 = clock_us()
@@ -41,9 +48,10 @@ struct FrameBudget(Copyable, Movable):
     def slice_us(self, min_us: Int, max_us: Int) -> Int:
         """The budget for this frame's background work: the target less the last frame's other work, within
         [min_us, max_us] (max_us before anything was measured)."""
+        var most = max_us if self.max_override <= 0 else self.max_override
         if self.other_us < 0:
-            return max_us
-        return max(min_us, min(max_us, self.target_us - self.other_us))
+            return most
+        return max(min_us, min(most, self.target_us - self.other_us))
 
     def spent(mut self, us: Int):
         self.slice += us

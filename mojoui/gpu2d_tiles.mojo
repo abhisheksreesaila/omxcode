@@ -140,7 +140,8 @@ struct OpBins(Movable):
 
     def fresh(self, scene: Scene, i: Int) -> Bool:
         var span = scene.layer_range(i)
-        if self.version != scene.layer_versions[i] or self.nops != span[1] - span[0] or scene.layer_versions[i] < 0 or len(self.ext) != 4:
+        var v = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]  # (D-7969: the ops' own version)
+        if self.version != v or self.nops != span[1] - span[0] or v < 0 or len(self.ext) != 4:
             return False
         for c in range(4):
             if self.ext[c] != scene.layer_ext[4 * i + c]:
@@ -150,7 +151,7 @@ struct OpBins(Movable):
     def build(mut self, scene: Scene, i: Int):
         var span = scene.layer_range(i)
         var n = span[1] - span[0]
-        self.version = scene.layer_versions[i]
+        self.version = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]
         self.nops = n
         self.ext = List[Float64]()
         for c in range(4):

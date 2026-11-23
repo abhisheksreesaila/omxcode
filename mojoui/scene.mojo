@@ -122,6 +122,12 @@ trait Painter:
         meet; with no damage (or another base) a new version invalidates every tile."""
         ...
 
+    def layer_ops_version(mut self, v: Int):
+        """(D-7969) The current layer's ops are the same as the last ones given this ops version (its picture's version,
+        layer_version, may still move: damage elsewhere). A renderer keeps what it built from the ops (bins) while it
+        holds. -1 (the default): the layer version stands for both."""
+        ...
+
     def ops_mark(self) -> Int:
         """(D-7963) How many ops the painter holds now (for ops_capture), -1 when it can't keep ops."""
         ...
@@ -263,6 +269,9 @@ struct SurfacePainter(Painter, Movable):
     def layer_damage(mut self, since: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         pass
 
+    def layer_ops_version(mut self, v: Int):
+        pass
+
     def ops_mark(self) -> Int:
         return -1
 
@@ -375,6 +384,7 @@ struct Scene(Painter, Movable, Copyable):
     var layer_snap: List[String]  # (D-7956) layer_snapshot: the file, the app's tag, and whether its ops are still coming
     var layer_snap_tag: List[String]
     var layer_hold: List[Bool]
+    var layer_opsv: List[Int]  # (D-7969) layer_ops_version (-1: none given)
     var layer_snap_note: List[String]  # (written in the snapshot's head for the app to read back first: its page grid)
     var dmg_layer: List[Int]
     var dmg: List[Float64]
@@ -408,6 +418,7 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_tag = List[String]()
         self.layer_hold = List[Bool]()
         self.layer_snap_note = List[String]()
+        self.layer_opsv = List[Int]()
         self.dmg_layer = List[Int]()
         self.dmg = List[Float64]()
 
@@ -441,6 +452,7 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_tag.clear()
         self.layer_hold.clear()
         self.layer_snap_note.clear()
+        self.layer_opsv.clear()
         self.dmg_layer.clear()
         self.dmg.clear()
 
@@ -480,6 +492,7 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_tag.append("")
         self.layer_hold.append(False)
         self.layer_snap_note.append("")
+        self.layer_opsv.append(-1)
 
     def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         if len(self.layer_keys) == 0:
@@ -508,6 +521,10 @@ struct Scene(Painter, Movable, Copyable):
         self.dmg.append(y0)
         self.dmg.append(x1)
         self.dmg.append(y1)
+
+    def layer_ops_version(mut self, v: Int):
+        if len(self.layer_keys) > 0:
+            self.layer_opsv[len(self.layer_keys) - 1] = v
 
     def ops_mark(self) -> Int:
         return len(self.kinds)

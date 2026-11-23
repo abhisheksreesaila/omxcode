@@ -79,7 +79,7 @@ def parse_grid(note: String) -> Tuple[Int, Int]:
 
 comptime LOAD_SLICE_MIN_US = 250  # (D-7957) the least a slice gets (the open still ends: every frame takes a node at least)
 comptime FRAME_WORK_US = 3000  # (D-7957) the app's own share of an 8.3 ms frame (the renderer, GPU and compositor the rest)
-comptime LOAD_SLICE_US = 1500  # a progressive open's slice per frame (D-7944): the frame keeps its silky budget
+comptime LOAD_SLICE_US = 500  # (D-7969) the most a progressive open's slice takes a frame: A/B 1500 / 700 / 400 µs: frames during p95 ~11 / ~7 / ~4 ms, complete ~200 / ~450 / ~700 ms (the web: ~1,150)
 
 
 def guess_emoji(title: String, kind: String) -> String:
