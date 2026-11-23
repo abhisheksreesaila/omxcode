@@ -7,6 +7,7 @@ from mojoui.canvas import rgba
 from mojoui.skin import Skin, Shadow, hexc
 from mojoui.notesshell import Boxes, PanelConfig, Shelf, SkinChoice, DockItem, DOCK_TOOL, DOCK_DIVIDER, DOCK_DOT, DOCK_ACCENT
 from mojoui.keycaps import keycap
+from mojoui.fonttext import TextStyle
 
 
 def pn_names(mut b: Boxes):
@@ -302,3 +303,36 @@ def pn_boxes() -> Boxes:
     var b = Boxes()
     pn_names(b)
     return b^
+
+
+def pn_warm_styles() -> List[TextStyle]:
+    """The text styles the look is drawn in (D-8002: their glyphs are readied while nothing happens, before the first
+    switch or search asks for them)."""
+    var out = List[TextStyle]()
+    out.append(TextStyle("Geist", 400, False, 11))
+    out.append(TextStyle("Geist", 400, False, 11.5))
+    out.append(TextStyle("Geist", 400, False, 12))
+    out.append(TextStyle("Geist", 400, False, 12.5))
+    out.append(TextStyle("Geist", 400, False, 13))
+    out.append(TextStyle("Geist", 400, False, 16))
+    out.append(TextStyle("Geist", 500, False, 12.5))
+    out.append(TextStyle("Geist", 500, False, 13))
+    out.append(TextStyle("Geist", 600, False, 11))
+    out.append(TextStyle("Geist", 600, False, 13.5))
+    out.append(TextStyle("Geist", 600, False, 14.5))
+    out.append(TextStyle("Geist Mono", 400, False, 10.5))
+    out.append(TextStyle("Geist Mono", 400, False, 11))
+    out.append(TextStyle("Geist Mono", 400, False, 11.5))
+    out.append(TextStyle("Geist Mono", 400, False, 12))
+    out.append(TextStyle("Geist Mono", 400, False, 16.2))
+    out.append(TextStyle("Geist Mono", 500, False, 10.5))
+    out.append(TextStyle("Figtree", 500, False, 13))
+    out.append(TextStyle("Bricolage Grotesque", 700, False, 17))
+    out.append(TextStyle("Bricolage Grotesque", 700, False, 20))
+    out.append(TextStyle("Bricolage Grotesque", 700, False, 25.2))
+    out.append(TextStyle("Bricolage Grotesque", 700, False, 34.2))
+    out.append(TextStyle("Literata", 400, False, 18))
+    out.append(TextStyle("Literata", 700, False, 18))
+    out.append(TextStyle("Literata", 400, True, 18))
+    out.append(TextStyle("Source Serif 4", 400, False, 24))
+    return out^

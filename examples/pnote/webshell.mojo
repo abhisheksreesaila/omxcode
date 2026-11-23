@@ -9,7 +9,7 @@ from mojoui.scene import Painter
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
-from pnlook import pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items
+from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
@@ -31,6 +31,7 @@ from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome,
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.keycaps import keycap, device_name
+from mojoui.glyphwarm import GlyphWarm
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
@@ -191,6 +192,8 @@ struct WebShell(Movable):
     var win_h: Float64
     var win_k: Float64  # the device scale at the last paint (0: not painted yet)
     var budget: FrameBudget  # (D-7957) the open's slices sized by what the rest of the frame cost
+    var warm: GlyphWarm  # (D-8002) the glyphs drawn last time and the look's own styles, readied while nothing happens
+    var warm_styles: Bool
     var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
@@ -237,6 +240,8 @@ struct WebShell(Movable):
         self.win_w = 1440
         self.win_h = 900
         self.win_k = 0
+        self.warm = GlyphWarm(config_dir("pnote") + "/glyphs.txt")
+        self.warm_styles = False
         self.snap_dir = ""
         self.budget = FrameBudget(FRAME_WORK_US)
         if getenv("MOJOUI_SNAP") != "0":
@@ -515,6 +520,10 @@ struct WebShell(Movable):
         self.win_w = w
         self.win_h = h
         self.win_k = k
+        if not self.warm_styles:
+            self.warm_styles = True
+            for st in pn_warm_styles():
+                self.warm.add_ascii(st, k)
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
         if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure:

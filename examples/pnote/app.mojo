@@ -36,6 +36,7 @@ from themes.liquid import liquid
 from webshell import WebShell
 from mojoui.files import read_setting
 from mojoui.fonttext_check import fontcheck
+from mojoui.glyphwarm import WARM_TICK_MS
 
 comptime NEW_PAGE = 1
 comptime NEW_CANVAS = 2
@@ -47,6 +48,7 @@ comptime PALETTE_TYPE = 6
 comptime PALETTE_GO = 7
 comptime PALETTE_CANCEL = 8
 comptime DELETE_NOTE = 9
+comptime WARM_TICK = 11  # (D-8002: glyphs readied while nothing happens)
 comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
 
 comptime PAGE = 0
@@ -529,11 +531,14 @@ struct Main(App):
     def every(self) -> List[Every]:
         if len(self.web) > 0 and self.web[0].saver.pending():
             return [Every(self.web[0].saver.tick_ms(), SAVE_TICK)]
+        if len(self.web) > 0 and self.web[0].warm.more():
+            return [Every(WARM_TICK_MS, WARM_TICK)]
         return List[Every]()
 
     def closing(mut self):
         if len(self.web) > 0:
             self.web[0].flush()
+            _ = self.web[0].warm.save()
             print("PNOTE QUIT: saved", flush=True)
             return
         self.save()
@@ -782,6 +787,10 @@ struct Main(App):
                 if self.web[0].tick():
                     self.version += 1
                 return
+            if m == WARM_TICK:
+                _ = self.web[0].warm.idle_step(4000)
+                return
+            self.web[0].warm.touch()
             if m == GESTURE and event.number == HOVER:
                 if self.web[0].hover(event.x, event.y):
                     self.version += 1
@@ -860,6 +869,7 @@ struct Main(App):
         next note), omnibar (open/close), openall (a note of each kind in turn)."""
         if len(self.web) > 0:
             self.version += 1
+            self.web[0].warm.touch()
             return self.web[0].bench(name)
         if self.open_kind != CANVAS:
             return (-1.0, -1.0)

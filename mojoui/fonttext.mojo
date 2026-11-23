@@ -320,6 +320,8 @@ struct FontEngine(Movable):
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
     var kern_round: String  # FONTTEXT_KERN_ROUND, read once (not per glyph)
+    var image_dev: List[Float64]  # per image: the exact device size it was rastered at (its key rounds to 1/64 px)
+    var styles_seen: Dict[String, Bool]  # (D-8002) every text style shaped so far (glyphwarm keeps them; no text)
     var img_n: Int  # (diagnosis) glyph images rastered, the time in it (ns), runs shaped, the time in it (ns), so far
     var img_ns: Int
     var shape_n: Int
@@ -393,6 +395,8 @@ struct FontEngine(Movable):
         # on the Mac unrounded (Chrome there positions glyphs on subpixels, as CoreText does)
         self.kern_round = getenv("FONTTEXT_KERN_ROUND", "exact" if CompilationTarget.is_macos() else "D")
         self.trace = getenv("FONTTEXT_TRACE") == "1"
+        self.image_dev = List[Float64]()
+        self.styles_seen = Dict[String, Bool]()
         self.img_n = 0
         self.img_ns = 0
         self.shape_n = 0
@@ -646,6 +650,83 @@ struct FontEngine(Movable):
         self.fallback[key] = idx
         return idx
 
+    # ------------------------------------------------ keeping and warming glyph images (D-8002, mojoui.glyphwarm)
+
+    def glyph_lines(self, most: Int) -> List[String]:
+        """The glyph images rastered so far, one line each (at most `most`, oldest first): glyph id, device size,
+        x offset, the instance's weight and optical size, its face (a file and index, or a system face's name). Glyph ids
+        only: nothing says what text they were drawn for."""
+        var names = Dict[Int, String]()
+        for e in self.face_of_name.items():
+            names[e.value] = e.key
+        var out = List[String]()
+        for e in self.image_of.items():
+            if len(out) >= most:
+                break
+            var k = e.key >> 2
+            var gid = (k >> 16) & 0xFFFFF
+            var inst = k >> 36
+            if inst < 0 or inst >= len(self.insts):
+                continue
+            var fi = self.insts[inst].face
+            var face = ("n:" + names.get(fi, "")) if self.faces[fi].path == "" else ("p:" + String(self.faces[fi].index) + ":" + self.faces[fi].path)
+            if face == "n:":
+                continue
+            out.append("G\t" + String(gid) + "\t" + String(self.image_dev[e.value]) + "\t" + String(e.key & 3) + "\t" + String(self.insts[inst].wght) + "\t" + String(self.insts[inst].opsz) + "\t" + face)
+        return out^
+
+    def warm_line(mut self, line: String) -> Bool:
+        """A line of glyph_lines (its image rastered now, if its face is here and it isn't yet) or a style's ("S …", a run
+        shaped in it, its faces ready). True when that did work."""
+        var f = line.split("\t")
+        try:
+            if len(f) >= 5 and String(f[0]) == "S":
+                var st = TextStyle(String(f[4]), Int(String(f[1])), String(f[2]) == "1", Float64(String(f[3])))
+                _ = self.shape(st, "Hamburgefonstiv 0123456789")
+                return True
+            if len(f) >= 7 and String(f[0]) == "A":  # (eight characters of printable ASCII in a style, at a device scale)
+                var st = TextStyle(String(f[4]), Int(String(f[1])), String(f[2]) == "1", Float64(String(f[3])))
+                var c0 = Int(String(f[6]))
+                var text = String("")
+                for c in range(c0, min(c0 + 8, 127)):
+                    text += chr(c)
+                var n1 = len(self.images)
+                var r = self.shape(st, text)
+                for ref g in r.glyphs:
+                    _ = self.image(g.inst, g.gid, st.size * Float64(String(f[5])), 0)
+                return len(self.images) > n1
+            if len(f) < 7 or String(f[0]) != "G":
+                return False
+            var face = -1
+            var id = String(f[6])
+            if id.startswith("n:"):
+                var name = String(id[byte=2:id.byte_length()])
+                face = self.face_of_name.get(name, -1)
+                comptime if CompilationTarget.is_macos():
+                    if face < 0:
+                        var font = _fn[def(Int, Float64, Int) thin abi("C") -> Int](self._m(_M_CTBYNAME))(self._cfstr(name), 16.0, 0)
+                        if font != 0:
+                            face = self._face_from_ctfont(font, name == "AppleColorEmoji")
+            else:
+                var at = String(id[byte=2:id.byte_length()])
+                var c = at.find(":")
+                var index = Int(String(at[byte=0:c]))
+                var path = String(at[byte=c + 1:at.byte_length()])
+                face = self.face_of_file.get(path + "#" + String(index), -1)
+                comptime if not CompilationTarget.is_macos():
+                    if face < 0:
+                        face = self._open_face(_Face(path, index, "", False, 400))
+            if face < 0:
+                return False
+            var wght = Float64(String(f[4]))
+            var opsz = Float64(String(f[5]))
+            var n0 = len(self.images)
+            var inst = self.inst(face, Int(wght) if wght > 0 else 400, opsz if opsz > 0 else 16.0)
+            _ = self.image(inst, Int(String(f[1])), Float64(String(f[2])), Int(String(f[3])))
+            return len(self.images) > n0
+        except:
+            return False
+
     # ------------------------------------------------ shaping
 
     def shape(mut self, st: TextStyle, text: String) -> Run:
@@ -846,6 +927,7 @@ struct FontEngine(Movable):
                         img.cov.append(UInt8(_peek_u8(row + x)))
         _fn[def(Int, Int, Int) thin abi("C") -> NoneType](self.FT_Set_Transform)(ft, 0, 0)
         self.images.append(img^)
+        self.image_dev.append(size_dev)
         self.image_of[key] = len(self.images) - 1
         return len(self.images) - 1
 
@@ -1237,6 +1319,7 @@ struct FontEngine(Movable):
         _ = g
         _ = rect
         self.images.append(img^)
+        self.image_dev.append(size_dev)
         self.image_of[key] = len(self.images) - 1
         self.img_n += 1
         self.img_ns += Int(now_ns()) - t_img
@@ -1422,6 +1505,9 @@ def shape(st: TextStyle, text: String) -> Run:
     if hit:
         return hit.value().copy()
     var r = e[].shape(st, text)
+    var sk = String(st.weight) + "\t" + ("1" if st.italic else "0") + "\t" + String(st.size) + "\t" + st.family
+    if sk not in e[].styles_seen and len(e[].styles_seen) < 512:
+        e[].styles_seen[sk] = True
     if len(e[].runs) >= 8192:
         e[].runs = Dict[String, Run]()
     e[].runs[key] = r.copy()
