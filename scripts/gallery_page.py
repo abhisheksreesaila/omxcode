@@ -1,5 +1,5 @@
 # Writes docs/gallery/index.html: a gallery of photos, one card per app (a picture, what it does, what it proves,
-# where it runs, what's next). omxplorer and omxconsole are the two flagships (STARS). Owner, 2026-10-31: "a card with an image and some details
+# where it runs, what's next). omxplorer, omxconsole and omx are the flagships (STARS). Owner, 2026-10-31: "a card with an image and some details
 # around it… the same theme as the cover page". Edit APPS below and run: pixi run python scripts/gallery_page.py
 import html, pathlib
 
@@ -40,7 +40,21 @@ CONSOLE = dict(
     needs="Needs MAX installed (docs.modular.com/max/packages). Mac: it opens and starts its service on GitHub's Mac runners; no model has been served on a Mac yet.",
     get=[("Linux", download_url("omxconsole", "Linux"), "x86_64 · GTK 4"),
          ("Mac", download_url("omxconsole", "Mac"), "Apple Silicon · macOS 15 or later")])
-STARS = [STAR, CONSOLE]
+# the third flagship (owner, 2026-11-22: "this has to go into the omxcode gallery… just like omxplorer and omxconsole, this needs
+# its own cover page"): omx, the kitchen-counter assistant on the Stage (goals 72 and 77). No download yet: it needs Qwen3.8-27B
+# on a 24 GB GPU, so the card says so and links its page, which has the build steps.
+OMX = dict(
+    name="omx", app="omx", kind="The third flagship · a home assistant that shows you",
+    line="Ask out loud and it shows you: live tiles on a three-column Stage, a chat bar that grows into a visual explanation and points at what it means, cards the model builds from omxcode's components over AG-UI. A local model, in the app's own process.",
+    shots=[("../img/omx/stage-tv-heatpump.jpg", "The TV open over the Stage: how a heat pump works"),
+           ("../img/omx/stage-day.jpg", "The Stage: quiet on the left, urgent in the middle, live on the right"),
+           ("../img/omx/omx-point.jpg", "omx on Qwen, on this machine: the ring on the part it's saying"),
+           ("../img/omx/charm-rain.jpg", "Rain before pickup: the weather tile takes the stage"),
+           ("../img/omx/mac-thanksgiving.jpg", "The Stage on a Mac, at night")],
+    src="examples/omx", page="../omx.html", cta="See omx",
+    needs="Build from source for now: omx needs a 24 GB NVIDIA GPU on Linux; the Stage alone also runs on the Mac.",
+    get=[])
+STARS = [STAR, CONSOLE, OMX]
 
 APPS = [
     dict(name="Sketch", app="sketch", kind="Drawing",
@@ -104,7 +118,9 @@ def thumbs(shots):
 
 
 def gets(a):
-    """The card's download buttons: (platform, url, note) for the star, platform names for the rest."""
+    """The card's download buttons: (platform, url, note) for the star, platform names for the rest (none: no buttons)."""
+    if not a["get"]:
+        return ""
     items = [(g, download_url(a["app"], g), "") if isinstance(g, str) else g for g in a["get"]]
     return '<div class="get">' + "".join(
         f'<a class="dl" href="{e(u)}" download><b>Download for {e(pl)}</b>{f"<span>{e(n)}</span>" if n else ""}</a>'
@@ -243,7 +259,7 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>omxplorer, and what else it builds.</h1>
-    <p class="lede">Two flagships: omxplorer, the data explorer, and omxconsole, local models on Modular's MAX. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too.</p>
+    <p class="lede">Three flagships: omxplorer, the data explorer; omxconsole, local models on Modular's MAX; and omx, a home assistant that shows you. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every smaller app downloads for Linux; most for the Mac too.</p>
   </div>
   <div class="grid">
 STAR_CARD
