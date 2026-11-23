@@ -199,8 +199,9 @@ def liquid_css(p: Palette) -> String:
         "background-color: " + hex_of(p.page) + "; background-image: linear-gradient(180deg, " + hex_of(mix(p.page, WHITE, 0.03)) + ", " + hex_of(mix(p.page, hx("#000000"), 0.08)) + ");")
     var thumb = String("background: #ffffff; color: ") if not d else ("background: " + hex_of(p.raised) + "; color: ")
     var thumb_shadow = String("0 1px 3px rgba(15,23,42,0.12), 0 0 0 1px rgba(15,23,42,0.04)") if not d else ("0 1px 3px rgba(0,0,0,0.35), 0 0 0 1px " + strong)
-    var tab_on = String("background: #ffffff; color: " + ink + "; box-shadow: 0 1px 3px rgba(15,23,42,0.12);") if not d else (
-        "background: " + hex_of(p.raised) + "; color: " + ink + "; box-shadow: 0 1px 3px rgba(0,0,0,0.35), inset 0 0 0 1px " + strong + ";")
+    # the selected bottom tab: a quiet tint on a rectangle, no white pill (owner, 2026-11-22: "the pill in the rectangular box looks weird")
+    var tab_on = String("background: rgba(15,23,42,0.07); color: " + ink + "; box-shadow: none;") if not d else (
+        "background: rgba(255,255,255,0.08); color: " + ink + "; box-shadow: none;")
     var pop = String("background-color: rgba(255,255,255,0.94); box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 0 0 1px rgba(15,23,42,0.08), 0 12px 40px rgba(15,23,42,0.16);") if not d else (
         "background-color: " + css_rgba(mix(p.card, WHITE, 0.03), 0.97) + "; box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,0.50);")
     var key_ink = hex_of(mix(p.ink3, rgba(255, 255, 255), 0.3)) if not d else ink2
@@ -260,8 +261,8 @@ def liquid_css(p: Palette) -> String:
         + w + ".mui-tag-tile:focus-within button, " + w + ".mui-tag-chart-tile:focus-within button.image-button, " + w + ".mui-tag-tile button:focus-visible, " + w + ".mui-tag-chart-tile button:focus-visible, " + w + ".mui-board .mui-card button:focus-visible { opacity: 1; }\n"
         + w + ".mui-board .mui-card .mui-tag-player-controls button.image-button { opacity: 1; }\n"  # (a video card's play button is its main control: always shown, goal 39 M6)
         + w + "label.title-1.mui-tone-accent, " + w + "label.title-4.mui-tone-accent { color: " + accent + "; }\n"
-        # the bottom strip: tabs as pills, live figures
-        + w + ".mui-tag-sheet-tabs button { border-radius: 999px; padding: 2px 14px; font-weight: 500; }\n"
+        # the bottom strip: tabs as rectangles (the selected one tinted), live figures
+        + w + ".mui-tag-sheet-tabs button { border-radius: 6px; padding: 2px 14px; font-weight: 500; }\n"
         + w + ".mui-tag-sheet-tabs button:not(.flat) { " + tab_on + " }\n"
         # segmented controls: a soft track and a white thumb
         + w + "toggle-group { background: " + track + "; border-radius: 999px; padding: 3px; }\n"
@@ -339,7 +340,8 @@ body.liquid [data-tag=tile]:hover button, body.liquid [data-tag=chart-tile]:hove
 body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-tile] button:focus-visible, body.liquid .board > .object button:focus-visible { opacity: 1; }
 body.liquid .board > .object [data-tag=player-controls] button.icon-only { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
-body.liquid [data-tag=sheet-tabs] button { border-radius: 999px; padding: 2px 14px; }
+body.liquid [data-tag=sheet-tabs] button { border-radius: 6px; padding: 2px 14px; }  /* (rectangles, the selected one tinted: owner 2026-11-22) */
+body.liquid [data-tag=sheet-tabs] button:not(.subtle) { background: var(--l-track); color: var(--o-ink); box-shadow: none; border: 0; }
 body.liquid [data-tag=ribbon-tabs] { background: var(--l-track); border-radius: 999px; padding: 3px; gap: 2px; }  /* (the ribbon's tabs: a quiet segmented row, goal 76) */
 body.liquid [data-tag=ribbon-tabs] button { border-radius: 999px; min-height: 26px; padding: 0 14px; font-weight: 500; border: 0; box-shadow: none; background: transparent; color: var(--o-ink3); }
 body.liquid [data-tag=ribbon-tabs] button:not(.subtle) { background: var(--l-thumb); color: var(--o-ink); box-shadow: var(--l-thumb-shadow); }
