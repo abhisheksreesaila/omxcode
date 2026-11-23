@@ -8,6 +8,47 @@ any feature work (f9ef3c70), since strengthened (D-7911, D-7929, D-7931) and fix
 **Owner's ask (11-19):** "Rebuild Personal Note the exact way the web version looks with a better performance." Then
 D-7900: framework first; every trick goes into mojoui; Linux and Mac count equally.
 
+## Continuation 11 (2026-11-22, evening, autopilot): the 44 ms frame bisected, the open's frames pass
+Decisions D-7968–D-7970; journal "continuation 11".
+
+**Machine state.** The race (16:53–17:00) and its reruns ran with one goal 77 process busy at ~130 % CPU throughout (its
+voice/web check; c11-quiet.log 16:24–16:52 never quiet). The GPUs were idle (P8, 0 %) in almost every sample, and the
+load was 0.8–2.6. Treat the race as under light load.
+
+**The ~44 ms undo frame (D-7970).** The bisect (3 runs of each build, same probe, same window) put it on 94a218fc,
+continuation 10's press change: max 43.2 / 43.6 / 44.5 there, ≤ 13.4 on 5ff9ae3a and on 4f4cabdb (the GL state cache:
+clean). I reverted 94a218fc; undo max is 10.6 / 11.6 / 11.0 since.
+
+**Undo's work (D-7968).**
+- (a) Partial rasters already encode only the ops whose exact bounds meet the damaged part.
+- A shared frame per partial raster cut uploads by 42 % but doubled GL calls and raised renderer CPU, so I dropped it.
+- The undo frame's renderer CPU is ~1.7 ms of ~10; the rest is GPU raster time at idle clocks (2.4–5 ms) and the scene.
+  So (b), resident geometry, would save ≤ ~1 ms, and (c), spreading the re-raster, can't remove the old position's
+  re-raster from the frame that shows the undo. Neither was built.
+- Undo/redo stay ~10 ms at idle clocks; at P2 they measured 7.8 / 6.0.
+
+**The open's frames and the press (D-7969).**
+- BoardLook walks nothing while holding.
+- Its kept ops survive adoptions outside its cull rect.
+- `Painter.layer_ops_version` lets the renderer keep its op bins (it rebuilt ~20k ops' bins every slice).
+- pnote's open slice is capped at 500 µs (A/B 1500 / 700 / 400).
+
+The "first press one-time cost" wasn't one: the first press of a row landed on an ordinary during-open frame.
+
+**Race (17:00) and reruns (3×, under light load):**
+| note | row | before (c10 race) | now | |
+|---|---|---|---|---|
+| stress | open: first frame (first open 7.2, kept view in 30 of 30 cold opens) | 18.8 ✗ (spike) | **7.8** | ✓ |
+| stress | open: frames during | 11.4 / 35.8 ✗ | **4.1 / 14.7** | ✓ |
+| stress | open: a press during it | 10.7 ✗ | **6.2** | ✓ |
+| stress | open: complete | 200 / 250 | 417 / 467 (web 1,688 this run) | ✓ |
+| stress | zoom from 30 % (max) | 21.6 | 20.7 · reruns 15.2 / 15.4 / 17.3 (median 15.4, worst 17.3) | ✗ |
+| stress | undo / redo (p95) | 12.5 / 9.3 | 10.6 / 11.3 · reruns 11.4–11.6 / 10.5–12.0 (load 2.3–2.6); at load ~1: 10.2 / 10.0 | ✗ ✗ |
+| 600 | every row (open first frame 5.3, during 3.4, press 3.7) | ✓ | ✓ | ✓ |
+
+**Milestones:** M0 PASS · M1 BLOCKED (Mac) · M2, M3, M4 **PASS** (rerun: 0.974 / 0.984 / 0.972 / 0.974; canvas 0.992; 28
+steps, worst 0.964, notes equal) · M5 BLOCKED · M6 **FAIL** (stress zoom max, undo, redo) · M7 BLOCKED.
+
 ## Continuation 10 (2026-11-22, autopilot): counting GL, the premise tested
 Decisions D-7965–D-7967; journal "continuation 10". The machine was quiet at 14:28 and the race started then, but goal 77
 woke mid-race (busy in 5 of 14 samples). Polling 14:50–15:50 found no quiet window again (load up to 46, GPU bursts to

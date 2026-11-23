@@ -4,6 +4,19 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 11: the open passes; undo is GPU-bound (2026-11-22, evening)
+- **Setup:** Linux. One of goal 77's processes was busy throughout; the GPUs were idle.
+- **What worked:**
+  - The 44 ms undo frame was bisected to continuation 10's press change and reverted.
+  - The stress open's frames now pass: no walk while holding the kept view, kept ops that survive loading outside the
+    view, renderer bins kept when the ops are the same, and a 500 µs slice cap.
+  - Stress open: first frame 7.8, frames during 4.1 / 14.7, a press during it 6.2, complete 417 ms.
+- **What didn't:** sharing one frame across a damage's partial rasters (fewer bytes, more calls, more CPU).
+- **What it means:** of M6's rows only stress zoom's worst frame (~15–17 ms) and undo/redo (~10 ms, GPU raster at idle
+  clocks) remain.
+- **Next small step:** undo's GPU raster: fewer pixels or samples for a small edit's partial raster; the zoom settle's
+  worst frame.
+
 ## Goal 79, continuation 10: counting GL calls (2026-11-22, late afternoon)
 - **Setup:** Linux. The race started quiet but goal 77 woke mid-race; an hour of polling afterwards found no quiet window.
 - **What it showed:** an undo frame issues ~4,400 GL calls (most of them per-draw state). Cutting a third of them
