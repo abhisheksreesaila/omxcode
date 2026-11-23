@@ -136,6 +136,10 @@ trait Painter:
         """(D-7963) The ops from from_op on, kept to be replayed in a later frame (empty when it can't keep ops)."""
         ...
 
+    def ops_replay_range(mut self, kept: KeptOps, a: Int, b: Int) -> Bool:
+        """(D-7974) Kept ops [a, b) appended as if drawn again (False: this painter can't)."""
+        ...
+
     def ops_replay(mut self, kept: KeptOps) -> Bool:
         """(D-7963) Ops kept from an earlier frame appended as if drawn again (False: this painter can't; draw them)."""
         ...
@@ -282,6 +286,9 @@ struct SurfacePainter(Painter, Movable):
 
     def ops_capture(self, from_op: Int) -> KeptOps:
         return KeptOps()
+
+    def ops_replay_range(mut self, kept: KeptOps, a: Int, b: Int) -> Bool:
+        return False
 
     def ops_replay(mut self, kept: KeptOps) -> Bool:
         return False
@@ -572,6 +579,50 @@ struct Scene(Painter, Movable, Copyable):
                 k.note_ops.append(self.note_ops[q] - from_op)
                 k.notes.append(self.notes[q])
         return k^
+
+    def ops_replay_range(mut self, kept: KeptOps, a: Int, b: Int) -> Bool:
+        if not kept.ok or a < 0 or b > len(kept.kinds) or a > b:
+            return False
+        if len(self.layer_keys) == 0:
+            self.begin_layer("")
+        var base = len(self.kinds)
+        var nb = len(self.nums)
+        for op in range(a, b):
+            var kind = Int(kept.kinds[op])
+            self.kinds.append(kept.kinds[op])
+            for c in range(STRIDE):
+                self.nums.append(kept.nums[op * STRIDE + c])
+            self.colors.append(kept.colors[op])
+            var t = Int(kept.text_of[op])
+            if t >= 0:
+                self.text_of.append(Int32(len(self.texts)))
+                self.texts.append(kept.texts[t])
+            else:
+                self.text_of.append(-1)
+            var at = nb + (op - a) * STRIDE
+            if kind == OP_IMAGE:
+                self.nums[at + 4] = Float32(len(self.images))
+                self.images.append(kept.images[Int(kept.nums[op * STRIDE + 4])].copy())
+            elif kind == OP_POLY or kind == OP_STROKE:
+                var first = Int(kept.nums[op * STRIDE])
+                var cnt = Int(kept.nums[op * STRIDE + 1])
+                self.nums[at] = Float32(len(self.path) // 2)
+                for q in range(2 * first, 2 * (first + cnt)):
+                    self.path.append(kept.path[q])
+        var lo = 0  # (notes are kept in op order: the first at or after a, by halves)
+        var hi = len(kept.note_ops)
+        while lo < hi:
+            var mid = (lo + hi) // 2
+            if kept.note_ops[mid] < a:
+                lo = mid + 1
+            else:
+                hi = mid
+        var q = lo
+        while q < len(kept.note_ops) and kept.note_ops[q] < b:
+            self.note_ops.append(kept.note_ops[q] - a + base)
+            self.notes.append(kept.notes[q])
+            q += 1
+        return True
 
     def ops_replay(mut self, kept: KeptOps) -> Bool:
         if not kept.ok:

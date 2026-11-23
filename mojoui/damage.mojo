@@ -30,6 +30,7 @@ struct DamageSnap(Movable):
     var seen: List[Bool]
     var out: List[Float64]
     var moved_order: Bool
+    var changed: List[Int]  # (D-7974) the ids the last finish() / append() found new, changed or gone
 
     def __init__(out self):
         self.ids = List[Int]()
@@ -46,6 +47,7 @@ struct DamageSnap(Movable):
         self.seen = List[Bool]()
         self.out = List[Float64]()
         self.moved_order = False
+        self.changed = List[Int]()
 
     def begin(mut self):
         self.nids.clear()
@@ -55,6 +57,7 @@ struct DamageSnap(Movable):
         self.out.clear()
         self.seen = List[Bool](length=len(self.ids), fill=False)
         self.moved_order = False
+        self.changed = List[Int]()
 
     def _rect(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         self.out.append(x0)
@@ -101,12 +104,14 @@ struct DamageSnap(Movable):
             p = self.at.get(id, -1)
         if p < 0:
             self._emit(x0, y0, x1, y1, pad)  # (new)
+            self.changed.append(id)
             return
         self.seen[p] = True
         if (self.keys[p] != key or self.boxes[4 * p] != x0 or self.boxes[4 * p + 1] != y0 or self.boxes[4 * p + 2] != x1 or self.boxes[4 * p + 3] != y1
                 or self.pads[p] != pad):
             self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
             self._emit(x0, y0, x1, y1, pad)
+            self.changed.append(id)
 
     def finish(mut self) -> List[Float64]:
         self.fresh = not self.have
@@ -114,6 +119,7 @@ struct DamageSnap(Movable):
             for p in range(len(self.ids)):
                 if not self.seen[p]:
                     self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])
+                    self.changed.append(self.ids[p])
         if len(self.nids) != len(self.ids):
             self.moved_order = True
         swap(self.ids, self.nids)
@@ -131,6 +137,7 @@ struct DamageSnap(Movable):
         """(D-7960) An item that came while nothing else changed (a progressive open adopting it): added to the snapshot
         as if fed, its damage returned, nothing walked. Outside a begin()/finish(). pad ≥ 0: a line, as feed_line."""
         self.out.clear()
+        self.changed.append(id)
         var p = self.at.get(id, -1) if self.have else -1
         if p >= 0:  # (already there: a change of it)
             self._emit(self.boxes[4 * p], self.boxes[4 * p + 1], self.boxes[4 * p + 2], self.boxes[4 * p + 3], self.pads[p])

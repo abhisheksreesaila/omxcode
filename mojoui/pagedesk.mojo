@@ -281,6 +281,13 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
+    var seg_at: Dict[Int, Int]  # (D-7974) the kept ops per object: id → its range [seg_a, seg_b)
+    var seg_a: List[Int]
+    var seg_b: List[Int]
+    var dirty_ids: Dict[Int, Bool]  # objects changed since the ops were kept, and whether that is all that changed
+    var dirty_known: Bool
+    var patch_on: Bool  # MOJOUI_KEEP_PATCH=0: walk every changed board whole (the comparison)
+    var patches: Int
     var ops_clean: Bool  # (D-7969) nothing inside the cull rect changed since the kept ops were taken
     var fill_outside: Bool  # the last look found only adoptions, none meeting the cull rect
     var cull: List[Float64]
@@ -321,6 +328,13 @@ struct BoardLook(Movable):
         self.fills = 0
         self.kept = KeptOps()
         self.kept_token = ""
+        self.seg_at = Dict[Int, Int]()
+        self.seg_a = List[Int]()
+        self.seg_b = List[Int]()
+        self.dirty_ids = Dict[Int, Bool]()
+        self.dirty_known = False
+        self.patch_on = getenv("MOJOUI_KEEP_PATCH") != "0"
+        self.patches = 0
         self.ops_clean = False
         self.fill_outside = False
         self.cull = List[Float64]()
@@ -408,6 +422,11 @@ struct BoardLook(Movable):
         var ver0 = self.board_version
         self._track(layer, len(lifted) > 0)
         var inside_changed = self.board_version != ver0 and not self.fill_outside
+        if self.board_version != ver0:  # (D-7974) what changed since the kept ops, by id (a new picture: unknown)
+            if self.since < 0:
+                self.dirty_known = False
+            for id in self.snap.changed:
+                self.dirty_ids[id] = True
         if inside_changed:
             self.ops_clean = False  # (D-7969) something inside the cull rect may have changed since the ops were kept
         p.begin_layer("board")
@@ -435,17 +454,39 @@ struct BoardLook(Movable):
             self.replays += 1
             p.layer_ops_version(self.kept_ver)  # (D-7969: the same ops as at kept_ver: a renderer keeps its bins)
         else:
+            # (D-7974) the same view as the kept ops and every change since known by id: a patch: changed (and new)
+            # objects painted again, every other object's kept ops replayed, the order the layer's own (z)
+            var patch = self.keep_ops and self.patch_on and token == self.kept_token and self.kept.ok and self.dirty_known
             var mark = p.ops_mark()
+            var segs = List[Int]()  # per object painted: id, first op, end op (from mark)
             for i in layer.query(tx0, ty0, tx1, ty1):
                 if any_lift and layer.objs[i].id in self.lift_set:
                     up.append(i)
                     continue
-                self.paint_obj(p, layer, i)
-            if self.keep_ops and mark >= 0 and token == self.last_token and not inside_changed:  # (kept once it held two paints: frames that change don't pay a copy)
+                var id = layer.objs[i].id
+                var s0 = p.ops_mark()
+                var sg = self.seg_at.get(id, -1) if patch and not (id in self.dirty_ids) else -1
+                if sg < 0 or not p.ops_replay_range(self.kept, self.seg_a[sg], self.seg_b[sg]):
+                    self.paint_obj(p, layer, i)
+                if mark >= 0:
+                    segs += [id, s0 - mark, p.ops_mark() - mark]
+            if patch:
+                self.patches += 1
+            var keep_now = token == self.last_token and not inside_changed
+            if self.keep_ops and mark >= 0 and (keep_now or patch):  # (kept once it held two paints, or patched from kept)
                 self.kept = p.ops_capture(mark)
                 self.kept_token = token
                 self.kept_ver = self.board_version
                 self.ops_clean = True
+                self.seg_at = Dict[Int, Int]()
+                self.seg_a = List[Int]()
+                self.seg_b = List[Int]()
+                for q in range(len(segs) // 3):
+                    self.seg_at[segs[3 * q]] = q
+                    self.seg_a.append(segs[3 * q + 1])
+                    self.seg_b.append(segs[3 * q + 2])
+                self.dirty_ids = Dict[Int, Bool]()
+                self.dirty_known = True
             self.last_token = token
         if any_lift:  # (the lifted objects: all of them, wherever they are, over the board)
             p.begin_layer("board-lift")
@@ -501,6 +542,7 @@ struct BoardLook(Movable):
                 self.seen_doc = layer.version
                 self.fills += 1
                 self.fill_outside = True
+                self.snap.changed = List[Int]()
                 var rects = List[Float64]()
                 for id in ad.value():
                     var q = layer.index(id)
