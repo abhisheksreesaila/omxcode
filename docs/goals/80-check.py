@@ -334,7 +334,7 @@ def m6():
         return sum(int(l.rsplit(":", 1)[1]) for l in run(cmd, 120).stdout.splitlines() if l.strip())
     if count(None) > count(BASE_REV):
         lost.append(f"mojoui/ names a race scene or rival more often than at {BASE_REV} ({count(None)} > {count(BASE_REV)})")
-    for t, ok in (("tests/test_gpu2d.mojo", "gpu2d: ok"), ("tests/test_gpu2d_gl.mojo", "gpu2d gl: ok"), ("tests/test_gpu2d_tiles.mojo", "tiles: ok")):
+    for t, ok in (("tests/test_gpu2d.mojo", "gpu2d cpu: ok"), ("tests/test_gpu2d_gl.mojo", "gpu2d gl: ok"), ("tests/test_gpu2d_tiles.mojo", "tiles: ok")):
         e, _ = mojo_test(t, ok)
         if e:
             lost.append(e)

@@ -417,8 +417,10 @@ def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64
 
 
 def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, x: Float64, baseline: Float64, size: Float64,
-            color: UInt32, slant: Float64, c0: Float64, c1: Float64, c2: Float64, c3: Float64):
-    """One GLYPH instance per glyph with pixels, the pen moving as Face.draw's."""
+            color: UInt32, slant: Float64, c0: Float64, c1: Float64, c2: Float64, c3: Float64,
+            rx0: Float64 = -NO_CLIP, ry0: Float64 = -NO_CLIP, rx1: Float64 = NO_CLIP, ry1: Float64 = NO_CLIP, pad: Float64 = 0):
+    """One GLYPH instance per glyph with pixels, the pen moving as Face.draw's. Glyphs whose box (widened by the slant
+    and `pad`) misses the region rx0..ry1 make none (goal 80: what a clip hides is never sent)."""
     var s = size / face.size
     var pen = x
     for ch in text.codepoints():
@@ -426,6 +428,14 @@ def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, 
         if gi < 0:
             continue
         ref g = face.glyphs[gi]
+        var gx0 = pen + Float64(g.left) * s
+        var gy0 = baseline + Float64(g.top) * s
+        # (a slanted row moves by slant × its height above the baseline: the box's sideways reach)
+        var lean = abs(slant) * max(abs(baseline - gy0), abs(gy0 + Float64(g.h) * s - baseline))
+        if g.w > 0 and g.h > 0 and (gx0 + Float64(g.w) * s + lean + pad < rx0 or gx0 - lean - pad > rx1
+                                    or gy0 + Float64(g.h) * s + pad < ry0 or gy0 - pad > ry1):
+            pen += g.advance * s
+            continue
         if g.w > 0 and g.h > 0:
             out.append(Float32(pen + Float64(g.left) * s))
             out.append(Float32(baseline + Float64(g.top) * s))
@@ -444,22 +454,22 @@ def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, 
         pen += g.advance * s
 
 
-def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font) -> Frame2D:
+def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font, cull: Bool = True) -> Frame2D:
     """The scene as GPU work (see the top of this file)."""
     var f = Frame2D()
-    fill_batches(f, scene, atlas, font)
+    fill_batches(f, scene, atlas, font, cull)
     return f^
 
 
-def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font):
+def fill_batches(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, cull: Bool = True):
     """build_batches into an existing frame, reusing its memory (a host keeps one Frame2D). When GlyphPages fill and
     start again while it builds, the glyphs placed before that are gone: the frame is built once more (D-7930)."""
     var pg = glyph_pages(atlas.width)
     var r0 = pg[].resets
-    fill_layers(f, scene, atlas, font, 0, scene.layers())
+    fill_layers(f, scene, atlas, font, 0, scene.layers(), cull=cull)
     if pg[].resets != r0:
         var r1 = pg[].resets
-        fill_layers(f, scene, atlas, font, 0, scene.layers())
+        fill_layers(f, scene, atlas, font, 0, scene.layers(), cull=cull)
         if pg[].resets != r1:
             print("GLYPHPAGES: one frame needs more glyphs than the pages hold (" + String(DYN_ROWS) + " rows)", flush=True)
 
@@ -535,14 +545,80 @@ def _zigzag_start(path: List[Float32], p0: Int, n: Int) -> Int:
     return best
 
 
+@always_inline
+def _box_meets(x0: Float64, y0: Float64, x1: Float64, y1: Float64, rx0: Float64, ry0: Float64, rx1: Float64, ry1: Float64) -> Bool:
+    return x1 >= rx0 and x0 <= rx1 and y1 >= ry0 and y0 <= ry1
+
+
+def _path_meets(scene: Scene, first: Int, n: Int, grow: Float64, rx0: Float64, ry0: Float64, rx1: Float64, ry1: Float64) -> Bool:
+    if n <= 0:
+        return False
+    var p0 = first * 2
+    var bx0 = Float64(scene.path[p0])
+    var by0 = Float64(scene.path[p0 + 1])
+    var bx1 = bx0
+    var by1 = by0
+    for z in range(1, n):
+        var x = Float64(scene.path[p0 + 2 * z])
+        var y = Float64(scene.path[p0 + 2 * z + 1])
+        bx0 = min(bx0, x)
+        by0 = min(by0, y)
+        bx1 = max(bx1, x)
+        by1 = max(by1, y)
+    return _box_meets(bx0 - grow, by0 - grow, bx1 + grow, by1 + grow, rx0, ry0, rx1, ry1)
+
+
+def _op_meets(scene: Scene, op: Int, kind: Int, rx0: Float64, ry0: Float64, rx1: Float64, ry1: Float64, pad: Float64) -> Bool:
+    """(goal 80) Whether an op may put a pixel inside the region rx0..ry1 (layer units): a conservative box per op, its
+    antialiasing grown by `pad`. Text before shaping: its height from the size (ink lies within 2 em above the baseline
+    and 1 em below, every script and emoji included), its width unknown, so bounded only on the side it's aligned to."""
+    if rx1 < rx0 or ry1 < ry0:
+        return False
+    var base = op * 6
+    var a = Float64(scene.nums[base])
+    var b = Float64(scene.nums[base + 1])
+    var c = Float64(scene.nums[base + 2])
+    var d = Float64(scene.nums[base + 3])
+    var e = Float64(scene.nums[base + 4])
+    if kind == OP_RECT or kind == OP_IMAGE:
+        return _box_meets(a - pad, b - pad, a + c + pad, b + d + pad, rx0, ry0, rx1, ry1)
+    if kind == OP_CIRCLE:
+        return _box_meets(a - c - pad, b - c - pad, a + c + pad, b + c + pad, rx0, ry0, rx1, ry1)
+    if kind == OP_LINE:
+        var g = e / 2 + pad
+        return _box_meets(min(a, c) - g, min(b, d) - g, max(a, c) + g, max(b, d) + g, rx0, ry0, rx1, ry1)
+    if kind == OP_TEXT or kind == OP_RUN:
+        var size = c
+        var lean = abs(d) * size if kind == OP_TEXT else 0.5 * size  # (a slant; a run's italic leans < 0.5 em)
+        if b + size + pad < ry0 or b - 2 * size - pad > ry1:
+            return False
+        var align = Int(scene.nums[base + 5]) if kind == OP_TEXT else scene.run_align(op)
+        if align == LEFT and a - size - lean - pad > rx1:
+            return False
+        if align == RIGHT and a + size + lean + pad < rx0:
+            return False
+        return True
+    if kind == OP_POLY:
+        return _path_meets(scene, Int(a), Int(b), pad, rx0, ry0, rx1, ry1)
+    if kind == OP_STROKE:
+        return _path_meets(scene, Int(a), Int(b), c / 2 + pad, rx0, ry0, rx1, ry1)
+    return True
+
+
 def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0,
-                only: List[Int] = List[Int](), content_k: Float64 = 0):
+                only: List[Int] = List[Int](), content_k: Float64 = 0, cull: Bool = True):
     """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
     rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
     skip_ops: layer `first`'s first ops left out (a layer that only grew, Scene.appends: just the new ops; the ops left
     out must leave no clip open). content_k > 0 (D-7940, a raster tile): just the ops in `only` of layer `first`
     (offsets from its first op, ascending, no clips or images among them; empty: none), built as if the layer were drawn at zoom
-    content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels)."""
+    content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels).
+
+    cull (goal 80, on unless a test compares): an op, or a glyph of a text run, wholly outside the region that can show
+    makes no instances; text runs are tested before they are shaped. The region is the clip, and the canvas too for a
+    layer that is rebuilt when it moves (not LayerTraits.fixed: a fixed layer's batches are kept and drawn again through
+    a pan, so content past the canvas's edge may come into view). Bounds are conservative: the picture is the same,
+    bit for bit (tests/test_gpu2d_cull)."""
     f.clear()
     f.width = scene.w
     f.height = scene.h
@@ -568,6 +644,13 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
             ty = 0
             tk = content_k
         var ik = 1.0 / tk if tk != 0 else 1.0
+        var cull_on = cull and tk > 0
+        var by_canvas = cull_on and content_k <= 0 and not layer_traits(scene, layer, len(clips) // 4).fixed
+        var rx0 = -NO_CLIP  # the region that can show, this layer's units (the clip, ∩ the canvas when by_canvas)
+        var ry0 = -NO_CLIP
+        var rx1 = NO_CLIP
+        var ry1 = NO_CLIP
+        var pad = 2.0 * ik  # (antialiasing ramps reach half a pixel past a box: 2 px is generous)
         var first_run = len(f.runs)
         f.layers.append(Layer2D(scene.layer_keys[layer].copy(), scene.layer_versions[layer], tx, ty, tk, first_run, 0))
         var cur_pipe = -1
@@ -601,6 +684,18 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     c1 = (clips[n - 3] - ty) * ik
                     c2 = (clips[n - 2] - tx) * ik
                     c3 = (clips[n - 1] - ty) * ik
+                if cull_on:
+                    rx0 = c0
+                    ry0 = c1
+                    rx1 = c2
+                    ry1 = c3
+                    if by_canvas:
+                        rx0 = max(rx0, -tx * ik)
+                        ry0 = max(ry0, -ty * ik)
+                        rx1 = min(rx1, (Float64(scene.w) - tx) * ik)
+                        ry1 = min(ry1, (Float64(scene.h) - ty) * ik)
+            if cull_on and kind != OP_FILL and not _op_meets(scene, op, kind, rx0, ry0, rx1, ry1, pad):
+                continue
             var color = scene.colors[op]
             var a = Float64(scene.nums[base])
             var b = Float64(scene.nums[base + 1])
@@ -626,15 +721,15 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 var ox = atlas.face_x[fi]
                 var oy = atlas.face_y[fi]
                 if fi == 0:
-                    _glyphs(f.glyphs, font.regular, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
+                    _glyphs(f.glyphs, font.regular, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 elif fi == 1:
-                    _glyphs(f.glyphs, font.medium, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
+                    _glyphs(f.glyphs, font.medium, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 elif fi == 2:
-                    _glyphs(f.glyphs, font.display, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
+                    _glyphs(f.glyphs, font.display, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 elif fi == 3:
-                    _glyphs(f.glyphs, font.mono, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
+                    _glyphs(f.glyphs, font.mono, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 else:
-                    _glyphs(f.glyphs, font.mono_bold, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3)
+                    _glyphs(f.glyphs, font.mono_bold, ox, oy, text, pen, b, c, color, d, c0, c1, c2, c3, rx0, ry0, rx1, ry1, pad)
                 added = len(f.glyphs) // GLYPH_FLOATS - before
             elif kind == OP_RUN:  # (goal 79) fonttext's shaped run: coverage glyphs from GlyphPages, colour ones as images
                 var st = scene.run_style(op)
@@ -647,7 +742,10 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 var by = Int(bdev + 0.5) if bdev >= 0 else Int(bdev - 0.5)
                 var g0 = len(f.glyphs) // GLYPH_FLOATS
                 var i0 = len(f.images) // IMAGE_FLOATS
+                var reach = 2.0 * st.size + pad  # (a glyph's ink lies within 2 em of its pen: tested before rasterizing)
                 for ref g in r.glyphs:
+                    if cull_on and (xl + g.x - reach > rx1 or xl + g.x + reach < rx0):
+                        continue
                     var gx = (xl + g.x) * tk + tx
                     var px = Int(gx + 0.5) if gx >= 0 else Int(gx - 0.5)
                     var gy = g.y * tk
@@ -659,6 +757,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     var ih = eng[].images[ii].h
                     var x_l = (Float64(px + eng[].images[ii].left) - tx) * ik
                     var y_l = (Float64(py - eng[].images[ii].top) - ty) * ik
+                    if cull_on and (x_l + Float64(iw) * ik + pad < rx0 or x_l - pad > rx1 or y_l + Float64(ih) * ik + pad < ry0 or y_l - pad > ry1):
+                        continue
                     if eng[].images[ii].color:
                         var al = Int((color >> 24) & 0xFF)
                         f.pixels.append(pg[].straight(ii, al, eng[].images[ii].rgba))
@@ -825,14 +925,22 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     var p0 = Int(a) * 2
                     var m = Int(b)
                     var hw = c / 2
+                    var g = hw + pad  # (goal 80: a capsule or disc wholly outside the region is left out)
                     for z in range(m - 1):
-                        _quad(f.quads, Float64(scene.path[p0 + 2 * z]), Float64(scene.path[p0 + 2 * z + 1]), Float64(scene.path[p0 + 2 * z + 2]),
-                              Float64(scene.path[p0 + 2 * z + 3]), hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                        var xa = Float64(scene.path[p0 + 2 * z])
+                        var ya = Float64(scene.path[p0 + 2 * z + 1])
+                        var xb = Float64(scene.path[p0 + 2 * z + 2])
+                        var yb = Float64(scene.path[p0 + 2 * z + 3])
+                        if cull_on and not _box_meets(min(xa, xb) - g, min(ya, yb) - g, max(xa, xb) + g, max(ya, yb) + g, rx0, ry0, rx1, ry1):
+                            continue
+                        _quad(f.quads, xa, ya, xb, yb, hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                     for z in range(m):
                         var px = Float64(scene.path[p0 + 2 * z])
                         var py = Float64(scene.path[p0 + 2 * z + 1])
+                        if cull_on and not _box_meets(px - g, py - g, px + g, py + g, rx0, ry0, rx1, ry1):
+                            continue
                         _quad(f.quads, px, py, px, py, hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
-                    added = 2 * m - 1
+                    added = len(f.quads) // QUAD_FLOATS - before
                 elif kind == OP_FILL:  # the whole canvas, whatever the layer's transform and clip
                     mode = BLEND_REPLACE
                     _quad(f.quads, -tx * ik, -ty * ik, c * ik, d * ik, 0, SHAPE_BOX, color, -NO_CLIP, -NO_CLIP, NO_CLIP, NO_CLIP)
