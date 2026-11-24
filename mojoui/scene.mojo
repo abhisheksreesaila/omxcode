@@ -1137,6 +1137,13 @@ struct Scene(Painter, Movable, Copyable):
             return List[Float64]()
         return self.removed_box(other, j, gone)
 
+    def has_runs(self) -> Bool:
+        """It holds text in real faces (fonttext's runs), which a replay into GTK's render nodes can't draw."""
+        for k in self.kinds:
+            if Int(k) == OP_RUN:
+                return True
+        return False
+
     def raster(self, mut s: Surface, font: Font):
         """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path), each layer
         through its transform."""

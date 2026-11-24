@@ -107,6 +107,7 @@ struct Omnibar(Movable):
         var qst = TextStyle(UI, 400, False, 17)
         var fx = ix + 18 + 20 + 12
         text_normal(p, qst, self.query, fx, y + 13 + (32 - line_metrics(qst).normal_height()) / 2, sk.ink)
+        p.rect(fx + measure(qst, self.query) + 0.5, y + 13 + 6, 1.5, 20, sk.ink, 0)
         bx.add("omni.input", fx, y + 13, iw - 18 - 20 - 12 - 12 - 35 - 16, 32)
         var kst = TextStyle(MONO, 400, False, 11)
         var ex = ix + iw - 16 - 35

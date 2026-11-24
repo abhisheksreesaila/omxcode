@@ -18,6 +18,7 @@ from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
 from mojoui.textedit import now_ms
+from mojoui.graphemes import one_line
 from mojoui.files import write_setting, read_setting
 from mojoui.islandcard import IslandCard, CardTile
 from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
@@ -1825,15 +1826,18 @@ struct WebShell(Movable):
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
         var i = self.note_index(self.current)
+        if self.panel.naming >= 0 and self.sidebar:
+            self.panel.naming_text += one_line(text)
+            return True
         if self.searching:
-            self.omni.query += " ".join(text.split())
+            self.omni.query += one_line(text)
             self.search()
             return True
         if self.card_open and self.card.editing:
             if self.card.all_selected:
                 self.card.title = ""
                 self.card.all_selected = False
-            self.card.title += " ".join(text.split())
+            self.card.title += one_line(text)
             return True
         if i < 0 or self.notes[i].secure or self.card_open or self.settings_open or not self.editable():
             return False
@@ -1850,7 +1854,7 @@ struct WebShell(Movable):
             if self.map.edit_all:
                 self.map.edit_text = ""
                 self.map.edit_all = False
-            self.map.edit_text += " ".join(text.split())
+            self.map.edit_text += one_line(text)
             return True
         return False
 

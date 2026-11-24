@@ -49,6 +49,11 @@ def without_last(text: String) -> String:
     return String(text[byte=0:erase_start(text, text.byte_length())])
 
 
+def one_line(text: String) -> String:
+    """Text for a field of one line, as a browser pastes it there: its line breaks and tabs are spaces, its own spaces kept."""
+    return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+
 def typed_text(name: String) -> Bool:
     """Whether a key's name is the text it types (a letter, a digit, an accented or other script's character, an emoji),
     not a key such as "Enter" or "F2"."""

@@ -291,6 +291,54 @@ def clearing() raises:
     print("   clear all")
 
 
+def input_method() raises:
+    """What the platform's input method commits (every key typed on a real window comes this way): spaces kept, a pasted
+    line break a space, over what is selected."""
+    var s = WebShell(DB, "paper")
+    s.create("page", "Typed")
+    for w in ["a", " ", "b", "\n"]:
+        _ = s.text_in("ime", String(w))
+    assert_equal(s.page.markdown(), "a b\n")
+    s.open_search()
+    for w in ["n", "e", "w", " ", "p"]:
+        assert_true(s.text_in("ime", String(w)), "typed")
+    assert_equal(s.omni.query, "new p")
+    assert_true(s.omni_kind[0] == 2, "New page")
+    _ = s.text_in("paste", "a\nb")
+    assert_equal(s.omni.query, "new pa b")
+    s.searching = False
+    s.card_open = True
+    s.card.editing = True
+    s.card.title = "old"
+    s.card.all_selected = True
+    for w in ["T", "w", "o", " ", "w"]:
+        _ = s.text_in("ime", String(w))
+    assert_equal(s.card.title, "Two w")
+    s.card_open = False
+    s.card.editing = False
+    s.sidebar = True
+    s.panel.naming = 0
+    s.panel.naming_text = ""
+    for w in ["N", " ", "é"]:
+        assert_true(s.text_in("ime", String(w)), "naming")
+    assert_equal(s.panel.naming_text, "N é")
+    s.panel.naming = -1
+    s.create("mindmap", "Ideas")
+    s.map.begin_edit(0)
+    for w in ["B", "i", "g", " ", "i"]:
+        _ = s.text_in("ime", String(w))
+    assert_equal(s.map.edit_text, "Big i")
+    _ = s.map.edit_key("Escape", 0)
+    s.create("canvas", "Words")
+    paint(s)
+    _ = s.tap(600, 300)
+    for w in ["B", " ", "i"]:
+        _ = s.text_in("ime", String(w))
+    assert_equal(s.tools.words.text(), "B i")
+    s.close()
+    print("   the input method's commits")
+
+
 def over_the_board() raises:
     """What lies over a canvas takes the pointer: the properties card, the toast."""
     var s = WebShell(DB, "paper")
@@ -502,6 +550,7 @@ def main() raises:
     filing()
     long_list()
     clearing()
+    input_method()
     over_the_board()
     another_app()
     notebooks()

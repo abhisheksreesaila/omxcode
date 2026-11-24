@@ -32,6 +32,7 @@ from mojoui.gpu2d_gl import GPU2D
 from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
+from mojoui.text import Font
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE, corner_rect
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
@@ -3930,7 +3931,19 @@ struct GtkHost[A: App](Movable):
                     if self.canvases[ci].on_gpu:  # (back from the GPU path: no kept nodes or textures match prev any more)
                         self.canvases[ci].on_gpu = False
                         self.canvases[ci].prev = Scene(0, 0, 1)
-                    self.replay(ci, sc^, wpx, hpx)
+                    if sc.has_runs():  # (real faces, which GTK's nodes don't hold: drawn on the CPU, goal 79's first-five-minutes run)
+                        if len(self.canvases[ci].pixels) != wpx * hpx:
+                            self.canvases[ci].pixels = List[UInt32](length=wpx * hpx, fill=0)
+                        var surface = Surface(Int(self.canvases[ci].pixels.unsafe_ptr()), wpx, hpx, scale)
+                        var font = Font()
+                        sc.raster(surface, font)
+                        var tex = texture(self.canvases[ci].pixels, wpx, hpx)
+                        external_call["gtk_picture_set_paintable", NoneType](widget, tex)
+                        external_call["g_object_unref", NoneType](tex)
+                        self.uploads += 1
+                        swap(self.canvases[ci].spare, sc)
+                    else:
+                        self.replay(ci, sc^, wpx, hpx)
         if not drew_scene:
             if len(self.canvases[ci].pixels) != wpx * hpx:
                 self.canvases[ci].pixels = List[UInt32](length=wpx * hpx, fill=0)
