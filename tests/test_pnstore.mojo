@@ -17,6 +17,15 @@ def columns(db: Database, table: String) raises -> String:
 
 
 def main() raises:
+    _ = unlink("build/test_pnstore3.db")
+    var other = Database("build/test_pnstore3.db")
+    other.exec("CREATE TABLE customers(id INTEGER)")
+    var refused = False
+    try:
+        make_notes_file(other)
+    except:
+        refused = True
+    assert_true(refused and other.count("SELECT COUNT(*) FROM sqlite_master") == 1, "another program's database is left alone")
     var path = String("build/test_pnstore.db")
     for x in ["", "-wal", "-shm"]:
         _ = unlink(path + String(x))

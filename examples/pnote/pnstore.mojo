@@ -158,6 +158,8 @@ def make_notes_file(mut db: Database) raises:
     brand-new file of its own starts. A file that has them already is left as it is."""
     if has_notes(db):
         return
+    if db.count("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'") > 0:  # (some other program's database: nothing is added to it)
+        raise Error("this isn't a notes file")
     db.exec("PRAGMA journal_mode = WAL")
     db.begin()
     try:

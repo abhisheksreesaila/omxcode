@@ -260,7 +260,63 @@ def test_styles() raises:
     assert_true(len(p.laid[2].segs) > 1 and len(p.laid[4].segs) == 1, "followed at once")
 
 
+def test_long_pages() raises:
+    """A long page is laid out as it is needed: the window at once, the rest in slices, nothing in view moving; an edit lays
+    out what it touched; in the end everything is as if laid out at once."""
+    var md = String("")
+    for i in range(700):
+        md += "Paragraph " + String(i) + " " + "some words " * (i % 37) + ("\n" if i < 699 else "")
+    var p = PageSheet()
+    p.set_markdown(md)
+    _ = p.key("Home", 2, 0)
+    _ = drawn(p)
+    var frames = 0
+    var mid = Pos(350, 0)
+    p.scroll = p.tops[350] - p.view_top - 200
+    _ = drawn(p)
+    var shown = -1  # (a paragraph in view, where it stands)
+    for para in range(len(p.tops)):
+        if p.tops[para] > p.view_top + 60:
+            shown = para
+            break
+    var y = p.tops[shown]
+    while p.waiting < len(p.ed.paras) and frames < 2000:
+        _ = drawn(p)
+        frames += 1
+        assert_true(abs(p.tops[shown] - y) < 0.5, "what is in view stays: " + String(p.tops[shown] - y) + " at frame " + String(frames))
+    assert_true(p.waiting == len(p.ed.paras), "all laid out in the end")
+    for step in range(4):  # (then edits: a letter, an Enter, a paste of lines, lines deleted)
+        p.ed.move_to(Pos(350, 3), False)
+        if step == 0:
+            p.insert("x")
+        elif step == 1:
+            p.newline()
+        elif step == 2:
+            p.insert("one\ntwo\nthree")
+        else:
+            p.ed.move_to(Pos(355, 1), True)
+            _ = p.key("Delete", 0, 0)
+        p.sync()
+        var left = 0
+        for ref l in p.laid:
+            if l.width != p.text_w:
+                left += 1
+        assert_true(left <= 6, "only what it touched: " + String(left))
+        _ = drawn(p)
+    while p.waiting < len(p.ed.paras):
+        _ = drawn(p)
+    var q = PageSheet()
+    q.set_markdown(p.markdown())
+    q.text_w = p.text_w
+    assert_equal(len(p.laid), len(p.ed.paras))
+    for para in range(len(p.ed.paras)):
+        assert_equal(p.laid[para].height, q.lay(para))
+        assert_equal(p.laid[para].text, p.ed.paras[para])
+    _ = mid
+
+
 def main() raises:
+    test_long_pages()
     test_styles()
     test_wraps()
     test_caret_moves()

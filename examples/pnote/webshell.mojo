@@ -26,7 +26,7 @@ from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE
-from mojoui.pagedesk import BoardTools
+from mojoui.pagedesk import BoardTools, T_BOX
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
@@ -1350,6 +1350,8 @@ struct WebShell(Movable):
     def save_copy(mut self):
         """Edits another app's save stands in the way of, saved as a note of their own; the note itself is then what the
         other app saved."""
+        if self.saver.pending():  # (what was typed since the last try: into what is held)
+            self.flush()
         var at = self.outbox.find(self.current)
         var i = self.note_index(self.current)
         if at < 0 or i < 0 or len(self.dbs) == 0:
@@ -2042,6 +2044,8 @@ struct WebShell(Movable):
 
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
+        if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
+            return False
         self.title_focus = False  # (a click moves the focus: the ring goes)
         if self.on_canvas():
             if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button", "#dock-flyout", "#ink-options-popover"]) != "":
@@ -2050,6 +2054,8 @@ struct WebShell(Movable):
                 return self.tools.press(x, y, self.board.layer, self.view)
             if not self.editable():
                 return False
+            if self.tools.tool == "eraser":  # (an edit along a path: the whole board)
+                return self.tools.press(x, y, self.board.edit(), self.view)
             var r = self.near_rect(x, y)  # (D-7959: the tools hit-test at the pointer: only what lies there must be in)
             return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         if self.on_map():
@@ -2108,7 +2114,7 @@ struct WebShell(Movable):
         """The open note is a page, readable, in Write mode, nothing over it."""
         var i = self.note_index(self.current)
         return (i >= 0 and self.notes[i].kind == "page" and not self.notes[i].secure and self.doc.may_edit() and not self.page.draw_mode
-                and not self.searching and not self.card_open and not self.settings_open)
+                and not self.searching and not self.card_open and not self.settings_open and not self.props_open)
 
     def double(mut self, x: Float64, y: Float64) -> Bool:
         """A double click: on a page's words, the word; a click more soon after, the line."""
@@ -2151,6 +2157,10 @@ struct WebShell(Movable):
         if self.on_canvas():
             if self.tools.tool != "hand" and not self.editable():
                 return False
+            if self.tools.drag == T_BOX:  # (a marquee selects whatever lies in it: the whole board)
+                var r = self.tools.release(x, y, self.board.edit(), self.view)
+                self.save_canvas()
+                return r
             var vr = self.near_rect(x, y)
             var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
@@ -2184,7 +2194,7 @@ struct WebShell(Movable):
     def on_canvas(self) -> Bool:
         var i = self.note_index(self.current)
         return (i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed() and not self.searching and not self.card_open
-                and not self.settings_open)
+                and not self.settings_open and not self.props_open)
 
     def canvas_tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool (an edit: the whole board

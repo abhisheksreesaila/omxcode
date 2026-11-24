@@ -13,6 +13,7 @@
 #   page.press(x, y, shift); page.drag(x, y); page.select_word(x, y); page.select_para(x, y); page.wheel(dy)
 #   page.ed.clip, page.ed.clip_version       # what was copied: show overlays.Clipboard(clip, clip_version)
 
+from std.time import perf_counter_ns
 from mojoui.graphemes import prev_grapheme, next_grapheme
 from mojoui.linebreak import browser_breaks
 from mojoui.textedit import TextEdit, Pos, SHIFT, CTRL, ALT, EDIT_OTHER, now_ms, decode_at, is_word_byte
@@ -39,6 +40,7 @@ comptime DISPLAY_FACE = "Bricolage Grotesque"
 comptime UI_FACE = "Figtree"
 comptime MONO_FACE = "Geist Mono"
 comptime BODY = 18.0
+comptime LAY_NS = 4_000_000  # how long a frame may lay out what isn't in view
 
 
 def lu(v: Float64) -> Float64:
@@ -106,8 +108,11 @@ struct PageSheet(Movable):
     var goal_x: Float64  # up and down keep this x (-1: the caret's)
     var laid: List[ParaLay]
     var tops: List[Float64]  # where the last draw put each paragraph (layout px)
-    var code: List[Bool]  # per paragraph: inside a ``` block (or its fence), of the text's version `code_of`
-    var code_of: Int
+    var code: List[Bool]  # per paragraph: inside a ``` block (or its fence), of the text's version `all_of`
+    var waiting: Int  # the first paragraph that may still wait for its layout
+    var all_of: Int
+    var all_w: Float64
+    var all_pre: String
     var content_h: Float64  # the desk's content and the room it has, at the last draw
     var view_h: Float64
     var view_top: Float64
@@ -139,7 +144,10 @@ struct PageSheet(Movable):
         self.laid = List[ParaLay]()
         self.tops = List[Float64]()
         self.code = List[Bool]()
-        self.code_of = -1
+        self.waiting = 0
+        self.all_of = -1
+        self.all_w = -1
+        self.all_pre = ""
         self.content_h = 0
         self.view_h = 0
         self.view_top = 0
@@ -337,22 +345,79 @@ struct PageSheet(Movable):
 
     # ------------------------------------------------ layout
 
+    def sync(mut self):
+        """The layouts follow the text: paragraphs an edit didn't touch keep theirs (found from both ends), the others wait
+        with a height guessed from their length, to be laid out when they come into view or there is time (lay_more)."""
+        if self.all_of == self.ed.version and self.all_w == self.text_w and self.all_pre == self.preedit:
+            return
+        var wide = self.all_w != self.text_w
+        self.all_of = self.ed.version
+        self.all_w = self.text_w
+        self.all_pre = self.preedit
+        var n = len(self.ed.paras)
+        self.code.clear()
+        var inside = False
+        for ref l in self.ed.paras:
+            var fence = l.find("```") >= 0 and String(l.strip()).startswith("```")
+            self.code.append(inside or fence)
+            if fence:
+                inside = not inside
+        var m = len(self.laid)
+        var f = 0
+        while f < min(n, m) and self.laid[f].text == self.ed.paras[f]:
+            f += 1
+        var k = 0
+        while k < min(n, m) - f and self.laid[m - 1 - k].text == self.ed.paras[n - 1 - k]:
+            k += 1
+        if n - k > f or m - k > f:
+            var fresh = List[ParaLay]()
+            for i in range(f, n - k):
+                var pl = ParaLay()
+                pl.text = self.ed.paras[i]
+                pl.height = self._guess(i)
+                fresh.append(pl^)
+            if len(fresh) == m - k - f:
+                for i in range(len(fresh)):
+                    self.laid[f + i] = fresh[i].copy()
+            else:
+                var tail = List[ParaLay](capacity=k)
+                for _ in range(k):
+                    tail.append(self.laid.pop())
+                while len(self.laid) > f:
+                    _ = self.laid.pop()
+                for i in range(len(fresh)):
+                    self.laid.append(fresh[i].copy())
+                while len(tail) > 0:
+                    self.laid.append(tail.pop())
+        for i in range(n):
+            if wide or self.laid[i].code != self.code[i]:
+                self.laid[i].width = -1
+        self.waiting = 0
+
+    def _guess(self, i: Int) -> Float64:
+        """A paragraph's height before it is laid out, from its length."""
+        var lines = max(Int(Float64(self.ed.paras[i].byte_length()) * 8.2 / self.text_w + 0.999), 1)
+        return Float64(lines) * lu(BODY * 1.65)
+
+    def lay_more(mut self, until_ns: Int) -> Bool:
+        """Lays out paragraphs that wait, in order, until the clock says so; True while some still wait. What a paragraph
+        above the window turns out to be high moves the scroll with it (nothing in view moves)."""
+        self.sync()
+        while self.waiting < len(self.ed.paras):
+            if self.laid[self.waiting].width != self.text_w:
+                var was = self.laid[self.waiting].height
+                var h = self.lay(self.waiting)
+                if self.waiting < len(self.tops) and self.tops[self.waiting] + was <= self.view_top:
+                    self.scroll += h - was
+                if Int(perf_counter_ns()) > until_ns:
+                    return self.waiting + 1 < len(self.ed.paras)
+            self.waiting += 1
+        return False
+
     def lay(mut self, i: Int) -> Float64:
         """Paragraph i's layout, made again when its words (the composition in them) or the width changed; its height."""
+        self.sync()
         var words = self.shown_text(i)
-        while len(self.laid) < len(self.ed.paras):
-            self.laid.append(ParaLay())
-        while len(self.laid) > len(self.ed.paras):
-            _ = self.laid.pop()
-        if self.code_of != self.ed.version:
-            self.code_of = self.ed.version
-            self.code.clear()
-            var inside = False
-            for ref l in self.ed.paras:
-                var fence = String(l.strip()).startswith("```")
-                self.code.append(inside or fence)
-                if fence:
-                    inside = not inside
         if self.laid[i].width == self.text_w and self.laid[i].text == words and self.laid[i].code == self.code[i]:
             return self.laid[i].height
         var pl = ParaLay()
@@ -769,11 +834,12 @@ struct PageSheet(Movable):
             base += self.ed.paras[para].byte_length() + 1
         return best
 
-    def page_json(self, source: String) raises -> String:
+    def page_json(mut self, source: String) raises -> String:
         """The page as it is saved when it was read from `source` (review 3): that text with its markdown replaced, when it
         changed, and the marks made here added after the ones it had; every other member (its other ink, keys nobody here
         knows) as it was. A page made here: the web's shape."""
         var md = self.markdown()
+        self.ink.follow(md)
         if source == "":
             return self.ink.save('{"version":1,"markdown":' + json_string(md) + ',"ink":{"marks":[],"drawings":[]}}')
         var j = Json.parse(source)
@@ -940,6 +1006,24 @@ struct PageSheet(Movable):
         var stage_w = min(860.0, dw - 32)
         var sx = dx + 16 + (dw - 32 - stage_w) / 2
         self.text_w = stage_w - 220
+        var t0 = Int(perf_counter_ns())
+        _ = self.lay(self.ed.caret.para)
+        # what the window shows is always laid out; the rest as there is time (a 300 KB page took 0.8 s at once)
+        var seen_from = self.scroll - 70 - 96
+        var y = 0.0
+        self.sync()
+        for para in range(len(self.ed.paras)):
+            if y + self.laid[para].height > seen_from - 200 and y < seen_from + dh + 300:
+                var was = self.laid[para].height
+                var h = self.lay(para)
+                if h != was and y + was <= seen_from:  # (above the window: what is in it stays)
+                    self.scroll += h - was
+                    seen_from += h - was
+            elif y > seen_from + dh + 300:
+                break
+            y += self.laid[para].height
+        if self.lay_more(t0 + LAY_NS):
+            p.set_again()
         var text_h = self._text_height()
         # the sheet (behind the toolbar); in Draw a hint sits under the toolbar and the sheet moves down by its height
         var sheet_at = 28.0 + 44 + 14 - 16 + (27.0 if self.draw_mode else 0.0)
@@ -1009,13 +1093,13 @@ struct PageSheet(Movable):
         var at_y = ty
         for para in range(len(self.ed.paras)):
             self.tops.append(at_y)
-            at_y += self.lay(para)
+            at_y += self.laid[para].height
         for i in range(len(self.ink.marks)):  # (the highlighter under the words: the web multiplies it over them)
             if self.ink.marks[i].tool == "highlight":
                 self._draw_mark(p, i)
         for para in range(len(self.ed.paras)):
-            var ph = self.lay(para)
-            if ty + ph < dy - 8 and caret.para != para or ty > dy + dh + 8 and caret.para != para:  # (out of view)
+            var ph = self.laid[para].height
+            if ty + ph < dy - 8 or ty > dy + dh + 8 or self.laid[para].width != self.text_w:  # (out of view)
                 ty += ph
                 continue
             var caret_byte = caret.byte + self.preedit.byte_length()
@@ -1090,16 +1174,18 @@ struct PageSheet(Movable):
             _polyline(p, o[0], o[1], self.ink.marks[i].points, look[1], look[0])
 
     def _text_height(mut self) -> Float64:
+        self.sync()
         var h = 0.0
-        for para in range(len(self.ed.paras)):
-            h += self.lay(para)
+        for ref l in self.laid:
+            h += l.height
         return h
 
     def _caret_at(mut self) -> Tuple[Float64, Float64]:
         """The caret's shown line: its top under the text's, and its height."""
         var y = 0.0
+        self.sync()
         for para in range(self.ed.caret.para):
-            y += self.lay(para)
+            y += self.laid[para].height
         var v = self.vline_of(Pos(self.ed.caret.para, self.ed.caret.byte + self.preedit.byte_length()), self.at_end)
         var l = self.laid[self.ed.caret.para].lines[v]
         return (y + l.top, l.height)

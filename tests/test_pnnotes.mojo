@@ -291,6 +291,39 @@ def clearing() raises:
     print("   clear all")
 
 
+def over_the_board() raises:
+    """What lies over a canvas takes the pointer: the properties card, the toast."""
+    var s = WebShell(DB, "paper")
+    s.create("canvas", "Board")
+    paint(s)
+    s.tools.tool = "pen"
+    s.props_open = True
+    paint(s)
+    var p = at(s, "#note-popover")
+    for k in range(5):
+        if k == 0:
+            _ = s.press(p[0], p[1] + 10)
+        _ = s.pan(p[0] + Float64(k) * 9, p[1] + 10)
+    _ = s.release(p[0] + 40, p[1] + 10)
+    s.props_open = False
+    s.say("A word", "Undo", 0)
+    paint(s)
+    p = at(s, "#toast")
+    _ = s.press(p[0] - 30, p[1])
+    _ = s.pan(p[0], p[1])
+    _ = s.pan(p[0] + 30, p[1])
+    _ = s.release(p[0] + 30, p[1])
+    assert_equal(len(s.board.edit().objs), 0)
+    s.hide_toast()
+    _ = s.press(600, 400)
+    _ = s.pan(620, 420)
+    _ = s.pan(660, 430)
+    _ = s.release(660, 430)
+    assert_equal(len(s.board.edit().objs), 1)
+    s.close()
+    print("   what lies over the board")
+
+
 def another_app() raises:
     """The web, or a second window, on the same file."""
     var s = WebShell(DB, "paper")
@@ -322,8 +355,9 @@ def another_app() raises:
     s.flush()
     assert_true(s.save_state != "", "told")
     paint(s)
+    typed(s, " and more")  # (typed after it was told: in the copy too)
     tap(s, "#save-copy")
-    assert_true(s.notes[0].title == "Shared (my copy)" and s.page.markdown().endswith(" S") and s.save_state == "", "a copy, opened")
+    assert_true(s.notes[0].title == "Shared (my copy)" and s.page.markdown().endswith(" S and more") and s.save_state == "", "a copy, opened")
     s.open(id)
     assert_true(s.page.markdown().endswith(" T") and s.doc.may_edit(), "the note is the other's")
     assert_equal(s.outbox.find(id), -1)
@@ -387,6 +421,7 @@ def main() raises:
     filing()
     long_list()
     clearing()
+    over_the_board()
     another_app()
     notebooks()
     print("pnnotes: ok")
