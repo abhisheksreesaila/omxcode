@@ -32,7 +32,7 @@ from mojoui.gpu2d_gl import GPU2D
 from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE, corner_rect
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
@@ -4111,7 +4111,19 @@ struct GtkHost[A: App](Movable):
         for op in range(first, end):
             var kind = Int(sc.kinds[op])
             var c = sc.colors[op]
-            if kind == OP_FILL or kind == OP_RECT:
+            if kind == OP_RECT and sc.num(op, 5) < 0:  # (D-8021: a corner of its own: a path)
+                var r0 = sc.num(op, 4)
+                var pts = corner_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3), r0, r0, -sc.num(op, 5), r0)
+                var b = external_call["gsk_path_builder_new", Int]()
+                external_call["gsk_path_builder_move_to", NoneType](b, Float32(pts[0]), Float32(pts[1]))
+                for z in range(1, len(pts) // 2):
+                    external_call["gsk_path_builder_line_to", NoneType](b, Float32(pts[2 * z]), Float32(pts[2 * z + 1]))
+                external_call["gsk_path_builder_close", NoneType](b)
+                var path = external_call["gsk_path_builder_free_to_path", Int](b)
+                self.put_rgba(c)
+                external_call["gtk_snapshot_append_fill", NoneType](snap, path, c_int(0), self.at(0))  # GSK_FILL_RULE_WINDING
+                external_call["gsk_path_unref", NoneType](path)
+            elif kind == OP_FILL or kind == OP_RECT:
                 self.snap_rect(snap, sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3), c, sc.num(op, 4) if kind == OP_RECT else 0)
             elif kind == OP_CIRCLE:
                 var rr = sc.num(op, 2)

@@ -13,7 +13,7 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.scene import Painter, snap_px, KeptOps
+from mojoui.scene import Painter, snap_px, KeptOps, corner_rect
 from mojoui.viewsnap import snap_read, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
@@ -286,6 +286,7 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
+    var corner_quads: Bool  # (D-8021) stickies' bodies without stencils (MOJOUI_CORNER_QUADS=0: as polygons; on the Mac off until it has run there)
     var reach: Float64  # (D-8019) how far past the window (screen px) the ops are complete, so a zoom-out finds its edges rastered (an app sets 0 while the board is still loading)
     var kept_gen: Int  # (D-8010) the look the kept ops were painted with
     var seg_at: Dict[Int, Int]  # (D-7974) the kept ops per object: id → its range [seg_a, seg_b)
@@ -340,6 +341,7 @@ struct BoardLook(Movable):
         self.kept_token = ""
         self.kept_gen = -1
         self.reach = BOARD_REACH
+        self.corner_quads = getenv("MOJOUI_CORNER_QUADS") != "0"
         self.seg_at = Dict[Int, Int]()
         self.seg_a = List[Int]()
         self.seg_b = List[Int]()
@@ -688,7 +690,10 @@ struct BoardLook(Movable):
             # (D-7973) an opaque sticky hides its shadow's middle: inset 10 page px stays inside its 24 px corner
             var hm = 10.0 if self.shadow_holes and ((o.color >> 24) & 0xFF) == 0xFF else -1.0
             draw_shadows(p, o.x, o.y, o.w, o.h, 6, [Shadow(0, 9, 16, 0, rgba(0, 0, 0, 66))], hm)
-            p.polygon(corner_rect(o.x, o.y, o.w, o.h, 4, 4, 24, 4), o.color)
+            if self.corner_quads:
+                p.rect_corner(o.x, o.y, o.w, o.h, o.color, 4, 24)
+            else:
+                p.polygon(corner_rect(o.x, o.y, o.w, o.h, 4, 4, 24, 4), o.color)
             self._words(p, o, o.x + STICKY_PAD, o.y + STICKY_PAD, o.w - 2 * STICKY_PAD, o.ink)
             p.note("object sticky " + String(o.id))
         elif kind == INK:
@@ -725,23 +730,6 @@ struct BoardLook(Movable):
         for n in range(len(ls)):
             if ls[n] != "":
                 p.run(st, ls[n], x, base + Float64(n) * pitch, color, 0)
-
-
-def corner_rect(x: Float64, y: Float64, w: Float64, h: Float64, tl: Float64, tr: Float64, br: Float64, bl: Float64) -> List[Float64]:
-    """A rect with its own radius at each corner (CSS order: top-left, top-right, bottom-right, bottom-left) as a polygon."""
-    var out = List[Float64]()
-    var rs: List[Float64] = [tl, tr, br, bl]
-    var cxs: List[Float64] = [x + tl, x + w - tr, x + w - br, x + bl]
-    var cys: List[Float64] = [y + tl, y + tr, y + h - br, y + h - bl]
-    var starts: List[Float64] = [PI, 1.5 * PI, 0, 0.5 * PI]
-    for c in range(4):
-        var r = min(rs[c], min(w, h) / 2)
-        var n = max(2, Int(r * 0.6) + 2)
-        for s in range(n + 1):
-            var a = starts[c] + 0.5 * PI * Float64(s) / Float64(n)
-            out.append(cxs[c] + r * cos(a))
-            out.append(cys[c] + r * sin(a))
-    return out^
 
 
 def draw_arrow[P: Painter](mut p: P, ax: Float64, ay: Float64, bx: Float64, by: Float64, width: Float64, color: UInt32, head: Bool = True):

@@ -805,7 +805,14 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 added = 1
                 if kind == OP_RECT:
                     var hole = Float64(scene.nums[op * 6 + 5])
-                    if hole <= 0:
+                    if hole < 0:  # (D-8021) the bottom-right corner's own radius: three boxes cut along pixels that meet exactly
+                        var bx = a + c + hole
+                        var by = b + d + hole
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, by))
+                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, by), min(c2, bx), c3)
+                        _quad(f.quads, a, b, c, d, -hole, SHAPE_BOX, color, max(c0, bx), max(c1, by), c2, c3)
+                        added = 3
+                    elif hole == 0:
                         _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, c3)
                     else:  # (D-7973) the box minus its middle as up to four clipped bands: no pixel of the middle is made
                         var hx0 = a + hole

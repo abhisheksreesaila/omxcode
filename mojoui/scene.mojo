@@ -11,6 +11,7 @@
 #       ...
 
 from std.collections import Dict
+from std.math import cos, sin
 from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
@@ -34,6 +35,23 @@ comptime STRIDE = 6  # floats per op
 def snap_px(v: Float64) -> Float64:
     """A translation snapped to a whole device pixel (a tiled layer's, D-7940: its kept tiles then land 1:1)."""
     return Float64(Int(v + 0.5)) if v >= 0 else -Float64(Int(-v + 0.5))
+
+
+def corner_rect(x: Float64, y: Float64, w: Float64, h: Float64, tl: Float64, tr: Float64, br: Float64, bl: Float64) -> List[Float64]:
+    """A rect with its own radius at each corner (CSS order: top-left, top-right, bottom-right, bottom-left) as a polygon."""
+    var out = List[Float64]()
+    var rs: List[Float64] = [tl, tr, br, bl]
+    var cxs: List[Float64] = [x + tl, x + w - tr, x + w - br, x + bl]
+    var cys: List[Float64] = [y + tl, y + tr, y + h - br, y + h - bl]
+    var starts: List[Float64] = [3.141592653589793, 1.5 * 3.141592653589793, 0, 0.5 * 3.141592653589793]
+    for c in range(4):
+        var r = min(rs[c], min(w, h) / 2)
+        var n = max(2, Int(r * 0.6) + 2)
+        for s in range(n + 1):
+            var a = starts[c] + 0.5 * 3.141592653589793 * Float64(s) / Float64(n)
+            out.append(cxs[c] + r * cos(a))
+            out.append(cys[c] + r * sin(a))
+    return out^
 
 
 struct KeptOps(Copyable, Movable):
@@ -235,6 +253,11 @@ trait Painter:
         painter may leave that middle out (the same picture, less fill). The CPU painter draws it whole."""
         ...
 
+    def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
+        """(D-8021) A rounded rect whose bottom-right corner has a radius of its own (a sticky's turned corner, a bubble's
+        tail). The GPU 2D renderers draw it as boxes cut along pixels that meet exactly (no stencil, no seam)."""
+        ...
+
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
         ...
 
@@ -401,6 +424,9 @@ struct SurfacePainter(Painter, Movable):
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         self.rect(x, y, w, h, color, radius)
+
+    def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
+        self.polygon(corner_rect(x, y, w, h, radius, radius, br, radius), color)
 
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
         var k = self.tk
@@ -857,6 +883,11 @@ struct Scene(Painter, Movable, Copyable):
         var hl = hole if hole > 0 and w - 2 * hole > 1 and h - 2 * hole > 1 else 0.0  # (no middle worth leaving out: 0)
         self._op(OP_RECT, x, y, w, h, radius, hl, color, -1)
 
+    def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
+        if w <= 0 or h <= 0:
+            return
+        self._op(OP_RECT, x, y, w, h, radius, -min(br, min(w, h) / 2) if br > 0 else 0.0, color, -1)  # (below zero: not a hole, the corner's radius)
+
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
         self._op(OP_LINE, x0, y0, x1, y1, width, 0, color, -1)
 
@@ -1106,6 +1137,10 @@ struct Scene(Painter, Movable, Copyable):
                 if len(clips) > 0:
                     _ = clips.pop()
             elif kind == OP_RECT:
+                if self.num(op, 5) < 0:  # (a corner of its own)
+                    var r0 = self.num(op, 4)
+                    polygon(s, corner_rect(self.num(op, 0), self.num(op, 1), self.num(op, 2), self.num(op, 3), r0, r0, -self.num(op, 5), r0), c, tx, ty, tk)
+                    continue
                 var x = self.num(op, 0) * tk + tx
                 var y = self.num(op, 1) * tk + ty
                 var w = self.num(op, 2) * tk
