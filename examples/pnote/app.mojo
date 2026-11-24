@@ -50,6 +50,8 @@ comptime PALETTE_GO = 7
 comptime PALETTE_CANCEL = 8
 comptime DELETE_NOTE = 9
 comptime WARM_TICK = 11  # (D-8002: glyphs readied while nothing happens)
+comptime FEED_TICK = 12  # the notes file looked at for what another app did
+comptime FEED_TICK_MS = 2000
 comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
 
 comptime PAGE = 0
@@ -538,6 +540,8 @@ struct Main(App):
             return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() else 500, SAVE_TICK)]
         if len(self.web) > 0 and self.web[0].readying():
             return [Every(WARM_TICK_MS, WARM_TICK)]
+        if len(self.web) > 0:
+            return [Every(FEED_TICK_MS, FEED_TICK)]
         return List[Every]()
 
     def draws_after_closing(self) -> Bool:
@@ -793,6 +797,10 @@ struct Main(App):
         if len(self.web) > 0:
             if m == SAVE_TICK:
                 if self.web[0].tick():
+                    self.version += 1
+                return
+            if m == FEED_TICK:  # (another app on the same notes file)
+                if self.web[0].refresh():
                     self.version += 1
                 return
             if m == WARM_TICK:

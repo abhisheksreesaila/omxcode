@@ -224,6 +224,21 @@ def drop_note(mut db: Database, id: Int) -> String:
     return drop_row(db, "notes", "id", id, before)
 
 
+def make_notebook(mut db: Database, name: String, category: String) -> NewResult:
+    """A new notebook on a shelf (services.create_notebook)."""
+    try:
+        var s = RowNew("notebooks")
+        s.set("resource_id", text_arg(hex_id("res_")))
+        s.set("name", text_arg(name if name != "" else String("Untitled notebook")))
+        s.set("color", text_arg("#B86B4B"))
+        s.set("category", text_arg(category))
+        for f in changed("notebook", NEW_ROW, "created", "notebooks"):
+            s.after.append(f.copy())
+        return new_row(db, s)
+    except e:
+        return NewResult(0, String(e))
+
+
 def file_note(mut db: Database, id: Int, revision: Int, notebook: Int) -> SaveResult:
     """A note filed into a notebook, or back to the Inbox (0) (services.move_note), on the revision the caller has."""
     var s = RowSave("notes", "id", id, "revision", revision)

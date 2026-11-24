@@ -31,7 +31,7 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
-from pnstore import make_notes_file, make_note, drop_note, file_note
+from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
@@ -326,6 +326,7 @@ struct WebShell(Movable):
     var gone_at: Int
     var props_open: Bool
     var props: PropsCard
+    var known_seq: Int  # the notes file's change feed, as last seen (-1: not yet)
     var clip: String  # what was copied last, and how many times something was
     var clip_version: Int
     var words_clips: Int
@@ -416,6 +417,7 @@ struct WebShell(Movable):
         self.cold_opens = False
         self.bench_note = -1
         self.doubled_us = -1_000_000
+        self.known_seq = -1
         self.clip = ""
         self.clip_version = 0
         self.words_clips = 0
@@ -885,7 +887,11 @@ struct WebShell(Movable):
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
         if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
             draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk)
-            draw_pill_button(p, self.boxes, "#save-retry", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Retry", self.sk)
+            var held_at = self.outbox.find(self.current)
+            if held_at >= 0 and self.outbox.items[held_at].conflict:  # (another app saved first: these edits can't go on top of its)
+                draw_pill_button(p, self.boxes, "#save-copy", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Save a copy", self.sk)
+            else:
+                draw_pill_button(p, self.boxes, "#save-retry", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Retry", self.sk)
         self.paint_overlays(p, w, h, k)
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
@@ -1256,22 +1262,7 @@ struct WebShell(Movable):
         if made.id == 0:
             self.say("Couldn’t make a note: " + made.message)
             return
-        var rec = NoteRec(made.id, "", "", name, kind, "", notebook, "", 1, False, 1, False, 0)
-        try:
-            var q = self.dbs[0].prepare("SELECT created_at, updated_at, revision, IFNULL(octet_length(content), 0), IFNULL(notebook_id, 0) FROM notes WHERE id = ?")
-            q.bind(1, made.id)
-            if q.step():
-                rec.created = q.text(0)
-                rec.updated = q.text(1)
-                rec.revision = q.int(2)
-                rec.bytes = q.int(3)
-                rec.notebook = q.int(4)
-        except:
-            pass
-        rec.emoji = guess_emoji(name, kind)
-        rec.tint = tint_of(rec.emoji)
-        self.notes.insert(0, rec^)
-        self.list_notes()
+        self.add_record(made.id, kind, name)
         self.open(made.id)
         self.panel.scroll = 0
         if kind == "page":
@@ -1337,6 +1328,133 @@ struct WebShell(Movable):
             self.toast = ""
             self.toast_action = ""
             self.toast_does = 0
+
+    def save_copy(mut self):
+        """Edits another app's save stands in the way of, saved as a note of their own; the note itself is then what the
+        other app saved."""
+        var at = self.outbox.find(self.current)
+        var i = self.note_index(self.current)
+        if at < 0 or i < 0 or len(self.dbs) == 0:
+            return
+        var u = self.outbox.items[at].copy()
+        var title = self.notes[i].title + " (my copy)"
+        var made = make_note(self.dbs[0], u.kind, title, self.notes[i].notebook, u.content, u.body)
+        if made.id == 0:
+            self.say("Couldn’t save a copy: " + made.message)
+            return
+        self.saver.done()
+        self.save_kind = ""
+        self.outbox.drop(u.id)
+        self.doc.begin(0)  # (what is on screen is in the copy: nothing of it is saved or kept as the note's own)
+        self.current = 0
+        self.add_record(made.id, u.kind, title)
+        self.open(made.id)
+        self.say("Saved as “" + title + "”")
+        print("PNOTE COPY: note " + String(u.id) + " -> " + String(made.id), flush=True)
+
+    def add_record(mut self, id: Int, kind: String, title: String):
+        """A note just made in the file, listed first."""
+        var rec = NoteRec(id, "", "", title, kind, "", 0, "", 1, False, 1, False, 0)
+        try:
+            var q = self.dbs[0].prepare("SELECT created_at, updated_at, revision, IFNULL(octet_length(content), 0), IFNULL(notebook_id, 0) FROM notes WHERE id = ?")
+            q.bind(1, id)
+            if q.step():
+                rec.created = q.text(0)
+                rec.updated = q.text(1)
+                rec.revision = q.int(2)
+                rec.bytes = q.int(3)
+                rec.notebook = q.int(4)
+        except:
+            pass
+        rec.emoji = guess_emoji(title, kind)
+        rec.tint = tint_of(rec.emoji)
+        self.notes.insert(0, rec^)
+        self.panel_counts()
+        self.list_notes()
+
+    def refresh(mut self) -> Bool:
+        """What another app did to the notes file since (its change feed's sequence moved on): the list read again; the
+        open note, when its row moved on and nothing here is unsaved, opened again. True when the screen changes."""
+        if len(self.dbs) == 0:
+            return False
+        try:
+            var seq = self.dbs[0].count("SELECT sequence FROM workspace_state WHERE id = 1")
+            if seq == self.known_seq:
+                return False
+            var first = self.known_seq < 0
+            self.known_seq = seq
+            if first:
+                return False
+            var rows = Dict[Int, Int]()  # id → revision
+            var fresh = List[NoteRec]()
+            var changed = False
+            var q = self.dbs[0].prepare("SELECT id, title, note_type, IFNULL(notebook_id, 0), icon, icon_tint, created_at, updated_at, revision, secure, IFNULL(octet_length(content), 0) FROM notes ORDER BY updated_at DESC, id DESC")
+            while q.step():
+                var id = q.int(0)
+                if len(self.gone) > 0 and self.gone[0].id == id:  # (deleted here, its row waiting for the toast)
+                    continue
+                var emoji = q.text(4)
+                var tint = q.int(5)
+                var own = emoji != ""
+                if not own:
+                    emoji = guess_emoji(q.text(1), q.text(2))
+                    tint = tint_of(emoji)
+                rows[id] = q.int(8)
+                var rec = NoteRec(id, q.text(6), q.text(7), q.text(1), q.text(2), "", q.int(3), emoji, tint, own, q.int(8), q.int(9) != 0, q.int(10))
+                var i = self.note_index(id)
+                if i < 0 or self.notes[i].revision != rec.revision or self.notes[i].title != rec.title or self.notes[i].notebook != rec.notebook:
+                    changed = True
+                if i >= 0 and self.outbox.find(id) >= 0:  # (edits held at an older revision: they keep building on it)
+                    rec.revision = self.notes[i].revision
+                if i >= 0 and id == self.current and (self.saver.pending() or self.tools.editing != -1 or self.map.editing >= 0 or self.page.marking() or self.page.preedit != ""):
+                    rec.revision = self.notes[i].revision  # (being edited: the save will meet the other's and say so)
+                fresh.append(rec^)
+            if len(fresh) != len(self.notes):
+                changed = True
+            if not changed:
+                return False
+            var cur = self.current
+            var was = self.doc.revision
+            self.notes = fresh^
+            self.panel.notebooks.clear()
+            var nb = self.dbs[0].prepare("SELECT id, name, color, category, (SELECT COUNT(*) FROM notes WHERE notebook_id = notebooks.id) FROM notebooks ORDER BY updated_at DESC, id ASC")
+            while nb.step():
+                self.panel.notebooks.append(PanelNotebook(nb.int(0), nb.text(1), hexc(nb.text(2)), nb.text(3), notebook_icon(nb.text(1)), nb.int(4)))
+            self.list_notes()
+            var i = self.note_index(cur)
+            if i < 0:  # (deleted there)
+                if cur != 0 and self.doc.may_edit():
+                    self.doc.begin(cur)
+                    self.doc.failed(cur, "This note was deleted in another app.")
+            elif self.doc.may_edit() and self.notes[i].revision != was and self.outbox.find(cur) < 0 and not self.notes[i].secure:
+                var scroll = self.page.scroll
+                var view = self.view
+                self.saver.done()
+                self.save_kind = ""
+                self.current = 0  # (nothing here is unsaved: what the file holds, shown)
+                self.doc.begin(0)
+                self.open(cur)
+                self.page.scroll = scroll
+                if self.notes[i].kind == "canvas" and self.view_set:
+                    self.view = view
+            print("PNOTE FEED: read again at " + String(seq), flush=True)
+            return True
+        except e:
+            return False
+
+    def name_notebook(mut self):
+        """The new notebook's name is written: made, on its shelf."""
+        var at = self.panel.naming
+        var name = String(self.panel.naming_text.strip())
+        self.panel.naming = -1
+        if at < 0 or name == "" or len(self.dbs) == 0:
+            return
+        var shelf = self.panel.cfg.shelves[at].key
+        var made = make_notebook(self.dbs[0], name, shelf)
+        if made.id == 0:
+            self.say("Couldn’t make it: " + made.message)
+            return
+        self.panel.notebooks.insert(0, PanelNotebook(made.id, name, hexc("#B86B4B"), shelf, notebook_icon(name), 0))
 
     def move_note(mut self, notebook: Int):
         """The open note filed into a notebook (0: the Inbox)."""
@@ -1612,6 +1730,12 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        if self.panel.naming >= 0 and self.sidebar:
+            var r = self.panel.name_key(name, mods)
+            if r == 2:
+                self.name_notebook()
+            if r != 0:
+                return True
         if (mods & 2) != 0 and (name == "k" or name == "K"):
             if self.searching:
                 self.searching = False
@@ -2119,15 +2243,17 @@ struct WebShell(Movable):
 
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
-        var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button"])
+        var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button", ".sec-head"])
         self.px = x
         self.py = y
-        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button"]) != before
+        self.panel.px = x
+        self.panel.py = y
+        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", ".sec-head"]) != before
 
     def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
         self.title_focus = False
-        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#rail-new-note", ".nav-row:"])
+        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#save-copy", "#rail-new-note", ".nav-row:"])
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
                 self.run_toast()
@@ -2200,6 +2326,9 @@ struct WebShell(Movable):
             var again = self.current
             self.open(again)
             return True
+        if hit == "#save-copy":
+            self.save_copy()
+            return True
         if hit == "#save-retry":
             self.retry_save()
             return True
@@ -2221,6 +2350,15 @@ struct WebShell(Movable):
             var id = self.panel.hit(x, y, 0)
             if id >= 0:
                 self.open(id)
+                return True
+        if hit.startswith(".sec-head") and (y < self.panel.list_y0 or y >= self.panel.list_y1):
+            return True  # (a shelf's head scrolled out from under the footer: nothing there)
+        if hit.startswith(".sec-head"):
+            var at = self.panel.add_at(x, y)
+            if at >= 0:
+                self.panel.naming = at
+                self.panel.naming_text = ""
+                self.panel.open_shelves[at] = True
                 return True
         if hit.startswith(".nav-row:"):
             var id = self.panel.hit(x, y, 1)

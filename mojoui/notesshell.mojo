@@ -10,6 +10,7 @@
 #   var panel = NotesPanel(); …; panel.draw(p, bx, k, sk)
 
 from std.collections import Dict
+from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT
@@ -412,6 +413,10 @@ struct NotesPanel(Movable):
     var scroll_max: Float64
     var list_y0: Float64
     var list_y1: Float64
+    var naming: Int  # the shelf a new notebook is being named on (its place in cfg.shelves; -1: none), and its words
+    var naming_text: String
+    var px: Float64  # where the pointer is (a shelf's + shows under it)
+    var py: Float64
     var hits: List[Float64]  # what the last draw showed in the list: kind (0 a note, 1 a notebook), id, x, y, w, h each
 
     def __init__(out self, cfg: PanelConfig = PanelConfig()):
@@ -430,6 +435,34 @@ struct NotesPanel(Movable):
         self.list_y0 = 0
         self.list_y1 = 0
         self.hits = List[Float64]()
+        self.naming = -1
+        self.naming_text = ""
+        self.px = -1
+        self.py = -1
+
+    def add_at(self, x: Float64, y: Float64) -> Int:
+        """The shelf whose + is at (x, y) (drawn while the pointer is on its head); -1: none."""
+        if y < self.list_y0 or y >= self.list_y1:
+            return -1
+        for i in range(0, len(self.hits), 6):
+            if Int(self.hits[i]) == 2 and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
+                return Int(self.hits[i + 1])
+        return -1
+
+    def name_key(mut self, name: String, mods: Int) -> Int:
+        """A key while a notebook is being named: 0 not its key, 1 the words changed, 2 Enter (make it), 3 Escape."""
+        if name == "Enter" or name == "Return":
+            return 2
+        if name == "Escape":
+            self.naming = -1
+            return 3
+        if name == "Backspace" or name == "BackSpace":
+            self.naming_text = without_last(self.naming_text)
+            return 1
+        if (mods & 6) == 0 and typed_text(name):
+            self.naming_text += name
+            return 1
+        return 0
 
     def hit(self, x: Float64, y: Float64, kind: Int) -> Int:
         """The note (kind 0) or notebook (1) whose row is at (x, y), by id; -1: none (by where it was drawn: two notes may
@@ -487,6 +520,8 @@ struct NotesPanel(Movable):
                 for ref nb in self.notebooks:
                     if nb.category == self.cfg.shelves[s].key:
                         b += 31 + self._book_height(nb.id)
+                if self.naming == s:
+                    b += 31
                 h += 26.8 + 2 if b == 0 else b - 1 + 2
             else:
                 h += 2
@@ -594,12 +629,26 @@ struct NotesPanel(Movable):
             var rows_under = 0.0  # (the notes of the opened notebooks)
             for i in books:
                 rows_under += self._book_height(self.notebooks[i].id)
+            if self.naming == s:
+                rows_under += 31.0 if len(books) > 0 else 31.0 - 26.8
             var sh = 2 + 34 + 2 + ((26.8 if len(books) == 0 else Float64(len(books)) * 31 - 1 + rows_under) if open else 0.0)
             if open:
                 p.rect(cx, cy, cw, sh, sk.shelf, 13)
             cy = self._shelf(p, bx, k, sk, cx, cy, cw, shelf.label, shelf.icon, open, String(len(books)) if is_archive else "", False, is_archive)
+            if self.py >= cy - 34 and self.py < cy and self.px >= cx and self.px < cx + cw and not is_archive and self.naming < 0:  # (the pointer on the head: its +)
+                draw_icon(p, "plus", cx + cw - 2 - 8 - 14 - 8 - 14, cy - 34 + 10, 14, k, sk.ink_soft)
+                self._hit(2, s, cx + cw - 2 - 8 - 14 - 8 - 14 - 5, cy - 34 + 5, 24, 24)
+            if open and self.naming == s:  # (the new notebook's name, being written: Enter makes it)
+                p.rect(cx + 2 + 8, cy + 8, 14, 14, sk.accent, 4)
+                var nst = TextStyle(UI, 400, False, 13)
+                draw_bordered(p, cx + 2 + 30, cy + 1, cw - 4 - 36, 28, 8, sk.panel, sk.line)
+                text_normal(p, nst, self.naming_text if self.naming_text != "" else String("Name the notebook"), cx + 2 + 38, cy + 6.5, sk.ink if self.naming_text != "" else sk.ui_muted)
+                p.rect(cx + 2 + 38 + measure(nst, self.naming_text), cy + 6, 1.5, 18, sk.ink, 0)
+                cy += 31
             if open:
-                if len(books) == 0:
+                if len(books) == 0 and self.naming == s:
+                    cy += 2
+                elif len(books) == 0:
                     var est = TextStyle(UI, 400, False, 12)
                     text_at(p, est, self.cfg.empty_text, cx + 2 + 8, cy + 5, 16.8, sk.ui_muted)
                     bx.add("panel.empty:" + self.cfg.empty_text, cx + 2, cy, cw - 4, 26.8)

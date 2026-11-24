@@ -285,6 +285,84 @@ def clearing() raises:
     print("   clear all")
 
 
+def another_app() raises:
+    """The web, or a second window, on the same file."""
+    var s = WebShell(DB, "paper")
+    s.create("page", "Shared")
+    typed(s, "mine")
+    s.flush()
+    var id = s.current
+    assert_true(not s.refresh(), "the first look only learns where the feed is")
+    assert_true(not s.refresh(), "nothing new")
+    var t = WebShell(DB, "paper")
+    t.open(id)
+    _ = t.key("End", 2)
+    typed(t, " and theirs")
+    t.flush()
+    t.create("page", "Made there")
+    assert_true(s.refresh(), "seen")
+    assert_equal(s.page.markdown(), "mine and theirs")
+    assert_true(s.notes[0].title == "Made there" and s.current == id and s.doc.may_edit(), "its new note listed; the open note still open")
+    typed(s, "!")
+    s.flush()
+    assert_equal(s.save_state, "")  # (on the new revision)
+    # both edit: the second is told, its edits are held, and go into a copy of their own
+    t.open(id)
+    _ = t.key("End", 2)
+    typed(t, " T")
+    t.flush()
+    typed(s, " S")
+    assert_true(not s.refresh() or s.page.markdown().endswith(" S"), "an edit under way isn't replaced")
+    s.flush()
+    assert_true(s.save_state != "", "told")
+    paint(s)
+    tap(s, "#save-copy")
+    assert_true(s.notes[0].title == "Shared (my copy)" and s.page.markdown().endswith(" S") and s.save_state == "", "a copy, opened")
+    s.open(id)
+    assert_true(s.page.markdown().endswith(" T") and s.doc.may_edit(), "the note is the other's")
+    assert_equal(s.outbox.find(id), -1)
+    # deleted there while open here
+    _ = s.refresh()
+    t.open(id)
+    t.delete_note()
+    t.close()
+    assert_true(s.refresh() and s.doc.is_failed() and s.note_index(id) < 0, "said so")
+    paint(s)
+    typed(s, "x")
+    s.close()
+    assert_equal(count("SELECT COUNT(*) FROM notes WHERE id = " + String(id)), 0)
+    print("   another app on the same file")
+
+
+def notebooks() raises:
+    var s = WebShell(DB, "paper")
+    s.sidebar = True
+    paint(s)
+    s.panel.inbox_open = False
+    paint(s)
+    var p = at(s, ".sec-head@2")  # Projects
+    _ = s.hover(p[0], p[1])
+    paint(s)
+    var plus = (0.0, 0.0)
+    for k in range(0, len(s.panel.hits), 6):
+        if Int(s.panel.hits[k]) == 2:
+            plus = (s.panel.hits[k + 2] + 8, s.panel.hits[k + 3] + 8)
+    assert_true(plus[0] > 0, "drawn: " + String(p[0]) + "," + String(p[1]) + " list " + String(s.panel.list_y0) + " scroll " + String(s.panel.scroll_max))
+    assert_true(s.tap(plus[0], plus[1]) and s.panel.naming == 0, "its +")
+    typed(s, "Alpß")
+    _ = s.key("Backspace", 0)
+    typed(s, "s")
+    paint(s)
+    var n = len(s.panel.notebooks)
+    assert_true(s.key("Enter", 0) and len(s.panel.notebooks) == n + 1 and s.panel.notebooks[0].name == "Alps", "made")
+    assert_equal(count("SELECT COUNT(*) FROM notebooks WHERE name = 'Alps' AND category = 'projects' AND resource_id LIKE 'res_%'"), 1)
+    s.panel.naming = 0
+    s.panel.naming_text = "x"
+    assert_true(s.key("Escape", 0) and s.panel.naming == -1 and len(s.panel.notebooks) == n + 1, "Escape: none")
+    s.close()
+    print("   a new notebook")
+
+
 def main() raises:
     _ = private_dir("build/test_pnnotes_cfg")
     _ = setenv("OMX_CONFIG", "build/test_pnnotes_cfg")
@@ -296,4 +374,6 @@ def main() raises:
     filing()
     long_list()
     clearing()
+    another_app()
+    notebooks()
     print("pnnotes: ok")
