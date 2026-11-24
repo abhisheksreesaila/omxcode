@@ -9,7 +9,7 @@
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
-from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, draw_emoji_tile, text_at, text_normal
+from mojoui.notesshell import Boxes, draw_lifted, draw_bordered, draw_emoji_tile, text_at, text_normal
 from mojoui.canvas import rgba
 from mojoui.json import json_string
 
@@ -410,8 +410,7 @@ struct PageSheet(Movable):
         var paper_shadow = List[Shadow]()
         paper_shadow.append(Shadow(0, 1, 0, 0, rgba(31, 27, 22, 15)))
         paper_shadow.append(Shadow(0, 18, 40, -18, rgba(60, 40, 10, 89)))
-        draw_shadows(p, sx, paper_y, stage_w, paper_h, 3, paper_shadow)
-        p.rect(sx, paper_y, stage_w, paper_h, PAGE_PAPER, 3)
+        draw_lifted(p, sx, paper_y, stage_w, paper_h, 3, paper_shadow, PAGE_PAPER)
         bx.add("page.paper", sx, paper_y, stage_w, paper_h)
         if emoji != "":
             draw_emoji_tile(p, emoji, sx + 110, paper_y + 18, 64, 18, 38, mix(tint, 36, PAGE_PAPER))
@@ -522,8 +521,7 @@ struct PageSheet(Movable):
             widths.append(ws^)
         total += 14 * 3  # (the web's toolbar has a fourth, empty item: one more 14 px gap after the shapes, measured)
         var x = sx + (stage_w - total) / 2
-        draw_shadows(p, x, y, total, 44, 12, _shadow2())
-        p.rect(x, y, total, 44, PAGE_PAPER, 12)
+        draw_lifted(p, x, y, total, 44, 12, _shadow2(), PAGE_PAPER)
         bx.add("page.tools", x, y, total, 44)
         var bxp = x + 8
         for g in range(3):

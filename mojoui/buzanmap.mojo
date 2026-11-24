@@ -11,7 +11,7 @@ from std.math import sqrt, tanh, pow
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
-from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, draw_radial_steps
+from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
 from mojoui.json import Json, json_string
 
@@ -497,8 +497,7 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
         p.rect(x, y, 170, 102, sk.line, 6)
         p.rect(x + 1, y + 1, 168, 100, sk.panel, 5)
     else:
-        draw_shadows(p, x, y, 170, 102, 6, sk.shadow1)
-        p.rect(x, y, 170, 102, hexc("#fffffc"), 6)
+        draw_lifted(p, x, y, 170, 102, 6, sk.shadow1, hexc("#fffffc"))
     bx.add("map.overview", x, y, 170, 102)
     var vs = min(158.0 / 220, 90.0 / 130)
     var ox = x + 6 + (158 - 220 * vs) / 2
