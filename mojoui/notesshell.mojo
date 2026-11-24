@@ -180,6 +180,15 @@ def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Fl
                 p.rect(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e))
 
 
+def draw_lifted[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, shadows: List[Shadow], fill: UInt32):
+    """A lifted surface (a panel, an island, a window): its shadows, then its rounded rect. An opaque fill hides the
+    shadows' middle, so those layers leave it out (D-8008: a 760 px panel's ten layers cost the GPU four windows of
+    overdraw; the same picture without). The hole stays inside the rounded corners: 0.3 of the radius and a pixel in."""
+    var hm = 0.3 * radius + 1 if ((fill >> 24) & 0xFF) == 0xFF else -1.0
+    draw_shadows(p, x, y, w, h, radius, shadows, hm)
+    p.rect(x, y, w, h, fill, radius)
+
+
 def _erfc(x: Float64) -> Float64:
     # Abramowitz–Stegun 7.1.26
     var z = abs(x)
@@ -225,8 +234,7 @@ def draw_round_button[P: Painter](mut p: P, mut bx: Boxes, name: String, x: Floa
                                   bg: UInt32, size: Float64 = 44, hovered: Bool = False):
     """A round island button (the panel toggle, search): the skin's panel lifted by its shadow, a 20 px icon; hovered,
     the skin's state layer (8 %) over its fill (the web's --lift)."""
-    draw_shadows(p, x, y, size, size, size / 2, sk.shadow2)
-    p.rect(x, y, size, size, bg, size / 2)
+    draw_lifted(p, x, y, size, size, size / 2, sk.shadow2, bg)
     if hovered:
         p.rect(x, y, size, size, sk.hover, size / 2)
     draw_icon(p, icon, x + (size - 20) / 2, y + (size - 20) / 2, 20, k, sk.ink_soft)
@@ -292,8 +300,7 @@ def draw_title_island[P: Painter](mut p: P, mut bx: Boxes, slot_x0: Float64, slo
     var w = title_island_width(title, has_icon)
     var x = Float64(Int(((slot_x0 + slot_x1) / 2 - w / 2) * 2 + 0.5)) / 2  # (centred as flex does: half-px steps)
     var y = 16.0
-    draw_shadows(p, x, y, w, 44, 22, sk.shadow2)
-    p.rect(x, y, w, 44, sk.panel, 22)
+    draw_lifted(p, x, y, w, 44, 22, sk.shadow2, sk.panel)
     bx.add("title", x, y, w, 44)
     var title_x = x + 1 + 18
     bx.add("title.face:" + face_emoji + title, x + 1, y + 1, w - 2, 42)
@@ -413,8 +420,7 @@ struct NotesPanel(Movable):
         var y = 72.0
         var w = 280.0
         var ph = h - 72 - 16
-        draw_shadows(p, x, y, w, ph, sk.radius, sk.shadow2)
-        p.rect(x, y, w, ph, sk.panel, sk.radius)
+        draw_lifted(p, x, y, w, ph, sk.radius, sk.shadow2, sk.panel)
         bx.add("panel", x, y, w, ph)
         var cx = x + 1 + 10  # content box: border 1, padding 14 10
         var cw = w - 2 - 20
@@ -594,8 +600,7 @@ def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, 
         else:
             inner += 44 + (2.0 if i + 1 < len(labels) and labels[i + 1] != "" else 0.0)
     var h = inner + 14
-    draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
-    p.rect(x, y, 56, h, sk.panel, sk.radius)
+    draw_lifted(p, x, y, 56, h, sk.radius, sk.shadow2, sk.panel)
     bx.add("dock", x, y, 56, h)
     if group != "":
         bx.add(group, x + 6, y + 7, 44, inner)
@@ -636,8 +641,7 @@ def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, word
         p.rect(x + 1, y + 1, w - 2, 26, sk.panel, 4)
         text_normal(p, st, words, x + 10, y + 7, sk.ink)
     else:
-        draw_shadows(p, x, y, w, 28, 5, sk.shadow1)
-        p.rect(x, y, w, 28, bg, 5)
+        draw_lifted(p, x, y, w, 28, 5, sk.shadow1, bg)
         text_normal(p, st, words, x + 10, y + 7, ink)
     var cut = String("")
     var n = 0
@@ -726,8 +730,7 @@ def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items
     the panel's colour, a colour dot ringed in the panel and the edge, the accent button with its glow. Its box is
     [Canvas tools]; `group` names the column of children."""
     var h = dock_height(items)
-    draw_shadows(p, x, y, 56, h, sk.radius, sk.shadow2)
-    p.rect(x, y, 56, h, sk.panel, sk.radius)
+    draw_lifted(p, x, y, 56, h, sk.radius, sk.shadow2, sk.panel)
     bx.add("dock", x, y, 56, h)
     if group != "":
         bx.add(group, x + 6, y + 7, 44, h - 14)
@@ -767,8 +770,7 @@ def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items
 
 def draw_history_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, k: Float64, sk: Skin):
     """Undo and redo in a pill (the web's .history-island: 48 tall, padded 0 6, 44 px buttons 2 apart)."""
-    draw_shadows(p, x, y, 104, 48, 24, sk.shadow2)
-    p.rect(x, y, 104, 48, sk.panel, 24)
+    draw_lifted(p, x, y, 104, 48, 24, sk.shadow2, sk.panel)
     bx.add("history", x, y, 104, 48)
     draw_icon(p, "path d=M9 7L4.5 11.5 9 16|path d=M5 11.5h9a5 5 0 010 10h-2", x + 7 + 12, y + 2 + 12, 20, k, sk.ink_soft, 1.7)
     bx.add("history.undo", x + 7, y + 2, 44, 44)
@@ -780,8 +782,7 @@ def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float
     """The canvas's zoom island ending at `right` (the web's .zoom-control): minus, the zoom (a press resets it), plus, a
     divider, fit all pages."""
     var x = right - 185
-    draw_shadows(p, x, y, 185, 48, 24, sk.shadow2)
-    p.rect(x, y, 185, 48, sk.panel, 24)
+    draw_lifted(p, x, y, 185, 48, 24, sk.shadow2, sk.panel)
     bx.add("pagezoom", x, y, 185, 48)
     draw_icon(p, "minus", x + 7 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
     bx.add("pagezoom.out", x + 7, y + 6, 36, 36)

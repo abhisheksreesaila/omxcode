@@ -9,7 +9,7 @@
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics
-from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, text_at, text_normal
+from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, text_at, text_normal
 from mojoui.strokeicon import draw_icon
 
 comptime UI = "Geist"
@@ -42,8 +42,7 @@ struct SettingsWindow(Movable):
         var wh = 620.0
         var x = (w - ww) / 2
         var y = (h - wh) / 2
-        draw_shadows(p, x, y, ww, wh, 20, sk.shadow3)
-        p.rect(x, y, ww, wh, sk.panel, 20)
+        draw_lifted(p, x, y, ww, wh, 20, sk.shadow3, sk.panel)
         bx.add("settings.window", x, y, ww, wh)
         bx.add("settings.frame", x, y, ww, wh)
         # the navigation column
@@ -74,8 +73,7 @@ struct SettingsWindow(Movable):
                 var on = n == self.page
                 if on:
                     cur = pg.copy()
-                    draw_shadows(p, x + 10, gy, 244, 42, 21, sk.shadow1)
-                    p.rect(x + 10, gy, 244, 42, sk.panel, 21)
+                    draw_lifted(p, x + 10, gy, 244, 42, 21, sk.shadow1, sk.panel)
                 p.circle(x + 18 + 14, gy + 7 + 14, 14, sk.ink if on else mix(sk.ink, 7, sk.panel))
                 draw_icon(p, pg.icon, x + 24, gy + 13, 16, k, sk.panel if on else sk.ink_soft)
                 text_normal(p, ist, pg.label, x + 58, gy + 12, sk.ink)
@@ -123,7 +121,7 @@ def skin_cards[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w: F
             draw_shadows(p, cx, y, cw, 152, 16, sk.shadow2)
             p.rect(cx - 2, y - 2, cw + 4, 156, sk.ink, 18)
         else:
-            draw_shadows(p, cx, y, cw, 152, 16, sk.shadow1)
+            draw_shadows(p, cx, y, cw, 152, 16, sk.shadow1, 0.3 * 16 + 1)
         p.rect(cx, y, cw, 152, sk.panel, 16)
         bx.add("settings.choice", cx, y, cw, 152)
         var ax = cx + 8

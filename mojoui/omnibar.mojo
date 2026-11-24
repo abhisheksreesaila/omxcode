@@ -10,7 +10,7 @@ from std.ffi import external_call
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_RIGHT, ALIGN_CENTER
-from mojoui.notesshell import Boxes, draw_shadows, draw_emoji_tile, text_at, text_normal, _f
+from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_emoji_tile, text_at, text_normal, _f
 from mojoui.strokeicon import draw_icon
 from mojoui.canvas import rgba
 
@@ -74,8 +74,7 @@ struct Omnibar(Movable):
         var x = (w - 760) / 2
         var y = 96.0
         var ph = 1 + 56 + 42 + 320 + 36.39 + 1
-        draw_shadows(p, x, y, 760, ph, 20, sk.shadow3)
-        p.rect(x, y, 760, ph, sk.panel, 20)
+        draw_lifted(p, x, y, 760, ph, 20, sk.shadow3, sk.panel)
         bx.add("omni", x, y, 760, ph)
         var ix = x + 1
         var iw = 758.0

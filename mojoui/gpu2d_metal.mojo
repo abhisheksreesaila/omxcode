@@ -476,6 +476,8 @@ struct Metal2D(Movable):
     var zero_px: List[UInt32]  # (a tile's worth of transparent pixels: what a restored tile's margins are cleared from)
     var up_buf: Int  # (D-7993) a shared buffer a restore decodes into; the GPU copies tiles out of it (blit), as GL's unpack buffer
     var up_cap: Int
+    var skip: List[String]  # MOJOUI_METAL_SKIP=shell,chrome: layers not drawn (what each costs the GPU; diagnosis)
+    var layer_names: List[String]
     var zero_buf: Int  # a tile's worth of zeros on the GPU (a restored tile's margins are copied from it)
     var blit: Int  # the open blit encoder (begin_blit … end_blit), 0: none
     var atlas_w: Int
@@ -570,6 +572,11 @@ struct Metal2D(Movable):
         self.up_buf = 0
         self.up_cap = 0
         self.zero_buf = 0
+        self.skip = List[String]()
+        for part in getenv("MOJOUI_METAL_SKIP").split(","):
+            if String(part) != "":
+                self.skip.append(String(part))
+        self.layer_names = List[String]()
         self.blit = 0
         self.atlas_w = atlas.width
         self.atlas_dyn = atlas.dyn_y0
@@ -861,6 +868,8 @@ struct Metal2D(Movable):
             cfunc[NoneType]("objc_autoreleasePoolPop", pool)
             return False
         for i in range(n):
+            if len(self.skip) > 0 and i < len(self.layer_names) and self.layer_names[i] in self.skip:  # (diagnosis: MOJOUI_METAL_SKIP)
+                continue
             if i < len(tiled) and tiled[i]:  # (D-7993) its kept raster tiles
                 self.draw_tiles(enc, tile_draws[i])
                 continue
@@ -1806,6 +1815,23 @@ struct MetalCanvas2D(Movable):
                 L.built_resets = pg[].resets
                 self.rebuilt += 1
                 if self.layer_trace:  # (MOJOUI_LAYER_TRACE=1: each layer built, its ops and time; diagnosis)
+                    var area = 0.0  # (what it fills: every quad's and glyph's box, clipped to the window, in windows)
+                    var nq = len(L.frame.quads) // 16
+                    var caps = 0
+                    var big = 0
+                    for qq in range(nq):
+                        var qx = Float64(L.frame.quads[16 * qq]) * sc.layer_tk[i] + sc.layer_tx[i]
+                        var qy = Float64(L.frame.quads[16 * qq + 1]) * sc.layer_tk[i] + sc.layer_ty[i]
+                        var qw = max(min(Float64(L.frame.quads[16 * qq + 2]) * sc.layer_tk[i], Float64(w) - qx), 0.0)
+                        var qh = max(min(Float64(L.frame.quads[16 * qq + 3]) * sc.layer_tk[i], Float64(h) - qy), 0.0)
+                        if Float64(L.frame.quads[16 * qq + 5]) >= 0.5:  # (a capsule: a, b, half width)
+                            qw = abs(Float64(L.frame.quads[16 * qq + 2]) - Float64(L.frame.quads[16 * qq])) + 2 * Float64(L.frame.quads[16 * qq + 4]) + 2
+                            qh = abs(Float64(L.frame.quads[16 * qq + 3]) - Float64(L.frame.quads[16 * qq + 1])) + 2 * Float64(L.frame.quads[16 * qq + 4]) + 2
+                            caps += 1
+                        if qw * qh > 0.02 * Float64(w) * Float64(h):
+                            big += 1
+                        area += qw * qh
+                    print("LAYERAREA: " + sc.layer_keys[i] + " quads " + String(nq) + " (lines " + String(caps) + ", over 2 % of the window " + String(big) + ") area " + String(area / (Float64(w) * Float64(h))) + " windows, glyphs " + String(len(L.frame.glyphs) // 26), flush=True)
                     print("LAYER: built " + sc.layer_keys[i] + " ops " + String(span[1] - span[0]) + " known " + String(known) + " in " + String(Float64(Int(now_ns()) - lt0) / 1e6) + " ms; glyphs rastered "
                           + String(fe[].img_n - im0) + " in " + String(Float64(fe[].img_ns - ims0) / 1e6) + " ms, runs shaped " + String(fe[].shape_n - sh0) + " in " + String(Float64(fe[].shape_ns - shs0) / 1e6) + " ms", flush=True)
             L.dx = sc.layer_tx[i]
@@ -1866,6 +1892,8 @@ struct MetalCanvas2D(Movable):
         if self.tile_trace and any_tiled and (self.tiles.rastered > 0 or self.tiles.damaged > 0):
             print("TILES: rastered " + String(self.tiles.rastered) + " damaged " + String(self.tiles.damaged) + " drawn " + String(self.tiles.drawn)
                   + " more " + String(self.more) + " tile_ms " + String(self.tile_ms), flush=True)
+        if len(self.metal.skip) > 0:
+            self.metal.layer_names = self.scene.layer_keys.copy()
         var ok = self.metal.render_layers(self.layers, n, io, w, h, drawable, wait, tiled, tile_draws)
         if self.metal.cb_open != 0:  # (not taken by a pass: its tile rasters still go to the GPU, the tiles stay true)
             _send[NoneType](self.metal.f, self.metal.cb_open, self.metal.s_commit)

@@ -8,7 +8,7 @@
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_CENTER, ALIGN_RIGHT
-from mojoui.notesshell import Boxes, draw_shadows, draw_bordered, text_at, text_normal
+from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, text_at, text_normal
 from mojoui.strokeicon import draw_icon
 
 comptime UI = "Geist"
@@ -94,8 +94,7 @@ struct IslandCard(Movable):
         var h = inner_h + 2
         var x = Float64(Int(((slot_x0 + slot_x1) / 2 - w / 2) * 2 + 0.5)) / 2
         var y = 16.0
-        draw_shadows(p, x, y, w, h, 20, sk.shadow2)
-        p.rect(x, y, w, h, sk.panel, 20)
+        draw_lifted(p, x, y, w, h, 20, sk.shadow2, sk.panel)
         bx.add("card", x, y, w, h)
         bx.add("card.menu", x + 1, y + 1, w - 2, inner_h)
         var cx = x + 1 + 14
