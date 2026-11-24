@@ -11,7 +11,7 @@ from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_RIGHT, ALIGN_CENTER
-from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_emoji_tile, text_at, text_normal, _f
+from mojoui.notesshell import Boxes, fitted, draw_lifted, draw_shadows, draw_emoji_tile, text_at, text_normal, _f
 from mojoui.strokeicon import draw_icon
 from mojoui.canvas import rgba
 
@@ -49,6 +49,8 @@ struct Omnibar(Movable):
     var pill: Int  # the pressed one
     var groups: List[OmniGroup]
     var selected: Int  # over all rows, in order
+    var none_words: String  # shown where nothing was found ("" : nothing is)
+    var none_sub: String
     var preview_kind: String  # the selected row's type, for the preview's facts
     var preview_edited: String
     var preview_created: String
@@ -59,9 +61,17 @@ struct Omnibar(Movable):
         self.pill = 0
         self.groups = List[OmniGroup]()
         self.selected = 0
+        self.none_words = ""
+        self.none_sub = ""
         self.preview_kind = ""
         self.preview_edited = ""
         self.preview_created = ""
+
+    def move(mut self, by: Int):
+        """The selection a row up or down, around the ends."""
+        var n = self.rows()
+        if n > 0:
+            self.selected = ((self.selected + by) % n + n) % n
 
     def rows(self) -> Int:
         var n = 0
@@ -127,6 +137,28 @@ struct Omnibar(Movable):
         bx.add("omni.body", ix, by, iw, 320)
         bx.add("omni.results", ix, by + 1, iw - 250, 319)
         var ry = by + 1 + 10
+        # (more rows than fit: the list scrolled so the selected one is in view, at its end)
+        var tall = 10.0
+        var sel_top = 0.0
+        var m = 0
+        for ref g in self.groups:
+            if len(g.rows) > 0:
+                tall += 18.0 if g.title != "" else 0.0
+                for _ in g.rows:
+                    if m == self.selected:
+                        sel_top = tall
+                    tall += 56
+                    m += 1
+                tall += 10
+        var off = 0.0
+        if tall > 319:
+            off = min(max(sel_top + 56 + 10 - 319, 0), tall - 319)
+            p.push_clip(ix, by + 1, iw - 250, 319)
+            ry -= off
+        if m == 0 and self.none_words != "":  # (nothing found)
+            var nst = TextStyle(UI, 600, False, 15)
+            text_at(p, nst, fitted(nst, self.none_words, iw - 250 - 40), ix + (iw - 250) / 2, ry + 22, 20, sk.ink, ALIGN_CENTER)
+            text_at(p, TextStyle(UI, 400, False, 12.5), self.none_sub, ix + (iw - 250) / 2, ry + 22 + 24, 18, sk.ui_muted, ALIGN_CENTER)
         var n = 0
         var sel_row = OmniRow("", "", 0, "", "", "", 0, "")
         for gi in range(len(self.groups)):
@@ -136,8 +168,9 @@ struct Omnibar(Movable):
             var hst = TextStyle(UI, 600, False, 11)
             hst.letter_spacing = 0.77
             var gtop = ry
-            text_normal(p, hst, g.title.upper(), ix + 8 + 8, ry, sk.ui_muted)
-            ry += 14 + 4
+            if g.title != "":
+                text_normal(p, hst, g.title.upper(), ix + 8 + 8, ry, sk.ui_muted)
+                ry += 14 + 4
             for ref r in g.rows:
                 if n == self.selected:
                     sel_row = r.copy()
@@ -146,6 +179,8 @@ struct Omnibar(Movable):
                 n += 1
             bx.add("omni.group:" + g.title, ix + 8, gtop, iw - 250 - 16, ry - gtop)
             ry += 10
+        if off > 0 or tall > 319:
+            p.pop_clip()
         self._preview(p, bx, k, sk, ix + iw - 250, by + 1, sel_row)
         # the footer
         var fy = by + 320
@@ -174,13 +209,15 @@ struct Omnibar(Movable):
         var tst = TextStyle(UI, 600, False, 14.5)
         var top = y + (56 - (18.84 + 2 + 17 if r.sub != "" else 18.84)) / 2
         # the title, its matched letters marked (the c1 band from 18 % to 88 % of the line, padded 1 px each side)
+        var room = w - 10 - 40 - 12 - 10 - (0.0 if r.badge == "" else 12 + 24 + measure(TextStyle(MONO, 500, False, 10.5), r.badge))
+        var title = fitted(tst, r.title, room)
         var q = self.query.lower()
-        var at = _word_match(r.title.lower(), q)
+        var at = _word_match(title.lower(), q)
         var penx = tx
         if at >= 0 and q != "":
-            var before = String(r.title[byte=0:at])
-            var hit = String(r.title[byte=at:at + q.byte_length()])
-            var after = String(r.title[byte=at + q.byte_length():])
+            var before = String(title[byte=0:at])
+            var hit = String(title[byte=at:at + q.byte_length()])
+            var after = String(title[byte=at + q.byte_length():])
             text_at(p, tst, before, penx, top, 18.85, sk.ink)
             penx += measure(tst, before)
             var hw = measure(tst, hit) + 2
@@ -189,9 +226,9 @@ struct Omnibar(Movable):
             penx += hw
             text_at(p, tst, after, penx, top, 18.85, sk.ink)
         else:
-            text_at(p, tst, r.title, tx, top, 18.85, sk.ink)
+            text_at(p, tst, title, tx, top, 18.85, sk.ink)
         if r.sub != "":
-            text_normal(p, TextStyle(UI, 400, False, 12.5), r.sub, tx, top + 18.84 + 2, sk.ui_muted)
+            text_normal(p, TextStyle(UI, 400, False, 12.5), fitted(TextStyle(UI, 400, False, 12.5), r.sub, room), tx, top + 18.84 + 2, sk.ui_muted)
         if r.badge != "":
             var bst = TextStyle(MONO, 500, False, 10.5)
             var bw = 6 + 7 + 5 + measure(bst, r.badge) + 6

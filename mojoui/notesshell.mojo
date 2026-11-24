@@ -407,6 +407,12 @@ struct NotesPanel(Movable):
     var open_shelves: List[Bool]  # one per cfg.shelves
     var skin_name: String
     var cfg: PanelConfig
+    var open_books: List[Int]  # the notebooks opened to their notes, by id
+    var scroll: Float64  # the list, scrolled (layout px); how far it can go, and where it shows, at the last draw
+    var scroll_max: Float64
+    var list_y0: Float64
+    var list_y1: Float64
+    var hits: List[Float64]  # what the last draw showed in the list: kind (0 a note, 1 a notebook), id, x, y, w, h each
 
     def __init__(out self, cfg: PanelConfig = PanelConfig()):
         self.notes = List[PanelNote]()
@@ -418,6 +424,80 @@ struct NotesPanel(Movable):
             self.open_shelves.append(sh.open)
         self.skin_name = cfg.skins[0].name if len(cfg.skins) > 0 else String("")
         self.cfg = cfg.copy()
+        self.open_books = List[Int]()
+        self.scroll = 0
+        self.scroll_max = 0
+        self.list_y0 = 0
+        self.list_y1 = 0
+        self.hits = List[Float64]()
+
+    def hit(self, x: Float64, y: Float64, kind: Int) -> Int:
+        """The note (kind 0) or notebook (1) whose row is at (x, y), by id; -1: none (by where it was drawn: two notes may
+        have the same name)."""
+        if y < self.list_y0 or y >= self.list_y1:
+            return -1
+        for i in range(0, len(self.hits), 6):
+            if Int(self.hits[i]) == kind and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
+                return Int(self.hits[i + 1])
+        return -1
+
+    def toggle_book(mut self, id: Int):
+        for i in range(len(self.open_books)):
+            if self.open_books[i] == id:
+                _ = self.open_books.pop(i)
+                return
+        self.open_books.append(id)
+
+    def reveal(mut self, id: Int):
+        """A note's row where it can be seen: its notebook and shelf opened (the web's revealNotebook)."""
+        for ref n in self.notes:
+            if n.id == id and n.notebook != 0:
+                self.reveal_book(n.notebook)
+
+    def reveal_book(mut self, id: Int):
+        for ref nb in self.notebooks:
+            if nb.id == id:
+                for i in range(len(self.cfg.shelves)):
+                    if self.cfg.shelves[i].key == nb.category:
+                        self.open_shelves[i] = True
+                if id not in self.open_books:
+                    self.open_books.append(id)
+
+    def wheel(mut self, dy: Float64) -> Bool:
+        """The list scrolled by dy px (down: positive); True when it moved."""
+        var was = self.scroll
+        self.scroll = min(max(self.scroll + dy, 0), self.scroll_max)
+        return self.scroll != was
+
+    def _book_notes(self, id: Int) -> List[Int]:
+        var out = List[Int]()
+        for i in range(len(self.notes)):
+            if self.notes[i].notebook == id:
+                out.append(i)
+        return out^
+
+    def _list_height(self) -> Float64:
+        """How high the whole list is (as draw lays it out)."""
+        var n = len(self._book_notes(0))
+        var h = 38.0 + ((Float64(n) * 35 - 1 + 8) if self.inbox_open else 2.0)
+        for s in range(len(self.cfg.shelves)):
+            h += 4 + 36
+            if self.open_shelves[s]:
+                var b = 0.0
+                for ref nb in self.notebooks:
+                    if nb.category == self.cfg.shelves[s].key:
+                        b += 31 + self._book_height(nb.id)
+                h += 26.8 + 2 if b == 0 else b - 1 + 2
+            else:
+                h += 2
+        return h
+
+    def _book_height(self, id: Int) -> Float64:
+        """The rows under an opened notebook (0: folded)."""
+        if id not in self.open_books:
+            return 0
+        var n = len(self._book_notes(id))
+        return 2 + (Float64(n) * 35 - 1 if n > 0 else 26.8) + 6
 
     def toggle_shelf(mut self, at: Int):
         """Folds or opens a shelf: 0 the loose notes, 1… the shelves in order (a tap on its head)."""
@@ -426,7 +506,7 @@ struct NotesPanel(Movable):
         elif at >= 1 and at <= len(self.open_shelves):
             self.open_shelves[at - 1] = not self.open_shelves[at - 1]
 
-    def draw[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, h: Float64):
+    def draw[P: Painter](mut self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, h: Float64):
         var x = 16.0
         var y = 72.0
         var w = 280.0
@@ -469,6 +549,15 @@ struct NotesPanel(Movable):
         cy += 38 + 10 + 2  # margin 10, the panel's gap 2
         # the navigator: Inbox and the four shelves
         bx.add("panel.navigator", cx - 4, cy, cw + 8, y + ph - 1 - 14 - (29 + 6 + 2) - cy)
+        self.hits.clear()
+        self.list_y0 = cy
+        self.list_y1 = y + ph - 1 - 14 - (29 + 6 + 2)
+        self.scroll_max = max(self._list_height() - (self.list_y1 - self.list_y0), 0)
+        self.scroll = min(self.scroll, self.scroll_max)
+        var clipped = self.scroll_max > 0  # (everything fits: drawn as it stands)
+        if clipped:
+            p.push_clip(cx - 4, self.list_y0, cw + 8, self.list_y1 - self.list_y0)
+            cy -= self.scroll
         var list_top = cy
         var inbox_notes = List[Int]()
         for i in range(len(self.notes)):
@@ -486,13 +575,15 @@ struct NotesPanel(Movable):
             bx.add("panel.loose-rows:" + self.cfg.loose_label, cx + 2 + 13, rows_y, cw - 4 - 13, rows_h)
             var ry = rows_y
             for i in inbox_notes:
-                self._note_row(p, bx, k, sk, cx + 2 + 13 + 1.5 + 7.5, ry, cw - 4 - 13 - 9, self.notes[i])
+                if ry + 35 > self.list_y0 and ry < self.list_y1:
+                    self._note_row(p, bx, k, sk, cx + 2 + 13 + 1.5 + 7.5, ry, cw - 4 - 13 - 9, self.notes[i])
+                    self._hit(0, self.notes[i].id, cx + 2 + 13 + 1.5 + 7.5, ry, cw - 4 - 13 - 9, 34)
                 ry += 35
             cy = rows_y + rows_h + 6 + 2
         else:
             cy += 2
         for s in range(len(self.cfg.shelves)):
-            ref shelf = self.cfg.shelves[s]
+            var shelf = self.cfg.shelves[s].copy()
             cy += 4
             var books = List[Int]()
             for i in range(len(self.notebooks)):
@@ -500,7 +591,10 @@ struct NotesPanel(Movable):
                     books.append(i)
             var is_archive = shelf.show_count
             var open = self.open_shelves[s]
-            var sh = 2 + 34 + 2 + ((26.8 if len(books) == 0 else Float64(len(books)) * 31 - 1) if open else 0.0)
+            var rows_under = 0.0  # (the notes of the opened notebooks)
+            for i in books:
+                rows_under += self._book_height(self.notebooks[i].id)
+            var sh = 2 + 34 + 2 + ((26.8 if len(books) == 0 else Float64(len(books)) * 31 - 1 + rows_under) if open else 0.0)
             if open:
                 p.rect(cx, cy, cw, sh, sk.shelf, 13)
             cy = self._shelf(p, bx, k, sk, cx, cy, cw, shelf.label, shelf.icon, open, String(len(books)) if is_archive else "", False, is_archive)
@@ -514,13 +608,31 @@ struct NotesPanel(Movable):
                     var ny = cy
                     for i in books:
                         self._notebook_row(p, bx, k, sk, cx + 2, ny, cw - 4, self.notebooks[i])
-                        ny += 31
+                        self._hit(1, self.notebooks[i].id, cx + 2, ny, cw - 4, 30)
+                        var bh = self._book_height(self.notebooks[i].id)
+                        if bh > 0:
+                            var inside = self._book_notes(self.notebooks[i].id)
+                            var gy = ny + 30 + 2
+                            p.rect(cx + 2 + 13, gy, 1.5, bh - 8, sk.line, 0)
+                            if len(inside) == 0:
+                                text_at(p, TextStyle(UI, 400, False, 12), "Empty", cx + 2 + 13 + 9 + 8, gy + 5, 16.8, sk.ui_muted)
+                            for j in inside:
+                                if gy + 35 > self.list_y0 and gy < self.list_y1:
+                                    self._note_row(p, bx, k, sk, cx + 2 + 13 + 1.5 + 7.5, gy, cw - 4 - 13 - 9, self.notes[j])
+                                    self._hit(0, self.notes[j].id, cx + 2 + 13 + 1.5 + 7.5, gy, cw - 4 - 13 - 9, 34)
+                                gy += 35
+                        ny += 31 + bh
                     cy = ny - 1 + 2
             else:
                 if is_archive:
                     bx.add("panel.empty:" + self.cfg.empty_text, cx + 2, cy, cw - 4, 10)
                 cy += 2
         bx.add("panel.list", cx, list_top, cw, cy - list_top)
+        if clipped:
+            p.pop_clip()
+            var track = self.list_y1 - self.list_y0
+            var th = max(24.0, track * track / (track + self.scroll_max))
+            p.rect(cx + cw + 1, self.list_y0 + (track - th) * self.scroll / self.scroll_max, 4, th, with_alpha(sk.ink, 0.22), 2)
         # footer
         var fy = y + ph - 1 - 14 - 29
         p.rect(cx - 2, fy, cw + 4, 1, sk.line, 0)
@@ -542,6 +654,10 @@ struct NotesPanel(Movable):
             p.circle(ox + 9, sy + 9, 9, sk.panel)
             p.circle(ox + 9, sy + 9, 7, c.swatch)
             bx.add("panel.skin:" + c.label, ox, sy, 18, 18)
+
+    def _hit(mut self, kind: Int, id: Int, x: Float64, y: Float64, w: Float64, h: Float64):
+        for v in [Float64(kind), Float64(id), x, y, w, h]:
+            self.hits.append(v)
 
     def _shelf[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, label: String, icon: String,
                            open: Bool, count: String, badge: Bool, archive: Bool) -> Float64:
@@ -576,7 +692,7 @@ struct NotesPanel(Movable):
         var fg = sk.accent_text if active else sk.ink_soft
         draw_emoji_tile(p, n.emoji, x + 8, y + 5, 24, 7, 14, mix(sk.tint(n.tint), 36, sk.panel))
         var st = TextStyle(UI, 400, False, 12.5)
-        text_at(p, st, n.title, x + 8 + 24 + 8, y + 8.875, 16.25, fg)
+        text_at(p, st, fitted(st, n.title, w - 8 - 24 - 8 - 8 - 14 - 8), x + 8 + 24 + 8, y + 8.875, 16.25, fg)
         var icon = "git-fork" if n.kind == "mindmap" else ("file-pen" if n.kind == "page" else "file-text")
         draw_icon(p, icon, x + w - 8 - 14, y + 10, 14, k, with_alpha(fg, 0.65))
         bx.add("panel.row:" + n.emoji + " " + n.title, x, y, w, 34)
@@ -591,12 +707,12 @@ struct NotesPanel(Movable):
             draw_icon(p, nb.icon, x + 7, y + 7, 16, k, nb.color)
         bx.add("panel.group-icon:" + nb.name, x, y, 30, 30)
         var st = TextStyle(UI, 400, False, 13)
-        text_normal(p, st, nb.name, x + 33, y + 6.5, sk.ink_soft)
+        text_normal(p, st, fitted(st, nb.name, w - 33 - 8 - 14 - 9 - 24), x + 33, y + 6.5, sk.ink_soft)
         var cst = TextStyle(MONO, 400, False, 11)
         var cnt = String(nb.count)
         var tw = measure(cst, cnt)
         text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
-        draw_icon(p, "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(sk.ink_soft, 0.7))
+        draw_icon(p, "chevron-down" if nb.id in self.open_books else "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(sk.ink_soft, 0.7))
         bx.add("panel.group-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
 
 
@@ -867,6 +983,129 @@ def draw_locked_cover[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float6
 
 
 # ------------------------------------------------ what went wrong, and a way on (review 3)
+
+def fitted(st: TextStyle, text: String, width: Float64) -> String:
+    """text, cut with "…" where it is wider than `width` (CSS's text-overflow: ellipsis)."""
+    if measure(st, text) <= width:
+        return text
+    var lo = 0
+    var cuts = List[Int]()
+    var i = 0
+    for c in text.graphemes():
+        cuts.append(i)
+        i += c.byte_length()
+    var hi = len(cuts) - 1
+    while lo < hi:  # (the longest start that fits with the dots)
+        var mid = (lo + hi + 1) // 2
+        if measure(st, String(text[byte=0:cuts[mid]]) + "…") <= width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return String(text[byte=0:cuts[lo]]) + "…" if len(cuts) > 0 else String("…")
+
+
+def draw_toast[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, bottom: Float64, words: String, action: String, sk: Skin) -> Float64:
+    """A message at the bottom, centred on cx, its bottom edge at `bottom`, with one action ("" : none), as the web's
+    toast. Its boxes: "toast", "toast.action". Its width."""
+    var st = TextStyle(UI, 400, False, 13)
+    var bst = TextStyle(UI, 600, False, 12)
+    var ww = measure(st, words)
+    var bw = measure(bst, action) + 20 if action != "" else 0.0
+    var w = 16 + ww + (14 + bw if action != "" else 6.0) + 10
+    var h = 44.0
+    var x = cx - w / 2
+    var y = bottom - h
+    draw_lifted(p, x, y, w, h, 8, sk.shadow3, rgba(41, 42, 37))
+    bx.add("toast", x, y, w, h)
+    text_at(p, st, words, x + 16, y, h, rgba(255, 255, 255))
+    if action != "":
+        p.rect(x + 16 + ww + 14, y + 9, bw, 26, rgba(255, 255, 255, 41), 6)
+        text_at(p, bst, action, x + 16 + ww + 14 + 10, y + 9, 26, rgba(255, 255, 255))
+        bx.add("toast.action", x + 16 + ww + 14, y + 9, bw, 26)
+    return w
+
+
+@fieldwise_init
+struct PropsRow(Copyable, Movable):
+    """A fact in a properties card: its name and its value."""
+    var name: String
+    var value: String
+
+
+struct PropsCard(Movable):
+    """A document's properties (the web's note popover): where it is filed, with a menu to file it elsewhere, facts, and a
+    danger button. Boxes: "props", "props.place", "props.place-row:<i>", "props.danger"."""
+    var label: String
+    var place: Int  # the chosen one of `places`
+    var places: List[String]
+    var place_colors: List[UInt32]  # 0: the loose place's icon
+    var menu_open: Bool
+    var facts: List[PropsRow]
+    var danger_label: String
+
+    def __init__(out self):
+        self.label = "Notebook"
+        self.place = 0
+        self.places = List[String]()
+        self.place_colors = List[UInt32]()
+        self.menu_open = False
+        self.facts = List[PropsRow]()
+        self.danger_label = "Delete"
+
+    def draw[P: Painter](self, mut p: P, mut bx: Boxes, cx: Float64, y: Float64, k: Float64, sk: Skin):
+        var w = 320.0
+        var x = cx - w / 2
+        var lst = TextStyle(UI, 700, False, 10)
+        lst.letter_spacing = 0.8
+        var h = 4 + 12 + 14 + 9 + 38 + 12 + 1 + 12 + Float64(len(self.facts)) * 15 + Float64(max(len(self.facts) - 1, 0)) * 13 + 12 + 12 + 38 + 14
+        draw_lifted(p, x, y, w, h, 16, sk.shadow2, sk.panel)
+        bx.add("props", x, y, w, h)
+        var ix = x + 18
+        var iw = w - 36
+        var cy = y + 16
+        text_at(p, lst, self.label.upper(), ix, cy, 14, sk.ui_muted)
+        cy += 23
+        draw_bordered(p, ix, cy, iw, 38, 10, sk.panel, sk.line)
+        bx.add("props.place", ix, cy, iw, 38)
+        var place_y = cy
+        self._place(p, k, sk, ix, cy, iw, self.place)
+        draw_icon(p, "chevron-down", ix + iw - 10 - 14, cy + 12, 14, k, sk.ui_muted)
+        cy += 38 + 12
+        p.rect(x + 14, cy, w - 28, 1, sk.line, 0)
+        cy += 13
+        var fst = TextStyle(UI, 400, False, 12)
+        for f in self.facts:
+            text_at(p, fst, f.name, ix, cy, 15, sk.ui_muted)
+            text_at(p, fst, f.value, ix + iw - measure(fst, f.value), cy, 15, sk.ink)
+            cy += 28
+        cy += 11.0 if len(self.facts) > 0 else 24.0
+        draw_bordered(p, ix, cy, iw, 38, 19, sk.panel, sk.line)
+        var dst = TextStyle(UI, 600, False, 12)
+        var dw = 15 + 8 + measure(dst, self.danger_label)
+        draw_icon(p, "trash-2", ix + (iw - dw) / 2, cy + 11.5, 15, k, sk.danger)
+        text_at(p, dst, self.danger_label, ix + (iw - dw) / 2 + 23, cy, 38, sk.danger)
+        bx.add("props.danger", ix, cy, iw, 38)
+        if self.menu_open:
+            var mh = Float64(len(self.places)) * 36 + 10
+            draw_lifted(p, ix, place_y + 44, iw, mh, 12, sk.shadow2, sk.panel)
+            bx.add("props.menu", ix, place_y + 44, iw, mh)
+            for i in range(len(self.places)):
+                var ry = place_y + 44 + 5 + Float64(i) * 36
+                if i == self.place:
+                    p.rect(ix + 5, ry, iw - 10, 36, sk.hover, 8)
+                self._place(p, k, sk, ix + 5, ry - 1, iw - 10, i)
+                bx.add("props.place-row:" + String(i), ix + 5, ry, iw - 10, 36)
+
+    def _place[P: Painter](self, mut p: P, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, i: Int):
+        if i < 0 or i >= len(self.places):
+            return
+        if self.place_colors[i] == 0:
+            draw_icon(p, "inbox", x + 10, y + 12, 14, k, sk.ink_soft)
+        else:
+            p.circle(x + 17, y + 19, 4.5, self.place_colors[i])
+        var st = TextStyle(UI, 400, False, 13)
+        text_at(p, st, fitted(st, self.places[i], w - 32 - 34), x + 32, y, 38, sk.ink)
+
 
 def draw_pill_button[P: Painter](mut p: P, mut bx: Boxes, name: String, cx: Float64, y: Float64, label: String, sk: Skin):
     """A small filled button centred on cx, its top at y (32 high)."""

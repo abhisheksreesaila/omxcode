@@ -9,13 +9,13 @@ from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
-from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items
+from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, pn_actions
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
 from mojoui.pagesheet import PageSheet
 from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
-from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, word_match, relative_time, short_date, utc_epoch
+from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
 from mojoui.textedit import now_ms
 from mojoui.files import write_setting
@@ -31,6 +31,7 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
+from pnstore import make_notes_file, make_note, drop_note, file_note
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
@@ -41,7 +42,7 @@ from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
 from mojoui.graphemes import typed_text
 from mojoui.files import private_dir, private_write, file_exists
-from mojoui.notesshell import draw_problem, draw_pill_button
+from mojoui.notesshell import draw_problem, draw_pill_button, draw_toast, PropsCard, PropsRow
 from mojoui.libc import unlink
 from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved
 from mojoui.canvasload import text_hash
@@ -202,6 +203,35 @@ def read_map(content: String, mut map: BuzanMap) raises -> String:
     return root
 
 
+comptime TOAST_UNDELETE = 1
+comptime TOAST_UNCLEAR = 2
+
+
+def has_all(text: String, tokens: List[String]) -> Bool:
+    var t = text.lower()
+    for k in tokens:
+        if t.find(k) < 0:
+            return False
+    return True
+
+
+def fts_words(q: String) -> List[String]:
+    """The words of what was typed (letters, digits and _ ; services.WORD_PATTERN), for the search index."""
+    var out = List[String]()
+    var cur = String("")
+    for c in q.codepoint_slices():
+        var b = c.as_bytes()
+        var word = len(b) > 1 or (b[0] >= 48 and b[0] <= 57) or (b[0] >= 65 and b[0] <= 90) or (b[0] >= 97 and b[0] <= 122) or b[0] == 95
+        if word:
+            cur += String(c)
+        elif cur != "":
+            out.append(cur)
+            cur = ""
+    if cur != "":
+        out.append(cur)
+    return out^
+
+
 @fieldwise_init
 struct NoteRec(Copyable, Movable):
     var id: Int
@@ -286,6 +316,16 @@ struct WebShell(Movable):
     var kept: KeptDocs[ObjectLayer]  # canvases already parsed, by (note, revision) (D-7934)
     var kept_pages: Dict[Int, Int]  # a kept canvas's page grid (columns × 1000 + rows), by note
     var cold_opens: Bool  # (the race's cold-open row: nothing kept is reused)
+    var omni_kind: List[Int]  # the omnibar's rows, in order: 0 a note, 1 a notebook, 2 an action, 3 "New note" with the words
+    var omni_id: List[Int]  # their note or notebook, or the action's place in pn_actions()
+    var toast: String  # the message at the bottom ("" : none), its action, what that does, and when it goes
+    var toast_action: String
+    var toast_does: Int  # TOAST_UNDELETE | TOAST_UNCLEAR
+    var toast_until: Int
+    var gone: List[NoteRec]  # the note just deleted, until its toast goes (Undo brings it back); then its row is deleted
+    var gone_at: Int
+    var props_open: Bool
+    var props: PropsCard
     var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
 
@@ -372,8 +412,19 @@ struct WebShell(Movable):
         self.cold_opens = False
         self.bench_note = -1
         self.doubled_us = -1_000_000
+        self.omni_kind = List[Int]()
+        self.omni_id = List[Int]()
+        self.toast = ""
+        self.toast_action = ""
+        self.toast_does = 0
+        self.toast_until = 0
+        self.gone = List[NoteRec]()
+        self.gone_at = 0
+        self.props_open = False
+        self.props = PropsCard()
         try:
             self.dbs.append(Database(db_path))
+            make_notes_file(self.dbs[0])  # (an empty file: Personal Note's tables; one that has them is left as it is)
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
             self.forget_pictures()
@@ -508,6 +559,12 @@ struct WebShell(Movable):
         var i = self.note_index(id)
         if i < 0:
             return
+        if len(self.gone) > 0 and id != self.current:  # (another note opens: the held delete is made)
+            self.commit_delete()
+            i = self.note_index(id)
+            if i < 0:
+                return
+        self.props_open = False
         var t_open = clock_us()
         var trace = getenv("MOJOUI_LOAD_TRACE") == "1"
         self.settle_open()
@@ -611,8 +668,13 @@ struct WebShell(Movable):
         var kind = self.notes[i].kind
         try:
             if kind == "page":
+                var clip = self.page.ed.clip
+                var clips = self.page.ed.clip_version
+                var words = page_markdown(content)
                 self.page = PageSheet()
-                self.page.set_markdown(page_markdown(content))
+                self.page.set_markdown(words)
+                self.page.ed.clip = clip  # (what was copied stays copied)
+                self.page.ed.clip_version = clips
                 self.page_src = content^
             elif kind == "canvas":
                 self.open_canvas(i, content^, held >= 0)
@@ -821,7 +883,7 @@ struct WebShell(Movable):
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
-        if (self.card_open and i >= 0) or self.searching or self.settings_open:  # (a layer of their own: opening one leaves the shell's batches as they are)
+        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0):  # (a layer of their own: opening one leaves the shell's batches as they are)
             p.begin_layer("overlay")
             p.layer_transform(0, 0, k)
         if self.card_open and i >= 0:
@@ -829,6 +891,9 @@ struct WebShell(Movable):
             c.status = "Saved on this " + device_name() if self.save_state == "" else self.save_state
             c.status_dot = self.sk.c2
             c.place = "Inbox"
+            for ref nb in self.panel.notebooks:
+                if nb.id == self.notes[i].notebook:
+                    c.place = nb.name
             c.wide_id = "#share-focus"
             c.wide_label = "Focus"
             c.wide_icon = "focus"
@@ -840,6 +905,21 @@ struct WebShell(Movable):
             for t in range(len(ids)):
                 c.tiles.append(CardTile(ids[t], labels[t], icons[t], t == 9))
             c.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) + 16, w - 16, k, self.sk)
+        if self.props_open and i >= 0:
+            ref pc = self.props
+            pc.places = ["Inbox"]
+            pc.place_colors = [UInt32(0)]
+            pc.place = 0
+            for k_ in range(len(self.panel.notebooks)):
+                pc.places.append(self.panel.notebooks[k_].name)
+                pc.place_colors.append(self.panel.notebooks[k_].color)
+                if self.panel.notebooks[k_].id == self.notes[i].notebook:
+                    pc.place = k_ + 1
+            pc.facts = [PropsRow("Page" if self.notes[i].kind == "page" else ("Canvas" if self.notes[i].kind == "canvas" else "Mind map"), "Expands automatically"), PropsRow("Storage", "On this device")]
+            pc.danger_label = "Delete note"
+            pc.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) / 2 + w / 2, 72, k, self.sk)
+        if self.toast != "":
+            _ = draw_toast(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.sk)
         if self.searching:
             self.omni.draw(p, self.boxes, w, h, k, self.sk)
         if self.settings_open:
@@ -991,38 +1071,354 @@ struct WebShell(Movable):
         return Int(external_call["time", Int](0))
 
     def search(mut self):
-        """The omnibar's groups for the query: notes and actions with a word starting with it (the web's word search)."""
-        var notes = List[OmniRow]()
-        var first = -1
+        """The omnibar's groups for the query, as the web's omnibar builds them: notes whose title holds every word, notes
+        whose words do (the search index), notebooks, actions; nothing typed: the recent notes and the actions; nothing
+        found: a "New note" row with the words."""
+        var o = self.omni.pill
+        var q = String(self.omni.query.strip())
+        var tokens = List[String]()
+        for t in q.lower().split(" "):
+            if String(t) != "":
+                tokens.append(String(t))
+        self.omni_kind.clear()
+        self.omni_id.clear()
         self.hits.clear()
-        for i in range(len(self.notes)):
-            ref n = self.notes[i]
-            if self.omni.query == "" or word_match(n.title, self.omni.query):
-                self.hits.append(n.id)
-                if first < 0:
-                    first = i
-                notes.append(OmniRow(n.emoji, "", self.sk.tint(n.tint), n.title, "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map"),
-                                     "Inbox", self.sk.ink, relative_time(n.updated, self.now())))
+        var notes = List[OmniRow]()
+        var note_ids = List[Int]()
+        var words = List[OmniRow]()
+        var word_ids = List[Int]()
+        var books = List[OmniRow]()
+        var book_ids = List[Int]()
         var acts = List[OmniRow]()
-        var names: List[String] = ["New page", "New canvas", "New mind map", "Link to a note…", "Open settings", "Switch skin"]
-        var icons: List[String] = ["file-pen", "file-text", "git-fork", "link", "sliders-horizontal", "palette"]
-        for i in range(len(names)):
-            if self.omni.query != "" and word_match(names[i], self.omni.query):
-                acts.append(OmniRow("", icons[i], 0, names[i], "", "", 0, ""))
+        var act_ids = List[Int]()
+        if len(tokens) == 0:
+            for i in range(min(len(self.notes), 8 if o == 1 else 4)):
+                notes.append(self.note_row(i, ""))
+                note_ids.append(self.notes[i].id)
+        else:
+            var sn_id = List[Int]()
+            var sn = List[String]()
+            self.word_hits(q, sn_id, sn)
+            for i in range(len(self.notes)):
+                if len(notes) < 8 and has_all(self.notes[i].title, tokens):
+                    var ex = String("")
+                    for k in range(len(sn_id)):
+                        if sn_id[k] == self.notes[i].id and not self.notes[i].secure:
+                            ex = sn[k]
+                    notes.append(self.note_row(i, ex))
+                    note_ids.append(self.notes[i].id)
+            for k in range(len(sn_id)):
+                var i = self.note_index(sn_id[k])
+                if i < 0 or sn_id[k] in note_ids:
+                    continue
+                if sn[k] != "" and not self.notes[i].secure:
+                    words.append(self.note_row(i, sn[k]))
+                    word_ids.append(sn_id[k])
+                else:
+                    notes.append(self.note_row(i, ""))
+                    note_ids.append(sn_id[k])
+        for ref nb in self.panel.notebooks:
+            if len(tokens) == 0 and o != 2 or not has_all(nb.name, tokens):
+                continue
+            books.append(OmniRow("", "book", nb.color, nb.name, "Notebook · " + String(nb.count) + (" note" if nb.count == 1 else " notes"), "", 0, ""))
+            book_ids.append(nb.id)
+        var actions = pn_actions()
+        for a in range(len(actions)):
+            if has_all(actions[a].title + " " + actions[a].keywords, tokens) and (len(tokens) > 0 or o == 3 or actions[a].top):
+                acts.append(OmniRow("", actions[a].icon, 0, actions[a].title, "", "", 0, ""))
+                act_ids.append(a)
         self.omni.pills.clear()
         self.omni.pills.append(OmniPill("All", ""))
-        self.omni.pills.append(OmniPill("Notes", String(len(notes))))
-        self.omni.pills.append(OmniPill("Notebooks", "0"))
-        self.omni.pills.append(OmniPill("Actions", String(len(acts))))
+        self.omni.pills.append(OmniPill("Notes", String(len(notes) + len(words)) if q != "" else String("")))
+        self.omni.pills.append(OmniPill("Notebooks", String(len(books)) if q != "" else String("")))
+        self.omni.pills.append(OmniPill("Actions", String(len(acts)) if q != "" else String("")))
         self.omni.groups.clear()
-        self.omni.groups.append(OmniGroup("Notes", notes^))
-        self.omni.groups.append(OmniGroup("Actions", acts^))
+        if o == 0 or o == 1:
+            self._group("Notes" if q != "" else "Recent", notes, note_ids, 0)
+            self._group("In your words", words, word_ids, 0)
+        if o == 0 or o == 2:
+            self._group("Notebooks", books, book_ids, 1)
+        if o == 0 or o == 3:
+            self._group("Actions", acts, act_ids, 2)
+        for k in range(len(self.omni_kind)):
+            if self.omni_kind[k] == 0:
+                self.hits.append(self.omni_id[k])
+        self.omni.none_words = ""
+        if len(self.omni_kind) == 0:
+            self.omni.none_words = "Nothing matches “" + q + "”" if q != "" else String("Nothing here yet")
+            self.omni.none_sub = "Secure notes match by title only."
+            if q != "" and (o == 0 or o == 1):
+                self._group("", [OmniRow("", "plus", 0, "New note “" + q + "”", "", "", 0, "")], [0], 3)
         self.omni.selected = 0
-        if first >= 0:
-            ref n = self.notes[first]
-            self.omni.preview_kind = "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map")
-            self.omni.preview_edited = relative_time(n.updated, self.now())
-            self.omni.preview_created = short_date(n.created)
+        self.omni_facts()
+
+    def _group(mut self, title: String, rows: List[OmniRow], ids: List[Int], kind: Int):
+        if len(rows) == 0:
+            return
+        self.omni.groups.append(OmniGroup(title, rows.copy()))
+        for id in ids:
+            self.omni_kind.append(kind)
+            self.omni_id.append(id)
+
+    def note_row(self, i: Int, excerpt: String) -> OmniRow:
+        ref n = self.notes[i]
+        var place = String("Inbox")
+        var dot = self.sk.accent if n.notebook != 0 else self.sk.ink
+        for ref nb in self.panel.notebooks:
+            if nb.id == n.notebook:
+                place = nb.name
+                dot = nb.color
+        var sub = excerpt
+        if sub == "":
+            sub = "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map")
+        return OmniRow(n.emoji if not n.secure else String("🔒"), "", self.sk.tint(n.tint), n.title, sub if not n.secure else String("Secure note · not in the native app yet"), place, dot,
+                       relative_time(n.updated, self.now()))
+
+    def word_hits(mut self, q: String, mut ids: List[Int], mut excerpts: List[String]):
+        """The notes whose words hold every typed word (services.search: FTS5, best first, 30 at most), with a piece of the
+        text around them ("" when only the title matched)."""
+        if len(self.dbs) == 0:
+            return
+        var match_ = String("")
+        for t in fts_words(q):
+            match_ += ("" if match_ == "" else " AND ") + '"' + t + '"'
+        if match_ == "":
+            return
+        try:
+            var st = self.dbs[0].prepare("SELECT CAST(note_search.note_id AS INTEGER), snippet(note_search, 2, '', '', ' … ', 18) FROM note_search JOIN notes ON notes.id = CAST(note_search.note_id AS INTEGER) WHERE note_search MATCH ? ORDER BY bm25(note_search), notes.updated_at DESC LIMIT 30")
+            st.bind(1, match_)
+            while st.step():
+                ids.append(st.int(0))
+                excerpts.append(" ".join(st.text(1).split()))
+        except e:
+            print("PNOTE ERROR: search: " + String(e), flush=True)
+
+    def omni_facts(mut self):
+        """The preview's facts for the selected row."""
+        var k = self.omni.selected
+        self.omni.preview_kind = ""
+        if k >= 0 and k < len(self.omni_kind) and self.omni_kind[k] == 0:
+            var i = self.note_index(self.omni_id[k])
+            if i >= 0:
+                ref n = self.notes[i]
+                self.omni.preview_kind = "Page" if n.kind == "page" else ("Canvas" if n.kind == "canvas" else "Mind map")
+                self.omni.preview_edited = relative_time(n.updated, self.now())
+                self.omni.preview_created = short_date(n.created)
+
+    def run_row(mut self, k: Int):
+        """The omnibar's row k chosen (Enter, a click)."""
+        if k < 0 or k >= len(self.omni_kind):
+            return
+        var kind = self.omni_kind[k]
+        var id = self.omni_id[k]
+        self.searching = False
+        if kind == 0:
+            self.open(id)
+        elif kind == 1:  # (a notebook: shown in the panel, opened)
+            self.sidebar = True
+            self.panel.reveal_book(id)
+        elif kind == 3:
+            self.create("canvas", String(self.omni.query.strip()))
+        else:
+            self.act(pn_actions()[id].id)
+
+    def act(mut self, id: String):
+        if id == "new-note" or id == "quick-note":
+            self.create("canvas")
+        elif id == "new-page":
+            self.create("page")
+        elif id == "new-map":
+            self.create("mindmap")
+        elif id == "settings":
+            self.settings_open = True
+        elif id.startswith("skin-"):
+            self.set_skin(String(id[byte=5:]))
+        else:
+            self.say("Not in the native app yet")
+
+    # ------------------------------------------------ whole notes: made, filed, deleted (as Personal Note's API does)
+
+    def create(mut self, kind: String, title: String = "", notebook: Int = 0):
+        """A new note, opened (the web's createNote: no notebook named, so the Inbox)."""
+        if len(self.dbs) == 0:
+            return
+        self.settle_open()
+        self.flush()
+        var name = title if title != "" else String("Untitled note")
+        var made = make_note(self.dbs[0], kind, name, notebook)
+        if made.id == 0:
+            self.say("Couldn’t make a note: " + made.message)
+            return
+        var rec = NoteRec(made.id, "", "", name, kind, "", notebook, "", 1, False, 1, False, 0)
+        try:
+            var q = self.dbs[0].prepare("SELECT created_at, updated_at, revision, IFNULL(octet_length(content), 0), IFNULL(notebook_id, 0) FROM notes WHERE id = ?")
+            q.bind(1, made.id)
+            if q.step():
+                rec.created = q.text(0)
+                rec.updated = q.text(1)
+                rec.revision = q.int(2)
+                rec.bytes = q.int(3)
+                rec.notebook = q.int(4)
+        except:
+            pass
+        rec.emoji = guess_emoji(name, kind)
+        rec.tint = tint_of(rec.emoji)
+        self.notes.insert(0, rec^)
+        self.list_notes()
+        self.open(made.id)
+        self.panel.scroll = 0
+        if kind == "page":
+            self.page.caret_end()
+        print("PNOTE NEW: " + kind + " " + String(made.id), flush=True)
+
+    def delete_note(mut self):
+        """The open note deleted: gone from the list at once, its row when the toast goes (Undo, 8 s), another note opens or
+        the app closes (the web's deleteActiveNote)."""
+        var i = self.note_index(self.current)
+        if i < 0 or len(self.dbs) == 0:
+            return
+        if self.notes[i].secure:
+            self.say("Secure notes aren’t in the native app yet")
+            return
+        self.commit_delete()
+        self.settle_open()
+        self.flush()
+        i = self.note_index(self.current)
+        var id = self.current
+        self.gone_at = i
+        self.gone = [self.notes.pop(i)]
+        self.current = 0
+        self.doc.begin(0)
+        self.list_notes()
+        var held = self.gone.copy()
+        self.gone = List[NoteRec]()  # (opening the next note would delete the row for good)
+        if len(self.notes) == 0:
+            self.create("canvas")
+        else:
+            self.open(self.notes[0].id)
+        self.gone = held^
+        self.say("Note deleted", "Undo", TOAST_UNDELETE)
+        print("PNOTE DELETE: note " + String(id) + " (held for Undo)", flush=True)
+
+    def undo_delete(mut self):
+        if len(self.gone) == 0:
+            return
+        var rec = self.gone.pop()
+        var id = rec.id
+        self.notes.insert(min(self.gone_at, len(self.notes)), rec^)
+        self.list_notes()
+        self.hide_toast()
+        self.open(id)
+
+    def commit_delete(mut self):
+        """The held delete, for real."""
+        if len(self.gone) == 0:
+            return
+        var rec = self.gone.pop()
+        var why = drop_note(self.dbs[0], rec.id)
+        if why != "" and why != "gone":
+            print("PNOTE DELETE: failed note " + String(rec.id) + ": " + why, flush=True)
+            self.notes.insert(min(self.gone_at, len(self.notes)), rec^)
+            self.list_notes()
+            self.say("Couldn’t delete it: " + why)
+            return
+        self.outbox.drop(rec.id)
+        if self.snap_dir != "":
+            _ = unlink(self.snap_path(rec.id))
+        print("PNOTE DELETE: note " + String(rec.id), flush=True)
+        if self.toast_does == TOAST_UNDELETE:
+            self.toast = ""
+            self.toast_action = ""
+            self.toast_does = 0
+
+    def move_note(mut self, notebook: Int):
+        """The open note filed into a notebook (0: the Inbox)."""
+        var i = self.note_index(self.current)
+        if i < 0 or len(self.dbs) == 0 or self.notes[i].notebook == notebook:
+            return
+        self.settle_open()
+        self.flush()
+        i = self.note_index(self.current)
+        if self.outbox.find(self.current) >= 0 or self.doc.loading():
+            self.say("Couldn’t move it. Try again.")
+            return
+        var r = file_note(self.dbs[0], self.current, self.notes[i].revision, notebook)
+        if r.status != SAVED:
+            self.say("Couldn’t move it. Try again.")
+            return
+        self.doc.saved(r.revision)
+        self.notes[i].revision = r.revision
+        self.notes[i].updated = r.value
+        self.notes[i].notebook = notebook
+        self.panel_counts()
+        var rec = self.notes.pop(i)
+        self.notes.insert(0, rec^)
+        self.list_notes()
+        self.panel.reveal(self.current)
+
+    def panel_counts(mut self):
+        for k in range(len(self.panel.notebooks)):
+            var n = 0
+            for ref x in self.notes:
+                if x.notebook == self.panel.notebooks[k].id:
+                    n += 1
+            self.panel.notebooks[k].count = n
+
+    def clear_all(mut self):
+        """The open note emptied, one undoable step (the web's Clear all)."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].secure or not self.editable():
+            return
+        if self.notes[i].kind == "page":
+            if self.page.markdown() == "":
+                return
+            self.page.ed.select_all()
+            _ = self.page.key("Delete", 0, now_ms())
+            self.save_page()
+        elif self.notes[i].kind == "canvas":
+            ref layer = self.board.edit()
+            layer.select_all()
+            if len(layer.selected) == 0:
+                return
+            layer.delete_selection()
+            self.tools.changed = True
+            self.save_canvas()
+        else:
+            return
+        self.say("Cleared", "Undo", TOAST_UNCLEAR)
+
+    def say(mut self, words: String, action: String = "", does: Int = 0):
+        if does != TOAST_UNDELETE:
+            self.commit_delete()
+        self.toast = words
+        self.toast_action = action
+        self.toast_does = does
+        self.toast_until = clock_us() + 8_000_000
+
+    def hide_toast(mut self):
+        self.toast = ""
+        self.toast_action = ""
+        self.toast_does = 0
+        self.commit_delete()
+
+    def run_toast(mut self):
+        var does = self.toast_does
+        if does == TOAST_UNDELETE:
+            self.undo_delete()
+            return
+        self.hide_toast()
+        if does == TOAST_UNCLEAR:
+            var i = self.note_index(self.current)
+            if i >= 0 and self.notes[i].kind == "page":
+                _ = self.page.undo()
+                self.save_page()
+            elif i >= 0 and self.notes[i].kind == "canvas" and self.editable():
+                self.tools.undo(self.board.edit())
+                self.save_canvas()
+
+    def waiting(self) -> Bool:
+        """Something has to happen later without input: a save, a toast to go (App.every)."""
+        return self.saver.pending() or self.toast != ""
 
     def save_page(mut self):
         """An edit on the open page: saved later, as the web does (queueSave: 650 ms after the last edit)."""
@@ -1038,11 +1434,19 @@ struct WebShell(Movable):
     def tick(mut self) -> Bool:
         """The save timer's tick (App.every while a save is pending): writes it once it is due. True when the screen
         changes (a failed save shows)."""
+        if self.toast != "" and clock_us() > self.toast_until:
+            self.hide_toast()
+            return True
         if not self.saver.due(clock_us()):
             return False
         var before = self.save_state
         self.flush()
         return self.save_state != before
+
+    def close(mut self):
+        """The app closing: the held delete and the pending save are made."""
+        self.commit_delete()
+        self.flush()
 
     def flush(mut self):
         """Writes the pending save now (a due timer, another note opening, the app closing)."""
@@ -1175,6 +1579,21 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        if (mods & 2) != 0 and (name == "k" or name == "K"):
+            if self.searching:
+                self.searching = False
+            else:
+                self.open_search()
+            return True
+        if (mods & 4) != 0 and (mods & 2) == 0 and (name == "n" or name == "N") and not self.searching and not self.card.editing and not self.settings_open and not self.typing():
+            self.create("canvas")
+            return True
+        if self.props_open and name == "Escape":
+            if self.props.menu_open:
+                self.props.menu_open = False
+            else:
+                self.props_open = False
+            return True
         var mi = self.note_index(self.current)
         if mi >= 0 and self.notes[mi].kind == "mindmap" and self.doc.may_edit() and not self.notes[mi].secure and not self.searching and not self.card_open and not self.settings_open:
             if self.map.editing >= 0:
@@ -1206,6 +1625,9 @@ struct WebShell(Movable):
             var r = self.page.key(name, mods, now_ms())
             if r == 2:
                 self.save_page()
+            if r == 0 and name == "Escape" and self.sidebar:
+                self.sidebar = False
+                return True
             return r != 0
         if self.card_open and self.card.editing:
             var r = self.card.title_key(name, mods)
@@ -1220,17 +1642,16 @@ struct WebShell(Movable):
             self.settings_open = False
             return True
         if not self.searching:
+            if name == "Escape" and self.sidebar:
+                self.sidebar = False
+                return True
             return False
         if name == "Enter":
-            if self.omni.selected >= 0 and self.omni.selected < len(self.hits):
-                var id = self.hits[self.omni.selected]
-                self.searching = False
-                self.open(id)
+            self.run_row(self.omni.selected)
             return True
         if name == "ArrowDown" or name == "ArrowUp":
-            var n = len(self.hits)
-            if n > 0:
-                self.omni.selected = (self.omni.selected + (1 if name == "ArrowDown" else n - 1)) % n
+            self.omni.move(1 if name == "ArrowDown" else -1)
+            self.omni_facts()
             return True
         if name == "Escape":
             self.searching = False
@@ -1240,6 +1661,18 @@ struct WebShell(Movable):
         else:
             return False
         return True
+
+    def open_search(mut self):
+        self.searching = True
+        self.card_open = False
+        self.props_open = False
+        self.omni.query = ""
+        self.omni.pill = 0
+        self.search()
+
+    def typing(self) -> Bool:
+        """Words are being typed into a canvas text, or an idea."""
+        return (self.on_canvas() and self.tools.editing != -1) or self.map.editing >= 0
 
     def caret(self) -> Tuple[Float64, Float64, Float64, Float64]:
         var i = self.note_index(self.current)
@@ -1353,6 +1786,8 @@ struct WebShell(Movable):
 
     def wheel(mut self, x: Float64, y: Float64, dx: Float64, dy: Float64) -> Bool:
         """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
+        if self.sidebar and not self.searching and not self.settings_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
+            return self.panel.wheel(dy)
         if not self.on_canvas():
             var i = self.note_index(self.current)
             if i >= 0 and self.notes[i].kind == "page" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open and (
@@ -1536,7 +1971,46 @@ struct WebShell(Movable):
     def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
         self.title_focus = False
-        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry"])
+        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#rail-new-note", ".nav-row:"])
+        if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
+            if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
+                self.run_toast()
+            return True
+        if self.searching:
+            var sh = self.boxes.hit_any(x, y, ["#omni-row-", ".omni-chip:", "#search-close", "[Search or jump to]"])
+            if sh.startswith("#omni-row-"):
+                try:
+                    self.run_row(Int(String(sh[byte=10:])))
+                except:
+                    pass
+            elif sh.startswith(".omni-chip:"):
+                var pills: List[String] = [".omni-chip:All", ".omni-chip:Notes", ".omni-chip:Notebooks", ".omni-chip:Actions"]
+                for n in range(4):
+                    if sh == pills[n] or sh.startswith(pills[n] + " "):
+                        self.omni.pill = n
+                self.search()
+            elif sh != "[Search or jump to]":  # (the Esc button, or outside it)
+                self.searching = False
+            return True
+        if self.props_open:
+            var ph = self.boxes.hit_any(x, y, ["[Move to ", "#notebook-picker", "#delete-note", "#note-popover"])
+            if ph.startswith("[Move to "):
+                try:
+                    var n = Int(String(ph[byte=9:].removesuffix("]")))
+                    self.props.menu_open = False
+                    self.move_note(0 if n == 0 else self.panel.notebooks[n - 1].id)
+                except:
+                    pass
+            elif ph == "#notebook-picker":
+                self.props.menu_open = not self.props.menu_open
+            elif ph == "#delete-note":
+                self.props_open = False
+                self.delete_note()
+            elif ph == "":
+                self.props_open = False
+            else:
+                self.props.menu_open = False
+            return True
         if self.settings_open:
             var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])
             if sh == "#close-properties":
@@ -1547,15 +2021,24 @@ struct WebShell(Movable):
                 self.set_skin(names[at])
             return True
         if self.card_open:
-            var ch = self.boxes.hit_any(x, y, ["#top-properties", "#note-title"])
+            var ch = self.boxes.hit_any(x, y, ["#top-properties", "#note-title", "#share-props", "#share-focus", "#clear-note", "#share-print", "#share-png", "#share-backup", "#share-markdown", "#share-vault", "#share-icon", "#share-link", "#island"])
             if ch == "#note-title":
                 self.card.editing = True
                 self.card.all_selected = False
+                return True
+            if ch == "#island":  # (inside the card, on nothing)
                 return True
             self.card_open = False
             self.card.editing = False
             if ch == "#top-properties":
                 self.settings_open = True
+            elif ch == "#share-props":
+                self.props_open = True
+                self.props.menu_open = False
+            elif ch == "#clear-note":
+                self.clear_all()
+            elif ch.startswith("#share-"):
+                self.say("Not in the native app yet")
             return True
         if hit == "#open-retry":
             var again = self.current
@@ -1570,18 +2053,24 @@ struct WebShell(Movable):
             self.card.editing = False
             return True
         if hit == "#search-button":
-            self.searching = True
-            self.omni.query = ""
-            self.search()
+            self.open_search()
+            return True
+        if hit == "#rail-new-note":
+            self.create("canvas")
             return True
         if hit == "#toggle-sidebar":
             self.sidebar = not self.sidebar
             return True
         if hit.startswith("row:"):
-            for ref n in self.notes:
-                if hit == "row:" + n.emoji + " " + n.title:
-                    self.open(n.id)
-                    return True
+            var id = self.panel.hit(x, y, 0)
+            if id >= 0:
+                self.open(id)
+                return True
+        if hit.startswith(".nav-row:"):
+            var id = self.panel.hit(x, y, 1)
+            if id >= 0:
+                self.panel.toggle_book(id)
+                return True
         if hit.startswith(".sec-head"):
             var at = 0
             if hit != ".sec-head":

@@ -21,6 +21,13 @@ def pn_names(mut b: Boxes):
     b.alias("panel.brand", ".brand-row")
     b.alias("panel.brand-mark", ".brand-mark")
     b.alias("panel.brand-name:", ".brand-name:{}")
+    b.alias("toast", "#toast")
+    b.alias("toast.action", "#toast-action")
+    b.alias("props", "#note-popover")
+    b.alias("props.place", "#notebook-picker")
+    b.alias("props.menu", "#notebook-picker-menu")
+    b.alias("props.place-row:", "[Move to {}]")
+    b.alias("props.danger", "#delete-note")
     b.alias("panel.action", "#rail-new-note")
     b.alias("panel.action-key", "#quick-note-kbd")
     b.alias("panel.navigator", "#notebook-navigator")
@@ -130,6 +137,32 @@ def pn_panel() -> PanelConfig:
     c.skins = [SkinChoice("crayon", "Crayon skin", hexc("#2f6fe0")), SkinChoice("paper", "Paper skin", hexc("#1f1b16")),
                SkinChoice("night", "Night skin", hexc("#1b2130"))]
     return c^
+
+
+@fieldwise_init
+struct PnAction(Copyable, Movable):
+    var id: String
+    var title: String
+    var icon: String
+    var keywords: String
+    var top: Bool  # shown before anything is typed
+
+
+def pn_actions() -> List[PnAction]:
+    """The omnibar's actions (main.js omniActions; New page and New mind map are the native app's own, so a person can
+    make all three kinds)."""
+    var a = List[PnAction]()
+    a.append(PnAction("new-note", "New note", "plus", "create add", True))
+    a.append(PnAction("quick-note", "Quick note", "zap", "inbox capture", True))
+    a.append(PnAction("new-page", "New page", "file-pen", "create words write", True))
+    a.append(PnAction("new-map", "New mind map", "git-fork", "create brainstorm", True))
+    a.append(PnAction("link-note", "Link to a note…", "link", "drop card reference", False))
+    a.append(PnAction("settings", "Open settings", "sliders-horizontal", "preferences", False))
+    for k in range(3):
+        var ids: List[String] = ["crayon", "paper", "night"]
+        var names: List[String] = ["Crayon", "Paper", "Night"]
+        a.append(PnAction("skin-" + ids[k], "Skin: " + names[k], "palette", "switch skin theme appearance look", True))
+    return a^
 
 
 def pn_skin_cards() -> Tuple[List[Skin], List[String]]:

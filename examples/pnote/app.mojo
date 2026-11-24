@@ -529,8 +529,8 @@ struct Main(App):
         self.version += 1
 
     def every(self) -> List[Every]:
-        if len(self.web) > 0 and self.web[0].saver.pending():
-            return [Every(self.web[0].saver.tick_ms(), SAVE_TICK)]
+        if len(self.web) > 0 and self.web[0].waiting():
+            return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() else 500, SAVE_TICK)]
         if len(self.web) > 0 and self.web[0].readying():
             return [Every(WARM_TICK_MS, WARM_TICK)]
         return List[Every]()
@@ -540,7 +540,7 @@ struct Main(App):
 
     def closing(mut self):
         if len(self.web) > 0:
-            self.web[0].flush()
+            self.web[0].close()
             _ = self.web[0].warm.save()
             print("PNOTE QUIT: saved", flush=True)
             return
