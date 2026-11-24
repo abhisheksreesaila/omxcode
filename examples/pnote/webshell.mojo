@@ -4,7 +4,7 @@
 
 from std.collections import Dict
 from std.math import floor, ceil
-from std.os import getenv
+from std.os import getenv, stat
 from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
@@ -14,7 +14,7 @@ from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
 from mojoui.pagesheet import PageSheet
-from mojoui.buzanmap import BuzanMap, draw_minimap, map_json
+from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, word_match, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
 from mojoui.files import write_setting
@@ -37,7 +37,13 @@ from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
-from mojoui.viewsnap import snap_dir_ready, expect_snapshots
+from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
+from mojoui.files import private_dir, private_write, file_exists
+from mojoui.notesshell import draw_problem, draw_pill_button
+from mojoui.libc import unlink
+from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved
+from mojoui.canvasload import text_hash
+from mojoui.json import J_ARRAY, J_STRING
 from mojoui.snapahead import snap_ahead
 from mojoui.letgo import let_go
 from std.os import listdir
@@ -74,13 +80,25 @@ def parse_grid(note: String) -> Tuple[Int, Int]:
     """grid_note's (columns, rows); (0, 0) when the note isn't one."""
     if not note.startswith("grid="):
         return (0, 0)
-    var parts = String(note[byte=5:]).split("x")
+    var end = note.find(";")
+    var parts = String(note[byte=5:end if end > 0 else note.byte_length()]).split("x")
     if len(parts) != 2:
         return (0, 0)
     try:
         return (max(1, Int(String(parts[0]))), max(1, Int(String(parts[1]))))
     except:
         return (0, 0)
+
+
+def parse_hash(note: String) -> Int:
+    """The fingerprint of the text a kept view was kept of (after grid_note's part; 0: none)."""
+    var at = note.find(";")
+    if at < 0:
+        return 0
+    try:
+        return Int(String(note[byte=at + 1:]))
+    except:
+        return 0
 
 
 comptime LOAD_SLICE_MIN_US = 250  # (D-7957) the least a slice gets (the open still ends: every frame takes a node at least)
@@ -146,40 +164,39 @@ def notebook_icon(name: String) -> String:
     return ""
 
 
-def page_markdown(content: String) -> String:
-    try:
-        var j = Json.parse(content)
-        return j.text(j.get(0, "markdown"))
-    except:
-        return ""
+def page_markdown(content: String) raises -> String:
+    """A page's words (a content that isn't a page's raises: an empty page would be saved over it)."""
+    var j = Json.parse(content)
+    var m = j.get(0, "markdown")
+    if j.kind(m) != J_STRING:
+        raise Error("not a page (it has no markdown)")
+    return j.text(m)
 
 
-def read_map(content: String, mut map: BuzanMap) -> String:
-    """A mind-map note's ideas read into `map` (empty); its root's id ("root" when the content is broken)."""
-    var root = String("root")
-    try:
-        var j = Json.parse(content)
-        var nodes = j.get(0, "nodes")
-        var ids = List[String]()
-        for q in range(j.size(nodes)):
-            ids.append(j.text(j.get(j.at(nodes, q), "id")))
-        for q in range(j.size(nodes)):
-            var nd = j.at(nodes, q)
-            var pid = j.text(j.get(nd, "parentId"))
-            var par = -1
-            for r in range(len(ids)):
-                if ids[r] == pid:
-                    par = r
-            _ = map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
-                        ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
-        root = j.text(j.get(0, "rootId"), "root")
-        map.selected = 0
+def read_map(content: String, mut map: BuzanMap) raises -> String:
+    """A mind-map note's ideas read into `map` (empty); its root's id. A content that isn't a map's raises."""
+    var j = Json.parse(content)
+    var nodes = j.get(0, "nodes")
+    if j.kind(nodes) != J_ARRAY:
+        raise Error("not a mind map (it has no ideas)")
+    var ids = List[String]()
+    for q in range(j.size(nodes)):
+        ids.append(j.text(j.get(j.at(nodes, q), "id")))
+    for q in range(j.size(nodes)):
+        var nd = j.at(nodes, q)
+        var pid = j.text(j.get(nd, "parentId"))
+        var par = -1
         for r in range(len(ids)):
-            if ids[r] == root:
-                map.selected = r
-        map.freeze()
-    except:
-        pass
+            if ids[r] == pid:
+                par = r
+        _ = map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
+                    ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
+    var root = j.text(j.get(0, "rootId"), "root")
+    map.selected = 0
+    for r in range(len(ids)):
+        if ids[r] == root:
+            map.selected = r
+    map.freeze()
     return root
 
 
@@ -197,6 +214,7 @@ struct NoteRec(Copyable, Movable):
     var icon_set: Bool  # the note has its own icon (else it is guessed from the title, as note_icon.py does)
     var revision: Int  # the revision this copy was read or last saved at (saves carry it: D-7927)
     var secure: Bool  # a secure note: its words are only sealed; the native app shows it locked and never writes it
+    var bytes: Int  # the content's size in the file when last read (what a kept view's name includes)
 
 
 comptime WARM_OMNI = -1
@@ -250,6 +268,13 @@ struct WebShell(Movable):
     var screens: SceneWarm  # (D-8011) the screen being readied
     var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
     var ready_k: Float64  # the device scale they're readied for (0: not asked yet)
+    var doc: OpenDoc  # (review 3) which note is open and whether it was read: what may be edited, kept and saved
+    var outbox: SaveOutbox  # edits that couldn't be written, until they land
+    var page_src: String  # the open page's or map's content as it was read (a save changes it in place)
+    var content_hash: Int  # the open canvas's text's fingerprint (0: not read yet), and the one its kept view was kept of
+    var kept_hash: Int
+    var opening_rev: Int  # the revision a deferred open began at
+    var db_id: String  # the notes file: its path's hash and its inode
     var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
@@ -306,12 +331,27 @@ struct WebShell(Movable):
         self.screens = SceneWarm()
         self.to_ready = List[Int]()
         self.ready_k = 0
+        self.doc = OpenDoc()
+        self.page_src = ""
+        self.content_hash = 0
+        self.kept_hash = 0
+        self.opening_rev = -1
+        self.db_id = String(fnv(db_path))
+        try:
+            self.db_id += "-" + String(Int(stat(db_path).st_ino))
+        except:
+            pass
+        var held_in = config_dir("pnote") + "/unsaved"
+        self.outbox = SaveOutbox(held_in if private_dir(held_in) else String(""), String(fnv(db_path)))
+        self.outbox.load()
         self.snap_dir = ""
         self.budget = FrameBudget(FRAME_WORK_US)
         if getenv("MOJOUI_SNAP") != "0":
-            var d = environment("PNOTE_SNAPS", config_dir("pnote") + "/snaps")
-            if snap_dir_ready(d):
+            var root = environment("PNOTE_SNAPS", config_dir("pnote") + "/snaps")
+            var d = root + "/" + self.db_id  # (a folder for each notes file: two files' notes share no picture)
+            if private_dir(root) and snap_dir_ready(d):
                 self.snap_dir = d
+                _ = private_write(d + "/of.txt", db_path)
                 try:
                     for f in listdir(d):
                         if String(f).endswith(".snap"):
@@ -332,6 +372,7 @@ struct WebShell(Movable):
             self.dbs.append(Database(db_path))
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
+            self.forget_pictures()
         except e:
             self.problem = String(e)
             print("PNOTE ERROR: " + self.problem, flush=True)
@@ -350,7 +391,7 @@ struct WebShell(Movable):
                 emoji = guess_emoji(title, kind)
                 tint = tint_of(emoji)
             var secure = st.int(10) != 0
-            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, "" if secure else st.text(3), st.int(4), emoji, tint, own, st.int(9), secure))
+            self.notes.append(NoteRec(st.int(0), st.text(7), st.text(8), title, kind, "" if secure else st.text(3), st.int(4), emoji, tint, own, st.int(9), secure, 0))
         self.list_notes()
         self.panel.notebooks.clear()
         var nb = db.prepare("SELECT id, name, color, category, (SELECT COUNT(*) FROM notes WHERE notebook_id = notebooks.id) FROM notebooks ORDER BY updated_at DESC, id ASC")
@@ -363,23 +404,28 @@ struct WebShell(Movable):
         for ref n in self.notes:
             self.panel.notes.append(PanelNote(n.id, n.title, n.kind, n.emoji, n.tint, n.notebook))
 
-    def read_row(mut self, i: Int, with_content: Bool = True):
-        """One note's row from the file again (the web fetches a note when it opens it): its content, revision and
-        secure flag, so an edit another app saved is what opens and what the next save builds on."""
+    def read_row(mut self, i: Int, with_content: Bool = True) -> String:
+        """One note's row from the file again (the web fetches a note when it opens it): its content, revision and secure
+        flag, so an edit another app saved is what opens and what the next save builds on. "" or why it couldn't be read
+        (then nothing here changed: what it knew of the row may be old)."""
         if len(self.dbs) == 0:
-            return
+            return self.problem if self.problem != "" else String("the notes file isn't open")
         try:
-            var q = self.dbs[0].prepare("SELECT " + ("content" if with_content else "''") + ", revision, secure, title, updated_at FROM notes WHERE id = ?")
+            var q = self.dbs[0].prepare("SELECT " + ("content" if with_content else "''") + ", revision, secure, title, updated_at, IFNULL(octet_length(content), 0) FROM notes WHERE id = ?")
             q.bind(1, self.notes[i].id)
-            if q.step():
-                self.notes[i].secure = q.int(2) != 0
-                if with_content:
-                    self.notes[i].content = "" if self.notes[i].secure else q.text(0)
-                self.notes[i].revision = q.int(1)
-                self.notes[i].title = q.text(3)
-                self.notes[i].updated = q.text(4)
+            if not q.step():
+                return "this note isn't in the file any more"
+            self.notes[i].secure = q.int(2) != 0
+            if with_content:
+                self.notes[i].content = "" if self.notes[i].secure else q.text(0)
+            self.notes[i].revision = q.int(1)
+            self.notes[i].title = q.text(3)
+            self.notes[i].updated = q.text(4)
+            self.notes[i].bytes = q.int(5)
+            return ""
         except e:
-            print("PNOTE ERROR: read note: " + String(e), flush=True)
+            print("PNOTE ERROR: read note " + String(self.notes[i].id) + ": " + String(e), flush=True)
+            return String(e)
 
     def locked(self) -> Bool:
         """The open note is a secure one (shown locked: nothing here reads or writes its words)."""
@@ -401,31 +447,105 @@ struct WebShell(Movable):
     def view_rect(self) -> Tuple[Float64, Float64, Float64, Float64]:
         return board_rect(self.view, self.win_w, self.win_h)
 
+    def settle_open(mut self):
+        """A deferred open that has landed: the document read (its own page grid, its own text's fingerprint against the kept
+        view's) or failed. Nothing to do while it is still being read, or when nothing is opening."""
+        if not self.doc.loading() or self.board.pending():
+            return
+        var i = self.note_index(self.doc.id)
+        if i < 0 or self.notes[i].kind != "canvas":
+            return
+        if self.board.broken:
+            var bad = self.board.problem
+            self.open_failed(bad)
+            return
+        var why = self.read_row(i, False)
+        if why == "" and self.notes[i].revision != self.opening_rev:  # (another app saved while it was being read: read it again)
+            self.doc.begin(-1)
+            self.open(self.notes[i].id)
+            return
+        if why != "":
+            self.open_failed(why)
+            return
+        if self.look.keep_path != "" and self.kept_hash != 0 and self.kept_hash != self.board.text_hash:
+            # (the kept view isn't of this text, whatever its key says: gone, from the screen and the disk)
+            print("PNOTE: a kept view wasn't of this note's text: dropped", flush=True)
+            _ = unlink(self.look.keep_path)
+            self.look.keep_path = ""
+            self.look.keep_tag = ""
+        self.content_hash = self.board.text_hash
+        var page = self.board.member("pn")
+        var g = page.get(page.get(0, "page"), "columns")
+        var cols = max(1, Int(page.real(g, 1)))
+        var rows = max(1, Int(page.real(page.get(page.get(0, "page"), "rows"), 1)))
+        if cols != self.cols or rows != self.rows:  # (its grid is the document's own)
+            self.cols = cols
+            self.rows = rows
+            self.view = opening_view(self.win_w, self.win_h, Float64(cols) * PAGE_W, Float64(rows) * PAGE_H)
+        self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
+        self.doc.ready(self.doc.id, self.notes[i].revision)
+
+    def open_failed(mut self, why: String):
+        """The open note couldn't be read: shown as that, with a Retry; nothing of the empty screen can be edited, kept or
+        saved (OpenDoc, OpenBoard.fail)."""
+        print("PNOTE ERROR: open note " + String(self.doc.id) + ": " + why, flush=True)
+        self.doc.failed(self.doc.id, why)
+        self.board.fail(why)
+        self.page.set_markdown("")
+        self.map = BuzanMap()
+        self.tools = BoardTools()
+        self.look.keep_path = ""
+        self.look.keep_tag = ""
+        self.look.keep_hold = False
+        self.saver.done()
+        self.save_kind = ""
+
     def open(mut self, id: Int):
         var i = self.note_index(id)
         if i < 0:
             return
         var t_open = clock_us()
         var trace = getenv("MOJOUI_LOAD_TRACE") == "1"
-        self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote)
+        self.settle_open()
+        self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote; one that can't be written is held: SaveOutbox)
         var out_i = self.note_index(self.current)
-        if out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.board.edit().unsaved() == False:
+        if (out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.doc.may_keep(self.current) and self.outbox.find(self.current) < 0
+                and self.board.edit().unsaved() == False and self.board.keepable()):
             var moving = self.board.take()  # (the outgoing canvas, whole, kept parsed)
             let_go(self.kept.keep_out(self.notes[out_i].id, self.notes[out_i].revision, moving^))  # (the canvas just left, kept parsed)
             self.kept_pages[self.notes[out_i].id] = self.cols * 1000 + self.rows
         i = self.note_index(id)
         if trace:
             print("OPEN: outgoing " + String(clock_us() - t_open) + " us", flush=True)
-        self.read_row(i, False)
+        self.doc.begin(id)
+        self.current = id
+        self.panel.active = id
+        self.save_state = ""
+        self.save_detail = ""
         self.look.keep_path = ""  # (D-7956: the note's own file below, a canvas only)
         self.look.keep_tag = ""
         self.look.keep_hold = False
         self.look.keep_note = ""
-        var at = -1 if self.cold_opens else self.kept.find(id, self.notes[i].revision)
-        if self.notes[i].kind == "canvas" and not self.notes[i].secure and at >= 0:
+        self.kept_hash = 0
+        self.content_hash = 0
+        self.page_src = ""
+        var was_secure = self.notes[i].secure
+        var why = self.read_row(i, False)
+        if why != "":
+            self.open_failed(why)
+            return
+        if self.notes[i].secure:  # (its content column is a placeholder: never shown, never edited, never saved; nothing of it kept on disk)
+            if not was_secure:
+                _ = unlink(self.snap_path(id))
+            self.page.set_markdown("")
+            self.board.set(ObjectLayer())
+            self.board.layer.read_only = True
+            self.map = BuzanMap()
+            return
+        var held = self.outbox.find(id)  # (edits of it that couldn't be written: they are what opens, with why and a Retry)
+        var at = -1 if self.cold_opens or held >= 0 else self.kept.find(id, self.notes[i].revision)
+        if self.notes[i].kind == "canvas" and at >= 0:
             # the file still holds the revision this canvas was parsed at: reuse it (D-7934), nothing read or parsed
-            self.current = id
-            self.panel.active = id
             self.board.set(self.kept.take(at))
             var grid = self.kept_pages.get(id, 1001)
             self.cols = grid // 1000
@@ -433,99 +553,146 @@ struct WebShell(Movable):
             self.view_set = False
             self.tools = BoardTools()
             self.sticky_look()
+            self.doc.ready(id, self.notes[i].revision)
             return
-        if self.notes[i].kind == "canvas" and not self.notes[i].secure and self.snap_dir != "":
+        if self.notes[i].kind == "canvas" and self.snap_dir != "" and held < 0:
             var path = self.snap_path(id)
             var tag = self.snap_tag(i)
             var head = self.look.kept_head(path)  # (the file's head, read once)
-            var grid = parse_grid(self.look.head_note(head, tag))
+            var note = self.look.head_note(head, tag)
+            var grid = parse_grid(note)
             if grid[0] > 0:  # (its last view is kept: the page grid from it, the view laid out, the key asked)
                 var view = opening_view(self.win_w, self.win_h, Float64(grid[0]) * PAGE_W, Float64(grid[1]) * PAGE_H)
                 if self.win_k > 0 and self.look.head_shows(head, tag, view, self.win_w, self.win_h, self.win_k):
                     snap_ahead(path)  # (read while this frame is laid out: D-8015)
                     # the deferred open: the kept view shows this frame, the row is read, skimmed and the view's nodes
-                    # parsed on a job thread (OpenBoard.open_later); the board loads underneath, held until they're in
-                    self.current = id
-                    self.panel.active = id
+                    # parsed on a job thread (OpenBoard.open_later); the board loads underneath, held until they're in. The
+                    # grid is the document's as soon as it is in (settle_open), and nothing is saved from this one
                     self.cols = grid[0]
                     self.rows = grid[1]
+                    self.kept_hash = parse_hash(note)
+                    self.opening_rev = self.notes[i].revision
                     self.view = view
                     self.view_set = True
                     self.tools = BoardTools()
                     self.sticky_look()
                     self.look.keep_path = path
                     self.look.keep_tag = tag
-                    self.look.keep_note = grid_note(grid[0], grid[1])
+                    self.look.keep_note = note
                     self.look.keep_hold = True
                     var r = self.view_rect()
                     self.board.open_later(SqlText(self.db_path, "SELECT content FROM notes WHERE id = ? AND secure = 0", id), r[0], r[1], r[2], r[3], 6)
                     if trace:
                         print("OPEN: deferred (kept view) " + String(clock_us() - t_open) + " us", flush=True)
                     return
-        self.read_row(i, True)
+        var content = String("")
+        var revision = self.notes[i].revision
+        if held >= 0:
+            content = self.outbox.items[held].content
+            revision = self.outbox.items[held].revision
+            self.notes[i].revision = revision  # (what its edits build on)
+            self.save_state = "Couldn’t save"
+            self.save_detail = self.outbox.items[held].why
+        else:
+            why = self.read_row(i, True)
+            if why == "" and self.notes[i].secure:
+                why = "this note was locked just now"
+            if why != "":
+                self.open_failed(why)
+                return
+            revision = self.notes[i].revision
+            swap(content, self.notes[i].content)  # (the open document holds its text; the note's copy isn't read again)
         if trace:
             print("OPEN: rows read " + String(clock_us() - t_open) + " us", flush=True)
-        self.current = id
-        self.panel.active = id
-        ref n = self.notes[i]
-        if n.secure:  # (its content column is a placeholder: never shown, never edited, never saved)
-            self.page.set_markdown("")
-            self.board.set(ObjectLayer())
-            self.map = BuzanMap()
+        var kind = self.notes[i].kind
+        try:
+            if kind == "page":
+                self.page = PageSheet()
+                self.page.set_markdown(page_markdown(content))
+                self.page_src = content^
+            elif kind == "canvas":
+                self.open_canvas(i, content^, held >= 0)
+            elif kind == "mindmap":
+                self.map = BuzanMap()
+                self.map_root = read_map(content, self.map)
+                self.page_src = content^
+            else:
+                raise Error("a kind of note this app doesn't know (" + kind + ")")
+        except e:
+            self.open_failed(String(e))
             return
-        if n.kind == "page":
-            self.page.set_markdown(page_markdown(n.content))
-        elif n.kind == "canvas":
-            self.view_set = False
-            self.cols = 1
-            self.rows = 1
-            # (D-7944) the progressive open: the document skimmed, the page grid read, the nodes the opening view shows
-            # parsed now (every core), the rest a slice a frame (paint); anything that changes or reads all of it goes through OpenBoard.edit()
-            var text = String("")
-            swap(text, self.notes[i].content)  # (the loader keeps the text; the note's copy isn't read for a canvas)
-            # (the page grid first: the opening view, and so the first slice, depend on it)
-            var grid = read_page_grid(text)
-            self.cols = grid[0]
-            self.rows = grid[1]
-            self.tools = BoardTools()
-            self.sticky_look()
-            self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
-            self.view_set = True
-            var r = self.view_rect()
-            if self.snap_dir != "":  # (its view kept once it settles, for the next open: D-7956)
-                self.look.keep_path = self.snap_path(id)
-                self.look.keep_tag = self.snap_tag(i)
-                self.look.keep_note = grid_note(self.cols, self.rows)
-            var back = self.board.open(text^, r[0], r[1], r[2], r[3], 6)
-            if trace:
-                print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
-            if back == "":
-                return
-            self.view_set = False
-            self.notes[i].content = back^
-            try:
-                var j = Json.parse(self.notes[i].content)  # (parsed once: the objects and the page grid, D-7941)
-                self.board.set(import_json_canvas_doc(j))
-                self.board.layer.set_connector_gap(6)
-                self.board.layer.mark_saved()  # (what the file holds: unchanged until edited)
-                self.tools = BoardTools()
-                self.sticky_look()
-                var pg = j.get(j.get(0, "pn"), "page")
-                self.cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
-                self.rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
-            except e:
-                print("PNOTE ERROR: canvas: " + String(e), flush=True)
-                self.board.set(ObjectLayer())
-        elif n.kind == "mindmap":
-            self.map = BuzanMap()
-            self.map_root = read_map(n.content, self.map)
+        if trace:
+            print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
+        self.doc.ready(id, revision)
+
+    def open_canvas(mut self, i: Int, var text: String, held: Bool) raises:
+        """A canvas note from its text: (D-7944) progressively: the document skimmed, the page grid read, the nodes the
+        opening view shows parsed now (every core), the rest a slice a frame (paint); anything that changes or reads all
+        of it goes through OpenBoard.edit(). One the skim can't open is imported whole (and raises when it isn't a canvas)."""
+        var id = self.notes[i].id
+        if text == "":
+            raise Error("the note is empty")
+        # (the page grid first: the opening view, and so the first slice, depend on it)
+        var grid = read_page_grid(text)
+        self.cols = grid[0]
+        self.rows = grid[1]
+        self.tools = BoardTools()
+        self.sticky_look()
+        self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+        self.view_set = True
+        self.content_hash = text_hash(text)
+        var r = self.view_rect()
+        var back = self.board.open(text^, r[0], r[1], r[2], r[3], 6)
+        if back != "":
+            var j = Json.parse(back)  # (parsed once: the objects and the page grid, D-7941)
+            var layer = import_json_canvas_doc(j, back)
+            layer.set_connector_gap(6)
+            layer.mark_saved()  # (what the file holds: unchanged until edited)
+            self.board.set(layer^)
+        if held:  # (edits that aren't in the file: not "saved")
+            self.board.edit().saved_version = -1
+        elif self.snap_dir != "":  # (its view kept once it settles, for the next open: D-7956)
+            self.look.keep_path = self.snap_path(id)
+            self.look.keep_tag = self.snap_tag(i)
+            self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
 
     def snap_path(self, id: Int) -> String:
-        return self.snap_dir + "/note-" + String(id) + ".snap"
+        return self.snap_dir + "/note-" + String(id) + ".snap" if self.snap_dir != "" else String("")
 
     def snap_tag(self, i: Int) -> String:
-        """What a canvas's kept view depends on besides the view (the renderer adds zoom, view, size, GPU, build)."""
-        return "pnote;note=" + String(self.notes[i].id) + ";rev=" + String(self.notes[i].revision) + ";skin=" + self.panel.skin_name
+        """What a canvas's kept view depends on besides the view (the renderer adds zoom, view, size, GPU, build): the notes
+        file (its path and inode: the folder too is this file's own), the note, its revision, when and how big it was saved,
+        the skin. A copy or a restored backup of the file has another inode or another row; and whatever the key says, the
+        text's own fingerprint, kept with the view, is compared when the text is in (settle_open)."""
+        ref n = self.notes[i]
+        return "pnote;db=" + self.db_id + ";note=" + String(n.id) + ";rev=" + String(n.revision) + ";at=" + n.updated + ";bytes=" + String(n.bytes) + ";skin=" + self.panel.skin_name
+
+    def forget_pictures(mut self):
+        """Kept views of notes that were deleted or locked since, and of notes files that are gone: removed from the disk."""
+        if self.snap_dir == "":
+            return
+        var keep = List[String]()
+        for ref n in self.notes:
+            if n.kind == "canvas" and not n.secure:
+                keep.append("note-" + String(n.id) + ".snap")
+        _ = snap_forget(self.snap_dir, keep)
+        var root = String(self.snap_dir[byte=0:self.snap_dir.rfind("/")])
+        try:
+            for f in listdir(root):  # (one folder per notes file, each naming it; a picture straight in here is an older build's)
+                var name = String(f)
+                if name.endswith(".snap") or name.endswith(".tmp"):
+                    _ = unlink(root + "/" + name)
+                    continue
+                var path = String("")
+                try:
+                    with open(root + "/" + name + "/of.txt", "r") as g:
+                        path = String(g.read().strip())
+                except:
+                    continue
+                if path != "" and not file_exists(path):
+                    _ = snap_forget(root + "/" + name, List[String]())
+        except:
+            pass
 
     def set_skin(mut self, name: String):
         self.sk = skin_named(name)
@@ -560,7 +727,7 @@ struct WebShell(Movable):
         self.boxes.add("#app", 0, 0, w, h)
         var cover = List[Float64]()  # (the opaque page or map host drawn over the desk, inside its rounded corners)
         var ci = self.note_index(self.current)
-        if ci >= 0 and self.notes[ci].kind != "canvas" and not self.notes[ci].secure:
+        if ci >= 0 and self.notes[ci].kind != "canvas" and not self.notes[ci].secure and not self.doc.is_failed():
             var m = self.sk.radius + 1
             cover = [(296.0 if self.sidebar else 0.0) + 4 + m, 66 + m, w - 12 - m, h - 12 - m]
         if self.desk.begin(p, "desk", self.panel.skin_name + "|" + String(w) + "|" + String(h) + "|" + String(k) + "|" + (String(cover[0]) if len(cover) == 4 else String("")), k):
@@ -577,7 +744,7 @@ struct WebShell(Movable):
                 self.warm.add_ascii(st, k)
         var left = 296.0 if self.sidebar else 0.0
         var i = self.note_index(self.current)
-        if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure:
+        if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed():
             # the board under every island: the page frame (screen px), the objects (a layer in page px), then the chrome
             if not self.view_set:
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
@@ -590,9 +757,7 @@ struct WebShell(Movable):
                 self.budget.spent(clock_us() - ts)
                 if more:
                     p.set_again()
-                if self.board.problem != "":
-                    print("PNOTE ERROR: canvas: " + self.board.problem, flush=True)
-                    self.board.problem = ""
+            self.settle_open()  # (a deferred open that has landed: read, or failed)
             self.look.reach = 0 if self.board.loading() else BOARD_REACH
             if self.look.keep_path != "":  # (D-7956) the kept view: shown while the view's nodes load, kept again when settled
                 self.look.keep_hold = self.board.holding(r[0], r[1], r[2], r[3])
@@ -618,7 +783,9 @@ struct WebShell(Movable):
             if not self.card_open:
                 draw_title_island(p, self.boxes, left + 16, w - 16, n.title, island_emoji, self.sk.tint(n.tint), k, self.sk, n.emoji, self.title_focus)
             self.boxes.add("#workspace", left, 0, w - left, h)
-            if n.kind == "mindmap" and not n.secure:
+            if self.doc.is_failed():
+                draw_problem(p, self.boxes, left, 0, w - left, h, "This note couldn’t be opened", self.doc.problem + " Nothing in it has been changed.", "Retry", "#open-retry", self.sk)
+            elif n.kind == "mindmap" and not n.secure:
                 var mw = w - left - 4 - 12
                 var mh = h - 66 - 12
                 self.map.draw(p, self.boxes, left + 4, 66, mw, mh, 0, self.sk, n.title)
@@ -628,7 +795,7 @@ struct WebShell(Movable):
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
                 draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
                 draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
-            if n.kind == "canvas" and not n.secure:
+            if n.kind == "canvas" and not n.secure and not self.doc.is_failed():
                 self.boxes.add("#paper", left, 0, w - left, h)
                 self.boxes.add("#leafer-host", left, 0, w - left, h)
                 self.boxes.add("#note-input", left, 0, w - left, h)
@@ -641,10 +808,11 @@ struct WebShell(Movable):
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
-            if n.kind == "page" and not n.secure:
+            if n.kind == "page" and not n.secure and not self.doc.is_failed():
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
         if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
             draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk)
+            draw_pill_button(p, self.boxes, "#save-retry", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Retry", self.sk)
         self.paint_overlays(p, w, h, k)
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
@@ -744,9 +912,16 @@ struct WebShell(Movable):
             var i = self.note_index(what)
             if i >= 0 and not self.notes[i].secure and not self.searching and not self.settings_open and not self.card_open:
                 self.current = what
+                var doc = OpenDoc()  # (painted as if open: nothing of it can be edited or saved from here)
+                doc.begin(what)
+                doc.ready(what, self.notes[i].revision)
+                swap(doc, self.doc)
                 if self.notes[i].kind == "page":
                     var pg = PageSheet()
-                    pg.set_markdown(page_markdown(self.notes[i].content))
+                    try:
+                        pg.set_markdown(page_markdown(self.notes[i].content))
+                    except:
+                        pass
                     swap(pg, self.page)
                     self._paint(sc, self.win_w, self.win_h, self.win_k)
                     swap(pg, self.page)
@@ -754,10 +929,14 @@ struct WebShell(Movable):
                     self._unseen_board(sc, i)
                 else:
                     var mp = BuzanMap()
-                    _ = read_map(self.notes[i].content, mp)
+                    try:
+                        _ = read_map(self.notes[i].content, mp)
+                    except:
+                        pass
                     swap(mp, self.map)
                     self._paint(sc, self.win_w, self.win_h, self.win_k)
                     swap(mp, self.map)
+                swap(doc, self.doc)
         self.current = id
         swap(bx, self.boxes)
         return sc^
@@ -770,7 +949,7 @@ struct WebShell(Movable):
         if self.notes[i].content.byte_length() <= WARM_NOTE_BYTES:
             try:
                 var j = Json.parse(self.notes[i].content)
-                bd.set(import_json_canvas_doc(j))
+                bd.set(import_json_canvas_doc(j, ""))
                 bd.layer.set_connector_gap(6)
                 var pg = j.get(j.get(0, "pn"), "page")
                 cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
@@ -847,7 +1026,7 @@ struct WebShell(Movable):
 
     def queue_save(mut self, kind: String):
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure:
+        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure or not self.doc.may_edit():
             return
         self.save_kind = kind
         self.saver.touch(clock_us())
@@ -868,39 +1047,56 @@ struct WebShell(Movable):
         self.saver.done()
         var kind = self.save_kind
         self.save_kind = ""
+        self.settle_open()
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != kind:
+        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure:
             return
-        if kind == "page":
-            var md = self.page.markdown()
-            var ink = String('{"marks":[],"drawings":[]}')
-            try:
-                var j = Json.parse(self.notes[i].content)
-                var node = j.get(0, "ink")
-                if node >= 0:
-                    ink = j.dump(node)
-            except:
-                pass
-            if len(self.page.marks) > 0:
-                ink = self.page.ink_json()
-            # (page_note.page_text: a page's search body is its Markdown itself)
-            self.save_note(i, '{"version":1,"markdown":' + json_string(md) + ',"ink":' + ink + "}", md)
-        elif kind == "canvas":
-            self.save_note(i, export_json_canvas(self.board.edit(), self.cols, self.rows), reading_text(self.board.edit()))
-            if self.save_state == "":
-                self.board.edit().mark_saved()
-        elif kind == "mindmap":
-            self.save_note(i, map_json(self.map, self.notes[i].title, self.map_root), map_text(self.map))
+        if not self.doc.may_save(self.current, self.notes[i].revision):  # (never a screen that isn't this row's document, read whole)
+            print("PNOTE SAVE: refused (note " + String(self.current) + " isn't open and read)", flush=True)
+            return
+        var content = String("")
+        var body = String("")
+        try:
+            if kind == "page":
+                content = self.page.page_json(self.page_src)
+                body = self.page.markdown()  # (page_note.page_text: a page's search body is its Markdown itself)
+            elif kind == "canvas":
+                ref layer = self.board.edit()
+                content = export_json_canvas(layer, self.cols, self.rows)
+                body = reading_text(layer)
+            elif kind == "mindmap":
+                content = map_json_from(self.map, self.page_src, self.notes[i].title, self.map_root)
+                body = map_text(self.map)
+        except e:
+            self.save_state = "Couldn’t save"
+            self.save_detail = String(e)
+            print("PNOTE SAVE: failed note " + String(self.current) + ": " + String(e), flush=True)
+            return
+        if self.save_note(i, content, body) and kind == "canvas":
+            self.board.edit().mark_saved()
+            self.content_hash = text_hash(content)
+            self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
 
-    def save_note(mut self, i: Int, content: String, body: String):
+    def retry_save(mut self):
+        """The island's Retry: the held edits of the open note, again."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.outbox.find(self.current) < 0 or not self.doc.may_edit():
+            return
+        self.save_kind = self.notes[i].kind
+        self.saver.touch(clock_us())
+        self.flush()
+
+    def save_note(mut self, i: Int, content: String, body: String) -> Bool:
         """One note's new content into Personal Note's schema as its API saves it (services.save_note): only on the
         revision this copy holds (another app saved first: nothing is written and the island says so), with the change
         log, the search index and, for a map, its reminders kept in step, in one transaction. Then that one row is
-        updated in memory and moves to the top of the list; nothing else is read again."""
-        if self.notes[i].secure or len(self.dbs) == 0:
-            print("PNOTE SAVE: refused (secure note " + String(self.notes[i].id) + ")", flush=True)
-            return
+        updated in memory and moves to the top of the list; nothing else is read again. What couldn't be written is held
+        (SaveOutbox: on disk at once), opens in place of the row until it lands, and is tried again by Retry or the next
+        edit. True when it landed."""
         var id = self.notes[i].id
+        if self.notes[i].secure or len(self.dbs) == 0:
+            print("PNOTE SAVE: refused (secure note " + String(id) + ")", flush=True)
+            return False
         var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
         s.set("content", text_arg(content))
         s.stamp("updated_at")
@@ -916,9 +1112,15 @@ struct WebShell(Movable):
             s.then("UPDATE mindmap_reminders SET label = COALESCE((SELECT substr(trim(COALESCE(json_extract(value, '$.text'), ''), ' ' || char(9, 10, 13)), 1, 200) FROM json_each(?2, '$.nodes') WHERE json_extract(value, '$.id') = mindmap_reminders.node_id), label) WHERE note_id = ?1",
                    [int_arg(id), text_arg(content)])
         var r = save_row(self.dbs[0], s)
-        self.landed(i, r.status, r.revision, r.value, r.message)
         if r.status == SAVED:
-            self.notes[i].content = content
+            self.doc.saved(r.revision)
+            self.outbox.drop(id)
+            self.notes[i].bytes = content.byte_length()
+        else:
+            if not self.outbox.put(Unsaved(id, self.notes[i].kind, self.notes[i].revision, content, body, r.message, r.status == CONFLICT)):
+                print("PNOTE SAVE: the edits of note " + String(id) + " are held in memory only", flush=True)
+        self.landed(i, r.status, r.revision, r.value, r.message)
+        return r.status == SAVED
 
     def landed(mut self, i: Int, status: Int, revision: Int, stamp: String, message: String):
         """A save's outcome: saved → this copy takes the new revision and time and goes to the top; a conflict or a
@@ -936,6 +1138,14 @@ struct WebShell(Movable):
             self.save_detail = message
             print("PNOTE SAVE: " + ("conflict" if status == CONFLICT else "failed") + " note " + String(self.notes[i].id) + " at revision " + String(self.notes[i].revision) + ": " + message, flush=True)
 
+    def editable(mut self) -> Bool:
+        """The open note was read and may be edited (a deferred open is waited for: what it needs of the view)."""
+        if self.doc.loading() and self.board.pending():
+            var r = self.view_rect()
+            _ = self.board.near(r[0], r[1], r[2], r[3]).version
+        self.settle_open()
+        return self.doc.may_edit()
+
     def log_change(self, mut s: RowSave, id: Int):
         """Personal Note's workspace change feed (record_change): the sequence moves on, a row for this revision."""
         s.then("UPDATE workspace_state SET sequence = sequence + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1", List[SqlArg]())
@@ -945,7 +1155,7 @@ struct WebShell(Movable):
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste into the open page."""
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or self.searching or self.card_open or self.settings_open:
+        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or self.searching or self.card_open or self.settings_open or not self.editable():
             return False
         self.page.insert(text)
         self.save_page()
@@ -953,7 +1163,7 @@ struct WebShell(Movable):
 
     def preedit(mut self, text: String, cx: Float64, cy: Float64, cw: Float64, ch: Float64) -> Bool:
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure:
+        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or not self.doc.may_edit():
             return False
         self.page.preedit = text
         if text != "":
@@ -963,7 +1173,7 @@ struct WebShell(Movable):
 
     def key(mut self, name: String, mods: Int) -> Bool:
         var mi = self.note_index(self.current)
-        if mi >= 0 and self.notes[mi].kind == "mindmap" and not self.notes[mi].secure and not self.searching and not self.card_open and not self.settings_open:
+        if mi >= 0 and self.notes[mi].kind == "mindmap" and self.doc.may_edit() and not self.notes[mi].secure and not self.searching and not self.card_open and not self.settings_open:
             if self.map.editing >= 0:
                 var r = self.map.edit_key(name, mods)
                 if r == 2:
@@ -976,7 +1186,7 @@ struct WebShell(Movable):
             if name == "F2":
                 self.map.begin_edit(self.map.selected)
                 return True
-        if self.on_canvas():
+        if self.on_canvas() and self.editable():
             var r = self.tools.key(name, mods, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
             if r and (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y"):  # (an undo or redo by key, as by the island)
                 self.tools.hug_routes(self.board.edit(), self.look)
@@ -984,7 +1194,7 @@ struct WebShell(Movable):
             if r:
                 return True
         var ni = self.note_index(self.current)
-        if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure:
+        if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.doc.may_edit():
             if self.page.draw_mode:
                 if name == "Escape":
                     self.page.draw_mode = False
@@ -1199,10 +1409,12 @@ struct WebShell(Movable):
                 return False  # (the chrome: nothing of the board read, an open keeps coming in)
             if self.tools.tool == "hand":  # (the hand only moves the view)
                 return self.tools.press(x, y, self.board.layer, self.view)
+            if not self.editable():
+                return False
             var r = self.near_rect(x, y)  # (D-7959: the tools hit-test at the pointer: only what lies there must be in)
             return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         var ni = self.note_index(self.current)
-        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and not self.searching and not self.card_open:
+        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and self.doc.may_edit() and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
                 self.page.mark_press(x, y)
                 return True
@@ -1212,6 +1424,8 @@ struct WebShell(Movable):
         if self.on_canvas():
             if self.tools.tool == "hand":
                 return self.tools.pan(x, y, self.board.layer, self.view)  # (the hand tool moves self.view)
+            if not self.editable():
+                return False
             var r = self.near_rect(x, y)
             return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         if len(self.page.wet) > 0:
@@ -1221,6 +1435,8 @@ struct WebShell(Movable):
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
+            if self.tools.tool != "hand" and not self.editable():
+                return False
             var vr = self.near_rect(x, y)
             var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
@@ -1249,7 +1465,8 @@ struct WebShell(Movable):
 
     def on_canvas(self) -> Bool:
         var i = self.note_index(self.current)
-        return i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open
+        return (i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed() and not self.searching and not self.card_open
+                and not self.settings_open)
 
     def canvas_tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool (an edit: the whole board
@@ -1263,6 +1480,8 @@ struct WebShell(Movable):
             if hit == names[t]:
                 self.tools.set_tool(tools[t], self.board.layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
                 return True
+        if (hit == "#undo" or hit == "#redo") and not self.editable():
+            return False
         if hit == "#undo":
             self.tools.undo(self.board.edit())
             self.tools.hug_routes(self.board.edit(), self.look)
@@ -1274,6 +1493,8 @@ struct WebShell(Movable):
         elif hit == "#zoom-fit":
             self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
         elif hit == "":
+            if not self.editable():
+                return False
             var vr = self.near_rect(x, y)
             if not self.tools.tap(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view, self.win_w, self.win_h):
                 return False
@@ -1297,10 +1518,12 @@ struct WebShell(Movable):
         var t = String(title.strip())
         if i < 0 or t == "" or t == self.notes[i].title:
             return
-        if self.notes[i].secure:
-            print("PNOTE SAVE: refused (secure note " + String(self.notes[i].id) + ")", flush=True)
+        if self.notes[i].secure or not self.editable():
+            print("PNOTE SAVE: refused (note " + String(self.notes[i].id) + ": secure, or not read)", flush=True)
             return
         self.flush()
+        if self.outbox.find(self.current) >= 0:  # (its edits haven't landed: a new name now would move its revision from under them)
+            return
         i = self.note_index(self.current)
         var id = self.notes[i].id
         var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
@@ -1311,6 +1534,7 @@ struct WebShell(Movable):
         s.then("UPDATE note_search SET title = ? WHERE note_id = ?", [text_arg(t), int_arg(id)])
         var r = save_row(self.dbs[0], s)
         if r.status == SAVED:
+            self.doc.saved(r.revision)
             self.notes[i].title = t
             if not self.notes[i].icon_set:
                 self.notes[i].emoji = guess_emoji(t, self.notes[i].kind)
@@ -1327,7 +1551,7 @@ struct WebShell(Movable):
     def tap(mut self, x: Float64, y: Float64) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
         self.title_focus = False
-        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button"])
+        var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry"])
         if self.settings_open:
             var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])
             if sh == "#close-properties":
@@ -1347,6 +1571,13 @@ struct WebShell(Movable):
             self.card.editing = False
             if ch == "#top-properties":
                 self.settings_open = True
+            return True
+        if hit == "#open-retry":
+            var again = self.current
+            self.open(again)
+            return True
+        if hit == "#save-retry":
+            self.retry_save()
             return True
         if hit == "#share-button":
             self.card_open = True
@@ -1378,7 +1609,7 @@ struct WebShell(Movable):
         if self.on_canvas() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
             return self.canvas_tap(x, y)
         var ni = self.note_index(self.current)
-        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and not self.searching:
+        if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.doc.may_edit() and not self.searching:
             var tool = self.boxes.hit_any(x, y, [".page-tool:"])
             if tool == ".page-tool:Draw" or tool == ".page-tool:Pen":
                 self.page.draw_mode = True

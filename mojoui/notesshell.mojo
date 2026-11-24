@@ -864,3 +864,41 @@ def draw_locked_cover[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float6
     bx.add("locked-heading:" + heading, x + w / 2 - measure(hst, heading) / 2, cy, measure(hst, heading), 22)
     var sst = TextStyle(UI, 400, False, 13)
     text_at(p, sst, sub, x + w / 2, cy + 22 + 10, 18, sk.muted, ALIGN_CENTER)
+
+
+# ------------------------------------------------ what went wrong, and a way on (review 3)
+
+def draw_pill_button[P: Painter](mut p: P, mut bx: Boxes, name: String, cx: Float64, y: Float64, label: String, sk: Skin):
+    """A small filled button centred on cx, its top at y (32 high)."""
+    var st = TextStyle(UI, 600, False, 13)
+    var w = measure(st, label) + 28
+    draw_lifted(p, cx - w / 2, y, w, 32, 16, sk.shadow2, sk.panel)
+    text_at(p, st, label, cx - w / 2 + 14, y, 32, sk.ink)
+    bx.add(name, cx - w / 2, y, w, 32)
+
+
+def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w: Float64, h: Float64, title: String, detail: String, action: String, name: String,
+                             sk: Skin):
+    """In place of a document that couldn't be opened: what happened, why (wrapped), and a button."""
+    var cw = min(420.0, w - 48)
+    var ts = TextStyle(UI, 600, False, 16)
+    var ds = TextStyle(UI, 400, False, 13)
+    var lines = List[String]()
+    var line = String("")
+    for wd in detail.split(" "):
+        var trial = String(wd) if line == "" else line + " " + String(wd)
+        if line != "" and measure(ds, trial) > cw - 48:
+            lines.append(line)
+            line = String(wd)
+        else:
+            line = trial
+    lines.append(line)
+    var ch = 24 + 22 + 10 + 20 * Float64(len(lines)) + 16 + 32 + 24
+    var cx = x + (w - cw) / 2
+    var cy = y + (h - ch) / 2
+    draw_lifted(p, cx, cy, cw, ch, 16, sk.shadow2, sk.panel)
+    bx.add(".open-problem", cx, cy, cw, ch)
+    text_at(p, ts, title, cx + 24, cy + 24, 22, sk.ink)
+    for n in range(len(lines)):
+        text_at(p, ds, lines[n], cx + 24, cy + 24 + 22 + 10 + 20 * Float64(n), 20, sk.ui_muted)
+    draw_pill_button(p, bx, name, cx + 24 + 60, cy + ch - 24 - 32, action, sk)
