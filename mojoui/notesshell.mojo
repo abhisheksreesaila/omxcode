@@ -684,14 +684,29 @@ def draw_radial_steps[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, 
                 ts[i] = ts[j]
                 ts[j] = tmp
     p.push_clip(x, y, w, h)
-    for t in ts:
+    for q in range(len(ts)):
+        var t = ts[q]
+        if q > 0 and t == ts[q - 1]:  # (two channels change at the same place: one circle, its colour the same)
+            continue
         var tt = t - 1e-6  # (the colour just inside this boundary)
         var c = UInt32(0xFF000000)
         for ch in range(3):
             var a = Float64(Int((inner >> UInt32(8 * ch)) & 0xFF))
             var b = Float64(Int((outer >> UInt32(8 * ch)) & 0xFF))
             c |= UInt32(Int(a + (b - a) * tt + 0.5)) << UInt32(8 * ch)
-        p.circle(cx, cy, t * r_end, c)
+        # (D-8012: the next circle inward hides this one's middle: the square inside that circle is left out, or 25 nested
+        # discs cost the GPU ten windows of overdraw)
+        var r = t * r_end
+        var next = 0.0
+        for n in range(q + 1, len(ts)):
+            if ts[n] != t:
+                next = ts[n] * r_end
+                break
+        var square = next * 0.70710678 - 1.5  # (half its side, the edge's antialiasing off)
+        if square > 4 and r > 8:
+            p.rect_hole(cx - r, cy - r, 2 * r, 2 * r, c, r, r - square)
+        else:
+            p.circle(cx, cy, r, c)
     p.pop_clip()
 
 

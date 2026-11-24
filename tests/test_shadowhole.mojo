@@ -3,10 +3,10 @@
 # rasters, with holes against without (BoardLook.shadow_holes). `shadowhole: ok`.
 #   pixi run mojo run -I . -I vendor tests/test_shadowhole.mojo
 from std.testing import assert_true, assert_equal
-from mojoui.scene import Scene, OP_RECT
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
-from mojoui.notesshell import draw_shadows, draw_lifted
+from mojoui.notesshell import draw_shadows, draw_lifted, draw_radial_steps
 from mojoui.skin import Shadow
 from mojoui.canvas import Surface, rgba
 from mojoui.scene import SurfacePainter
@@ -145,8 +145,60 @@ def test_lifted() raises:
         print("   lifted at", tall, ": ", a[2], "holed shadow layers, GL and CPU pixels identical")
 
 
+def radial_frame(mode: Int, k: Float64) raises -> Tuple[List[UInt32], Int]:
+    """A radial gradient's discs (draw_radial_steps): as drawn (0), their holes filled in (1), as plain circles (2)."""
+    var src = Scene(W, H, k)
+    src.begin_layer("a")
+    src.layer_transform(0, 0, k)
+    draw_radial_steps(src, 6, 66, 1400, 820, 0.48, 0.44, rgba(255, 254, 250), rgba(244, 240, 232), 0.74, 14)
+    draw_radial_steps(src, 20, 900, 300, 90, 0.3, 0.8, rgba(90, 10, 200), rgba(0, 200, 90), 0.9, 8)
+    var sc = Scene(W, H, k)
+    sc.begin_layer("a")
+    sc.layer_transform(0, 0, k)
+    sc.fill(0xFFF0F2F5)
+    var holed = 0
+    sc.push_clip(0, 0, 1500, 1200)
+    for op in range(src.ops()):
+        var n0 = op * 6
+        if Int(src.kinds[op]) == OP_RECT:
+            var hole = Float64(src.nums[n0 + 5])
+            if hole > 0:
+                holed += 1
+            if mode == 2 and hole > 0:
+                var r = Float64(src.nums[n0 + 2]) / 2
+                sc.circle(Float64(src.nums[n0]) + r, Float64(src.nums[n0 + 1]) + r, r, src.colors[op])
+            else:
+                sc.rect_hole(Float64(src.nums[n0]), Float64(src.nums[n0 + 1]), Float64(src.nums[n0 + 2]), Float64(src.nums[n0 + 3]), src.colors[op], Float64(src.nums[n0 + 4]),
+                             hole if mode == 0 else 0.0)
+        elif Int(src.kinds[op]) == OP_CIRCLE:
+            sc.circle(Float64(src.nums[n0]), Float64(src.nums[n0 + 1]), Float64(src.nums[n0 + 2]), src.colors[op])
+    sc.pop_clip()
+    var g = GPU2D()
+    assert_true(g.start(False), "start")
+    var slot = g.draw(sc, Scene(0, 0, 1.0), 1, W, H)
+    var out = List[UInt32](length=W * H, fill=0)
+    assert_true(slot >= 0 and g.gl.read(g.gl.tex[slot], W, H, Int(out.unsafe_ptr())), "read")
+    g.gl.close()
+    return (out^, holed)
+
+
+def test_radial() raises:
+    """(D-8012) draw_radial_steps: each disc leaves out the middle the next one covers: the same picture as whole discs
+    (identical) and as circles (a level at most, at the antialiased edges)."""
+    for k in [1.0, 1.25, 1.6]:
+        var a = radial_frame(0, k)
+        var whole = radial_frame(1, k)
+        var circles = radial_frame(2, k)
+        assert_true(a[1] > 10, "discs with a hole")
+        assert_equal(apart(a[0], whole[0])[0], 0, "holes filled in: the same picture")
+        var c = apart(a[0], circles[0])
+        assert_true(c[1] <= 1, "circles: a level at most, " + String(c[1]))
+        print("   radial at", k, ":", a[1], "discs with a hole, pixels identical to whole discs, circles", c[0], "channels apart by", c[1])
+
+
 def main() raises:
     assert_true(headless_gl33() != 0, "a headless GL context")
+    test_radial()
     test_lifted()
     var layer = board()
     var whole = frames(layer, False)

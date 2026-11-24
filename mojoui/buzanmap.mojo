@@ -218,7 +218,7 @@ struct BuzanMap(Movable):
         return (sc, w / 2 - (minx + maxx) / 2 * sc, h / 2 - (miny + maxy) / 2 * sc)
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, w: Float64, h: Float64, zoom_in: Float64, sk: Skin, label: String):
-        draw_shadows(p, x0, y0, w, h, sk.radius, sk.shadow1)
+        draw_shadows(p, x0, y0, w, h, sk.radius, sk.shadow1, 0.3 * sk.radius + 1)
         draw_radial_steps(p, x0, y0, w, h, 0.48, 0.44, CARD, SHEET, 0.74, sk.radius)  # (.mindmap-stage's background)
         bx.add("map.host", x0, y0, w, h)
         bx.add("map.canvas", x0, y0, w, h)
