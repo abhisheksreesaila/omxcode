@@ -1151,6 +1151,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Raster tiles (a big layer as tiles: pans composite, edits raster their damage; GL and Metal)` | `mojoui/gpu2d_tiles.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Keycaps (a shortcut as the platform writes it)` | `mojoui/keycaps.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Graphemes (where a caret may stand: whole characters, in every field)` | `mojoui/graphemes.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Page ink (a page's marks: anchored to words, followed through edits, saved as they were read)` | `mojoui/pageink.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Words edited in place (one box's words: caret, selection, copy, undo, an input method, shown lines)` | `mojoui/wordsedit.mojo` | Canvas, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ | pnote |
+| `Properties card (where a document is filed, with a menu; facts; a danger button) and toast` | `mojoui/notesshell.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Dock flyout, colours and widths` | `mojoui/notesshell.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Rows made and deleted with their follow-ups, all or nothing` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Stroke icons (Lucide geometry rasterized natively at device px)` | `mojoui/strokeicon.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)` | `mojoui/notesshell.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
 | `Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)` | `mojoui/pagesheet.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -1243,12 +1248,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 219 | 11 | 0 |
-| Web | 174 | 39 | 17 |
-| Android | 19 | 90 | 121 |
-| Mac (AppKit) | 9 | 194 | 27 |
-| iPhone (UIKit) | 0 | 161 | 69 |
-| Agent (MCP) | 66 | 68 | 96 |
+| Linux (GTK) | 224 | 11 | 0 |
+| Web | 174 | 44 | 17 |
+| Android | 19 | 94 | 122 |
+| Mac (AppKit) | 9 | 199 | 27 |
+| iPhone (UIKit) | 0 | 165 | 70 |
+| Agent (MCP) | 66 | 72 | 97 |
 
 ## Inside one app, not components yet (the debt)
 

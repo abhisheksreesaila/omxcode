@@ -18,7 +18,7 @@ from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
 from mojoui.textedit import now_ms
-from mojoui.files import write_setting
+from mojoui.files import write_setting, read_setting
 from mojoui.islandcard import IslandCard, CardTile
 from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
 from std.ffi import external_call
@@ -441,6 +441,7 @@ struct WebShell(Movable):
             make_notes_file(self.dbs[0])  # (an empty file: Personal Note's tables; one that has them is left as it is)
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
+            self.recall_folds()
             self.forget_pictures()
         except e:
             self.problem = String(e)
@@ -1459,6 +1460,29 @@ struct WebShell(Movable):
         except e:
             return False
 
+    def remember_folds(mut self):
+        """Which shelves are folded and which notebooks open, for the next start (in this app's own settings)."""
+        var s = String("1" if self.panel.inbox_open else "0")
+        for o in self.panel.open_shelves:
+            s += "1" if o else "0"
+        write_setting("pnote", "shelves-" + String(fnv(self.db_path)), s)
+        var b = String("")
+        for id in self.panel.open_books:
+            b += ("," if b != "" else "") + String(id)
+        write_setting("pnote", "books-" + String(fnv(self.db_path)), b)
+
+    def recall_folds(mut self):
+        var s = read_setting("pnote", "shelves-" + String(fnv(self.db_path)), "")
+        if s.byte_length() == 1 + len(self.panel.open_shelves):
+            self.panel.inbox_open = s.as_bytes()[0] == 49
+            for i in range(len(self.panel.open_shelves)):
+                self.panel.open_shelves[i] = s.as_bytes()[i + 1] == 49
+        for p in read_setting("pnote", "books-" + String(fnv(self.db_path)), "").split(","):
+            try:
+                self.panel.open_books.append(Int(String(p)))
+            except:
+                pass
+
     def name_notebook(mut self):
         """The new notebook's name is written: made, on its shelf."""
         var at = self.panel.naming
@@ -2408,6 +2432,7 @@ struct WebShell(Movable):
             var id = self.panel.hit(x, y, 1)
             if id >= 0:
                 self.panel.toggle_book(id)
+                self.remember_folds()
                 return True
         if hit.startswith(".sec-head"):
             var at = 0
@@ -2417,6 +2442,7 @@ struct WebShell(Movable):
                 except:
                     at = -1
             self.panel.toggle_shelf(at)
+            self.remember_folds()
             return True
         if self.on_map() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
             return self.map_tap(x, y)

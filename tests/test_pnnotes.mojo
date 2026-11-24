@@ -359,8 +359,14 @@ def notebooks() raises:
     s.panel.naming = 0
     s.panel.naming_text = "x"
     assert_true(s.key("Escape", 0) and s.panel.naming == -1 and len(s.panel.notebooks) == n + 1, "Escape: none")
+    tap(s, ".sec-head@3")  # (a fold and an opened notebook are there at the next start)
+    s.panel.open_books = List[Int]()
+    s.panel.toggle_book(s.panel.notebooks[0].id)
+    s.remember_folds()
     s.close()
-    print("   a new notebook")
+    var t = WebShell(DB, "paper")
+    assert_true(not t.panel.open_shelves[1] and s.panel.notebooks[0].id in t.panel.open_books, "remembered")
+    print("   a new notebook; folds remembered")
 
 
 def main() raises:

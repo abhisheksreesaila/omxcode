@@ -1924,3 +1924,15 @@ scripts/gpu-free (exit 75) is asked by scripts/check, scripts/testscreen, M6's w
 
 ## D-8036: Backspace and syllables built a sign at a time (goal 79, continuation 20; ours)
 D-8032 made every Backspace take a whole grapheme, and test_webpieces (since 11-19: नमस्ते less one is नमस्त, as the web's page does) failed; it hadn't been run after that change, and was found by running the wider set at 01:24. The old test is kept as it is; the rule now: a whole grapheme (é in two code points, families, flags, skin tones), except in Devanagari … Sinhala, Thai, Lao, Tibetan, Myanmar and Khmer, where Backspace takes the last sign (Chrome, Android and CodeMirror do); the caret still moves by whole syllables. test_graphemes gains the cases; its नि row moved from "taken whole" to "a sign at a time".
+
+## D-8037: pnote's page stands on TextEdit (goal 79, continuation 20; ours)
+The page had its own small editor without selection, undo, wrapping or scrolling. TextEdit already had the text, selection, words and undo; its keys that need no layout are now `edit_key`, and PageSheet keeps its own CSS layout (wrapping by linebreak's Chrome table, then anywhere). Chosen over moving the page to mdedit (its look isn't the web's). **Con:** all paragraphs are laid out at open (a very long page pays once); laying out lazily is open. Fixture pages draw the same operations as before.
+
+## D-8038: what was built of the gaps, and what "Not in the native app yet" is for (ours)
+S gaps and most M ones (docs/goals/79-gaps.md). A button the web has and the native app can't do yet stays where the web draws it (the pictures are compared) and says so in a toast, over hiding it or doing nothing. New page and New mind map are in the omnibar though the web offers only a canvas: a person can otherwise make neither.
+
+## D-8039: a person's notes file (ours)
+With nothing said, the app uses its own file in the platform's data folder, never Personal Note's own (`~/.local/share/personal-note`): two apps on one file is a choice (PNOTE_DB). The feed is looked at every 2 s, so using one file for both works, without merging. **Con:** nobody's existing notes are there on the first start; an import is open.
+
+## D-8040: a page's ink follows its words (ours)
+Positions were written back unchanged after an edit above them, so the web would have shown marks on other words. `mojoui.pageink` maps them as CodeMirror's mapPos does (one changed stretch per edit), drops a mark with its word and brings it back with undo, converts bytes ↔ UTF-16, and patches only the positions that moved. A page whose ink was never loaded loses none of it. Con: the single-stretch diff can't tell a replaced word from an edited one when a paste repeats text around it.
