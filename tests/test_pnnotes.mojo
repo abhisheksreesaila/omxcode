@@ -10,6 +10,7 @@ from mojoui.scene import Scene
 from mojoui.sqlite import Database
 from mojoui.docstore import clock_us
 from webshell import WebShell, fts_words
+from pnstore import default_notes_file
 
 comptime DB = "build/test_pnnotes.db"
 comptime W: Float64 = 1440
@@ -57,6 +58,20 @@ def count(sql: String) raises -> Int:
 def typed(mut s: WebShell, words: String):
     for c in words.graphemes():
         _ = s.key(String(c), 0)
+
+
+def default_file() raises:
+    _ = setenv("OMX_DATA", "build/test_pnnotes_data")
+    for x in ["", "-wal", "-shm"]:
+        _ = unlink("build/test_pnnotes_data/notes.db" + String(x))
+    assert_equal(default_notes_file(), "build/test_pnnotes_data/notes.db")
+    var s = WebShell(default_notes_file(), "paper")
+    assert_true(s.problem == "" and len(s.notes) == 0 and len(s.panel.notebooks) == 1, s.problem)
+    s.create("canvas")
+    s.close()
+    var t = WebShell(default_notes_file(), "paper")
+    assert_true(len(t.notes) == 1, "there the next time")
+    print("   the default notes file")
 
 
 def fresh_file() raises:
@@ -273,6 +288,7 @@ def clearing() raises:
 def main() raises:
     _ = private_dir("build/test_pnnotes_cfg")
     _ = setenv("OMX_CONFIG", "build/test_pnnotes_cfg")
+    default_file()
     fresh()
     fresh_file()
     search()

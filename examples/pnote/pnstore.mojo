@@ -5,7 +5,7 @@
 from mojoui.sqlite import Database
 from mojoui.docstore import RowNew, RowSave, Followup, SqlArg, NewResult, SaveResult, NEW_ROW, text_arg, int_arg, new_row, drop_row, save_row
 from mojoui.crypto import random_bytes
-from mojoui.files import private_dir
+from mojoui.files import private_dir, data_dir
 
 comptime EMPTY_CANVAS = '{"nodes":[],"edges":[],"pn":{"schemaVersion":1,"page":{"columns":1,"rows":1},"grid":{"width":860,"height":1080}}}'
 comptime EMPTY_PAGE = '{"version":1,"markdown":"","ink":{"marks":[],"drawings":[]}}'
@@ -181,6 +181,14 @@ def changed(kind: String, id: Int, what: String, table: String = "notes") -> Lis
     out.append(Followup("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), '" + kind
                         + "', resource_id, revision" + (" + 1" if what == "deleted" else "") + ", '" + what + "' FROM " + table + " WHERE id = ?", [int_arg(id)]))
     return out^
+
+
+def default_notes_file() -> String:
+    """Where a person's notes are when the app is told nothing else: the app's own data folder, readable by them alone
+    (made when missing). Never Personal Note's own file: two apps on one file is a choice a person makes (PNOTE_DB)."""
+    var dir = data_dir("pnote")
+    _ = private_dir(dir)
+    return dir + "/notes.db"
 
 
 def empty_content(kind: String) -> String:

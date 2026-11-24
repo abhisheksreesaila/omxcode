@@ -26,10 +26,27 @@ def next_grapheme(text: String, at: Int) -> Int:
     return text.byte_length()
 
 
+def erase_start(text: String, at: Int) -> Int:
+    """Where Backspace at byte `at` takes away from: the grapheme before it, except in the scripts whose graphemes are
+    built a sign at a time (Devanagari … Sinhala, Thai, Lao, Tibetan, Myanmar, Khmer): there its last sign only, as
+    platforms and Personal Note's page do, so that a wrong vowel sign is corrected without writing the syllable again."""
+    var start = prev_grapheme(text, at)
+    if start >= at:
+        return start
+    var b = text.as_bytes()
+    var k = at - 1
+    while k > start and (Int(b[k]) & 0xC0) == 0x80:
+        k -= 1
+    if k > start and Int(b[k]) >= 0xE0 and Int(b[k]) < 0xF0 and k + 2 < at:
+        var c = ((Int(b[k]) & 0x0F) << 12) | ((Int(b[k + 1]) & 0x3F) << 6) | (Int(b[k + 2]) & 0x3F)
+        if (0x0900 <= c <= 0x0FFF) or (0x1000 <= c <= 0x109F) or (0x1780 <= c <= 0x17FF):
+            return k
+    return start
+
+
 def without_last(text: String) -> String:
-    """The text without its last grapheme (Backspace at its end)."""
-    var at = prev_grapheme(text, text.byte_length())
-    return String(text[byte=0:at])
+    """The text after Backspace at its end."""
+    return String(text[byte=0:erase_start(text, text.byte_length())])
 
 
 def typed_text(name: String) -> Bool:

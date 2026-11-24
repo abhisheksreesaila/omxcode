@@ -1921,3 +1921,6 @@ Hosts call the app's closing before keeping views; waits for jobs are bounded (a
 
 ## D-8035: no GPU program while another project's job runs (goal 79, continuation 20)
 scripts/gpu-free (exit 75) is asked by scripts/check, scripts/testscreen, M6's web runs and the CPU test helper for GL tests; it never waits and never goes ahead anyway: the third power-off came 70 s into a race that a 10-minute timeout had started beside another job.
+
+## D-8036: Backspace and syllables built a sign at a time (goal 79, continuation 20; ours)
+D-8032 made every Backspace take a whole grapheme, and test_webpieces (since 11-19: नमस्ते less one is नमस्त, as the web's page does) failed; it hadn't been run after that change, and was found by running the wider set at 01:24. The old test is kept as it is; the rule now: a whole grapheme (é in two code points, families, flags, skin tones), except in Devanagari … Sinhala, Thai, Lao, Tibetan, Myanmar and Khmer, where Backspace takes the last sign (Chrome, Android and CodeMirror do); the caret still moves by whole syllables. test_graphemes gains the cases; its नि row moved from "taken whole" to "a sign at a time".

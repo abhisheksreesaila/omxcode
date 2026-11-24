@@ -34,6 +34,7 @@ from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
 from webshell import WebShell
+from pnstore import default_notes_file
 from mojoui.files import read_setting
 from mojoui.fonttext_check import fontcheck
 from mojoui.glyphwarm import WARM_TICK_MS
@@ -271,6 +272,8 @@ struct Main(App):
             except e:
                 print("fonttext: FAIL " + String(e), flush=True)
         var pn_db = environment("PNOTE_DB", "")
+        if pn_db == "" and environment("PNOTE_DIR", "") + environment("PNOTE_SCENE", "") + environment("PNOTE_IMPORT", "") + environment("PNOTE_PAGE_CHARS", "") == "":
+            pn_db = default_notes_file()  # (a person starting the app: this look, notes of its own)
         if pn_db != "":
             # (D-7907) the web look runs on a Personal Note database; goal 74/75's contract (PNOTE_DIR, its own store, the
             # judged scenes) keeps goal 74's look so their checks still prove the editors and the GPU path
@@ -284,6 +287,8 @@ struct Main(App):
                 except:
                     pass
                 self.web[0].open(start_id)
+            elif self.web[0].problem == "":
+                self.web[0].create("canvas")  # (no note yet: one to start on, as the web makes)
             print("PNOTE WEB: " + String(len(self.web[0].notes)) + " notes from " + pn_db, flush=True)
             return
         var dir = environment("PNOTE_DIR", "")

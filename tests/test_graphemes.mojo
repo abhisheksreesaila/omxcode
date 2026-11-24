@@ -1,3 +1,4 @@
+# (Backspace's one exception, D-8036: a Hindi syllable loses its last sign first; test_webpieces has asked for it since 11-19.)
 # mojoui.graphemes and every field that uses it (review 3, MUST 6): é composed and decomposed, an emoji family, flags, skin
 # tones, Japanese with voiced marks, Hindi, Korean: the caret and Backspace go a whole character at a time, nothing aborts,
 # what is left is whole text. graphemes: ok
@@ -13,7 +14,7 @@ from mojoui.textedit import TextEdit
 
 
 def whole() -> List[String]:
-    return ["a", "é", "é", "👩‍👩‍👧", "🇮🇳", "👍🏽", "が", "が", "नि", "한", "漢", "ß", "​" if False else "ñ", "🏳️‍🌈", "Ạ̊"]
+    return ["a", "é", "é", "👩‍👩‍👧", "🇮🇳", "👍🏽", "が", "が", "한", "漢", "ß", "​" if False else "ñ", "🏳️‍🌈", "Ạ̊"]
 
 
 def main() raises:
@@ -33,6 +34,11 @@ def main() raises:
     assert_equal(prev_grapheme(all, 0), 0)
     assert_equal(prev_grapheme("", 0), 0)
     assert_equal(without_last(""), "")
+    assert_equal(without_last("नमस्ते"), "नमस्त")  # (a sign at a time)
+    assert_equal(without_last("नि"), "न")
+    assert_equal(without_last("न"), "")
+    assert_equal(without_last("กี่"), "กี")
+    assert_equal(prev_grapheme("अनि", 9), 3)  # (the caret goes a syllable at a time)
     # a caret that stands inside a character (a stale position) lands on a boundary
     for b in range(all.byte_length() + 1):
         var p = prev_grapheme(all, b)
@@ -93,9 +99,9 @@ def main() raises:
     _ = t.tap(400, 300, l, v, 1440, 900)
     for g in whole():
         _ = t.key(g, 0, l, v, 1440, 900, 1, 1)
-    assert_equal(t.edit_words, all)
+    assert_equal(t.words.text(), all)
     for q in range(len(ends) - 1, -1, -1):
         _ = t.key("Backspace", 0, l, v, 1440, 900, 1, 1)
-        assert_equal(t.edit_words, String(all[byte=0:ends[q - 1] if q > 0 else 0]))
+        assert_equal(t.words.text(), String(all[byte=0:ends[q - 1] if q > 0 else 0]))
 
     print("graphemes: ok")

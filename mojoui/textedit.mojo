@@ -17,7 +17,7 @@
 # (mojoui.history) as the removed and inserted texts, so typing a word is one undo step.
 
 from std.time import perf_counter_ns
-from mojoui.graphemes import prev_grapheme, next_grapheme
+from mojoui.graphemes import prev_grapheme, next_grapheme, erase_start, typed_text
 from mojoui.text import Font, Face, REGULAR, MEDIUM, MONO, MONO_BOLD, LEFT
 from mojoui.scene import Painter
 from mojoui.history import History, Undoable
@@ -662,6 +662,8 @@ struct TextEdit(Movable):
                 self.replace(self.sel_start(), self.sel_end(), "", EDIT_OTHER, now_ms)
             elif not (self.caret == Pos(0, 0)):
                 var p = self.prev_char(self.caret)
+                if self.caret.byte > 0:
+                    p = Pos(self.caret.para, erase_start(self.paras[self.caret.para], self.caret.byte))
                 self.replace(p, self.caret, "", EDIT_DELETE, now_ms)
             return True
         if name == "Delete":
@@ -678,7 +680,7 @@ struct TextEdit(Movable):
         if name == "Tab":
             self.insert("    ", now_ms)
             return True
-        if name.byte_length() > 0 and (name.byte_length() == utf8_len(name.as_bytes()[0]) and Int(name.as_bytes()[0]) >= 32):
+        if typed_text(name):  # (a character, of however many code points)
             self.insert(name, now_ms)
             return True
         return False

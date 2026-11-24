@@ -35,7 +35,9 @@ Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
   saas) META="Sign in with Google, a tenant of your own, Stripe checkout: SaaS blocks in Mojo|Office;||./run-server.sh \& then ./$EX
 The server (saas-server, Mojo on Flare) reads its keys from ~/.config/omxcode/saas.env (make it with scripts/saas_keys.sh
 from the omxcode repo); the app finds it at \$SAAS_SERVER (default http://127.0.0.1:8000)." ;;
-  pnote) META="Notes, whiteboards and mind maps, written once in Mojo|Office;Utility;||./$EX            (PNOTE_DB=/path/to/notes.db ./$EX for another file)" ;;
+  pnote) META="Notes, whiteboards and mind maps, written once in Mojo|Office;Utility;||./$EX
+Your notes are in ~/.local/share/pnote/notes.db (on a Mac: ~/Library/Application Support/pnote); PNOTE_DB=/path/to/notes.db
+./$EX opens another file. The file is made on the first start." ;;
   todo) META="A to-do list in the platform's own controls, written once in Mojo|Utility;||./$EX" ;;
   *) META="Written once in Mojo|Utility;||./$EX" ;;
 esac

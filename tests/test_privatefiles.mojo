@@ -5,7 +5,7 @@ from std.os import stat, listdir, getenv
 from std.testing import assert_true, assert_equal
 from std.time import sleep
 from mojoui.files import private_dir, private_write, private_write_parts, clean_temps, keep_under, age_s
-from mojoui.libc import unlink, chmod
+from mojoui.libc import getpid, unlink, chmod
 
 
 def mode(path: String) raises -> Int:
@@ -20,7 +20,7 @@ def names(dir: String) raises -> List[String]:
 
 
 def main() raises:
-    var base = getenv("TMPDIR", "/tmp") + "/mojoui-private-test"
+    var base = getenv("TMPDIR", "/tmp") + "/mojoui-private-test-" + String(getpid())
     assert_true(private_dir(base), "made")
     var dir = base + "/a/b"
     assert_true(private_dir(dir), "made, its parents too")
