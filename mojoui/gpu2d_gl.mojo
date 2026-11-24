@@ -47,7 +47,7 @@ from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtl
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
 from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TileRead, TILE, TILE_TEX, _pack
-from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
+from mojoui.viewsnap import snap_take, set_renderer_id, fnv, rle_decode, snapshots_expected
 from max.algorithm import parallelize
 from std.sys.info import num_logical_cores
 
@@ -2557,7 +2557,7 @@ struct GPU2D(Movable):
         """(D-7956) Tiled layer i's snapshot from path, when every part of its key matches: its tiles uploaded as the
         layer's fallback tiling (mojoui.viewsnap, gpu2d_tiles.Tiles.snap_restored)."""
         var t0 = perf_counter_ns()
-        var snap = snap_read(path)
+        var snap = snap_take(path)
         var tr = perf_counter_ns()
         if not snap.ok:
             if self.tiles.snap_log:

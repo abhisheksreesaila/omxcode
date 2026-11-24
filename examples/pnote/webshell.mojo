@@ -36,7 +36,7 @@ from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
-from mojoui.viewsnap import snap_dir_ready, expect_snapshots
+from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_ahead
 from std.os import listdir
 from mojoui.framebudget import FrameBudget
 from mojoui.pagedesk import board_rect
@@ -430,6 +430,7 @@ struct WebShell(Movable):
             if grid[0] > 0:  # (its last view is kept: the page grid from it, the view laid out, the key asked)
                 var view = opening_view(self.win_w, self.win_h, Float64(grid[0]) * PAGE_W, Float64(grid[1]) * PAGE_H)
                 if self.win_k > 0 and self.look.kept_view(path, tag, view, self.win_w, self.win_h, self.win_k):
+                    snap_ahead(path)  # (read while this frame is laid out: D-8015)
                     # the deferred open: the kept view shows this frame, the row is read, skimmed and the view's nodes
                     # parsed on a job thread (OpenBoard.open_later); the board loads underneath, held until they're in
                     self.current = id

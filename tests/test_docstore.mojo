@@ -2,8 +2,11 @@
 # (nothing written, the follow-ups not run), the debounce's timing. Not tied to any app: a made-up "docs" table.
 #   pixi run mojo run -I . tests/test_docstore.mojo        → "docstore: ok"
 from mojoui.sqlite import Database
-from mojoui.docstore import KeptDocs, SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
+from mojoui.docstore import KeptDocs, let_go, SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
 from std.os import remove
+from std.time import sleep
+from std.memory import Pointer
+from std.testing import assert_true, assert_equal
 from std.os.path import exists
 
 
@@ -12,7 +15,49 @@ def check(ok: Bool, what: String) raises:
         raise Error("docstore: FAIL " + what)
 
 
+struct Counted(Movable):
+    """Counts its own end in a cell the test owns."""
+    var cell: Int
+
+    def __init__(out self, cell: Int):
+        self.cell = cell
+
+    def __deinit__(deinit self):
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=self.cell)[] += 1
+
+
+def ended(cell: Int, n: Int) -> Int:
+    var total = 0
+    for i in range(n):
+        total += Pointer[Int, MutUntrackedOrigin](unsafe_from_address=cell + 8 * i)[]
+    return total
+
+
+def test_let_go() raises:
+    """(D-8015) let_go and KeptDocs' evictions end a document exactly once, soon, on whichever thread (each has a cell of
+    its own: the threads share none)."""
+    var ends = List[Int](length=8, fill=0)
+    var cell = Int(ends.unsafe_ptr())
+    let_go(Counted(cell))
+    var kept = KeptDocs[Counted](2)
+    for i in range(6):
+        kept.keep(i, 1, Counted(cell + 8 * (1 + i)))  # (four evicted)
+    kept.keep(5, 2, Counted(cell + 56))  # (the same id again: the one kept before goes)
+    for _ in range(2000):
+        if ended(cell, 8) >= 6:
+            break
+        sleep(0.001)
+    sleep(0.02)
+    assert_equal(ended(cell, 8), 6)
+    assert_true(kept.find(5, 2) >= 0 and kept.find(4, 1) >= 0 and kept.find(3, 1) < 0, "the two newest stay")
+    kept.clear()
+    for i in range(8):
+        assert_equal(ends[i], 1)
+    _ = len(ends)
+
+
 def main() raises:
+    test_let_go()
     var path = "build/test_docstore.db"
     if exists(path):
         remove(path)

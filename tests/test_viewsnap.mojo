@@ -14,7 +14,7 @@ from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
 from std.os import getenv
 from std.time import perf_counter_ns
-from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, SnapWriter, snap_read, snap_dir_ready, build_id
+from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, SnapWriter, snap_read, snap_ahead, snap_take, snap_dir_ready, build_id
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
@@ -95,6 +95,18 @@ def gl_identity() raises:
     var kept = snap_read(path)
     assert_true(kept.ok, "kept after settling")
     print("   kept:", len(kept.tiles), "tiles,", len(kept.bytes), "bytes")
+    # (D-8015) read ahead: the same file's bytes and key, the renderer's picture from it the same (below, once each way);
+    # another path, or one asked for too late, is read as it is
+    snap_ahead(path)
+    var ahead = snap_take(path)
+    assert_true(ahead.ok and ahead.key.same(kept.key) and ahead.note == kept.note, "read ahead: the same head")
+    assert_equal(len(ahead.tiles), len(kept.tiles))
+    assert_true(ahead.bytes == kept.bytes, "read ahead: the same bytes")
+    snap_ahead(path + ".gone")
+    assert_true(not snap_take(path + ".gone").ok, "no file: none")
+    snap_ahead(path + ".gone")
+    assert_true(snap_take(path).ok, "another path than the one read ahead")
+    snap_ahead(path)
     # a fresh renderer, the board not loaded yet (holding): the kept view alone, nothing rastered
     var empty = ObjectLayer()
     var look2 = BoardLook()

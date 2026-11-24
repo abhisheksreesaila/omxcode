@@ -13,6 +13,7 @@
 #   s.then("DELETE FROM note_search WHERE note_id = ?", [int_arg(7)])
 #   var r = save_row(db, s)        # r.status: SAVED | CONFLICT | FAILED, r.revision = 13, r.value = the stamp read back
 
+from omxcore import JobBody, JobCtl, start_job
 from mojoui.sqlite import Database, Statement
 from std.time import perf_counter_ns
 
@@ -202,6 +203,25 @@ def row_revision(mut db: Database, table: String, key: String, id: Int, rev: Str
     return -1
 
 
+struct _LetGo[T: Movable & Deinitable](JobBody):
+    comptime Out = Int
+    var docs: List[Self.T]
+
+    def __init__(out self, var doc: Self.T):
+        self.docs = List[Self.T]()
+        self.docs.append(doc^)
+
+    def run(mut self, ctl: JobCtl) raises -> Int:
+        self.docs.clear()
+        return 0
+
+
+def let_go[T: Movable & Deinitable](var doc: T):
+    """A big value freed on a job thread (D-8015: a 1 200-object board's objects and strings took the opening frame 2.7 ms
+    on the Mac). Nothing else may still point into it. Where jobs have no threads (the iPhone), freed here."""
+    _ = start_job(_LetGo[T](doc^))
+
+
 struct KeptDocs[T: Movable & Deinitable](Movable):
     """Documents an app already parsed, kept by (id, revision): opening one again whose row still has that revision
     reuses it instead of reading and parsing its text again (D-7934). Least recently kept goes first beyond `cap`."""
@@ -232,10 +252,10 @@ struct KeptDocs[T: Movable & Deinitable](Movable):
     def keep(mut self, id: Int, revision: Int, var doc: Self.T):
         for i in range(len(self.ids)):
             if self.ids[i] == id:
-                _ = self.take(i)
+                let_go(self.take(i))
                 break
         if len(self.ids) >= self.cap:
-            _ = self.take(0)
+            let_go(self.take(0))
         self.ids.append(id)
         self.revs.append(revision)
         self.docs.append(doc^)

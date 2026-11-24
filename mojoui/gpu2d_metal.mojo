@@ -37,7 +37,7 @@ from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QU
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.fonttext import engine as font_engine
 from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
-from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
+from mojoui.viewsnap import snap_take, set_renderer_id, fnv, rle_decode, snapshots_expected
 from max.algorithm import parallelize
 from std.sys.info import num_logical_cores
 
@@ -1983,7 +1983,7 @@ struct MetalCanvas2D(Movable):
         """(D-7956) Tiled layer i's kept view from path, when every part of its key matches: its tiles decoded and put
         into tile textures as the layer's fallback tiling (Tiles.snap_restored); the GPU done with every slot first."""
         var t0 = Int(now_ns())
-        var snap = snap_read(path)
+        var snap = snap_take(path)
         var t_read = Float64(Int(now_ns()) - t0) / 1e6
         if not snap.ok:
             if self.tiles.snap_log:

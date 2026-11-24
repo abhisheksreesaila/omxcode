@@ -1854,3 +1854,6 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 
 ## D-8014: a big bordered box fills its middle once (goal 79, continuation 18)
 draw_bordered drew the border's rect whole, then the fill over it: a window-sized page host filled twice. An opaque fill over 48 px leaves the border's middle out. Test: test_shadowhole.
+
+## D-8015: a kept view read ahead, a board let go off the main thread (goal 79, continuation 18)
+**Measured (Mac, stress, a first open after idle; split):** event 1.1–1.9 (outgoing board freed: +2.7 in openpress), scene 1.2, batch 0.6, Metal 4.2 of which the kept view 3.5 (read 1.2, decode 1.3, upload 0.7), GPU 0.9–2.6. The same restore warm (later opens): 0.9. **Chosen:** `viewsnap.snap_ahead` (the app starts the read on a job thread as the open begins; the renderer's `snap_take` uses it), `docstore.let_go` (evicted documents freed on a job thread). Not done: decoding ahead (a second copy of 10 MB costs what it saves). **Test:** test_viewsnap (same bytes; missing, other path), test_docstore (each document ended exactly once).

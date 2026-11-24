@@ -24,9 +24,14 @@ from std.sys import argv
 from mojoui.shared import get_shared, put_shared
 from mojoui.libc import rename, unlink
 from mojoui import libc
+from mojoui.clock import now_ns
+from std.memory.alloc import alloc, Layout
+from omxcore import Job, JobBody, JobCtl, start_job, JOB_RUNNING
 
 comptime SLOT_SNAP_RENDERER = 235  # mojoui.shared slot: the GPU 2D renderer's id (0: none yet: no snapshot is used)
 comptime SLOT_SNAP_EXPECT = 236  # mojoui.shared slot: an app expects to restore snapshots (the renderer prewarms)
+comptime SLOT_SNAP_AHEAD = 237  # mojoui.shared slot: the snapshot being read ahead (_Ahead)
+comptime SNAP_AHEAD_NS = 250_000_000  # (a read ahead older than this is not used: the file may have changed)
 comptime SNAP_MAGIC = "MOJOSNP1"
 
 
@@ -401,3 +406,62 @@ def snap_dir_ready(dir: String) -> Bool:
         return True
     except:
         return False
+
+
+# ------------------------------------------------ read ahead
+
+struct _ReadJob(JobBody):
+    comptime Out = ViewSnap
+    var path: String
+
+    def __init__(out self, path: String):
+        self.path = path
+
+    def run(mut self, ctl: JobCtl) raises -> ViewSnap:
+        return snap_read(self.path)
+
+
+struct _Ahead(Movable):
+    var path: String
+    var at: Int
+    var job: Optional[Job[ViewSnap]]
+
+    def __init__(out self):
+        self.path = ""
+        self.at = 0
+        self.job = None
+
+
+def _ahead() -> Pointer[_Ahead, MutUntrackedOrigin]:
+    var have = get_shared(SLOT_SNAP_AHEAD)
+    if have != 0:
+        return Pointer[_Ahead, MutUntrackedOrigin](unsafe_from_address=have)
+    var a = alloc(Layout[_Ahead].single())
+    var p = a^.unsafe_leak()
+    p.unsafe_write(_Ahead())
+    put_shared(SLOT_SNAP_AHEAD, Int(p))
+    return p
+
+
+def snap_ahead(path: String):
+    """The snapshot at path read on a job thread from now (D-8015): an app about to show one calls this as the open
+    begins; the renderer's snap_take finds it read, or waits out the rest (UI thread only, one at a time)."""
+    var a = _ahead()
+    a[].path = path
+    a[].at = Int(now_ns())
+    a[].job = start_job(_ReadJob(path))
+
+
+def snap_take(path: String) -> ViewSnap:
+    """snap_read(path), or what snap_ahead(path) just read (a quarter of a second ago at most)."""
+    var a = _ahead()
+    if a[].path == path and a[].job and Int(now_ns()) - a[].at < SNAP_AHEAD_NS:
+        a[].path = ""
+        while a[].job.value().poll() == JOB_RUNNING:
+            _ = libc.usleep(20)
+        var job = a[].job.take()
+        try:
+            return job.result()
+        except:
+            pass
+    return snap_read(path)
