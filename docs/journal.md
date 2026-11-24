@@ -1768,3 +1768,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Mac M6 twice on quiet-labelled runs (88dce705, then 1c8de571; Spotlight held one core throughout, load 1.6–3.0): drag rows, undo and redo moved by D-8005/D-8006. Three reruns of the failing rows (c17-mac-reruns.txt, 1c8de571's bundle).
 - D-8005 (drag lift and drop as patches; test_keptpatch found a bug that predates it: something added during a drag wasn't drawn) and D-8006 (the op index named its op list by version, which two views share: zoom away and back could take another view's boxes; test_boardraster crashed on it). Both shared code. Mistakes of mine on the way: I committed D-8005 with test_boardraster crashing (found at once, fixed in 270c0c86); `git stash` run by accident (the tree was clean: nothing taken).
 - Linux load went to 67 at 17:11 (another session's CPU burners): nothing raced there since. The Linux M2–M4 rerun (pixels after D-8005/D-8006) PASS at 1c8de571; M5 PASS both.
+
+## 2026-11-23 goal 79 (continuation 18) — autopilot
+- From f5e9bdb9. Order (main session): A Mac reruns with Spotlight done; B fixes by measured split; C two honesty points; D M7, Mac M6, Linux M1–M6 on one commit. The Mac's caffeinate ends 21:42: Mac time first.
