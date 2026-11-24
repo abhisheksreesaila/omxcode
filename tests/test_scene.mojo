@@ -148,7 +148,7 @@ def test_clips_images_and_versions() raises:
     var big: List[UInt32] = [0xFF0000FF, 0xFF00FF00, 0xFFFF0000, 0xFFFFFFFF, 0xFF000000, 0xFF000000]  # (6 pixels for a 2 × 2 image)
     var c = Scene(40, 40, 1.0)
     c.image(big, 2, 2, 0, 0, 40, 40)
-    assert_equal(len(c.images[0]), 4, "an image keeps exactly its width × height pixels")
+    assert_equal(len(c.images[0][].levels[0]), 4, "an image keeps exactly its width × height pixels")
     var buf2 = List[UInt32](length=40 * 40, fill=0)
     var s2 = Surface(Int(buf2.unsafe_ptr()), 40, 40, 1.0)
     c.raster(s2, font)

@@ -11,7 +11,7 @@ from std.math import floor, log2
 from std.memory import ArcPointer
 
 
-struct BitmapData(Movable):
+struct BitmapData(Movable, Equatable):
     var w: Int
     var h: Int
     var opaque: Bool  # every pixel's alpha is 255
@@ -21,16 +21,35 @@ struct BitmapData(Movable):
     def __init__(out self, var pixels: List[UInt32], w: Int, h: Int):
         self.w = w
         self.h = h
-        var hsh = UInt64(14695981039346656037) ^ UInt64(w * h) ^ (UInt64(w) << 40)
+        # (FNV-1a over four lanes at once: a video's frames are hashed as they come)
+        comptime P = UInt64(1099511628211)
+        var h0 = UInt64(14695981039346656037) ^ UInt64(w * h) ^ (UInt64(w) << 40)
+        var h1 = h0 * P
+        var h2 = h1 * P
+        var h3 = h2 * P
         var alpha = UInt32(0xFF000000)
         var p = pixels.unsafe_ptr()
-        for i in range(len(pixels)):
-            hsh = (hsh ^ UInt64(p[i])) * 1099511628211
+        var n = len(pixels)
+        for i in range(0, n - 3, 4):
+            var a = p[i]
+            var b = p[i + 1]
+            var c = p[i + 2]
+            var d = p[i + 3]
+            h0 = (h0 ^ UInt64(a)) * P
+            h1 = (h1 ^ UInt64(b)) * P
+            h2 = (h2 ^ UInt64(c)) * P
+            h3 = (h3 ^ UInt64(d)) * P
+            alpha &= a & b & c & d
+        for i in range(n - n % 4, n):
+            h0 = (h0 ^ UInt64(p[i])) * P
             alpha &= p[i]
-        self.hash = hsh | 1
+        self.hash = (((h0 * P ^ h1) * P ^ h2) * P ^ h3) | 1
         self.opaque = alpha == 0xFF000000
         self.levels = List[List[UInt32]]()
         self.levels.append(pixels^)
+
+    def __eq__(self, other: Self) -> Bool:
+        return self.hash == other.hash and self.w == other.w and self.h == other.h
 
     def level_w(self, l: Int) -> Int:
         return max(self.w >> l, 1)

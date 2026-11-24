@@ -9,11 +9,21 @@ from std.os import getenv
 
 from mojoui.canvas import Surface
 from mojoui.text import Font
-from mojoui.scene import Scene
+from mojoui.scene import Scene, OP_IMAGE, STRIDE
 from mojoui.gpu2d import GlyphAtlas, build_batches, execute_cpu
 from mojoui.mindmap import MapView
 from tests.test_gpu2d import paint_case, gradient, whiteboard, mindmap_of, text_scene
 from tests.test_objectlayer import seeded_note
+
+
+def unfiltered(sc: Scene) -> Scene:
+    """(goal 81, D-8103) The scene with its pictures drawn nearest, as the base commit drew every one: scaled pictures are
+    filtered now (tests/test_gpu2d_image), so it's the nearest drawing that must still be the base's, bit for bit."""
+    var out = sc.copy()
+    for op in range(len(out.kinds)):
+        if Int(out.kinds[op]) == OP_IMAGE:
+            out.nums[op * STRIDE + 5] = -abs(out.nums[op * STRIDE + 5])
+    return out^
 
 
 def hash_of(sc: Scene, atlas: GlyphAtlas, font: Font, threads: Int) -> String:
@@ -73,7 +83,7 @@ def main() raises:
     var same = 0
     for i in range(len(names)):
         for threads in [1, 0]:
-            var got = hash_of(scenes[i], atlas, font, threads)
+            var got = hash_of(unfiltered(scenes[i]), atlas, font, threads)
             if got == want[names[i]]:
                 same += 1
             elif strict or not names[i].startswith("text"):
