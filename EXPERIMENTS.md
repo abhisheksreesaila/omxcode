@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-24: goal 79, continuation 22 (the Mac unlocked; review round 4)
+- **Setup.** The owner unlocked the M4 (144 Hz screen) for two hours; review 4 in hand.
+- **Worked.** Pictures counted by a display link of their own and the window server's use of our surfaces say what a bench can't: 15–36 a second before, 144 after. M6 passes on the Mac. Edits: two windows, a text still being written, a note deleted under a save, a locked file. A 20,000-character paragraph 3,070 → 0.3 ms a key. Paper that grows.
+- **Broke / fixed.** A run-loop mode passed as a look-alike string (CF compares addresses) had kept the display link dead since 10-22. The bench took window pictures inside measured steps. Loading faster slowed a press: inputs' frames load least now. Goal 35's jsonpatch had been overwritten and Json's fields removed: four modules didn't compile for days.
+- **Means.** Count frames independently of the thing that draws them; build every user of a shared type; run tests of other goals once a round.
+- **Next.** The owner's word on the race's rule for a single late frame; right-to-left; moving NoteFile into the framework.
+
 ## 2026-11-24: goal 79, continuation 21 (the save thread attacked, proofs sharpened, the last everyday gaps)
 - **Setup.** The machine free for GPU work; the Mac reachable, its screen locked, kept awake with caffeinate.
 - **Worked.** Undo's worst frame 18.9 → 16.8–17.0 ms by drawing a key's frame right after it, not at the refresh. The save thread survived kill -9 at four stages and at 100 random moments, a 30 s lock, a full disk and edits during a save. A web map keeps its icons, dates, marks and folded branches. Emoji picker, line keys, double tap of Ctrl, Quick note's menu, Markdown and backup exports, the Mac's menu bar.

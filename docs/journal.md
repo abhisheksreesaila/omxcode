@@ -1816,3 +1816,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - 12:42 the Mac unlocked, scripts/mac-unlocked at the 12:18 commit: M6's Mac half PASS, every row (60); build/mac_unlocked3.txt, race-mac.md. Its caffeinate ended at 12:38; the screen locked again before 13:06 (mac-frames refused).
 - 12:26–12:45 the wide test run found goal 35's jsonpatch overwritten by ours (continuation 20) and Json.keys gone (JSON reader): agui, genui, agentui, console didn't compile. Restored, renamed, every example built, `mojo package` clean.
 - 13:17–13:56 M0–M5 PASS, M6 Linux FAIL on one row (stress, a press during an open 19.8) at de250dc0: my slices; D-8070. The locked Mac half of that run was put aside (build/g79/locked), the unlocked table kept.
+- 14:06–14:45 M0–M5 PASS, M6 Linux 58 ✓ 2 ✗ at 2e198b04 (600 redo max 18.6, stress undo not warmed max 18.9; one frame each); the Mac locked. Stopped there.

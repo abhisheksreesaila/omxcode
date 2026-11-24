@@ -23,6 +23,56 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 22 (2026-11-24, 11:13–14:50): the Mac unlocked, review round 4 fixed
+
+**Final code: 2e198b04** (later commits: tables and documents).
+
+| | Linux (RTX 3090) | Mac (M4, 144 Hz external screen, scale 1.0) |
+|---|---|---|
+| M0–M5 | PASS, all six, at 2e198b04 | M1 and M5 halves PASS |
+| M6 | **FAIL: 58 ✓, 2 ✗**, each one frame: 600 redo max 18.6 (web 17.2), stress undo not warmed max 18.9 (web 17.0); p95 better on both | **PASS, 60 ✓, 0 ✗**, unlocked and in front at every step, 12:18–12:42 at dfca9816. Locked since: not raced again |
+| M7 | not a Linux milestone | nine looks PASS (.987–.998) at 2e198b04 |
+| Tests | 84-test wide run at dfca9816's code: all that can run here pass (9 need data, a server or a library this worktree hasn't; the ones that didn't build are below); reruns at the end | at be45d39f: pnnotes pnshell savelater saveattack review4 opendoc longpara pageedit pagegrow graphemes jsonedit mapmarks boardedit pans tickchanges canvasload; at 2e198b04: opendoc framebudget |
+| Attacks | savekill (40 random kills), the reviewer's two processes on one file, the walk native → web → native: ok at 2e198b04's parent | — |
+
+**What differs between the Mac's race (dfca9816) and the final code:** the restored JSON files, docstore's lock-file clean-up, App.bench's name, FrameBudget.input (D-8070). Nothing in the Mac's frame path.
+
+### A. The Mac's 15 frames a second: real, ours, fixed (D-8060)
+Not the bench. Each drawn frame left the canvas idle, the host threw its timer away, and the next event made a new one: 16.7 ms plus macOS's coalescing (24 ms typical, 57 worst), for 1.2 ms of work. The display link that "never fired" since 10-22 was in a run-loop mode nobody runs: we passed a string reading "kCFRunLoopCommonModes", and Core Foundation knows the mode by its address.
+- Now the screen's own clock: pan, zoom, drags, pen and typing 6.9–7.2 ms between frames on both notes (27.8 typical and 61 at p95 before), undo 8–18 ms, and 144 new pictures a second, counted apart from the bench by a display link of its own and the window server's use of our surfaces.
+- Two things in the log were the bench's: a 45 ms stall every 450 ms (the report's window picture, taken inside measured steps) and "tests/test_canvasload fails" (the script never ran it there).
+- Check: `scripts/mac-frames`, 144 of 144 on both notes; the old timer gets 60 and FAILs.
+- Goal 81's M7 (../mojo-ui-bench) has the same idea and passes `ns_string("kCFRunLoopCommonModes")`: its link probably sits in the dead mode too. Not touched; for that session.
+- Opens load 2.5 ms a frame instead of 0.5 (D-8061): complete in 44–60 (600) and 105–192 ms (stress), web 199 and 603.
+
+### B. Review round 4
+| Finding | State | Proof |
+|---|---|---|
+| M1 two windows delete each other's held edits | fixed (D-8064) | test_opendoc two_windows, test_review4, the reviewer's two.py |
+| M2 a new canvas text isn't saved while written, nor in exports | fixed (D-8065) | test_review4 new_text |
+| M3 delete/Undo, Save a copy, rescue | fixed | test_review4 new_text, locked_note |
+| M4 words typed while a save is in flight, note deleted elsewhere | fixed | test_review4 gone_in_flight |
+| M5 a long paragraph | fixed (D-8067) | test_longpara (the old algorithm as reference; its mutant: a page drawing all its lines, found by the new race row) |
+| M6 the paper | fixed (D-8068) | test_pagegrow (pages.js's own cases), test_review4 paper |
+| Warning on the wrong note; spill of only the first waiting save; the 25 s close; locked elsewhere; a gesture interrupted; a notebook-only change reopening; rename ignored in silence; a map's ring; WordsEdit 15 s; a broken held file hiding others | fixed (D-8066) | test_review4, test_opendoc, test_longpara |
+| S11 a mouse's 1,000 points a second | once a frame, every point (D-8063) | test_pans |
+| S12 CPU load on Linux | a rule, both sides (D-8069); the last race: at most 0.48 cores busy before each of 34 runs | the checker |
+| S13 generic parts in webshell | **not moved**: about 600 lines tied to the open document, a round of its own. Listed in the debt table as NoteFile and CanvasNote | docs/components.md |
+| Right-to-left caret and selection | **open**, now in the gaps (81) | — |
+| Nits: backup twice in a second, a broken board queued, saveattack's run line, race.md's "run again" | fixed | — |
+
+**Not in the review, found here and mine:** mojoui/jsonpatch.mojo (goal 35's JDoc, JSON Patch) had been overwritten by this goal in continuation 20, its test with it, and an earlier JSON reader of this goal took Json.keys and kids away: agui, genui, agentui and the console app didn't compile. Restored; ours is mojoui.jsonedit; every Linux example builds again, test_jsonpatch passes on its own fixtures, `mojo package mojoui` is clean (lesson written).
+
+### The race's rule
+Not changed. The two Linux rows are each one frame 1.6–1.9 ms late in one run; in continuation 21's 24 runs the same undo row was over in 4. **The 25.6 ms undo** was step 0, the first key after the thirty set-up moves; that step takes 1.5–2.4 ms in every other run here, and it still isn't explained.
+**The reviewer's fair rule, as a proposal only (the owner decides):** judge a row's maximum on the median of five runs' maxima, the web's taken the same way, and keep p95 and missed frames as they are. Today the web's opens are the worst of five and native's are of one run.
+
+### For the reviewer
+Proofs and checks changed: M6 gains a row (webtype.mjs) and the Linux CPU rule (a noisy race is BLOCKED); judge_test has the new row's cases; scripts/mac-unlocked runs mac-frames and test_canvasload; scripts/mac-frames is new; MacReport takes no picture inside measured steps; first5 unchanged this round; tests/test_jsonpatch.mojo is goal 35's again (ours is test_jsonedit). RowSaver waits 3 s at a close, not 10. No bar lowered.
+The Mac's locked runs of the last two M6s are in build/g79/locked, not in race-mac.md.
+
+**Risk, most first:** docstore.SaveOutbox (locks, take-over at a start) and webshell's save queue, spill, rescue, secure and feed paths; AppKit's frame clock (screen's link, 1 s linger, stand-in timer, prompt tick, hidden windows) for every Canvas app on the Mac; queue_pan's order against other events; pagesheet's incremental layout; ObjectLayer.draft and shift_frame (undo, export); pagegrow on real notes whose grid doesn't match their content (the first edit settles it, as the web's does); json consumers after the API repair (built, agui's suites not all rerun); fonttext and gtk draw-ahead as before.
+
 ## Continuation 21 (2026-11-24, 06:17–10:40): the save thread attacked, two proofs sharpened, the last everyday gaps
 
 **The judged commit is 3a3886bd** for both machines (later commits: the race's tables and documents only).
