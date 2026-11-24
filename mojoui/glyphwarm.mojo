@@ -62,9 +62,13 @@ struct GlyphWarm(Movable):
     def more(self) -> Bool:
         return self.path != "" and (not self.loaded or self.at < len(self.queue) or len(self.ascii) > 0)
 
+    def quiet(self) -> Bool:
+        """No input for 300 ms."""
+        return Int(now_ns()) - self.touched >= WARM_QUIET_NS
+
     def idle_step(mut self, budget_us: Int) -> Bool:
         """step(budget_us), unless input came within the last 300 ms."""
-        if Int(now_ns()) - self.touched < WARM_QUIET_NS:
+        if not self.quiet():
             return self.more()
         return self.step(budget_us)
 

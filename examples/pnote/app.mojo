@@ -531,7 +531,7 @@ struct Main(App):
     def every(self) -> List[Every]:
         if len(self.web) > 0 and self.web[0].saver.pending():
             return [Every(self.web[0].saver.tick_ms(), SAVE_TICK)]
-        if len(self.web) > 0 and self.web[0].warm.more():
+        if len(self.web) > 0 and self.web[0].readying():
             return [Every(WARM_TICK_MS, WARM_TICK)]
         return List[Every]()
 
@@ -788,7 +788,7 @@ struct Main(App):
                     self.version += 1
                 return
             if m == WARM_TICK:
-                _ = self.web[0].warm.idle_step(4000)
+                self.web[0].ready_step()
                 return
             self.web[0].warm.touch()
             if m == GESTURE and event.number == HOVER:

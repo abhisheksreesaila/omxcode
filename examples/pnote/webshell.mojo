@@ -5,7 +5,7 @@
 from std.collections import Dict
 from std.math import floor, ceil
 from std.os import getenv
-from mojoui.scene import Painter
+from mojoui.scene import Painter, Scene
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
@@ -32,6 +32,7 @@ from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.keycaps import keycap, device_name
 from mojoui.glyphwarm import GlyphWarm
+from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
@@ -142,6 +143,43 @@ def notebook_icon(name: String) -> String:
     return ""
 
 
+def page_markdown(content: String) -> String:
+    try:
+        var j = Json.parse(content)
+        return j.text(j.get(0, "markdown"))
+    except:
+        return ""
+
+
+def read_map(content: String, mut map: BuzanMap) -> String:
+    """A mind-map note's ideas read into `map` (empty); its root's id ("root" when the content is broken)."""
+    var root = String("root")
+    try:
+        var j = Json.parse(content)
+        var nodes = j.get(0, "nodes")
+        var ids = List[String]()
+        for q in range(j.size(nodes)):
+            ids.append(j.text(j.get(j.at(nodes, q), "id")))
+        for q in range(j.size(nodes)):
+            var nd = j.at(nodes, q)
+            var pid = j.text(j.get(nd, "parentId"))
+            var par = -1
+            for r in range(len(ids)):
+                if ids[r] == pid:
+                    par = r
+            _ = map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
+                        ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
+        root = j.text(j.get(0, "rootId"), "root")
+        map.selected = 0
+        for r in range(len(ids)):
+            if ids[r] == root:
+                map.selected = r
+        map.freeze()
+    except:
+        pass
+    return root
+
+
 @fieldwise_init
 struct NoteRec(Copyable, Movable):
     var id: Int
@@ -156,6 +194,13 @@ struct NoteRec(Copyable, Movable):
     var icon_set: Bool  # the note has its own icon (else it is guessed from the title, as note_icon.py does)
     var revision: Int  # the revision this copy was read or last saved at (saves carry it: D-7927)
     var secure: Bool  # a secure note: its words are only sealed; the native app shows it locked and never writes it
+
+
+comptime WARM_OMNI = -1
+comptime WARM_CARD = -2
+comptime WARM_SETTINGS = -3
+comptime WARM_NOTES = 12  # the newest pages and maps readied ahead
+comptime WARM_NOTE_BYTES = 65536
 
 
 struct WebShell(Movable):
@@ -194,6 +239,9 @@ struct WebShell(Movable):
     var budget: FrameBudget  # (D-7957) the open's slices sized by what the rest of the frame cost
     var warm: GlyphWarm  # (D-8002) the glyphs drawn last time and the look's own styles, readied while nothing happens
     var warm_styles: Bool
+    var screens: SceneWarm  # (D-8011) the screen being readied
+    var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
+    var ready_k: Float64  # the device scale they're readied for (0: not asked yet)
     var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
@@ -242,6 +290,9 @@ struct WebShell(Movable):
         self.win_k = 0
         self.warm = GlyphWarm(config_dir("pnote") + "/glyphs.txt")
         self.warm_styles = False
+        self.screens = SceneWarm()
+        self.to_ready = List[Int]()
+        self.ready_k = 0
         self.snap_dir = ""
         self.budget = FrameBudget(FRAME_WORK_US)
         if getenv("MOJOUI_SNAP") != "0":
@@ -408,13 +459,7 @@ struct WebShell(Movable):
             self.map = BuzanMap()
             return
         if n.kind == "page":
-            var md = String("")
-            try:
-                var j = Json.parse(n.content)
-                md = j.text(j.get(0, "markdown"))
-            except:
-                md = ""
-            self.page.set_markdown(md)
+            self.page.set_markdown(page_markdown(n.content))
         elif n.kind == "canvas":
             self.view_set = False
             self.cols = 1
@@ -458,29 +503,7 @@ struct WebShell(Movable):
                 self.board.set(ObjectLayer())
         elif n.kind == "mindmap":
             self.map = BuzanMap()
-            try:
-                var j = Json.parse(n.content)
-                var nodes = j.get(0, "nodes")
-                var ids = List[String]()
-                for q in range(j.size(nodes)):
-                    ids.append(j.text(j.get(j.at(nodes, q), "id")))
-                for q in range(j.size(nodes)):
-                    var nd = j.at(nodes, q)
-                    var pid = j.text(j.get(nd, "parentId"))
-                    var par = -1
-                    for r in range(len(ids)):
-                        if ids[r] == pid:
-                            par = r
-                    _ = self.map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
-                                     ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
-                self.map_root = j.text(j.get(0, "rootId"), "root")
-                self.map.selected = 0
-                for r in range(len(ids)):
-                    if ids[r] == self.map_root:
-                        self.map.selected = r
-                self.map.freeze()
-            except:
-                pass
+            self.map_root = read_map(n.content, self.map)
 
     def snap_path(self, id: Int) -> String:
         return self.snap_dir + "/note-" + String(id) + ".snap"
@@ -635,6 +658,75 @@ struct WebShell(Movable):
             var body = sw.draw(p, self.boxes, w, h, k, self.sk)
             var cards = pn_skin_cards()
             skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name, cards[0], cards[1])
+
+    def readying(self) -> Bool:
+        """Something is left to ready while nothing happens (the glyphs drawn last time, the screens likely next)."""
+        return self.warm.more() or (self.win_k > 0 and getenv("MOJOUI_SCENEWARM") != "0" and (self.ready_k != self.win_k or self.screens.more() or len(self.to_ready) > 0))
+
+    def ready_step(mut self):
+        """An idle tick: ≤ 4 ms of glyphs, then a screen's painting (one) or ≤ 4 ms of its text; nothing for 300 ms after
+        input. The overlays first, then the newest pages and mind maps: what their first frame would otherwise pay for."""
+        if self.warm.more():
+            _ = self.warm.idle_step(4000)
+            return
+        if not self.warm.quiet() or self.win_k <= 0 or getenv("MOJOUI_SCENEWARM") == "0":
+            return
+        if self.ready_k != self.win_k:
+            self.ready_k = self.win_k
+            self.to_ready.clear()
+            var notes = List[Int]()
+            for ref n in self.notes:
+                if n.kind != "canvas" and not n.secure and n.id != self.current and n.content.byte_length() <= WARM_NOTE_BYTES and len(notes) < WARM_NOTES:
+                    notes.append(n.id)
+            for q in range(len(notes)):
+                self.to_ready.append(notes[len(notes) - 1 - q])
+            self.to_ready += [WARM_SETTINGS, WARM_CARD, WARM_OMNI]
+        if self.screens.more():
+            _ = self.screens.step(4000)
+        elif len(self.to_ready) > 0:
+            self.screens.take(self.unseen(self.to_ready.pop()))
+        if not self.readying() and getenv("MOJOUI_GLYPHWARM_LOG") == "1":
+            print("SCENEWARM: " + String(self.screens.runs) + " runs ready in " + String(self.screens.ms) + " ms", flush=True)
+
+    def unseen(mut self, what: Int) -> Scene:
+        """A screen painted into a scene nobody shows; the app's state as it was after."""
+        var sc = Scene(Int(self.win_w * self.win_k + 0.5), Int(self.win_h * self.win_k + 0.5), self.win_k)
+        sc.begin_layer("shell")
+        sc.layer_transform(0, 0, self.win_k)
+        var bx = Boxes()
+        swap(bx, self.boxes)
+        var id = self.current
+        if what == WARM_OMNI or what == WARM_CARD or what == WARM_SETTINGS:
+            var was: List[Bool] = [self.searching, self.card_open, self.settings_open]
+            self.card_open = what == WARM_CARD
+            self.settings_open = what == WARM_SETTINGS
+            self.searching = what == WARM_OMNI and not was[0]
+            if self.searching:
+                self.omni.query = ""
+                self.search()
+            self.paint_overlays(sc, self.win_w, self.win_h, self.win_k)
+            self.searching = was[0]
+            self.card_open = was[1]
+            self.settings_open = was[2]
+        else:
+            var i = self.note_index(what)
+            if i >= 0 and not self.notes[i].secure and self.notes[i].kind != "canvas" and not self.searching and not self.settings_open and not self.card_open:
+                self.current = what
+                if self.notes[i].kind == "page":
+                    var pg = PageSheet()
+                    pg.set_markdown(page_markdown(self.notes[i].content))
+                    swap(pg, self.page)
+                    self._paint(sc, self.win_w, self.win_h, self.win_k)
+                    swap(pg, self.page)
+                else:
+                    var mp = BuzanMap()
+                    _ = read_map(self.notes[i].content, mp)
+                    swap(mp, self.map)
+                    self._paint(sc, self.win_w, self.win_h, self.win_k)
+                    swap(mp, self.map)
+        self.current = id
+        swap(bx, self.boxes)
+        return sc^
 
     def now(self) -> Int:
         """The clock (PNOTE_NOW: a fixed UTC time, for comparing with a reference shot then)."""
