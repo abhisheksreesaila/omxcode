@@ -32,7 +32,7 @@ const DPR = Number(opt.dpr ?? 1.6)
 const DUMP = !!opt.dump
 const W = 1440, H = 900
 fs.mkdirSync(OUT, { recursive: true })
-const FIX = JSON.parse(fs.readFileSync(path.join(HERE, 'fixture.json'), 'utf8'))
+const FIX = JSON.parse(fs.readFileSync(opt.fixture ? path.resolve(opt.fixture) : path.join(HERE, 'fixture.json'), 'utf8')) // (--fixture: another set of notes for a one-off comparison)
 
 // ---------- fonts: Google Fonts' css2 answered from fonts/ ----------
 const FACES = {

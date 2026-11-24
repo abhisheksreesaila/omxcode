@@ -20,6 +20,8 @@ from mojoui.jsonpatch import Change, patched, members, elements, find_member, pa
 from mojoui.json import Json, json_string
 from mojoui.textedit import now_ms
 from mojoui.wordsedit import WordsEdit
+from mojoui.strokeicon import draw_icon
+from mojoui.mapmarks import Frame, Curve, TopicLook, look_of, branch_between, curve_mid, seed_of, pencil_outline, due_chip, local_now, icon_path, DayTime, DUE_TODAY, DUE_OVER
 
 comptime SERIF = "Source Serif 4"
 comptime SHEET: UInt32 = 0xFFEFF6F8  # #f8f6ef
@@ -41,21 +43,11 @@ struct Topic(Copyable, Movable):
     var font: String  # "hand" (Source Serif 4) | "clean" (IBM Plex Sans), "" none given
     var extra: String  # the document's other members of this idea ("due":…,"done":…), written back as they came (D-7927)
 
-    def member(self, name: String) -> String:
-        """One of the members kept in `extra`, as text ("true" for a flag; "" for none)."""
-        if self.extra.find(json_string(name)) < 0:
-            return ""
-        try:
-            var j = Json.parse("{" + self.extra + "}")
-            var at = j.get(0, name)
-            return j.text(at, "") if j.text(at, "") != "" else ("true" if j.flag(at) else "")
-        except:
-            return ""
+    var look: TopicLook  # what `extra` says of how it looks
 
     def words(self) -> String:
         """What the idea says: its emoji, then its words (model.js displayText)."""
-        var e = self.member("emoji")
-        return e + " " + self.text if e != "" else String(self.text)
+        return self.look.emoji + " " + self.text if self.look.emoji != "" else String(self.text)
 
 
 @fieldwise_init
@@ -68,12 +60,42 @@ struct MapState(Copyable, Movable):
 comptime BRANCH_COLORS: List[String] = ["#ef684b", "#efad28", "#65ae4f", "#2d9c91", "#3d8fe8", "#8c67cf", "#d85da8", "#5e6570"]
 
 
-@fieldwise_init
-struct Frame(ImplicitlyCopyable, Movable):
-    var x: Float64
-    var y: Float64
-    var hw: Float64
-    var hh: Float64
+struct MapLayout(Movable):
+    """An idea's words, icons and box (layout.js layoutNode)."""
+    var lines: List[String]
+    var widths: List[Float64]
+    var step: Float64
+    var icons: List[String]
+    var icon: Float64  # an icon's size
+    var lead: Float64  # the icons' room before the words
+    var trail: Float64  # the pill's after them
+    var chip: String
+    var chip_state: Int
+    var chip_w: Float64
+    var text_w: Float64
+    var w: Float64
+    var h: Float64
+
+    def __init__(out self):
+        self.lines = List[String]()
+        self.widths = List[Float64]()
+        self.step = 0
+        self.icons = List[String]()
+        self.icon = 0
+        self.lead = 0
+        self.trail = 0
+        self.chip = ""
+        self.chip_state = 0
+        self.chip_w = 0
+        self.text_w = 0
+        self.w = 0
+        self.h = 0
+
+
+def chip_style() -> TextStyle:
+    var st = TextStyle("IBM Plex Sans", 600, False, 11)
+    st.exact = True
+    return st
 
 
 struct BuzanMap(Movable):
@@ -86,6 +108,7 @@ struct BuzanMap(Movable):
     var edit_all: Bool  # its words are all selected (typing replaces them), as the web's editor opens
     var edit_caret: Tuple[Float64, Float64, Float64, Float64]  # where its caret was drawn (an input method's window), x -1: nowhere
     var made: Int  # ideas made here (for their ids)
+    var now: DayTime  # what due dates are measured from (year 0: the clock)
     var frozen: Bool  # the view's bounds are the ones the map opened with (adding ideas never re-fits it)
     var bounds: Tuple[Float64, Float64, Float64, Float64]
     var cam: Tuple[Float64, Float64, Float64]  # the view a person zoomed or panned to: scale, x, y (screen px of the map's origin)
@@ -109,6 +132,7 @@ struct BuzanMap(Movable):
         self.edit_all = False
         self.edit_caret = (-1.0, 0.0, 0.0, 0.0)
         self.made = 0
+        self.now = DayTime(0, 0, 0, 0, 0)
         self.frozen = False
         self.bounds = (0.0, 0.0, 0.0, 0.0)
         self.cam = (1.0, 0.0, 0.0)
@@ -147,7 +171,13 @@ struct BuzanMap(Movable):
         var mx = (x - v[1]) / v[0]
         var my = (y - v[2]) / v[0]
         for i in range(len(self.topics) - 1, -1, -1):
+            if self.hidden(i):
+                continue
             var f = self.frame(i)
+            if f.pin:  # (its words lie on its branch)
+                var m = curve_mid(self.branch_of(i))
+                f.x = m[0]
+                f.y = m[1] - f.hh
             if mx >= f.x - f.hw and mx <= f.x + f.hw and my >= f.y - f.hh and my <= f.y + f.hh:
                 return i
         return -1
@@ -264,7 +294,7 @@ struct BuzanMap(Movable):
 
     def add(mut self, parent: Int, text: String, x: Float64, y: Float64, color: UInt32, id: String = "", font_size: Float64 = 0,
             bold: Bool = False, font: String = "", extra: String = "") -> Int:
-        self.topics.append(Topic(parent, text, x, y, color, id, font_size, bold, font, extra))
+        self.topics.append(Topic(parent, text, x, y, color, id, font_size, bold, font, extra, look_of(extra)))
         return len(self.topics) - 1
 
     def children(self, i: Int) -> Int:
@@ -358,7 +388,7 @@ struct BuzanMap(Movable):
 
     def edit_style(self, i: Int) -> TextStyle:
         ref t = self.topics[i]
-        var st = TextStyle("IBM Plex Sans" if t.font == "clean" else SERIF, 700 if t.bold else 500, t.member("italic") != "", self.idea_size(i))
+        var st = TextStyle("IBM Plex Sans" if t.font == "clean" else SERIF, 700 if t.bold else 500, t.look.italic, self.idea_size(i))
         st.exact = True
         return st
 
@@ -409,6 +439,8 @@ struct BuzanMap(Movable):
         var maxx = -1e18
         var maxy = -1e18
         for i in range(len(self.topics)):
+            if self.hidden(i):
+                continue
             var f = self.frame(i)
             var rx = max(120.0, f.hw + 40)
             var ry = max(120.0, f.hh + 40)
@@ -427,24 +459,89 @@ struct BuzanMap(Movable):
             d += 1
         return d
 
-    def card_size(self, i: Int) -> Tuple[Float64, Float64]:
-        """layout.js layoutNode: the words wrapped past 28 letters, measured; the root max(180, words + 50) × 76, an idea
-        max(58, words) + 26 × (its size + 20), and a line's step for each line more."""
+    def layout(self, i: Int) -> MapLayout:
+        """layout.js layoutNode: the words wrapped past 28 letters (a branch's in capitals), the icons before them, the due
+        date's pill after them; the box: the root max(180, all + 50) × 76, an idea max(58, all) + 26 × (its size + 20), and a
+        line's step for each line more."""
+        ref t = self.topics[i]
         var st = self.label_style(i)
-        var lines = wrap_text(self.topics[i].words())
-        var wide = 0.0
-        for l in lines:
-            wide = max(wide, measure(st, l))
-        var more = Float64(len(lines) - 1) * self.line_step(i)
-        if self.topics[i].parent < 0:
-            return (max(180.0, wide + 50), 76.0 + more)
-        return (max(58.0, wide) + 26, st.size + 20 + more)
+        st.size = self.idea_size(i)
+        var branch = t.look.branch and t.parent >= 0
+        var l = MapLayout()
+        l.lines = wrap_text(t.words().upper() if branch else t.words())
+        l.step = self.line_step(i)
+        for x in l.lines:
+            l.widths.append(measure(st, x))
+            l.text_w = max(l.text_w, l.widths[len(l.widths) - 1])
+        l.icons = t.look.shown_icons()
+        l.icon = Float64(Int(st.size * 0.9 + 0.5))
+        l.lead = Float64(len(l.icons)) * (l.icon + 4)
+        if t.look.due != "" and not t.look.done:
+            var c = due_chip(t.look.due, self.now if self.now.year > 0 else local_now())
+            if c[0] != "":
+                l.chip = c[0]
+                l.chip_state = c[1]
+                l.chip_w = Float64(Int(measure(chip_style(), c[0]) + 14 + 0.5))
+                l.trail = l.chip_w + 6
+        var all = l.lead + l.text_w + l.trail
+        var more = Float64(len(l.lines) - 1) * l.step
+        if t.parent < 0:
+            l.w = max(180.0, all + 50)
+            l.h = 76 + more
+        else:
+            l.w = max(58.0, all) + 26
+            l.h = st.size + 20 + more
+        return l^
+
+    def card_size(self, i: Int) -> Tuple[Float64, Float64]:
+        var l = self.layout(i)
+        return (l.w, l.h)
+
+    def hidden(self, i: Int) -> Bool:
+        """Under an idea folded away (the web's collapsed)."""
+        var k = self.topics[i].parent
+        while k >= 0:
+            if self.topics[k].look.collapsed:
+                return True
+            k = self.topics[k].parent
+        return False
+
+    def under(self, i: Int) -> Int:
+        """How many ideas are under idea i, at every level."""
+        var n = 0
+        for k in range(len(self.topics)):
+            var u = self.topics[k].parent
+            while u >= 0:
+                if u == i:
+                    n += 1
+                    break
+                u = self.topics[u].parent
+        return n
+
+    def tasks(self) -> List[Int]:
+        """For each idea: how many of the to-dos under it are done, and how many there are (taskCounts), two numbers each."""
+        var out = List[Int](length=2 * len(self.topics), fill=0)
+        for k in range(len(self.topics)):
+            ref l = self.topics[k].look
+            if not l.done and "todo" not in l.icons:
+                continue
+            var u = self.topics[k].parent
+            while u >= 0:
+                out[2 * u] += 1 if l.done else 0
+                out[2 * u + 1] += 1
+                u = self.topics[u].parent
+        return out^
+
+    def branch_of(self, i: Int) -> Curve:
+        """Where idea i's branch runs (from its parent)."""
+        ref t = self.topics[i]
+        return branch_between(self.frame(t.parent), self.frame(i), t.look.curve, t.look.anchors, t.look.source, t.look.target)
 
     def label_style(self, i: Int) -> TextStyle:
         """The type an idea's words are drawn (and measured) in."""
         ref t = self.topics[i]
         var clean = t.font == "clean" and t.parent >= 0  # (the root is always in the serif: style.css .map-root-label)
-        var st = TextStyle("IBM Plex Sans" if clean else SERIF, 700 if t.parent < 0 else (500 if clean else 600), t.member("italic") != "", self.idea_size(i))
+        var st = TextStyle("IBM Plex Sans" if clean else SERIF, 700 if t.parent < 0 else (500 if clean else 600), t.look.italic, self.idea_size(i))
         st.exact = True
         return st
 
@@ -458,7 +555,9 @@ struct BuzanMap(Movable):
 
     def frame(self, i: Int) -> Frame:
         var s = self.card_size(i)
-        return Frame(self.topics[i].x, self.topics[i].y, s[0] / 2, s[1] / 2)
+        var f = Frame(self.topics[i].x, self.topics[i].y, s[0] / 2, s[1] / 2)
+        f.pin = self.topics[i].look.branch and self.topics[i].parent >= 0
+        return f
 
     def fit(self, w: Float64, h: Float64, padding: Float64) -> Tuple[Float64, Float64, Float64]:
         """renderer.js fit(): (scale, x, y) showing every topic (each reaching at least 120 around it); the bounds kept
@@ -472,6 +571,8 @@ struct BuzanMap(Movable):
         var maxx = -1e18
         var maxy = -1e18
         for i in range(len(self.topics)):
+            if self.hidden(i):
+                continue
             var f = self.frame(i)
             var rx = max(120.0, f.hw + 40)
             var ry = max(120.0, f.hh + 40)
@@ -506,12 +607,12 @@ struct BuzanMap(Movable):
         # branches under the cards
         for i in range(len(self.topics)):
             var par = self.topics[i].parent
-            if par < 0:
+            if par < 0 or self.hidden(i):
                 continue
             var d = Float64(self.depth(i))
             var start = max(5.0, 34 / pow(d, 0.82))
             var end = max(3.0, 8 / pow(d, 0.88))
-            var g = branch_geometry(self.frame(par), self.frame(i))
+            var g = self.branch_of(i)
             var pts = ribbon_outline(g, start, end, 36)
             for j in range(len(pts) // 2):
                 pts[2 * j] = cx + pts[2 * j] * zoom
@@ -522,7 +623,7 @@ struct BuzanMap(Movable):
         # a 2.5 #fffefa ring, the node shadow: 0 5 blur 7 #382f28 at .15)
         var sel = self.selected
         if sel >= 0 and sel < len(self.topics) and self.topics[sel].parent >= 0:
-            var g = branch_geometry(self.frame(self.topics[sel].parent), self.frame(sel))
+            var g = self.branch_of(sel)
             var guide = with_alpha(hexc("#fffefa"), 0.8)
             var px0 = g.sx
             var py0 = g.sy
@@ -556,58 +657,153 @@ struct BuzanMap(Movable):
                 p.circle(hx, hy, r - 1.25 * zoom, self.topics[sel].color)
                 bx.add("map.anchor:" + self.topics[sel].text, hx - 18 * zoom, hy - 18 * zoom, 36 * zoom, 36 * zoom)
         # cards and words
+        var tasks = self.tasks()
         for i in range(len(self.topics)):
+            if self.hidden(i):
+                continue
             ref t = self.topics[i]
-            var s = self.card_size(i)
-            var w2 = s[0] * zoom
-            var h2 = s[1] * zoom
+            var root = t.parent < 0
+            var branch = t.look.branch and not root
+            var l = self.layout(i)
+            var w2 = l.w * zoom
+            var h2 = l.h * zoom
             var lx = cx + t.x * zoom - w2 / 2
             var ly = cy + t.y * zoom - h2 / 2
             var st = self.label_style(i)
             st.size *= zoom
-            var lines = wrap_text(t.words())
-            var step = self.line_step(i)
+            var n = len(l.lines)
+            var size = self.idea_size(i)
+            # where the words stand (renderer.js labelPlace): a box's middle, or resting on the middle of its branch
+            var lab_x = t.x
+            var lab_y = t.y + 1
+            if branch:
+                var m = curve_mid(self.branch_of(i))
+                lab_x = m[0]
+                lab_y = m[1] - 5
+            var row0 = lab_y - Float64(n - 1) * l.step - size * 0.32 if branch else lab_y - Float64(n - 1) * l.step / 2  # (the first line's middle)
             var ex = 0.5 * 0.52 if st.family == "IBM Plex Sans" else 0.5 * 0.475  # (dominant-baseline: middle: half an x-height)
-            var first = t.y + 1 - Float64(len(lines) - 1) * step / 2 + ex * self.idea_size(i)
+            var base0 = lab_y - Float64(n - 1) * l.step if branch else row0 + ex * size
+            if branch:
+                bx.add("map.idea:" + t.text, cx + (lab_x - l.w / 2) * zoom, cy + (lab_y - l.h + 5) * zoom, w2, h2)
+            elif root:
+                # the group's box reaches the add handles: 18 beyond the card plus a handle's 17 hit circle
+                var reach_x = (l.w / 2 + 18 + 17.33) * zoom
+                var reach_y = (l.h / 2 + 18 + 17.33) * zoom
+                bx.add("map.idea:" + t.text, cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
+            else:
+                bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
             if i == self.editing:
-                if t.parent < 0:
-                    var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
-                    var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
-                    bx.add("map.idea:" + t.text, cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
-                else:
-                    bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)
                 continue  # (the box it is written in goes over all of them, below)
-            if t.parent < 0:
+            if t.look.image:  # (its picture's place: 88 × 68 in a white frame, above the card; the picture itself isn't decoded here)
+                var ix = cx + (t.x + (-45.0 if root else (-2.0 if t.x >= 0 else -88.0))) * zoom
+                var iy = cy + (t.y - (132.0 if root else 102.0)) * zoom
+                _drop(p, ix, iy, 88 * zoom, 68 * zoom, 0, 5 * zoom, 14 * zoom, 26 * zoom, 20 * zoom)
+                p.rect(ix - 4 * zoom, iy - 4 * zoom, 96 * zoom, 76 * zoom, rgba(255, 255, 255), 6 * zoom)
+                p.rect(ix, iy, 88 * zoom, 68 * zoom, hexc("#e6e1d5"), 2 * zoom)
+                draw_icon(p, "image", ix + 32 * zoom, iy + 22 * zoom, 24 * zoom, 1.6, with_alpha(LABEL, 0.45))
+            if root:
                 # (filter url(#mindmap-node-shadow): 0 5 and σ 7, #382f28 at .15, inside the filter's region: 30 % past the card)
                 _drop(p, lx, ly, w2, h2, 20 * zoom, 5 * zoom, 14 * zoom, 0.3 * w2, 0.3 * h2)
                 p.rect(lx, ly, w2, h2, t.color, 20 * zoom)
-                _smile(p, cx + t.x * zoom, cy + t.y * zoom, s[0], s[1], zoom)
-                for l in range(len(lines)):
-                    p.run(st, lines[l], cx + t.x * zoom, cy + (first + Float64(l) * step) * zoom, rgba(255, 255, 255), ALIGN_CENTER)
-                # the group's box reaches the add handles: 18 beyond the card plus a handle's 17 hit circle
-                var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
-                var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
-                bx.add("map.idea:" + t.text, cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
-            else:
+                _smile(p, cx + t.x * zoom, cy + t.y * zoom, l.w, l.h, zoom)
+            elif not branch:
                 var sh = List[Shadow]()
                 sh.append(Shadow(0, 3, 7, 0, rgba(57, 48, 37, 20)))
                 draw_shadows(p, lx, ly, w2, h2, 6 * zoom, sh)
                 draw_bordered(p, lx - 1, ly - 1, w2 + 2, h2 + 2, 6 * zoom + 1, CARD, t.color, 2)
-                for l in range(len(lines)):
-                    p.run(st, lines[l], cx + t.x * zoom, cy + (first + Float64(l) * step) * zoom, LABEL, ALIGN_CENTER)
-                bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
+            var mid = cx + (lab_x + (l.lead - l.trail) / 2) * zoom
+            var color = rgba(255, 255, 255) if root else LABEL
+            if t.look.done:
+                color = with_alpha(color, 0.55)
+            for q in range(n):
+                var by = cy + (base0 + Float64(q) * l.step) * zoom
+                if branch:  # (paint-order: stroke: the sheet's colour round the letters, so they read over a branch)
+                    var halo = with_alpha(rgba(255, 255, 255), 0.96) if i == self.selected else with_alpha(SHEET, 0.86)
+                    _halo(p, st, l.lines[q], mid, by, (2.5 if i == self.selected else 2.0) * zoom, halo)
+                p.run(st, l.lines[q], mid, by, color, ALIGN_CENTER)
+            if t.look.done:  # (the pencil through its words: .8 of #4a4d52)
+                var seed_id = t.id if t.id != "" else t.text
+                for q in range(n):
+                    var half = l.widths[q] / 2
+                    var ox = lab_x + (l.lead - l.trail) / 2
+                    var pts = pencil_outline(ox - half - 4, ox + half + 4, row0 + Float64(q) * l.step, seed_of(seed_id + String(q)))
+                    for z in range(0, len(pts), 2):
+                        pts[z] = cx + pts[z] * zoom
+                        pts[z + 1] = cy + pts[z + 1] * zoom
+                    p.polygon(pts, with_alpha(hexc("#4a4d52"), 0.8))
+            var block = lab_x - (l.lead + l.text_w + l.trail) / 2
+            for q in range(len(l.icons)):
+                draw_icon(p, icon_path(l.icons[q]), cx + (block + Float64(q) * (l.icon + 4)) * zoom, cy + (row0 - l.icon / 2) * zoom, l.icon * zoom, 1.6, rgba(255, 255, 255) if root else t.color)
+            if l.chip != "":
+                var fill = hexc("#fde7b0") if l.chip_state == DUE_TODAY else (hexc("#fbd3cd") if l.chip_state == DUE_OVER else CARD)
+                var ink = hexc("#7a4f00") if l.chip_state == DUE_TODAY else (hexc("#9c2418") if l.chip_state == DUE_OVER else hexc("#746f65"))
+                var edge = hexc("#e0a526") if l.chip_state == DUE_TODAY else (hexc("#e0675a") if l.chip_state == DUE_OVER else hexc("#cfc8ba"))
+                var chx = cx + (block + l.lead + l.text_w + l.trail - l.chip_w) * zoom
+                draw_bordered(p, chx - 0.5 * zoom, cy + (row0 - 10.5) * zoom, (l.chip_w + 1) * zoom, 21 * zoom, 10.5 * zoom, fill, edge, zoom)
+                var cst = chip_style()
+                cst.size *= zoom
+                p.run(cst, l.chip, chx + l.chip_w / 2 * zoom, cy + (row0 + 11 * 0.349) * zoom, ink, ALIGN_CENTER)  # (dominant-baseline: central)
+                bx.add("map.due:" + l.chip, chx, cy + (row0 - 10) * zoom, l.chip_w * zoom, 20 * zoom)
+            # its badges: to-dos done, ideas folded away, a vote
+            var box_l = lab_x - l.w / 2 if branch else t.x - l.w / 2
+            var box_t = lab_y - l.h + 5 if branch else t.y - l.h / 2
+            if tasks[2 * i + 1] > 0:
+                var all_done = tasks[2 * i] == tasks[2 * i + 1]
+                var words = String(tasks[2 * i]) + "/" + String(tasks[2 * i + 1])
+                var bw = 22.0 if all_done else Float64(words.byte_length()) * 6.6 + 12
+                var bxx = cx + box_l * zoom
+                var byy = cy + box_t * zoom
+                draw_bordered(p, bxx - (bw / 2 + 0.75) * zoom, byy - 9.75 * zoom, (bw + 1.5) * zoom, 19.5 * zoom, 9.75 * zoom, hexc("#2f8f5b") if all_done else CARD, hexc("#2f8f5b") if all_done else t.color, 1.5 * zoom)
+                if all_done:
+                    p.polygon(stroke_outline([bxx - 4.5 * zoom, byy + 0.5 * zoom, bxx - 1.5 * zoom, byy + 3.5 * zoom, bxx + 4.5 * zoom, byy - 3 * zoom], 2 * zoom), rgba(255, 255, 255))
+                else:
+                    var bst = TextStyle("IBM Plex Mono", 700, False, 10.5 * zoom)
+                    bst.exact = True
+                    p.run(bst, words, bxx, byy + 10.5 * 0.349 * zoom, hexc("#4d504a"), ALIGN_CENTER)
+                bx.add("map.tasks:" + words, bxx - bw / 2 * zoom, byy - 9 * zoom, bw * zoom, 18 * zoom)
+            if t.look.collapsed and self.under(i) > 0:
+                var count = String(self.under(i))
+                var ox = cx + (t.x + (0.0 if root else (10.0 if t.x >= 0 else -10.0))) * zoom
+                var oy = cy + (t.y + 18) * zoom
+                p.circle(ox, oy, 12 * zoom, t.color)
+                p.circle(ox, oy, 10 * zoom, CARD)
+                var bst = TextStyle("IBM Plex Sans", 700, False, 10 * zoom)
+                bst.exact = True
+                p.run(bst, count, ox, oy + 10 * 0.349 * zoom, t.color, ALIGN_CENTER)
+                bx.add("map.folded:" + count, ox - 11 * zoom, oy - 11 * zoom, 22 * zoom, 22 * zoom)
+            if t.look.vote != "":
+                var vx = cx + (t.x + l.w / 2 - 4) * zoom if root else cx + (lab_x + l.w / 2) * zoom
+                var vy = cy + (t.y - l.h / 2) * zoom if not branch else cy + (lab_y - l.h / 2) * zoom
+                p.circle(vx, vy, 14 * zoom, t.color)
+                p.circle(vx, vy, 12 * zoom, CARD)
+                var est = TextStyle("emoji", 400, False, 15 * zoom)
+                est.exact = True
+                p.run(est, "👍" if t.look.vote == "up" else "👎", vx, vy + zoom + 15 * 0.36 * zoom, rgba(0, 0, 0), ALIGN_CENTER)
+                bx.add("map.vote:" + t.look.vote, vx - 13 * zoom, vy - 13 * zoom, 26 * zoom, 26 * zoom)
         # the selection: dashed ring and four add handles (gone while the idea is written: .map-node.editing)
-        if self.selected >= 0 and self.selected < len(self.topics) and self.selected != self.editing:
+        if self.selected >= 0 and self.selected < len(self.topics) and self.selected != self.editing and not self.hidden(self.selected):
             ref t = self.topics[self.selected]
             var s = self.card_size(self.selected)
             var root = t.parent < 0
+            var branch = t.look.branch and not root
             var pad = 7.0 if root else 5.0
-            _dashed_rect(p, cx + (t.x - s[0] / 2 - pad) * zoom, cy + (t.y - s[1] / 2 - pad) * zoom, (s[0] + 2 * pad) * zoom, (s[1] + 2 * pad) * zoom,
-                         (24.0 if root else 9.0) * zoom, 1.5 * zoom, 4 * zoom)
+            if branch:
+                var m = curve_mid(self.branch_of(self.selected))
+                _dashed_rect(p, cx + (m[0] - s[0] / 2) * zoom, cy + (m[1] - 5 - s[1] + 5) * zoom, s[0] * zoom, s[1] * zoom, 5 * zoom, 1.5 * zoom, 4 * zoom)
+            else:
+                _dashed_rect(p, cx + (t.x - s[0] / 2 - pad) * zoom, cy + (t.y - s[1] / 2 - pad) * zoom, (s[0] + 2 * pad) * zoom, (s[1] + 2 * pad) * zoom,
+                             (24.0 if root else 9.0) * zoom, 1.5 * zoom, 4 * zoom)
             var hx: List[Float64] = [0, s[0] / 2 + 18, 0, -(s[0] / 2 + 18)]
             var hy: List[Float64] = [-(s[1] / 2 + 18), 0, s[1] / 2 + 18, 0]
             var names: List[String] = ["top", "right", "bottom", "left"]
+            var only = -1  # (a branch's words have one handle, outward)
+            if branch:
+                only = 1 if t.x >= self.topics[t.parent].x else 3
+                hx = [0, 22, 0, -22]
+                hy = [0, 5, 0, 5]
             for k in range(4):
+                if only >= 0 and k != only:
+                    continue
                 var ax = cx + (t.x + hx[k]) * zoom
                 var ay = cy + (t.y + hy[k]) * zoom
                 _drop_disc(p, ax, ay, 8.25 * zoom, 5 * zoom, 7 * zoom, 11.2 * zoom)
@@ -749,6 +945,15 @@ def utf16_len(s: String) -> Int:
     return n
 
 
+def _halo[P: Painter](mut p: P, st: TextStyle, words: String, x: Float64, base: Float64, r: Float64, color: UInt32):
+    """Words' outline in a colour of their own, r wide all round (an SVG text stroke painted first)."""
+    var solid = with_alpha(color, 1.0)
+    comptime N = 12
+    for q in range(N):
+        var a = 6.283185307179586 * Float64(q) / N
+        p.run(st, words, x + r * cos(a), base + r * sin(a), solid, ALIGN_CENTER)
+
+
 def _smile[P: Painter](mut p: P, cx: Float64, cy: Float64, w: Float64, h: Float64, z: Float64):
     """The root card's highlight: a quadratic from the lower left to the lower right, white at .23, 5 wide."""
     var x0 = -w / 2 + 18
@@ -826,46 +1031,9 @@ def _round_at(x: Float64, y: Float64, w: Float64, h: Float64, r: Float64, runs: 
     return (x + r - r * cos(a), y + r - r * sin(a))
 
 
-@fieldwise_init
-struct Curve(ImplicitlyCopyable, Movable):
-    var sx: Float64
-    var sy: Float64
-    var ax: Float64
-    var ay: Float64
-    var bx: Float64
-    var by: Float64
-    var ex: Float64
-    var ey: Float64
-
-
-def _attach(f: Frame, tx: Float64, ty: Float64, inset: Float64) -> Tuple[Float64, Float64]:
-    var dx = tx - f.x
-    var dy = ty - f.y
-    var length = sqrt(dx * dx + dy * dy)
-    if length == 0:
-        length = 1
-    var t = min(f.hw / (abs(dx) if abs(dx) > 0 else 1e-9), f.hh / (abs(dy) if abs(dy) > 0 else 1e-9))
-    var reach = (t * length - min(inset, 0.6 * t * length)) / length
-    return (f.x + dx * reach, f.y + dy * reach)
-
-
 def branch_geometry(parent: Frame, child: Frame, curve: Float64 = 78) -> Curve:
-    """geometry.js branchGeometry (no saved ports or anchors): both control points on one side of the chord."""
-    var s = _attach(parent, child.x, child.y, 30)
-    var e = _attach(child, parent.x, parent.y, 2)
-    var dx = e[0] - s[0]
-    var dy = e[1] - s[1]
-    var length = sqrt(dx * dx + dy * dy)
-    if length == 0:
-        length = 1
-    var cxn = dx / length
-    var side = tanh(2.2 * cxn) * (0.04 + (curve / 100) * 0.26)
-    # lerpAnchor at t .3 and .7, offset n = side along the chord's normal
-    var ax = s[0] + dx * 0.3 - dy * side
-    var ay = s[1] + dy * 0.3 + dx * side
-    var bx = s[0] + dx * 0.7 - dy * side
-    var by = s[1] + dy * 0.7 + dx * side
-    return Curve(s[0], s[1], ax, ay, bx, by, e[0], e[1])
+    """A branch with no sides or anchors of its own (mapmarks.branch_between)."""
+    return branch_between(parent, child, curve)
 
 
 def _axis(a: Float64, b: Float64, c: Float64, d: Float64, t: Float64, order: Int) -> Float64:
@@ -911,11 +1079,7 @@ def ribbon_outline(g: Curve, start: Float64, end: Float64, samples: Int) -> List
 def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y: Float64, view_w: Float64, view_h: Float64, sk: Skin):
     """The map's overview (170 × 102, padded 6): every topic as a dot in its colour and the visible part as a teal frame,
     in a 220 × 130 box fitted into it (editor.js updateMinimap)."""
-    if sk.dark:  # (a dark skin's controls: the surface, a line for an edge, no shadow: workspace-theme.css)
-        p.rect(x, y, 170, 102, sk.line, 6)
-        p.rect(x + 1, y + 1, 168, 100, sk.panel, 5)
-    else:
-        draw_lifted(p, x, y, 170, 102, 6, sk.shadow1, hexc("#fffffc"))
+    p.rect(x, y, 170, 102, sk.panel, sk.radius_control)  # (the surface, no edge, no shadow: workspace-theme.css)
     bx.add("map.overview", x, y, 170, 102)
     var vs = min(158.0 / 220, 90.0 / 130)
     var ox = x + 6 + (158 - 220 * vs) / 2
@@ -925,6 +1089,8 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     var maxx = -1e18
     var maxy = -1e18
     for i in range(len(m.topics)):
+        if m.hidden(i):
+            continue
         var f = m.frame(i)
         var rx = max(120.0, f.hw + 40)
         var ry = max(120.0, f.hh + 40)
@@ -941,18 +1107,15 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     var vw = view_w / fv[0] * sc
     var vh = view_h / fv[0] * sc
     var teal = hexc("#247c73")
-    var past = ox + vx * vs < x or oy + vy * vs < y or ox + (vx + vw) * vs > x + 170 or oy + (vy + vh) * vs > y + 102  # (a small map in a big window)
-    if past:
-        p.push_clip(x + 6, y + 6, 158, 90)  # (the drawing's own box)
+    p.push_clip(x + 6, y + 6, 158, 90)  # (the drawing's own box)
     p.rect(ox + vx * vs, oy + vy * vs, vw * vs, vh * vs, teal, 0)
     var sw = 1.5 * vs
-    p.rect(ox + vx * vs + sw / 2, oy + vy * vs + sw / 2, vw * vs - sw, vh * vs - sw, hexc("#fffffc"), 0)
+    p.rect(ox + vx * vs + sw / 2, oy + vy * vs + sw / 2, vw * vs - sw, vh * vs - sw, sk.panel, 0)
     p.rect(ox + vx * vs + sw / 2, oy + vy * vs + sw / 2, vw * vs - sw, vh * vs - sw, with_alpha(teal, 0.05), 0)
     for i in range(len(m.topics)):
         ref t = m.topics[i]
         p.circle(ox + (t.x * sc + offx) * vs, oy + (t.y * sc + offy) * vs, (4.0 if t.parent < 0 else 2.0) * vs, t.color)
-    if past:
-        p.pop_clip()
+    p.pop_clip()
 
 
 def map_json(m: BuzanMap, title: String, root_id: String) -> String:

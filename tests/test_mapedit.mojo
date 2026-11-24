@@ -4,7 +4,8 @@
 
 from std.math import exp
 from std.testing import assert_equal, assert_true
-from mojoui.buzanmap import BuzanMap, wrap_text, disc_shadow
+from mojoui.buzanmap import BuzanMap, wrap_text, disc_shadow, map_json
+from mojoui.mapmarks import DayTime, curve_mid
 from mojoui.notesshell import Boxes
 from mojoui.scene import Scene
 from pnlook import skin_named
@@ -64,6 +65,35 @@ def words_as_the_web() raises:
     m.draw(sc, bx, 0, 0, W, H, 1.0, skin_named("paper"), "x")
     var drawn = String("|".join(sc.texts))
     assert_true("Week plan for the move to|" in drawn and "the new apartment" in drawn and "🏦 Call the bank" in drawn, drawn)
+
+
+def marks_drawn() raises:
+    """A web map's own members are drawn: icons, due, done, votes, folded ideas hidden with their count, a branch's words in
+    capitals, a picture's place; and none of it is lost on the way back."""
+    var m = BuzanMap()
+    m.now = DayTime(2026, 11, 24, 9, 0)
+    _ = m.add(-1, "Week", 0, 0, 0xFF0000FF, "root", 28, True, "hand", '"icons":["star"]')
+    _ = m.add(0, "Bank", 300, -100, 0xFF00FF00, "a", 22, True, "hand", '"icons":["todo"],"due":"2026-11-24"')
+    _ = m.add(1, "Number", 560, -160, 0xFF00FF00, "a1", 19, False, "hand", '"done":true,"icons":["todo"]')
+    _ = m.add(1, "Fee", 560, -60, 0xFF00FF00, "a2", 19, False, "hand", '"icons":["todo"]')
+    _ = m.add(0, "Trips", -300, -100, 0xFFFF0000, "c", 22, True, "hand", '"collapsed":true,"vote":"up"')
+    _ = m.add(4, "Goa", -560, -100, 0xFFFF0000, "c1", 19, False, "hand")
+    _ = m.add(0, "Garden", 300, 120, 0xFFFF00FF, "g", 22, True, "hand", '"presentation":"branch"')
+    _ = m.add(0, "Photos", -300, 120, 0xFFFF00FF, "p", 22, True, "hand", '"image":"data:image/png;base64,xx"')
+    var sc = Scene(1400, 900, 1)
+    var bx = Boxes()
+    m.selected = -1
+    m.draw(sc, bx, 0, 0, 1400, 900, 0, skin_named("paper"), "x")
+    var t = String("|".join(sc.texts))
+    assert_true("Today" in t and "GARDEN" in t and "👍" in t and "1/2" in t and "Goa" not in t, t)
+    assert_true(bx.find("map.due:Today") >= 0 and bx.find("map.tasks:1/2") >= 0 and bx.find("map.folded:1") >= 0 and bx.find("map.vote:up") >= 0, "boxes")
+    assert_true(bx.find("map.idea:Goa") < 0, "hidden")
+    var v = m.view(1400, 900)
+    assert_equal(m.hit(v[1] + m.topics[5].x * v[0], v[2] + m.topics[5].y * v[0], 1400, 900), -1)
+    var mid = curve_mid(m.branch_of(6))
+    assert_equal(m.hit(v[1] + mid[0] * v[0], v[2] + (mid[1] - 12) * v[0], 1400, 900), 6)
+    assert_true(m.card_size(1)[0] > m.card_size(3)[0] + 40, "room for the icon and the pill")
+    assert_true('"collapsed":true,"vote":"up"' in map_json(m, "t", "root"), "kept")
 
 
 def shadows() raises:
@@ -182,4 +212,5 @@ def main() raises:
     words_as_the_web()
     writing()
     shadows()
+    marks_drawn()
     print("mapedit: ok")

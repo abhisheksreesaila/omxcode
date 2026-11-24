@@ -909,8 +909,7 @@ def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, 
 
 def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
     """The map's zoom island: minus, the zoom as a label (a press resets it), plus."""
-    p.rect(x, y, 132, 42, sk.line, sk.radius_control)
-    p.rect(x + 1, y + 1, 130, 40, sk.panel, sk.radius_control - 1)
+    p.rect(x, y, 132, 42, sk.panel, sk.radius_control)  # (workspace-theme.css: the surface, no edge, no shadow)
     bx.add("zoom", x, y, 132, 42)
     draw_icon(p, "minus", x + 4 + 9, y + 4 + 9, 16, k, sk.muted)
     bx.add("zoom.out", x + 4, y + 4, 34, 34)
@@ -921,19 +920,16 @@ def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64
     bx.add("zoom.in", x + 94, y + 4, 34, 34)
 
 
-def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, words: String, sk: Skin, ink: UInt32 = 0xFF656F74,
-                         bg: UInt32 = 0xFFFCFFFF):
-    """A quiet hint pill centred on cx (11 px words, padded 7 10, lifted by the skin's first shadow)."""
+def draw_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, y: Float64, words: String, sk: Skin, lifted: Bool = False):
+    """A quiet hint pill centred on cx (11 px words in the ink, padded 7 10, on the surface: no edge, no shadow)."""
     var st = TextStyle(UI, 400, False, 11)
     var w = measure(st, words) + 20
     var x = Float64(Int((cx - w / 2) * 2 + 0.5)) / 2
-    if sk.dark:  # (workspace-theme.css: the surface, the ink, a line, no shadow)
-        p.rect(x, y, w, 28, sk.line, 5)
-        p.rect(x + 1, y + 1, w - 2, 26, sk.panel, 4)
-        text_normal(p, st, words, x + 10, y + 7, sk.ink)
+    if lifted:  # (over a page of its own colour)
+        draw_lifted(p, x, y, w, 28, 5, sk.shadow1, sk.panel)
     else:
-        draw_lifted(p, x, y, w, 28, 5, sk.shadow1, bg)
-        text_normal(p, st, words, x + 10, y + 7, ink)
+        p.rect(x, y, w, 28, sk.panel, 5)
+    text_normal(p, st, words, x + 10, y + 7, sk.ink)
     var cut = String("")
     var n = 0
     for c in words.codepoints():

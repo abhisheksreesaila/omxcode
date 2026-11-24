@@ -556,11 +556,14 @@ struct FontEngine(Movable):
             return self.pick("Geist", weight, italic)
         var best = -1
         var best_d = 1 << 30
+        var slant = italic
+        if italic and family in self.declared and family + "/italic" not in self.declared:
+            slant = False  # (no italic of it was declared: its upright, as a page with font-synthesis off)
         for i in range(len(self.faces)):
             ref f = self.faces[i]
             if f.family != family:
                 continue
-            var d = (0 if f.italic == italic else 10000) + (0 if f.weight == 0 else abs(f.weight - weight))
+            var d = (0 if f.italic == slant else 10000) + (0 if f.weight == 0 else abs(f.weight - weight))
             if d < best_d:
                 best_d = d
                 best = i

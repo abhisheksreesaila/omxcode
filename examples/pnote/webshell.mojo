@@ -958,7 +958,7 @@ struct WebShell(Movable):
             if n.kind == "page" and not n.secure and not self.doc.is_failed():
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
         if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
-            draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk)
+            draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk, True)
             var held_at = self.outbox.find(self.current)
             if held_at >= 0 and self.outbox.items[held_at].conflict:  # (another app saved first: these edits can't go on top of its)
                 draw_pill_button(p, self.boxes, "#save-copy", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Save a copy", self.sk)
