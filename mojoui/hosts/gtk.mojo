@@ -6266,8 +6266,12 @@ def on_scroll[A: App](scroll: Int, dx: Float64, dy: Float64, host_addr: Int) abi
         return 1
     var at = host[].pointer(ci)
     var touchpad = external_call["gtk_event_controller_scroll_get_unit", c_int](scroll) == 1  # (surface pixels, not notches)
-    var node = host[].shown_at(host[].canvases[ci].node)
-    var pans = 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].spacing == 1
+    var node = host[].canvases[ci].node
+    var pans = False  # (as the screen the canvas is on says: the one before, while a rebuild waits)
+    if busy():
+        pans = 0 <= node < len(host[].built.nodes) and host[].built.nodes[node].spacing == 1
+    else:
+        pans = 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].spacing == 1
     if pans and not host[].canvases[ci].test_zoom and (mods_of(scroll) & CTRL) == 0:
         var step = 1.0 if touchpad else 40.0
         host[].canvas_send(ci, WHEEL, at[0], at[1], -dx * step, -dy * step, 1, host_addr)
@@ -7426,6 +7430,80 @@ def show_test_window(window: Int):
         pump()
 
 
+def burst[A: App](host_addr: Int, line: String):
+    """The burst: step. A canvas's value: kX = the key X, wN = the wheel N points down, p = a press; ^Ctrl+F (no tag): the
+    window's shortcut; a field's value "!" = Return."""
+    var host = host_at[A](host_addr)
+    var what = List[Tuple[Int, Int, String]]()  # (kind, widget, value), found before any of them goes
+    for item in line.split("~"):
+        var kv = split_at(String(item), "=")
+        if kv[0].startswith("^"):
+            what.append((-1, 0, String(kv[0][byte=1:])))
+            continue
+        var found = -1
+        for i in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[i].name == kv[0]:
+                found = i
+        if found < 0 or host[].widgets[found] == 0:
+            print("TEST: no view tagged", kv[0])
+            continue
+        var w = host[].widgets[found]
+        var kind = host[].rt.shown.nodes[found].kind
+        if kind == CANVAS:
+            var ci = host[].canvas_at(found)
+            w = host[].canvases[ci].keys if kv[1].startswith("k") else (host[].canvases[ci].scroll if kv[1].startswith("w") else host[].canvases[ci].drag)
+        _ = external_call["g_object_ref", Int](w)
+        what.append((kind, w, kv[1]))
+    for ref item in what:
+        var kind = item[0]
+        var w = item[1]
+        var value = item[2]
+        if kind == -1:
+            run_step[A](host_addr, "shortcut:" + value)
+        elif kind == BUTTON:
+            var sig = String("clicked")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span())
+        elif kind == FIELD and value == "!":
+            var sig = String("activate")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span())
+        elif kind == FIELD:
+            external_call["gtk_editable_set_text", NoneType](w, value.as_c_string_span())
+        elif kind == TEXTAREA:
+            external_call["gtk_text_buffer_set_text", NoneType](external_call["gtk_text_view_get_buffer", Int](w), value.as_c_string_span(), c_int(-1))
+        elif kind == TOGGLE:
+            external_call["gtk_check_button_set_active", NoneType](w, c_int(1 - Int(external_call["gtk_check_button_get_active", c_int](w))))
+        elif kind == DROPDOWN:
+            external_call["gtk_drop_down_set_selected", NoneType](w, c_uint(to_int(value)))
+        elif kind == SLIDER:
+            external_call["gtk_range_set_value", NoneType](w, Float64(to_int(value)))
+        elif kind == SEGMENTED:
+            external_call["adw_toggle_group_set_active", NoneType](w, c_uint(to_int(value)))
+        elif kind == RADIO:
+            var b = external_call["gtk_widget_get_first_child", Int](w)
+            for _ in range(to_int(value)):
+                b = external_call["gtk_widget_get_next_sibling", Int](b)
+            external_call["gtk_check_button_set_active", NoneType](b, c_int(1))
+        elif kind == LAZYLIST:
+            var sig = String("activate")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), c_uint(to_int(value)))
+        elif kind == CANVAS and value.startswith("k"):
+            var sig = String("key-pressed")
+            var handled = List[c_int](length=1, fill=0)
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), c_uint(gdk_keyval(String(value[byte=1:]))), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
+            _ = len(handled)
+        elif kind == CANVAS and value.startswith("w"):
+            var sig = String("scroll")
+            var handled = List[c_int](length=1, fill=0)
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), Float64(0), Float64(to_int(String(value[byte=1:]))), Int(handled.unsafe_ptr()))
+            _ = len(handled)
+        elif kind == CANVAS:
+            var sig = String("drag-begin")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), Float64(5), Float64(5))
+    for ref item in what:
+        if item[1] != 0:
+            external_call["g_object_unref", NoneType](item[1])
+
+
 def run_step[A: App](host_addr: Int, step: String):
     var host = host_at[A](host_addr)
     var verb_rest = split_at(step, ":")
@@ -7889,6 +7967,29 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
+    elif verb == "logmark":  # logmark:/path: a line MARK at the end of that file (a test's app writes its events there)
+        try:
+            var f = open(rest, "a")
+            f.write("MARK\n")
+            f.close()
+        except:
+            print("TEST: can't write", rest)
+    elif verb == "burst":  # burst:tag=value~tag=value…: each on the view tagged so as it is on screen now, one after another in a single turn (no main loop between: input that comes while a rebuild waits, goal 81 M4)
+        burst[A](host_addr, rest)
+    elif verb == "rows":  # rows:K: the words the K-th list's row widgets show now, and where it is scrolled to (goal 81)
+        var i = find(host[], LAZYLIST, "", to_int(rest))
+        if i < 0:
+            print("TEST: no list", rest)
+            return
+        var words = String("")
+        var row = external_call["gtk_widget_get_first_child", Int](host[].widgets[i])
+        while row != 0:
+            var label = external_call["gtk_widget_get_first_child", Int](row)
+            if label != 0 and external_call["gtk_widget_get_child_visible", c_int](row) != 0 and external_call["gtk_widget_get_visible", c_int](row) != 0:
+                words += "|" + c_str(external_call["gtk_label_get_text", Int](label))
+            row = external_call["gtk_widget_get_next_sibling", Int](row)
+        var adj = external_call["gtk_scrolled_window_get_vadjustment", Int](external_call["gtk_widget_get_parent", Int](host[].widgets[i]))
+        print("ROWS: " + rest + " at " + String(Int(external_call["gtk_adjustment_get_value", Float64](adj))) + " " + words)
     elif verb == "treedump":  # treedump:name: every widget's properties (mojoui.hosts.gtktree), appended to $MOJOUI_TREE
         var words = "SCREEN " + rest + "\n" + tree_words(host[].page)
         var path = getenv("MOJOUI_TREE")
