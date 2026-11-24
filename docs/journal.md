@@ -1775,3 +1775,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 - B, C, D (18:07–21:26): D-8007…D-8018 (decisions.md). Pivots: pre-touching the Metal decode buffer made no difference (reverted); a 2-second hand-over of decoded tiles not built; thread policies on the Mac changed nothing (D-8017). Mistakes: a one-tile close save and an omxcore import that broke vendorless tests (both fixed before the final runs, 29ee729b / 51a26d08).
 - D: all on 51a26d08: Linux M0–M5 PASS, M6 FAIL (zoom max, undo); Mac M1, M5, M7 PASS, M6 FAIL (first opens, stress press; omnibar not settled). Files: build/g79/c18-mac-reruns.txt, c18-mac-starts.txt, c18-lin-reruns.txt, c18w.txt, race.md, race-mac.md. Mac last used 21:26.
+
+## 2026-11-23 goal 79 (continuation 19) — autopilot
+- From c3719640. Rules as continuation 18; the Mac's keep-awake ends 21:42 and isn't extended: Linux only, Metal/AppKit code must cross-build and is labelled "not run on the Mac". Order: 1 report fixes, 2 Linux stress zoom max, 3 Linux stress undo, 4 Mac first frames (probes ready to run, work cut by counts), 5 Linux M1–M6 on one commit, package step prepared.
+- 1 (21:30): the reviewer list re-read line by line: emoji rule (D-8004 verified it), shared settings folder (D-8003), D-8016's "0 of 20" (7 were tiled), D-8000's drag frames since D-8018.

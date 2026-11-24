@@ -14,13 +14,14 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **79-check.py, Mac run A (continuation 18).** Reran up to three times when it kept no view (5a3ad824). Cause found and fixed (D-8016); the rerun is gone and a run without a kept view FAILs: stricter than before.
 - **Two mistakes of mine this round, both caught before the final runs:** the first close-time save wrote a file of one tile (found by reading the run's log; test_viewsnap `closing_keeps` now compares the whole file); viewsnap and docstore imported the vendored job package, which broke every test built without it (found by M7, fixed in 29ee729b: D-8015 amended).
 - **Note switch and omnibar rows are with idle warming** running in the bench's own pauses: the numbers without it are in the report's continuation 18.
-- **The race's drags (D-8000)** time the lift and the drop (they never did): a strengthening; older drag rows are understated.
+- **The race's drags (D-8000)** time the lift and the drop (they never did): a strengthening; older drag rows are understated. Since D-8018 (continuation 18) the lift happens in the first moving frame instead of the press frame; all 62 frames are timed either way, so the press's handling and the lift are now two timed frames where they were one. The row's max isn't comparable with earlier runs for that reason too.
 - **Note switch and omnibar (D-8001)** are raced against the web and have a max; they had only a silky p95.
-- **The Mac's start-up runs (D-8002)** each get a fresh settings folder (they shared one): a strengthening.
+- **The Mac's start-up runs (D-8002, corrected by D-8003).** D-8002 said they shared one settings folder: wrong. mac-ssh had always replaced the checker's folder with a fresh one; what was fixed is that the checker's own choice of folder now takes effect. No earlier Mac start-up number was helped by a shared folder.
 - **M1's Mac reference (D-7991)** switched from macwidths.py to the live page: the main session's ruling.
 - **Wrong claim, corrected (continuation 17):** "each undo step moves 40 objects back" in continuation 16's report and journal. It walks one 6×4 px one-object move back.
 - **Attribution:** D-7976, D-7977, D-7991, D-7992 and D-7998 are the main session's, not the owner's; d59ebc57's commit message still says otherwise.
-- **The Apple Color Emoji rule (D-7998)** is a rule derived from Chrome's whole-size table (31 sizes, 10–40 px), not verified on the Mac or at fractional or zoomed sizes.
+- **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
+- **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
 ## Continuations 14–17 (2026-11-22 to 11-23, autopilot)
 Decisions D-7976–D-8002; journal "continuation 14" to "continuation 17"; EXPERIMENTS likewise. In short:
@@ -74,7 +75,7 @@ Every run below is of 51a26d08's code (later commits are only these results and 
 - **Clocks (D-8017).** Proven for ordinary frames (GPU p95 3.5–3.7 ms at P8/210 MHz, 0.7–2.7 at P5), dropped for the worst one (max 13.1–13.6 cold, 13.9–14.7 warm). No clock setting changed, no work invented.
 
 ### C
-- **A with no kept view was a product bug, found and fixed (D-8016).** A frame that rastered the last tile asked for nothing more, so the frame that would have kept the view came only by chance. test_viewsnap: driven by the renderer's `more` alone, 0 of 20 boards were kept before; every tiled one now. A window closing sooner than the save's 750 ms keeps its view at the close (Linux 16.6 ms; the next open 3.4 ms instead of 98). Race A no longer reruns: a run that keeps no view is a FAIL.
+- **A with no kept view was a product bug, found and fixed (D-8016).** A frame that rastered the last tile asked for nothing more, so the frame that would have kept the view came only by chance. test_viewsnap: driven by the renderer's `more` alone, none of the 7 tiled boards tried was kept before; every tiled one is now (15 of 15). A window closing sooner than the save's 750 ms keeps its view at the close (Linux 16.6 ms; the next open 3.4 ms instead of 98). Race A no longer reruns: a run that keeps no view is a FAIL.
 - **Undo is settled as a fail on Linux.** Table above.
 
 ## Continuation 17, final table (2026-11-23; every number labelled with its commit)
