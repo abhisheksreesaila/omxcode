@@ -510,20 +510,27 @@ def selected() raises:
     s.sidebar = True
     s.open(s.notes[0].id)
     paint(s)
+    s.panel.naming = 0
+    s.panel.naming_text = "Mine"
+    s.name_notebook()
+    var book = s.panel.notebooks[0].id
+    s.move_note(0)
+    s.panel.select_book(0)
+    s.move_note(book)
+    assert_equal(s.panel.selected, book, "filed")
     s.move_note(0)
     assert_equal(s.panel.selected, 0, "the Inbox: none")
-    s.move_note(1)
-    assert_equal(s.panel.selected, 1, "filed")
+    s.move_note(book)
     s.create("page")
     assert_equal(s.panel.selected, 0, "a new page is in the Inbox")
     var filed = 0
     for ref n in s.notes:
-        if n.notebook == 1:
+        if n.notebook == book:
             filed = n.id
     s.open(filed)
-    assert_equal(s.panel.selected, 1, "opened")
+    assert_equal(s.panel.selected, book, "opened")
     s.act("new-note")
-    assert_equal(s.notes[s.note_index(s.current)].notebook, 1, "New note goes in the marked notebook")
+    assert_equal(s.notes[s.note_index(s.current)].notebook, book, "New note goes in the marked notebook")
     s.act("quick-note")
     assert_equal(s.notes[s.note_index(s.current)].notebook, 0, "Quick note in the Inbox")
     s.panel.naming = 0
@@ -538,7 +545,7 @@ def selected() raises:
     s.open(filed)
     s.close()
     var t = WebShell(DB, "paper")
-    assert_true(1 in t.panel.open_books, "a notebook opened by its note stays open after a restart")
+    assert_true(book in t.panel.open_books, "a notebook opened by its note stays open after a restart")
 
 
 def place(s: WebShell, kind: Int, id: Int) raises -> Tuple[Float64, Float64]:
@@ -554,17 +561,22 @@ def pointing() raises:
     var s = WebShell(DB, "paper")
     s.sidebar = True
     s.open(s.notes[0].id)
+    s.panel.open_shelves[0] = True
+    s.panel.naming = 0
+    s.panel.naming_text = "Pointed"
+    s.name_notebook()
+    var book = s.panel.notebooks[0].id
     paint(s)
-    var n = place(s, 1, 1)
+    var n = place(s, 1, book)
     _ = s.hover(5, 5)
     assert_true(s.hover(n[0], n[1]), "a redraw")
     paint(s)
     assert_true(not s.hover(n[0] + 1, n[1]), "none while on the same row")
-    var plus = place(s, 5, 1)
-    _ = place(s, 4, 1)
+    var plus = place(s, 5, book)
+    _ = place(s, 4, book)
     var before = len(s.notes)
     assert_true(s.tap(plus[0], plus[1]) and len(s.notes) == before + 1, "its + makes a note")
-    assert_equal(s.notes[s.note_index(s.current)].notebook, 1, "in that notebook")
+    assert_equal(s.notes[s.note_index(s.current)].notebook, book, "in that notebook")
     s.searching = True
     paint(s)
     var quiet = True
