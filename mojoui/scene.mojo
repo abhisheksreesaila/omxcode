@@ -425,6 +425,45 @@ struct SurfacePainter(Painter, Movable):
         font.draw(self.s, text, x * k + self.tx, baseline * k + self.ty, size * k, color, weight, align, slant)
 
 
+struct KeptPaint(Movable):
+    """(D-8013) A layer whose picture depends on little (a desk's dots, a grid): painted once, its ops replayed while the
+    token holds, under the same version (a renderer keeps what it built from them, compared by that number alone).
+
+        if desk.begin(p, "desk", token):     # a layer begun; False: replayed, nothing to draw
+            draw_desk(p, …)
+            desk.end(p)"""
+
+    var kept: KeptOps
+    var token: String
+    var version: Int
+    var mark: Int
+
+    def __init__(out self):
+        self.kept = KeptOps()
+        self.token = ""
+        self.version = 0
+        self.mark = -1
+
+    def begin[P: Painter](mut self, mut p: P, key: String, token: String, k: Float64) -> Bool:
+        """Layer `key` (scale k, no offset) begun; True: draw it now, then end()."""
+        p.begin_layer(key)
+        p.layer_transform(0, 0, k)
+        if token == self.token and p.ops_replay(self.kept):
+            p.layer_version(self.version)
+            return False
+        if token != self.token:
+            self.version += 1
+            self.token = token
+            self.kept = KeptOps()
+        p.layer_version(self.version)
+        self.mark = p.ops_mark()
+        return True
+
+    def end[P: Painter](mut self, mut p: P):
+        if self.mark >= 0:
+            self.kept = p.ops_capture(self.mark)
+
+
 struct Scene(Painter, Movable, Copyable):
     """A display list: ops in order, STRIDE floats each, a colour each, a text for text ops; layers are runs of ops."""
 

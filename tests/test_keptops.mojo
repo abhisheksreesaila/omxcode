@@ -6,11 +6,13 @@
 #   pixi run mojo run -I . -I vendor tests/test_keptops.mojo
 from std.testing import assert_true, assert_equal
 from mojoui.canvas import Surface
-from mojoui.scene import Scene, SurfacePainter, KeptOps, OP_IMAGE, OP_POLY, OP_STROKE, STRIDE
+from mojoui.scene import Scene, SurfacePainter, KeptOps, KeptPaint, OP_IMAGE, OP_POLY, OP_STROKE, STRIDE
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CH_MOVE
 from mojoui.canvasload import OpenBoard
+from mojoui.canvas import rgba
+from mojoui.fonttext import TextStyle
 
 comptime W = 2304
 comptime H = 1440
@@ -106,7 +108,45 @@ def check(name: String, mut kept: BoardLook, mut layer: ObjectLayer, v: DeskView
     assert_equal(d, 0, name + ": pixel-identical")
 
 
+def desk_scene(mut desk: KeptPaint, token: String, w: Float64, mut drawn: Int) raises -> Scene:
+    var sc = Scene(W, H, 1.0)
+    if desk.begin(sc, "desk", token, 1.25):
+        sc.fill(0xFFF0F2F5)
+        for q in range(Int(w) // 22):
+            sc.circle(22.0 * Float64(q), 11, 1.1, rgba(200, 200, 190))
+            sc.run(TextStyle("Geist", 400, False, 14), "Dot " + String(q), 22.0 * Float64(q), 40, 0xFF000000, 0)
+        desk.end(sc)
+        drawn += 1
+    sc.begin_layer("over")
+    sc.rect(10, 10, 50, 50, 0xFF0000FF, 4)
+    return sc^
+
+
+def test_keptpaint() raises:
+    """(D-8013) KeptPaint: drawn once per token, replayed op for op under the same version; another token: drawn again
+    under a new one, so a renderer never takes the old picture for it."""
+    var desk = KeptPaint()
+    var drawn = 0
+    var a = desk_scene(desk, "a", 1000, drawn)
+    var b = desk_scene(desk, "a", 1000, drawn)
+    assert_equal(drawn, 1, "replayed")
+    same_ops(a, b, "replay")
+    assert_true(a.layer_versions[0] >= 0 and a.same_layer(0, b, 0), "the same picture")
+    var c = desk_scene(desk, "b", 1200, drawn)
+    assert_equal(drawn, 2, "another token: drawn")
+    assert_true(not c.same_layer(0, b, 0), "another picture")
+    var d = desk_scene(desk, "a", 1000, drawn)
+    assert_equal(drawn, 3, "back: drawn again")
+    assert_true(not d.same_layer(0, c, 0) and not d.same_layer(0, b, 0), "never an old version's number")
+    var plain = KeptPaint()
+    var e = desk_scene(plain, "z", 1000, drawn)
+    for op in range(a.ops()):
+        assert_equal(Int(a.kinds[op]), Int(e.kinds[op]), "as drawn")
+    print("   KeptPaint: drawn once per token, replayed op for op")
+
+
 def main() raises:
+    test_keptpaint()
     var layer = board()
     print("   board:", len(layer.objs), "objects")
     var v = DeskView(-300, -200, 1.0)

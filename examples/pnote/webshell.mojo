@@ -5,7 +5,7 @@
 from std.collections import Dict
 from std.math import floor, ceil
 from std.os import getenv
-from mojoui.scene import Painter, Scene
+from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
@@ -239,6 +239,7 @@ struct WebShell(Movable):
     var budget: FrameBudget  # (D-7957) the open's slices sized by what the rest of the frame cost
     var warm: GlyphWarm  # (D-8002) the glyphs drawn last time and the look's own styles, readied while nothing happens
     var warm_styles: Bool
+    var desk: KeptPaint  # (D-8013) the desk's dots, replayed while the window and the skin hold
     var screens: SceneWarm  # (D-8011) the screen being readied
     var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
     var ready_k: Float64  # the device scale they're readied for (0: not asked yet)
@@ -290,6 +291,7 @@ struct WebShell(Movable):
         self.win_k = 0
         self.warm = GlyphWarm(config_dir("pnote") + "/glyphs.txt")
         self.warm_styles = False
+        self.desk = KeptPaint()
         self.screens = SceneWarm()
         self.to_ready = List[Int]()
         self.ready_k = 0
@@ -537,9 +539,11 @@ struct WebShell(Movable):
     def _paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         self.boxes.clear()
         self.boxes.add("#app", 0, 0, w, h)
+        if self.desk.begin(p, "desk", self.panel.skin_name + "|" + String(w) + "|" + String(h) + "|" + String(k), k):
+            draw_desk(p, w, h, k, self.sk)
+            self.desk.end(p)
         p.begin_layer("shell")
         p.layer_transform(0, 0, k)
-        draw_desk(p, w, h, k, self.sk)
         self.win_w = w
         self.win_h = h
         self.win_k = k
@@ -620,6 +624,9 @@ struct WebShell(Movable):
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
+        if (self.card_open and i >= 0) or self.searching or self.settings_open:  # (a layer of their own: opening one leaves the shell's batches as they are)
+            p.begin_layer("overlay")
+            p.layer_transform(0, 0, k)
         if self.card_open and i >= 0:
             ref c = self.card
             c.status = "Saved on this " + device_name() if self.save_state == "" else self.save_state
@@ -676,7 +683,7 @@ struct WebShell(Movable):
             self.to_ready.clear()
             var notes = List[Int]()
             for ref n in self.notes:
-                if n.kind != "canvas" and not n.secure and n.id != self.current and n.content.byte_length() <= WARM_NOTE_BYTES and len(notes) < WARM_NOTES:
+                if not n.secure and n.id != self.current and n.content.byte_length() <= WARM_NOTE_BYTES and len(notes) < WARM_NOTES:
                     notes.append(n.id)
             for q in range(len(notes)):
                 self.to_ready.append(notes[len(notes) - 1 - q])
@@ -710,7 +717,7 @@ struct WebShell(Movable):
             self.settings_open = was[2]
         else:
             var i = self.note_index(what)
-            if i >= 0 and not self.notes[i].secure and self.notes[i].kind != "canvas" and not self.searching and not self.settings_open and not self.card_open:
+            if i >= 0 and not self.notes[i].secure and not self.searching and not self.settings_open and not self.card_open:
                 self.current = what
                 if self.notes[i].kind == "page":
                     var pg = PageSheet()
@@ -718,6 +725,8 @@ struct WebShell(Movable):
                     swap(pg, self.page)
                     self._paint(sc, self.win_w, self.win_h, self.win_k)
                     swap(pg, self.page)
+                elif self.notes[i].kind == "canvas":
+                    self._unseen_board(sc, i)
                 else:
                     var mp = BuzanMap()
                     _ = read_map(self.notes[i].content, mp)
@@ -727,6 +736,39 @@ struct WebShell(Movable):
         self.current = id
         swap(bx, self.boxes)
         return sc^
+
+    def _unseen_board(mut self, mut sc: Scene, i: Int):
+        """Canvas note i painted at its opening view into sc, on a board, look and tools of its own."""
+        var bd = OpenBoard()
+        var cols = 1
+        var rows = 1
+        try:
+            var j = Json.parse(self.notes[i].content)
+            bd.set(import_json_canvas_doc(j))
+            bd.layer.set_connector_gap(6)
+            var pg = j.get(j.get(0, "pn"), "page")
+            cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
+            rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
+        except:
+            return
+        var look = BoardLook()
+        var tools = BoardTools()
+        var view = self.view
+        var view_set = self.view_set
+        self.view_set = False
+        swap(bd, self.board)
+        swap(look, self.look)
+        swap(tools, self.tools)
+        swap(cols, self.cols)
+        swap(rows, self.rows)
+        self._paint(sc, self.win_w, self.win_h, self.win_k)
+        swap(bd, self.board)
+        swap(look, self.look)
+        swap(tools, self.tools)
+        swap(cols, self.cols)
+        swap(rows, self.rows)
+        self.view = view
+        self.view_set = view_set
 
     def now(self) -> Int:
         """The clock (PNOTE_NOW: a fixed UTC time, for comparing with a reference shot then)."""

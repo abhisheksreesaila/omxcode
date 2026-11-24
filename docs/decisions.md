@@ -1848,3 +1848,6 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 
 ## D-8012: a radial gradient's discs leave out what the next one covers (goal 79, continuation 18)
 **Measured (Mac, mind map):** 25 nested opaque discs, 8 of the frame's 12 ms, all GPU. **Chosen:** each disc is a rounded rect of its radius with the square inside the next disc left out (`rect_hole`); two steps at the same radius draw once; the map host's shadows leave out what its ground covers. **Test:** test_shadowhole: pixels identical to whole discs at three scales; within one level of circles.
+
+## D-8013: the desk and the overlays are layers of their own (goal 79, continuation 18)
+**Measured (Mac):** opening an overlay or switching a note rebuilt the shell layer's 2 700 desk dots each time (batch 1–2 ms cold), and painted them each frame (scene 0.5). **Chosen:** `scene.KeptPaint`: a layer painted once per token (skin, window, scale), its ops replayed under the same version; overlays in a layer of their own. SceneWarm also readies small canvas notes (≤ 64 KB) at their opening view. **Test:** test_keptops (KeptPaint: op for op; a version never reused).
