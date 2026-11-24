@@ -537,7 +537,7 @@ struct Main(App):
 
     def every(self) -> List[Every]:
         if len(self.web) > 0 and self.web[0].waiting():
-            return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() else 500, SAVE_TICK)]
+            return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() or self.web[0].saving() else 500, SAVE_TICK)]
         if len(self.web) > 0 and self.web[0].readying():
             return [Every(WARM_TICK_MS, WARM_TICK)]
         if len(self.web) > 0:

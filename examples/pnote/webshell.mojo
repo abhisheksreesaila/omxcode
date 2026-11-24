@@ -31,7 +31,8 @@ from mojoui.pagedesk import BoardTools, T_BOX, writing_view, give_way
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
-from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
+from mojoui.rowsaver import RowSaver
+from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
@@ -257,6 +258,17 @@ comptime WARM_NOTES = 12  # the newest pages and maps readied ahead
 comptime WARM_NOTE_BYTES = 65536
 
 
+@fieldwise_init
+struct Written(Copyable, Movable):
+    """A save being written on its thread: whose it is, what it holds (kept if it can't be written), the board's version and
+    page grid it was taken at."""
+    var id: Int
+    var content: String
+    var body: String
+    var version: Int
+    var grid: String
+
+
 struct WebShell(Movable):
     var db_path: String
     var notes: List[NoteRec]
@@ -310,6 +322,8 @@ struct WebShell(Movable):
     var db_id: String  # the notes file: its path's hash and its inode
     var snap_dir: String  # (D-7956) where each canvas's last view is kept ("": nowhere, MOJOUI_SNAP=0 or no folder)
     var dbs: List[Database]  # the open connection (one, kept)
+    var writer: RowSaver  # a save on its thread, and what it is of (none or one)
+    var written: List[Written]
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
     var save_state: String  # "" saved, else the island's error ("Couldn’t save")
     var save_detail: String
@@ -415,6 +429,8 @@ struct WebShell(Movable):
                 except:
                     pass
         self.dbs = List[Database]()
+        self.writer = RowSaver()
+        self.written = List[Written]()
         self.saver = SaveTimer(650)
         self.save_state = ""
         self.save_detail = ""
@@ -1378,6 +1394,7 @@ struct WebShell(Movable):
         """The held delete, for real."""
         if len(self.gone) == 0:
             return
+        self.land_save(True)
         var rec = self.gone.pop()
         var why = drop_note(self.dbs[0], rec.id)
         if why != "" and why != "gone":
@@ -1398,8 +1415,7 @@ struct WebShell(Movable):
     def save_copy(mut self):
         """Edits another app's save stands in the way of, saved as a note of their own; the note itself is then what the
         other app saved."""
-        if self.saver.pending():  # (what was typed since the last try: into what is held)
-            self.flush()
+        self.flush()  # (what was typed since the last try: into what is held)
         var at = self.outbox.find(self.current)
         var i = self.note_index(self.current)
         if at < 0 or i < 0 or len(self.dbs) == 0:
@@ -1443,7 +1459,7 @@ struct WebShell(Movable):
     def refresh(mut self) -> Bool:
         """What another app did to the notes file since (its change feed's sequence moved on): the list read again; the
         open note, when its row moved on and nothing here is unsaved, opened again. True when the screen changes."""
-        if len(self.dbs) == 0:
+        if len(self.dbs) == 0 or self.saving():  # (a save of ours in flight: its outcome first, or it would look like another's)
             return False
         try:
             var seq = self.dbs[0].count("SELECT sequence FROM workspace_state WHERE id = 1")
@@ -1711,7 +1727,11 @@ struct WebShell(Movable):
 
     def waiting(self) -> Bool:
         """Something has to happen later without input: a save, a toast to go (App.every)."""
-        return self.saver.pending() or self.toast != ""
+        return self.saver.pending() or self.saving() or self.toast != ""
+
+    def saving(self) -> Bool:
+        """A save is being written on its thread."""
+        return len(self.written) > 0
 
     def save_page(mut self):
         """An edit on the open page: saved later, as the web does (queueSave: 650 ms after the last edit)."""
@@ -1730,10 +1750,13 @@ struct WebShell(Movable):
         if self.toast != "" and clock_us() > self.toast_until:
             self.hide_toast()
             return True
+        var before = self.save_state
+        if self.saving():
+            self.land_save(False)
+            return self.save_state != before
         if not self.saver.due(clock_us()):
             return False
-        var before = self.save_state
-        self.flush()
+        self.save_later()
         return self.save_state != before
 
     def close(mut self):
@@ -1755,21 +1778,72 @@ struct WebShell(Movable):
                 self.save_map()
 
     def flush(mut self):
-        """Writes the pending save now (a due timer, another note opening, the app closing)."""
+        """Writes the pending save now (another note opening, the app closing), after one still on its thread."""
+        self.land_save(True)
         if not self.saver.pending():
             return
+        var i = self.save_from()
+        if i < 0:
+            return
+        var content = String("")
+        var body = String("")
+        if not self.document(i, content, body):
+            return
+        var kind = self.notes[i].kind
+        if self.save_note(i, content, body) and kind == "canvas":
+            self.board.edit().mark_saved()
+            self.content_hash = text_hash(content)
+            self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
+
+    def save_later(mut self):
+        """The pending save (a due timer), its row written on a thread of its own: a big note's commit is several frames long
+        (mojoui.rowsaver). land_save() takes the outcome."""
+        var i = self.save_from()
+        if i < 0:
+            return
+        var content = String("")
+        var body = String("")
+        if not self.document(i, content, body) or len(self.dbs) == 0:
+            return
+        var version = self.board.edit().version if self.notes[i].kind == "canvas" else 0
+        self.written.append(Written(self.notes[i].id, content, body, version, grid_note(self.cols, self.rows)))
+        self.writer.start(self.db_path, self.row_save(i, content, body))
+
+    def land_save(mut self, wait: Bool):
+        """The outcome of the save on its thread, when it has ended (wait: blocks until it has)."""
+        if len(self.written) == 0:
+            return
+        var got = self.writer.done(wait)
+        if not got:
+            return
+        var w = self.written.pop()
+        var i = self.note_index(w.id)
+        if i < 0:  # (not in the list any more)
+            return
+        var r = got.value().result.copy()
+        self.saved_note(i, r, w.content, w.body)
+        if r.status == SAVED and self.notes[self.note_index(w.id)].kind == "canvas" and self.current == w.id:
+            self.board.edit().mark_saved_at(w.version)  # (edits since are the next save's)
+            self.content_hash = got.value().hash
+            self.look.keep_note = w.grid + ";" + String(self.content_hash)
+
+    def save_from(mut self) -> Int:
+        """The note the pending save is of, when it may be saved (-1: not), the pending save taken."""
         self.saver.done()
         var kind = self.save_kind
         self.save_kind = ""
         self.settle_open()
         var i = self.note_index(self.current)
         if i < 0 or self.notes[i].kind != kind or self.notes[i].secure:
-            return
+            return -1
         if not self.doc.may_save(self.current, self.notes[i].revision):  # (never a screen that isn't this row's document, read whole)
             print("PNOTE SAVE: refused (note " + String(self.current) + " isn't open and read)", flush=True)
-            return
-        var content = String("")
-        var body = String("")
+            return -1
+        return i
+
+    def document(mut self, i: Int, mut content: String, mut body: String) -> Bool:
+        """The open note as it would be saved, and its words for the search index."""
+        var kind = self.notes[i].kind
         try:
             if kind == "page":
                 content = self.page.page_json(self.page_src)
@@ -1785,11 +1859,8 @@ struct WebShell(Movable):
             self.save_state = "Couldn’t save"
             self.save_detail = String(e)
             print("PNOTE SAVE: failed note " + String(self.current) + ": " + String(e), flush=True)
-            return
-        if self.save_note(i, content, body) and kind == "canvas":
-            self.board.edit().mark_saved()
-            self.content_hash = text_hash(content)
-            self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
+            return False
+        return True
 
     def retry_save(mut self):
         """The island's Retry: the held edits of the open note, again."""
@@ -1811,6 +1882,13 @@ struct WebShell(Movable):
         if self.notes[i].secure or len(self.dbs) == 0:
             print("PNOTE SAVE: refused (secure note " + String(id) + ")", flush=True)
             return False
+        var r = save_row(self.dbs[0], self.row_save(i, content, body))
+        self.saved_note(i, r, content, body)
+        return r.status == SAVED
+
+    def row_save(self, i: Int, content: String, body: String) -> RowSave:
+        """The transaction that saves a note's new content (save_note, or RowSaver on its thread)."""
+        var id = self.notes[i].id
         var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
         s.set("content", text_arg(content))
         s.stamp("updated_at")
@@ -1825,16 +1903,20 @@ struct WebShell(Movable):
                    [int_arg(id), text_arg(content)])
             s.then("UPDATE mindmap_reminders SET label = COALESCE((SELECT substr(trim(COALESCE(json_extract(value, '$.text'), ''), ' ' || char(9, 10, 13)), 1, 200) FROM json_each(?2, '$.nodes') WHERE json_extract(value, '$.id') = mindmap_reminders.node_id), label) WHERE note_id = ?1",
                    [int_arg(id), text_arg(content)])
-        var r = save_row(self.dbs[0], s)
+        return s^
+
+    def saved_note(mut self, i: Int, r: SaveResult, content: String, body: String):
+        """What a save came to: the note's record and outbox."""
+        var id = self.notes[i].id
         if r.status == SAVED:
-            self.doc.saved(r.revision)
+            if id == self.current:
+                self.doc.saved(r.revision)
             self.outbox.drop(id)
             self.notes[i].bytes = content.byte_length()
         else:
             if not self.outbox.put(Unsaved(id, self.notes[i].kind, self.notes[i].revision, content, body, r.message, r.status == CONFLICT)):
                 print("PNOTE SAVE: the edits of note " + String(id) + " are held in memory only", flush=True)
         self.landed(i, r.status, r.revision, r.value, r.message)
-        return r.status == SAVED
 
     def landed(mut self, i: Int, status: Int, revision: Int, stamp: String, message: String):
         """A save's outcome: saved → this copy takes the new revision and time and goes to the top; a conflict or a

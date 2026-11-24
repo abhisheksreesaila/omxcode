@@ -2028,6 +2028,10 @@ struct ObjectLayer(Movable):
     def mark_saved(mut self):
         self.saved_version = self.version
 
+    def mark_saved_at(mut self, version: Int):
+        """What it was at `version` is saved (a save that ran meanwhile): edits made since are still unsaved."""
+        self.saved_version = version
+
     def adopt(mut self, var o: Obj) -> Int:
         """An object as it is (an importer's): a new id and the top z, no undo step."""
         o.id = self.next_id
