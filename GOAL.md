@@ -1,42 +1,37 @@
-# GOAL 80: the best 2D renderer, by borrowing what the best do (not by tuning for a benchmark)
+# GOAL 81: an app layer that never loses, repeats or stalls (what the GPUI study found)
 
-**End goal (owner, 2026-11-22):** "Borrow the best practices, or the ones we lack (but should have considered), not
-overfit to beat them. I want to be best, and performant." The rivals are nanoui (Zig, GPUI-style; raced with its own
-`hillclimb` scenes) and through it GPUI. The first race (`bench/nanoui/RESULTS.md`, 445fa148): ahead on shapes, 2–8×
-behind on text-heavy CPU work, no clip culling, no Gaussian shadow, a single-threaded CPU fallback.
+**End goal (owner, 2026-11-23):** the study's "real quality" and "moderate" rows; "skip the marginal and unproven and
+none". Why: omxcode draws fast, but a list that stops updating or a lost click reads as a broken framework.
+Study: docs/research/gpui.md (faults F1–F4, F6, F9; borrow list B7, C10, C12, A4).
 
-Base: goal-79-pnote-lookalike 3686e45b (goal 75's gpu2d + goal 79's fonttext). Worktree ../mojo-ui-bench, branch
-bench-nanoui. Decisions D-80xx in docs/decisions.md, attempts in docs/journal.md.
-Checker: `scripts/check` → `docs/goals/80-check.py` (PASS / FAIL / BLOCKED per milestone, `scripts/check M2` runs one).
+Base: bench-nanoui 2571778d. Worktree ../mojo-ui-bench, branch goal-81-quality. Decisions D-81xx in docs/decisions.md,
+attempts in docs/journal.md. Checker: `scripts/check` → docs/goals/81-check.py (PASS / FAIL / BLOCKED per milestone).
 
 ## Milestones
-| # | Milestone | Proof (docs/goals/80-check.py) |
+| # | Milestone | Proof (docs/goals/81-check.py) |
 |---|---|---|
-| M0 | The race, reproducible, plus held-out scenes | The checker builds nanoui at `cfe6000` (+ `bench/nanoui/nanoui-gl.patch`, Zig 0.17.0 fetched into build/g80) and `bench/nanoui/scenes.mojo`, runs nanoui's five scenes on both (headless GL, same GPU, nanoui's rules) and writes `docs/goals/80/race.md`. **Held-out scenes**, ours, never nanoui's: whiteboard (goal 75), Personal Note's 645-object canvas, a 200-node mind map, a long document page (wrapped paragraphs in several faces and scripts), a 10 000-row table scrolled. `docs/goals/80/baseline.json` holds every scene's omxcode numbers at the base commit, written once and committed before any renderer change. PASS: both run, every scene's last frame is saved and inked, baseline committed |
-| M1 | Draw only what can show | `fill_batches` drops ops wholly outside their clip ∩ the canvas **before shaping text**. tests/test_gpu2d_cull: (a) the CPU executor's picture with culling equals the picture without, bit for bit, on goal 75's scenes and 200 random clipped/transformed scenes; (b) no built instance lies wholly outside its clip ∩ canvas; (c) a 1000-row clipped column builds exactly the instances of a scene holding only the rows that meet the clip (an oracle built by the test); `gpu2d cull: ok` |
-| M2 | Text as cheap as a lookup | (a) a run cache keyed by numbers (style id, text hash), no String key built and no Run copied on a hit; (b) a simple-text fast path: per face and size, each printable ASCII glyph's id and advance and each pair's kerning, learned once from the full shaper; strings with a ligature or anything outside it go to the full shaper. tests/test_textfast: ≥ 2 000 strings × every bundled face × 4 sizes × 2 weights: fast path and full shaper give the same glyph ids, positions within 1/64 px, same width; `textfast: ok` |
-| M3 | No per-frame waste on the GPU | GL2D counts texture uploads, buffer (re)allocations and render-target allocations per frame. tests/test_gpu2d_waste: the same scene drawn twice uploads no texture and allocates nothing on the second frame; a scene with one new glyph uploads only that glyph's rows; instance data goes up once per frame (one buffer, orphaned or persistently mapped). `docs/goals/80/race.md` shows each scene's GPU time split (upload, draw, resolve) with GL timer queries; `gpu2d waste: ok` |
-| M4 | Gaussian shadows | `Painter.shadow(x, y, w, h, radius, blur, color)` on every painter; drawn on the GPU (GL and Metal) and by the CPU executor with GPUI's analytic formula (exact erf across, sampled along). tests/test_gpu2d_shadow: the CPU picture within 1 level (mean) of brute-force 2-D Gaussian convolution of the rounded box; GL within goal 75's bounds of the CPU (mean ≤ 1.5 levels, ≤ 0.5 % far) for blurs 0–32, radii 0–24, overlapping, clipped and in scaled layers (the Metal half is proven in M7). The race's boxes and dashboard then use real shadows. Components matrix regenerated |
-| M5 | A CPU fallback that uses the machine | `execute_cpu` splits the frame into bands across cores. On every goal 75 scene and every race scene, the threaded picture equals the single-threaded one bit for bit; median speed-up ≥ 4× over the race scenes at 1800×1280 on this 12-core machine |
-| M6 | The race, won honestly (Linux) | For each of nanoui's five scenes: omxcode's frame CPU median and p95, GPU median and p95, and CPU-fallback median each **≤ nanoui's**. **Not overfit:** every held-out scene ≤ 1.05× its baseline on frame CPU and GPU; `mojoui/` names no race scene or rival (`grep -iE 'nanoui|hillclimb|boxes|dashboard'` finds nothing new); test_gpu2d, test_gpu2d_gl, test_gpu2d_tiles and goal 75's M2–M6 still PASS |
-| M7 | The race on the M4 (Metal) | Same as M6 on the owner's M4: nanoui's own hillclimb (Metal, its home ground) against `scenes.mojo` on gpu2d's Metal backend, timed the same way; test_gpu2d_metal passes, and Metal draws test_gpu2d_shadow's cases within the same bounds of the CPU. BLOCKED (with the SSH error) while the Mac can't be reached |
+| M1 | Patched screen = fresh screen, tested at random | tests/test_diff_random: ≥ 5,000 random pairs of screens (seeded; every container kind; inserts, removals, moves, texts, sizes, tags). A model host that applies a Diff exactly as the hosts do (kept, resync, patches) must equal a fresh build, and no widget may be used twice. A mutant (one patch dropped, one resync dropped) must be caught. tests/test_gtk_random: a headless GTK app steps through ≥ 300 random screens by partial updates; after each, the widget tree's dump equals the dump after a full rebuild of the same screen |
+| M2 | Long lists compare fast and keep their widgets | tests/test_diff_long: adding a row on top of 600, 2,000 and 10,000 tagged rows keeps every old row's widgets; an unchanged 499-row list compares ≤ 0.25 ms and 10,000 rows grow no worse than linearly (≤ 1.5× per row of 500 rows, medians); on 2,000 random lists under 60 children the pairs kept are as many as the old table's (exact longest common run) |
+| M3 | Two long lists both keep updating | tests/test_gtk_lists: two LazyLists, one scrolled to 500, "Flip" then "Again": every visible row of both shows the newest words, read from the widgets (labels), not the screenshot; the scroll positions stay; a third run with three lists and one removed and added back. Fails on the base commit (recorded) |
+| M4 | No lost input | tests/test_gtk_input: clicks, keys, scrolls and field edits arriving while a partial or full rebuild waits (two in one turn, 200 random bursts) each reach update() exactly once, in order, unless their view is gone from the new screen; events fired by the host's own widget writes never do. Fails on the base commit (recorded) |
+| M5 | A hang monitor, always on | Every host run (Linux, Mac) keeps a ring of what its UI thread is doing; a watcher thread says so **while** it hangs (over 500 ms: what, which message, how long) and again when it ends; hangs.log in the app's state folder, at most 200 lines kept. tests/test_hang: a 1.2 s update() is reported during the hang and after it with its message; a 100 ms one isn't; ≤ 1 µs per event marked (measured); nothing personal in the line (no text typed, no paths). `MOJOUI_HANGS=0` turns it off |
+| M6 | A new letter on the Mac sends only itself | tests/test_gpu2d_metal_glyphs (on the M4): one new glyph uploads ≤ its own rows (counted by Metal2D), not every used row; 100 random frames with new glyphs equal the CPU reference within goal 80's bound; test_gpu2d_metal, test_gpu2d_metal_clear still pass. BLOCKED only while the Mac can't be reached |
+| M7 | The Mac draws at its screen's rate | Frames are paced by the display's own clock (display link; the 60 Hz timer stays as the fallback when no link tick comes for 100 ms, D-560), and stop when the window is hidden or covered. On the M4: ticks/s during an animation within 3 % of `NSScreen.maximumFramesPerSecond`; 0 ticks over 2 s hidden; idle 0 ticks. BLOCKED only while the Mac can't be reached or its screen is locked |
+| M8 | Pictures smooth and not copied | Pictures scaled down or up are filtered (bilinear, with a mip chain below half size) on GL, Metal and the CPU executor, within 2 levels mean of a box-filter oracle at 0.25×, 0.5×, 0.8×, 1.7×; unscaled ones stay bit for bit. A rebuilt frame with an unchanged 1920×1080 picture copies and hashes none of its pixels (counted) and uploads none. tests/test_gpu2d_image (+ _metal) |
+| M9 | Nothing got slower or broke | Goal 80's held-out scenes ≤ 1.05× of 2571778d (D-8030's method), goal 80's tests and the M1–M4 tests pass, pnote and omxplorer build on Linux and their existing GTK tests pass, AppKit examples build and run on the Mac, components matrix current |
 
 ## Done means
-80-check PASS for M0–M6, M7 PASS or BLOCKED only for reachability; a fresh reviewer passes it; `docs/goals/80-report.md`
-with the race table (before and after), the held-out table and the decisions worth a second look; EXPERIMENTS.md entry.
+81-check PASS for M1–M9 (M6, M7 and the Mac half of M8 BLOCKED only for reachability), a fresh reviewer passes it, docs/goals/81-report.md (short), EXPERIMENTS.md entry.
 Commit after each passing milestone. Never push; merging waits for the owner.
 
 ## Out of bounds
-Pushing; scene-specific code (anything in `mojoui/` that knows a benchmark scene); lowering a bar, editing a proof to
-pass, deleting a test, or changing nanoui beyond the GL timing patch; other worktrees (`../mojo-ui-g79` has someone's
-uncommitted work, `../mojo-ui-apple-test` is frozen); pip; global settings (NVIDIA driver, Hyprland, macOS `defaults`);
-nested compositors. Mac: only a scratch folder in the owner's home over SSH (Zig there in a folder, nothing system-wide).
+Text spacing, contrast, snapped borders (unproven, owner skipped); drawing-speed tricks and layout/state systems (marginal,
+none); keeping widgets across shape changes on Mac/iPhone/Android/web (F5), F7, F8: not chosen. Pushing; lowering a bar,
+editing a proof to pass, deleting a test; other worktrees; pip; global settings. Mac: `~/omxcode-g81` only, batches under
+`flock ~/.cache/omx-mac.lock`. Machine: it hard-stopped three times on 11-23, each with another project's model job running:
+builds on ≤ 4 cores (`taskset`, `nice`), no GPU run while another process holds > 4 GB of a GPU or an omx-*/speed_study/llama job runs.
 
 ## Assumptions (instead of asking)
-- "Best" is measured on the rival's own scenes, by its own rules, on the same machine; "not overfit" is measured by
-  held-out scenes from our apps that must not regress, and by fixes that live in the framework, not the bench.
-- nanoui's frame CPU includes its flexbox layout and ours doesn't (no layout engine, ROADMAP decision 10); we race
-  anyway and say so in the report. Adding a layout engine is not in this goal.
-- Shadows match GPUI's look (Evan Wallace's analytic rounded-box shadow), which nanoui also uses.
-- Linux first (RTX 3090, headless EGL); the M4 when reachable.
-- Budget: 250 turns. Two failures on one approach → stop, attack the premise, log the pivot.
+- "Plan real quality and moderate" = go for those rows, skip the rest.
+- M4's lost input and M3's lists are GTK faults; the Mac rebuilds whole screens synchronously, so its input isn't held.
+- Budget: 80 turns.
