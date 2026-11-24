@@ -606,6 +606,6 @@ def serialize(j: Json, node: Int) -> String:
     if k == J_OBJECT:
         var out = String("{")
         for i in range(j.size(node)):
-            out += (", " if i > 0 else "") + json_string(j.keys[node][i]) + ": " + serialize(j, j.at(node, i))
+            out += (", " if i > 0 else "") + json_string(j.key(node, i)) + ": " + serialize(j, j.at(node, i))
         return out + "}"
     return "true" if j.flag(node) else "false"

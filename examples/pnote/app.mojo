@@ -896,7 +896,7 @@ struct Main(App):
 
     # ------------------------------------------------ view
 
-    def bench(mut self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+    def bench_step(mut self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
         """Benchmark hooks (goal 79's race, the GTK framebench): where to drag one object or 40 (selected here), a history
         for undoredo, and a fresh open of the note for open. Points on the note's canvas. The web look: switch (the
         next note), omnibar (open/close), openall (a note of each kind in turn)."""

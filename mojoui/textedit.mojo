@@ -244,13 +244,13 @@ struct TextChange(Undoable):
         self.caret_before = caret_before
         self.caret_after = caret_after
 
-    def __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.start = other.start
-        self.removed = other.removed
-        self.inserted = other.inserted
-        self.caret_before = other.caret_before
-        self.caret_after = other.caret_after
+    def __init__(out self, *, copy: Self):
+        self.kind = copy.kind
+        self.start = copy.start
+        self.removed = copy.removed
+        self.inserted = copy.inserted
+        self.caret_before = copy.caret_before
+        self.caret_after = copy.caret_after
 
     def merge(mut self, later: Self) -> Bool:
         if later.kind != self.kind:

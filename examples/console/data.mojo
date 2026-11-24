@@ -173,7 +173,7 @@ def read_metrics(text: String, mut st: Store) raises:
     for k in range(j.size(by)):
         var b = j.at(by, k)
         var req = j.get(b, "requests")
-        out.append(ByModel(j.keys[by][k], j.number(req) if j.kind(req) == J_NUMBER else -1, real_or(j, j.get(b, "ttft_p50_ms"), -1),
+        out.append(ByModel(j.key(by, k), j.number(req) if j.kind(req) == J_NUMBER else -1, real_or(j, j.get(b, "ttft_p50_ms"), -1),
                            real_or(j, j.get(b, "decode_tps_p50"), -1)))
     st.by_model = out^
     var gpus = j.get(0, "gpus")
@@ -197,7 +197,7 @@ def read_series(text: String, mut st: Store) raises:
             var v = j.get(j.at(b, i), "decode_tps_p50")
             if j.kind(v) == J_NUMBER:
                 pts.append(j.real(v))
-        out.append(Series(j.keys[models][k], pts^))
+        out.append(Series(j.key(models, k), pts^))
     st.series = out^
 
 

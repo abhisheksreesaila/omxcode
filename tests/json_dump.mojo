@@ -29,7 +29,7 @@ def dump(j: Json, node: Int, path: String):
     if k == J_OBJECT:
         print(path + "\tobj " + String(j.size(node)))
         for i in range(j.size(node)):
-            dump(j, j.at(node, i), path + "." + hex_of(j.keys[node][i]))
+            dump(j, j.at(node, i), path + "." + hex_of(j.key(node, i)))
     elif k == J_ARRAY:
         print(path + "\tarr " + String(j.size(node)))
         for i in range(j.size(node)):

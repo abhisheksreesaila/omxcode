@@ -124,7 +124,7 @@ def search_json(q: String, home: String) raises -> String:
     if catalog_text != "":
         var cat = Json.parse(catalog_text)
         for a in range(cat.size(0)):
-            var name = cat.keys[0][a]
+            var name = cat.key(0, a)
             cat_names.append(name)
             var ids = cat.get(cat.at(0, a), "example_repo_ids")
             for k in range(cat.size(ids)):
@@ -143,7 +143,7 @@ def search_json(q: String, home: String) raises -> String:
         sort(order)
         for name in order:
             for a in range(cat.size(0)):
-                if cat.keys[0][a] != name:
+                if cat.key(0, a) != name:
                     continue
                 var ids = cat.get(cat.at(0, a), "example_repo_ids")
                 for k in range(cat.size(ids)):

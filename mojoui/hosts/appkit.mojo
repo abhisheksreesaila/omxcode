@@ -4255,7 +4255,7 @@ def print_bench_state[A: App](host_addr: Int, what: String):
 
 
 def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
-    """noteswitch:N / omnibar:N / openall: as GTK's (D-7988): App.bench(first canvas, "bench:<what>") changes the app's
+    """noteswitch:N / omnibar:N / openall: as GTK's (D-7988): App.bench_step(first canvas, "bench:<what>") changes the app's
     state N times; each is timed from the call through its frame: the app's step and view, the canvas drawn as the tick
     draws it, AppKit's display and commit, and the GPU's time on it. Prints `<LABEL>: n= p50= p95= max=` (ms)."""
     var host = host_at[A](host_addr)
@@ -4273,7 +4273,7 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
             var frames0 = host[].g2d_frames
             var t0 = Int(now_ns())
             host[].input_activity(host_addr)
-            _ = host[].rt.app.bench(host[].rt.shown.nodes[host[].canvases[0].node].style, "bench:" + what)
+            _ = host[].rt.app.bench_step(host[].rt.shown.nodes[host[].canvases[0].node].style, "bench:" + what)
             var d = host[].rt.refresh()
             host[].apply(d, host_addr)
             host[].wake()
@@ -4291,7 +4291,7 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
         var node = host[].canvases[0].node
         var t0 = Int(now_ns())
         host[].input_activity(host_addr)  # (the click or key the step stands for)
-        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        _ = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:" + what)
         var d = host[].rt.refresh()
         host[].apply(d, host_addr)
         var ev = Float64(Int(now_ns()) - t0) / 1e6
@@ -4596,7 +4596,7 @@ def bench_gesture[A: App](host_addr: Int, node: Int, k: Int, what: String, i: In
         host[].canvas_key(node, "z", 2 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 3, host_addr)
     elif what == "open" or what == "openpress":  # (the app reopens the note, cold: its first frame is this frame's)
         host[].input_activity(host_addr)  # (the click the open stands for)
-        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
+        _ = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:reopen")
         var dro = host[].rt.refresh()
         host[].apply(dro, host_addr)
     elif what == "type" or what == "grow":
@@ -4637,7 +4637,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
     var y = h * 0.3
     var drag_x0 = x
     var drag_y0 = y
-    var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
+    var sp = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
     var d0 = host[].rt.refresh()
     host[].apply(d0, host_addr)
     bench_settle[A](host_addr, 500_000_000)
@@ -4731,7 +4731,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
                     gaps.append(Float64(host[].drew_tick_ns - tick_seen) / 1e6)
                     tick_seen = host[].drew_tick_ns
                 if what == "openpress" and not pressed:
-                    var at = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:openspot")
+                    var at = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:openspot")
                     if at[0] >= 0:
                         pressed = True
                         press_ns = Int(now_ns())
@@ -4743,7 +4743,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
                 if press_ns > 0 and host[].g2d_frames != press_frames and len(host[].g2d_shown_ms) > press_shown:
                     press_lats.append(Float64(Int(now_ns()) - press_ns) / 1e6)
                     press_ns = 0
-                if done_shown < 0 and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
+                if done_shown < 0 and host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
                     done_shown = len(host[].g2d_shown_ms) + len(host[].g2d_pk)
                     done_frames = host[].g2d_frames
                     if len(gaps) == 0 and len(host[].g2d_pk) == 0:
@@ -4836,17 +4836,17 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var diag = List[String]()  # (per frame: event, paint, layout, slept, wall: FRAMES)
     var g2d_at = List[Int]()  # (per frame: which gpu2d frame of this step it is, -1: none)
     var walls = List[Float64]()  # (each frame's wall time, the GPU waits included)  # (per GPU frame: layers rebuilt/kept/grown, polygon groups)
-    # (D-7984) the app readies the step first, as on GTK (a tool, a text box: App.bench "bench:<what>"), and for Personal
+    # (D-7984) the app readies the step first, as on GTK (a tool, a text box: App.bench_step "bench:<what>"), and for Personal
     # Note's own steps says where (an object to drag, the lead of 40 it selected) or prepares them (a history, a reopen)
     var drag_x0 = x
     var drag_y0 = y
     if what == "pan" or what == "zoom" or what == "draw" or what == "type" or what == "finish":
-        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
+        _ = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:" + what)
         var d0 = host[].rt.refresh()
         host[].apply(d0, host_addr)
         bench_settle[A](host_addr, 300_000_000)
     if what == "dragone" or what == "drag40" or what == "undoredo" or what == "open" or what == "openpress" or what == "undo" or what == "redo":
-        var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
+        var sp = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
         var d0 = host[].rt.refresh()
         host[].apply(d0, host_addr)
         bench_settle[A](host_addr, 500_000_000)
@@ -4986,7 +4986,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 var press_ev = 0.0
                 var is_press = False
                 if what == "openpress" and not pressed:  # (a press where the partial board shows an object: an edit during the open)
-                    var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:openspot")
+                    var sp = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:openspot")
                     if sp[0] >= 0:
                         pressed = True
                         is_press = True
@@ -4994,7 +4994,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                         host[].canvas_send(node, PRESS, sp[0], sp[1], 0, 0, 1, host_addr)
                         host[].canvas_send(node, RELEASE, sp[0], sp[1], 0, 0, 1, host_addr)
                         press_ev = Float64(Int(now_ns()) - tp) / 1e6
-                if not is_press and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
+                if not is_press and host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
                     break
                 var work = open_tail_frame[A](host_addr, tag)
                 last_done = Int(now_ns())
@@ -5610,26 +5610,26 @@ def run_step[A: App](host_addr: Int, step: String):
                 host[].canvas_send(node, ZOOM, b.width / 2, b.height / 2, 0, 0, 2.0 ** (-dy / 4.0), host_addr)
     elif verb == "firstscreen":  # firstscreen: the process's age when its first canvas picture was drawn and shown (as GTK's, D-7988)
         print("FIRSTSCREEN: " + String(round(host[].first_draw_age_ms, 1)), flush=True)
-    elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its drawn frame
+    elif verb == "noteswitch":  # noteswitch:N: App.bench_step("bench:switch") N times, each to its drawn frame
         host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "NOTESWITCH", "switch", max(to_int(rest), 1))
         host_at[A](host_addr)[].report.measure(False)
-    elif verb == "omnibar":  # omnibar:N: App.bench("bench:omnibar") N times, each to its drawn frame
+    elif verb == "omnibar":  # omnibar:N: App.bench_step("bench:omnibar") N times, each to its drawn frame
         host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "OMNIBAR", "omnibar", max(to_int(rest), 1))
         host_at[A](host_addr)[].report.measure(False)
-    elif verb == "openall":  # openall: App.bench("bench:openall") (a note of each kind in turn), to the frame
+    elif verb == "openall":  # openall: App.bench_step("bench:openall") (a note of each kind in turn), to the frame
         host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "OPENALL", "openall", 3)
         host_at[A](host_addr)[].report.measure(False)
     elif verb == "rss":  # rss: this process's resident memory (MB), as the kernel reports it (proc_pidinfo)
         print("RSS: " + String(round(rss_mb(), 1)), flush=True)
-    elif verb == "appbench":  # appbench:K=<name>: the app readies a bench step on canvas K (App.bench "bench:<name>"), untimed, as GTK's (D-7984)
+    elif verb == "appbench":  # appbench:K=<name>: the app readies a bench step on canvas K (App.bench_step "bench:<name>"), untimed, as GTK's (D-7984)
         var node = canvas_node_at(host[], kv[0])
         if node < 0:
             host[].report.note("TEST: no canvas " + kv[0])
             return
-        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + kv[1])
+        _ = host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:" + kv[1])
         var d = host[].rt.refresh()
         host[].apply(d, host_addr)
         bench_settle[A](host_addr, 500_000_000)

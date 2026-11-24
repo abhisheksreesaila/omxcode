@@ -73,7 +73,7 @@ def safetensors_total(folder: String) -> Int:
                     n |= Int(head[i]) << (8 * i)
                 var meta = Json.parse(String(unsafe_from_utf8=f.read_bytes(n)))
                 for k in range(meta.size(0)):
-                    if meta.keys[0][k] == "__metadata__":
+                    if meta.key(0, k) == "__metadata__":
                         continue
                     var shape = meta.get(meta.at(0, k), "shape")
                     var count = 1
