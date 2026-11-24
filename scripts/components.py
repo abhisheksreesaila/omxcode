@@ -214,6 +214,7 @@ COMPOSITES = [
     ("Keycaps (a shortcut as the platform writes it)", "mojoui/keycaps.mojo", [], "keycap("),
     ("Graphemes (where a caret may stand: whole characters, in every field)", "mojoui/graphemes.mojo", [], "typed_text("),
     ("Page ink (a page's marks: anchored to words, followed through edits, saved as they were read)", "mojoui/pageink.mojo", ["Canvas"], "load_ink("),
+    ("Markdown inline styles (which bytes of a line are marks, bold, slanted, struck, code, links, addresses; CommonMark and GFM)", "mojoui/mdinline.mojo", [], "PageSheet("),
     ("Words edited in place (one box's words: caret, selection, copy, undo, an input method, shown lines)", "mojoui/wordsedit.mojo", ["Canvas", "Canvas: keys (focus on press)"], "BoardTools("),
     ("Properties card (where a document is filed, with a menu; facts; a danger button) and toast", "mojoui/notesshell.mojo", ["Canvas"], "PropsCard("),
     ("Dock flyout, colours and widths", "mojoui/notesshell.mojo", ["Canvas"], "draw_dock_flyout("),

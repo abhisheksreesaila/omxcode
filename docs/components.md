@@ -217,6 +217,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Keycaps (a shortcut as the platform writes it)` | `mojoui/keycaps.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Graphemes (where a caret may stand: whole characters, in every field)` | `mojoui/graphemes.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Page ink (a page's marks: anchored to words, followed through edits, saved as they were read)` | `mojoui/pageink.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Markdown inline styles (which bytes of a line are marks, bold, slanted, struck, code, links, addresses; CommonMark and GFM)` | `mojoui/mdinline.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Words edited in place (one box's words: caret, selection, copy, undo, an input method, shown lines)` | `mojoui/wordsedit.mojo` | Canvas, Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ | pnote |
 | `Properties card (where a document is filed, with a menu; facts; a danger button) and toast` | `mojoui/notesshell.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Dock flyout, colours and widths` | `mojoui/notesshell.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -313,12 +314,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 224 | 11 | 0 |
-| Web | 174 | 44 | 17 |
-| Android | 19 | 94 | 122 |
-| Mac (AppKit) | 9 | 199 | 27 |
-| iPhone (UIKit) | 0 | 165 | 70 |
-| Agent (MCP) | 66 | 72 | 97 |
+| Linux (GTK) | 225 | 11 | 0 |
+| Web | 174 | 45 | 17 |
+| Android | 19 | 95 | 122 |
+| Mac (AppKit) | 9 | 200 | 27 |
+| iPhone (UIKit) | 0 | 166 | 70 |
+| Agent (MCP) | 66 | 73 | 97 |
 
 ## Inside one app, not components yet (the debt)
 

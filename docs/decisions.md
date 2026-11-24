@@ -1939,3 +1939,6 @@ Positions were written back unchanged after an edit above them, so the web would
 
 ## D-8041: rect_corner on the Mac (goal 79, continuation 20; ours)
 tests/test_rectcorner_metal.mojo holds Metal to what test_rectcorner holds GL to: 60 cases pixel-exact on the M4 (01:53, 11-24); test_gpu2d_metal passes too. On by default there now (D-8021 had it off). Its effect on the Mac's frame times is not measured (screen locked).
+
+## D-8042: a page's Markdown is styled by the web's own rules (ours)
+`mojoui.mdinline` is held to Personal Note's parser (@lezer/markdown with GFM, run from its node_modules on our lines): 19 lines in test_mdinline, and a one-off 600 random lines (565 the same; the rest are bare addresses against marks, and long runs of `*`). Two things the fixture's page drew differently turned up and were checked in the reference picture before changing: a quote's `>` is the quote's colour (#6B6357 sampled) and inline code's ticks stand in the text face ("for the cottage" begins at 132 px, as with Literata's ticks; Geist Mono's put it at 134).

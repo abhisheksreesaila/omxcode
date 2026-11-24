@@ -16,6 +16,7 @@
 from std.time import perf_counter_ns
 from mojoui.graphemes import prev_grapheme, next_grapheme
 from mojoui.linebreak import browser_breaks
+from mojoui.mdinline import inline_flags, MARK, BOLD, ITALIC, STRIKE, CODE, LINK, URL
 from mojoui.textedit import TextEdit, Pos, SHIFT, CTRL, ALT, EDIT_OTHER, now_ms, decode_at, is_word_byte
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
@@ -879,104 +880,74 @@ struct PageSheet(Movable):
     def segments(self, line: String) -> List[Seg]:
         """A Markdown line as styled pieces (headings, list and quote marks, bold, italic, inline code)."""
         var out = List[Seg]()
-        var body = TextStyle(TEXT_FACE, 400, False, BODY)
         var lh = BODY * 1.65
         var b = line.as_bytes()
         var n = len(b)
-        # headings
+        var at = 0
+        var quote = False
+        while True:  # quotes: each > a mark, what follows muted and slanted
+            var k = at
+            while k < n and k < at + 4 and b[k] == 32:
+                k += 1
+            if k >= n or b[k] != 62 or k - at > 3:
+                break
+            quote = True
+            var qst = TextStyle(TEXT_FACE, 400, True, BODY)
+            if k > at:
+                out.append(Seg(String(line[byte=at:k]), qst, PAGE_MUTED, lh))
+            out.append(Seg(">", qst, PAGE_MUTED, lh))
+            at = k + 1
+        # a heading, a list's mark
+        var head = at
+        while head < n and head < at + 3 and b[head] == 32:
+            head += 1
         var hashes = 0
-        while hashes < n and b[hashes] == 35:
+        while head + hashes < n and b[head + hashes] == 35:
             hashes += 1
-        if hashes > 0 and hashes <= 6 and hashes < n and b[hashes] == 32:
-            var size = BODY * (1.9 if hashes == 1 else (1.4 if hashes == 2 else (1.15 if hashes == 3 else 1.0)))
-            var hst = TextStyle(DISPLAY_FACE, 700, False, size)
-            var hlh = size * 1.25 if hashes == 1 else size * 1.65
-            out.append(Seg(String(line[byte=0:hashes + 1]), hst, PAGE_MARKUP, hlh))
-            out.append(Seg(String(line[byte=hashes + 1:]), hst, PAGE_INK, hlh))
-            return out^
-        var i = 0
-        var base = body
-        var base_color = PAGE_INK
-        if n >= 2 and b[0] == 62 and b[1] == 32:  # quote
-            base = TextStyle(TEXT_FACE, 400, True, BODY)
-            base_color = PAGE_MUTED
-            out.append(Seg(">", base, PAGE_MARKUP, lh))
-            i = 1
-        elif n >= 2 and (b[0] == 45 or b[0] == 42) and b[1] == 32:  # bullet
-            out.append(Seg(String(line[byte=0:1]), body, PAGE_MARKUP, lh))
-            i = 1
-        else:
-            var d = 0
-            while d < n and b[d] >= 48 and b[d] <= 57:
-                d += 1
-            if d > 0 and d + 1 < n and b[d] == 46 and b[d + 1] == 32:
-                out.append(Seg(String(line[byte=0:d + 1]), body, PAGE_MARKUP, lh))
-                i = d + 1
-        # inline: **bold**, *italic*, `code`
-        var start = i
-        while i < n:
-            if b[i] == 42 and i + 1 < n and b[i + 1] == 42:
-                var close = line.find("**", i + 2)
-                if close > i + 2:
-                    if i > start:
-                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
-                    var bold = TextStyle(TEXT_FACE, 700, base.italic, BODY)
-                    out.append(Seg("**", bold, PAGE_MARKUP, lh))
-                    out.append(Seg(String(line[byte=i + 2:close]), bold, base_color, lh))
-                    out.append(Seg("**", bold, PAGE_MARKUP, lh))
-                    i = close + 2
-                    start = i
-                    continue
-            if b[i] == 42:
-                var close = line.find("*", i + 1)
-                if close > i + 1:
-                    if i > start:
-                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
-                    var it = TextStyle(TEXT_FACE, base.weight, True, BODY)
-                    out.append(Seg("*", it, PAGE_MARKUP, lh))
-                    out.append(Seg(String(line[byte=i + 1:close]), it, base_color, lh))
-                    out.append(Seg("*", it, PAGE_MARKUP, lh))
-                    i = close + 1
-                    start = i
-                    continue
-            if b[i] == 126 and i + 1 < n and b[i + 1] == 126:  # ~~struck~~
-                var close = line.find("~~", i + 2)
-                if close > i + 2:
-                    if i > start:
-                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
-                    out.append(Seg("~~", base, PAGE_MARKUP, lh, True))
-                    out.append(Seg(String(line[byte=i + 2:close]), base, base_color, lh, True))
-                    out.append(Seg("~~", base, PAGE_MARKUP, lh, True))
-                    i = close + 2
-                    start = i
-                    continue
-            if b[i] == 91:  # [words](address)
-                var close = line.find("](", i + 1)
-                var end = line.find(")", close + 2) if close > i else -1
-                if close > i and end > close:
-                    if i > start:
-                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
-                    out.append(Seg("[", base, PAGE_MARKUP, lh))
-                    out.append(Seg(String(line[byte=i + 1:close]), base, PAGE_ACCENT, lh))
-                    out.append(Seg(String(line[byte=close:end + 1]), base, PAGE_MARKUP, lh))
-                    i = end + 1
-                    start = i
-                    continue
-            if b[i] == 96:
-                var close = line.find("`", i + 1)
-                if close > i:
-                    if i > start:
-                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
-                    var mono = TextStyle(MONO_FACE, 400, False, BODY * 0.9)
-                    out.append(Seg("`", mono, PAGE_MARKUP, lh))
-                    out.append(Seg(String(line[byte=i + 1:close]), mono, base_color, lh))
-                    out.append(Seg("`", mono, PAGE_MARKUP, lh))
-                    i = close + 1
-                    start = i
-                    continue
-            i += 1
-        if start < n:
-            out.append(Seg(String(line[byte=start:n]), base, base_color, lh))
+        var face = String(TEXT_FACE)
+        var weight = 400
+        var size = BODY
+        if hashes > 0 and hashes <= 6 and (head + hashes == n or b[head + hashes] == 32):
+            size = BODY * (1.9 if hashes == 1 else (1.4 if hashes == 2 else (1.15 if hashes == 3 else 1.0)))
+            lh = size * 1.25 if hashes == 1 else size * 1.65
+            face = String(DISPLAY_FACE)
+            weight = 700
+            var hst = TextStyle(face, weight, quote, size)
+            var end = min(head + hashes + 1, n)
+            out.append(Seg(String(line[byte=at:end]), hst, PAGE_MUTED if quote else PAGE_MARKUP, lh))
+            at = end
+        var task = at
+        if size == BODY and weight == 400 and not _rule(line, at):
+            var k = at
+            while k < n and b[k] == 32:
+                k += 1
+            var e = k
+            if k < n and (b[k] == 45 or b[k] == 42 or b[k] == 43):
+                e = k + 1
+            else:
+                while e < n and b[e] >= 48 and b[e] <= 57:
+                    e += 1
+                e = e + 1 if e > k and e < n and (b[e] == 46 or b[e] == 41) else k
+            if e > k and e < n and b[e] == 32:
+                var st = TextStyle(TEXT_FACE, 400, quote, BODY)
+                if k > at:
+                    out.append(Seg(String(line[byte=at:k]), st, PAGE_INK, lh))
+                out.append(Seg(String(line[byte=k:e]), st, PAGE_MUTED if quote else PAGE_MARKUP, lh))
+                at = e
+                if e + 4 < n and b[e + 1] == 91 and (b[e + 2] == 32 or b[e + 2] == 120 or b[e + 2] == 88) and b[e + 3] == 93 and b[e + 4] == 32:  # (a task's box: no link)
+                    task = e + 4
+        # the words (mojoui.mdinline): marks quiet, links in the accent, addresses quiet, code in the mono face
+        var flags = inline_flags(line, max(at, task))
+        var k = at
+        while k < n:
+            var e = k
+            while e < n and flags[e] == flags[k]:
+                e += 1
+            var f = flags[k]
+            var color = PAGE_MUTED if quote else (PAGE_MARKUP if (f & URL) != 0 else (PAGE_ACCENT if (f & LINK) != 0 else (PAGE_MARKUP if (f & MARK) != 0 else PAGE_INK)))
+            var st = TextStyle(MONO_FACE if (f & CODE) != 0 else face, 700 if (f & BOLD) != 0 else weight, quote or (f & ITALIC) != 0, size * 0.9 if (f & CODE) != 0 else size)
+            out.append(Seg(String(line[byte=k:e]), st, color, lh, (f & STRIKE) != 0))
+            k = e
         return out^
 
     def line_box(self, segs: List[Seg]) -> Tuple[Float64, Float64]:
@@ -1231,6 +1202,22 @@ struct PageSheet(Movable):
                 bxp += bw
             bx.add(group_names[g], gx, y + 6, bxp - gx, 32)
             bxp += 14
+
+
+def _rule(line: String, at: Int) -> Bool:
+    """A thematic break (---, * * *, ___), which isn't a list's mark."""
+    var b = line.as_bytes()
+    var ch = 0
+    var n = 0
+    for i in range(at, len(b)):
+        var c = Int(b[i])
+        if c == 32 or c == 9:
+            continue
+        if (c != 45 and c != 42 and c != 95) or (ch != 0 and c != ch):
+            return False
+        ch = c
+        n += 1
+    return n >= 3
 
 
 def _may_break(before: Int, x: Int, y: Int) -> Bool:

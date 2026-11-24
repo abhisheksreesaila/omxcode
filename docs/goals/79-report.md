@@ -65,7 +65,7 @@ are not passed: its AppKit host has no paced run, and its screen is locked.
 
 ### C: the gaps
 [79-gaps.md](79-gaps.md). What was drawn before is drawn the same: on the fixture's ten screens the app's 86,180 lines of draw
-operations (kinds, colours, words, numbers) are identical to c761a99f's, checked after each batch. The new pieces' look is ours
+operations (kinds, colours, words, numbers) are identical to c761a99f's, checked after each batch, but for a quote's `>` and inline code's ticks, both moved to what the reference picture shows (D-8042). The new pieces' look is ours
 from the web's CSS; **nobody has seen them on a screen**.
 
 ### For the reviewer, this round
