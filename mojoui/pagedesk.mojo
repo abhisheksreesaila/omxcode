@@ -274,6 +274,8 @@ struct BoardLook(Movable):
     var lift_ids: List[Int]  # the lifted objects and the connectors that end at them (ids)
     var lift_key: List[Int]  # the lifted objects as asked (selection ids), to see when the lift changes
     var lift_set: Dict[Int, Bool]
+    var lift_was: Dict[Int, Bool]  # (D-8005) the lift set before the last change of it
+    var kept_lift: List[Int]  # the lift the kept ops were taken with
     var snap_lift: List[Int]  # the lift and the look's generation the snapshot was taken with
     var snap_gen: Int
     var keep_path: String  # (D-7956) the file the board's last view is kept in ("": none), the app's tag for what it
@@ -317,6 +319,8 @@ struct BoardLook(Movable):
         self.lift_ids = List[Int]()
         self.lift_key = List[Int]()
         self.lift_set = Dict[Int, Bool]()
+        self.lift_was = Dict[Int, Bool]()
+        self.kept_lift = List[Int]()
         self.snap_lift = List[Int]()
         self.snap_gen = 0
         self.wrap_rev = Dict[Int, Int]()
@@ -446,13 +450,13 @@ struct BoardLook(Movable):
         # (D-7963) the same board, cull rect, lift, look and zoom as the last paint: its ops again, nothing walked
         # (D-7969) the token leaves the board's version out: the ops stay good while every change since they were kept
         # was objects adopted outside the cull rect (a progressive open filling in round the view: ops_clean)
+        # (D-8005: the lift isn't in it: objects lifted are left out of a patch, dropped ones painted again in it; ops kept
+        # under one lift are replayed whole only under the same one)
         var token = String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1) + "|" + String(k) + "|" + String(v.scale)
-        for id in self.lift_key:
-            token += "," + String(id)
         if self.hold_skip and self.keep_hold and self.keep_path != "" and self.keep_tag != "":
             # (D-7969) holding: the renderer shows the kept view and rasters nothing from these ops; none are walked
             self.held_paints += 1
-        elif self.keep_ops and token == self.kept_token and (self.ops_clean if self.fill_keep else self.kept_ver == self.board_version) and p.ops_replay(self.kept):
+        elif self.keep_ops and token == self.kept_token and self.kept_lift == self.lift_key and (self.ops_clean if self.fill_keep else self.kept_ver == self.board_version) and p.ops_replay(self.kept):
             self.replays += 1
             p.layer_ops_version(self.kept_ver)  # (D-7969: the same ops as at kept_ver: a renderer keeps its bins)
         else:
@@ -496,6 +500,7 @@ struct BoardLook(Movable):
                 self.kept = p.ops_capture(mark)
                 self.kept_token = token
                 self.kept_ver = self.board_version
+                self.kept_lift = self.lift_key.copy()
                 self.ops_clean = True
                 self.seg_at = Dict[Int, Int]()
                 self.seg_a = List[Int]()
@@ -529,6 +534,7 @@ struct BoardLook(Movable):
                     break
         if same:
             return
+        self.lift_was = self.lift_set.copy()  # (D-8005: what a change of lift concerns, with the new one)
         self.lift_key = lifted.copy()
         self.lift_ids = List[Int]()
         self.lift_set = Dict[Int, Bool]()
@@ -545,23 +551,29 @@ struct BoardLook(Movable):
     def _track(mut self, mut layer: ObjectLayer, lifting: Bool):
         """The board's version and damage: when the document (or the lift) changed, every object's key and painted box
         compared with the last snapshot (lifted ones left out, as if gone); a new version only when something did. A
-        drag that keeps its lift only moves lifted things: nothing to compare."""
+        drag that keeps its lift moves lifted things, which are out of the board: only what else the change log names is
+        looked at."""
         self.dmg.clear()
         self.fill_outside = False
         var lift_changed = self.lift_key != self.snap_lift
         if layer.version == self.seen_doc and self.generation == self.seen_gen and not lift_changed:
             return
-        if lifting and not lift_changed and self.generation == self.seen_gen:
-            self.seen_doc = layer.version
-            return
         # (D-7960, D-7978) every change since the last look named by id (ObjectLayer.changes_since: edits, undo and
         # redo, re-routed connectors, removals, adoptions): their damage alone, nothing walked
-        if self.change_log and self.generation == self.seen_gen and not lift_changed and self.snap.have and len(self.lift_ids) == 0:
+        if self.change_log and self.generation == self.seen_gen and self.snap.have:
             var ch = layer.changes_since(self.seen_doc)
             if ch:
                 self.seen_doc = layer.version
                 self.fills += 1
-                self.fill_outside = True
+                self.fill_outside = not lift_changed
+                if lift_changed:  # (D-8005: what was lifted and what is now: their places vacated or filled again)
+                    var more = List[Int]()
+                    for e in self.lift_was.keys():
+                        more.append(e)
+                    for e in self.lift_set.keys():
+                        more.append(e)
+                    ch = ch.value() + more^
+                    self.snap_lift = self.lift_key.copy()
                 self.snap.changed = List[Int]()
                 var rects = List[Float64]()
                 var done = Dict[Int, Bool]()
@@ -573,7 +585,7 @@ struct BoardLook(Movable):
                     if len(old) == 4 and len(self.cull) == 4 and old[2] >= self.cull[0] and old[0] <= self.cull[2] and old[3] >= self.cull[1] and old[1] <= self.cull[3]:
                         self.fill_outside = False
                     var q = layer.index(id)
-                    if q < 0:
+                    if q < 0 or (len(self.lift_set) > 0 and id in self.lift_set):  # (gone, or lifted: out of the board)
                         rects += self.snap.remove(id)
                         continue
                     ref o = layer.objs[q]

@@ -35,11 +35,11 @@ def board() -> ObjectLayer:
         return l^
 
 
-def scene_of(mut look: BoardLook, mut layer: ObjectLayer, v: DeskView) -> Scene:
+def scene_of(mut look: BoardLook, mut layer: ObjectLayer, v: DeskView, lifted: List[Int] = List[Int]()) -> Scene:
     var sc = Scene(W, H, 1.0)
     sc.begin_layer("bg")
     sc.fill(0xFFF0F2F5)
-    look.paint(sc, layer, v, 1440, 900, K)
+    look.paint(sc, layer, v, 1440, 900, K, lifted)
     return sc^
 
 
@@ -139,6 +139,42 @@ def main() raises:
     assert_true(look.patches >= 30, "most edits patched")
     print("   (D-7978) looks answered from the change log: " + String(look.fills))
     assert_true(look.fills >= 30, "edits' damage from the change log, not a compare over every object")
+    # (D-8005) a drag: the press that lifts some objects (and the connectors that end at them), moves, the drop, a second
+    # drag straight after, and an edit elsewhere during one: the patched paint equals a full walk with the same lift each
+    # frame, its tiled frames pixel-identical; lifting and dropping are patches too, not full walks
+    var p0 = look.patches
+    var lifts = 0
+    var worst = 0
+    for round_ in range(8):
+        var vis = BoardTools().visible_objects(layer, v, 1440, 900)
+        var some = List[Int]()
+        var want = 1 + round_ * 4
+        for t in range(want):
+            var id = layer.objs[vis[(round_ * 37 + t * 11) % len(vis)]].id
+            if id not in some:
+                some.append(id)
+                layer.select(id, t > 0)
+        layer.begin_gesture(CH_MOVE)
+        for frame in range(5):
+            if frame > 0:
+                layer.move_by(Float64(frame) * 6, Float64(frame) * 4)
+            if frame == 3 and round_ % 3 == 0:  # (something else changes mid-drag)
+                _ = layer.add_text(40, 30 + Float64(round_) * 9, 160, 40, "meanwhile " + String(round_))
+            var a = scene_of(look, layer, v, some)
+            var b = scene_of(walk, layer, v, some)
+            same_ops(a, b, "lift " + String(round_) + " frame " + String(frame))
+            if frame == 0 or frame == 4 and round_ % 2 == 0:
+                var d = differ(pixels(g1, a), pixels(g2, b))
+                worst = max(worst, d)
+                assert_equal(d, 0, "lift " + String(round_) + ": pixel-identical at frame " + String(frame))
+        layer.end_gesture()
+        var a = scene_of(look, layer, v)
+        var b = scene_of(walk, layer, v)
+        same_ops(a, b, "drop " + String(round_))
+        assert_equal(differ(pixels(g1, a), pixels(g2, b)), 0, "drop " + String(round_) + ": pixel-identical")
+        lifts += 1
+    assert_true(look.patches - p0 >= 2 * lifts, "lifts and drops patched, not walked: " + String(look.patches - p0))
+    print("   (D-8005) " + String(lifts) + " lifts and drops: " + String(look.patches - p0) + " patched paints, ops and pixels identical")
     g1.gl.close()
     g2.gl.close()
     print("keptpatch: ok")
