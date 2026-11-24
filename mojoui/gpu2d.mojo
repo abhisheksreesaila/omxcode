@@ -416,6 +416,23 @@ def _quad(mut out: List[Float32], a: Float64, b: Float64, c: Float64, d: Float64
     _clip4(out, c0, c1, c2, c3)
 
 
+def _segment_meets(x0: Float64, y0: Float64, x1: Float64, y1: Float64, hw: Float64, r0: Float64, r1: Float64, r2: Float64, r3: Float64) -> Bool:
+    """Whether a line of half width hw may have pixels in the rect: its box meets it, and the rect's corners aren't all
+    further than hw on one side of it (a diagonal's box is mostly empty)."""
+    if max(x0, x1) + hw < r0 or min(x0, x1) - hw > r2 or max(y0, y1) + hw < r1 or min(y0, y1) - hw > r3:
+        return False
+    var dx = x1 - x0
+    var dy = y1 - y0
+    var l = sqrt(dx * dx + dy * dy)
+    if l < 1e-9:
+        return True
+    var nx = -dy / l
+    var ny = dx / l
+    var mid = (0.5 * (r0 + r2) - x0) * nx + (0.5 * (r1 + r3) - y0) * ny
+    var half = 0.5 * ((r2 - r0) * abs(nx) + (r3 - r1) * abs(ny))
+    return abs(mid) <= half + hw
+
+
 def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, x: Float64, baseline: Float64, size: Float64,
             color: UInt32, slant: Float64, c0: Float64, c1: Float64, c2: Float64, c3: Float64):
     """One GLYPH instance per glyph with pixels, the pen moving as Face.draw's."""
@@ -536,13 +553,15 @@ def _zigzag_start(path: List[Float32], p0: Int, n: Int) -> Int:
 
 
 def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, first: Int, end: Int, skip_ops: Int = 0,
-                only: List[Int] = List[Int](), content_k: Float64 = 0):
+                only: List[Int] = List[Int](), content_k: Float64 = 0, part: List[Float64] = List[Float64]()):
     """build_batches of layers [first, end) only, into f (emptied first): a host that keeps each layer's batches
     rebuilds just the layers that changed. Clips that earlier layers left open still cut these, as in the whole frame.
     skip_ops: layer `first`'s first ops left out (a layer that only grew, Scene.appends: just the new ops; the ops left
     out must leave no clip open). content_k > 0 (D-7940, a raster tile): just the ops in `only` of layer `first`
     (offsets from its first op, ascending, no clips or images among them; empty: none), built as if the layer were drawn at zoom
-    content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels)."""
+    content_k with no translation (glyphs rasterized and snapped for that zoom; a tile moves it by whole pixels).
+    part (D-8022; with content_k): the rect (x0, y0, x1, y1, the layer's units, antialiasing padded) that will be drawn:
+    boxes, capsules and glyphs wholly outside it aren't built (a long stroke's, a big shadow's, a paragraph's others)."""
     f.clear()
     f.width = scene.w
     f.height = scene.h
@@ -568,6 +587,11 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
             ty = 0
             tk = content_k
         var ik = 1.0 / tk if tk != 0 else 1.0
+        var cull = subset and len(part) == 4
+        var q0 = part[0] if cull else -NO_CLIP
+        var q1 = part[1] if cull else -NO_CLIP
+        var q2 = part[2] if cull else NO_CLIP
+        var q3 = part[3] if cull else NO_CLIP
         var first_run = len(f.runs)
         f.layers.append(Layer2D(scene.layer_keys[layer].copy(), scene.layer_versions[layer], tx, ty, tk, first_run, 0))
         var cur_pipe = -1
@@ -659,6 +683,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     var ih = eng[].images[ii].h
                     var x_l = (Float64(px + eng[].images[ii].left) - tx) * ik
                     var y_l = (Float64(py - eng[].images[ii].top) - ty) * ik
+                    if cull and (x_l > q2 or x_l + Float64(iw) * ik < q0 or y_l > q3 or y_l + Float64(ih) * ik < q1):
+                        continue
                     if eng[].images[ii].color:
                         var al = Int((color >> 24) & 0xFF)
                         f.pixels.append(pg[].straight(ii, al, eng[].images[ii].rgba))
@@ -808,10 +834,13 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                     if hole < 0:  # (D-8021) the bottom-right corner's own radius: three boxes cut along pixels that meet exactly
                         var bx = a + c + hole
                         var by = b + d + hole
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, by))
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, by), min(c2, bx), c3)
-                        _quad(f.quads, a, b, c, d, -hole, SHAPE_BOX, color, max(c0, bx), max(c1, by), c2, c3)
-                        added = 3
+                        if not cull or (b <= q3 and by >= q1):
+                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, by))
+                        if not cull or (b + d >= q1 and by <= q3 and a <= q2 and bx >= q0):
+                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, by), min(c2, bx), c3)
+                        if not cull or (b + d >= q1 and by <= q3 and bx <= q2 and a + c >= q0):
+                            _quad(f.quads, a, b, c, d, -hole, SHAPE_BOX, color, max(c0, bx), max(c1, by), c2, c3)
+                        added = len(f.quads) // QUAD_FLOATS - before
                     elif hole == 0:
                         _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, c3)
                     else:  # (D-7973) the box minus its middle as up to four clipped bands: no pixel of the middle is made
@@ -819,27 +848,42 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         var hy0 = b + hole
                         var hx1 = a + c - hole
                         var hy1 = b + d - hole
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), c2, c3)
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
-                        _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
-                        added = 4
+                        if not cull or (b <= q3 and hy0 >= q1):
+                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
+                        if not cull or (hy1 <= q3 and b + d >= q1):
+                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), c2, c3)
+                        if not cull or (hy0 <= q3 and hy1 >= q1):
+                            if not cull or (a <= q2 and hx0 >= q0):
+                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
+                            if not cull or (hx1 <= q2 and a + c >= q0):
+                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
+                        added = len(f.quads) // QUAD_FLOATS - before
                 elif kind == OP_CIRCLE:
                     _quad(f.quads, a, b, a, b, c, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                 elif kind == OP_LINE:
-                    _quad(f.quads, a, b, c, d, e / 2, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                    if not cull or _segment_meets(a, b, c, d, e / 2, q0, q1, q2, q3):
+                        _quad(f.quads, a, b, c, d, e / 2, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                    else:
+                        added = 0
                 elif kind == OP_STROKE:  # (D-7940: the capsules and discs a polyline of lines and circles would make)
                     var p0 = Int(a) * 2
                     var m = Int(b)
                     var hw = c / 2
                     for z in range(m - 1):
-                        _quad(f.quads, Float64(scene.path[p0 + 2 * z]), Float64(scene.path[p0 + 2 * z + 1]), Float64(scene.path[p0 + 2 * z + 2]),
-                              Float64(scene.path[p0 + 2 * z + 3]), hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
+                        var ax = Float64(scene.path[p0 + 2 * z])
+                        var ay = Float64(scene.path[p0 + 2 * z + 1])
+                        var zx = Float64(scene.path[p0 + 2 * z + 2])
+                        var zy = Float64(scene.path[p0 + 2 * z + 3])
+                        if cull and (max(ax, zx) + hw < q0 or min(ax, zx) - hw > q2 or max(ay, zy) + hw < q1 or min(ay, zy) - hw > q3):
+                            continue
+                        _quad(f.quads, ax, ay, zx, zy, hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
                     for z in range(m):
                         var px = Float64(scene.path[p0 + 2 * z])
                         var py = Float64(scene.path[p0 + 2 * z + 1])
+                        if cull and (px + hw < q0 or px - hw > q2 or py + hw < q1 or py - hw > q3):
+                            continue
                         _quad(f.quads, px, py, px, py, hw, SHAPE_CAPSULE, color, c0, c1, c2, c3)
-                    added = 2 * m - 1
+                    added = len(f.quads) // QUAD_FLOATS - before
                 elif kind == OP_FILL:  # the whole canvas, whatever the layer's transform and clip
                     mode = BLEND_REPLACE
                     _quad(f.quads, -tx * ik, -ty * ik, c * ik, d * ik, 0, SHAPE_BOX, color, -NO_CLIP, -NO_CLIP, NO_CLIP, NO_CLIP)

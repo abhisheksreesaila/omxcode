@@ -1954,7 +1954,7 @@ struct MetalCanvas2D(Movable):
             var r0 = pg[].resets
             for r in range(n):
                 ref tr = plan.rasters[r]
-                fill_layers(self.tile_frames[r], scene, self.atlas, self.font, tr.layer, tr.layer + 1, 0, tr.ops, tr.k)
+                fill_layers(self.tile_frames[r], scene, self.atlas, self.font, tr.layer, tr.layer + 1, 0, tr.ops, tr.k, tr.part)
             if pg[].resets == r0:
                 break
             if attempt == 1:

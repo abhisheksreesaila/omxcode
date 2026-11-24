@@ -381,6 +381,7 @@ struct TileRaster(Copyable, Movable):
     var ry0: Int
     var rx1: Int
     var ry1: Int
+    var part: List[Float64]  # (D-8022) that part in layer units, padded (x0, y0, x1, y1): what fill_layers may leave out
 
 
 @fieldwise_init
@@ -504,6 +505,7 @@ struct Tiles(Movable):
     var damaged: Int
     var budget_ops: Int
     var ahead: Bool  # (D-8019) kept tiles extended ahead of a zoom-out (MOJOUI_TILE_AHEAD=0: A/B)
+    var cull: Bool  # (D-8022) instances outside a raster's part not built (MOJOUI_TILE_CULL=0: A/B)
     var hurry: Bool  # (D-8016) the window is closing: a settled view is kept in this frame, not after 750 ms, a tile a frame
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
@@ -525,6 +527,7 @@ struct Tiles(Movable):
         self.damaged = 0
         self.budget_ops = TILE_BUDGET_OPS
         self.hurry = False
+        self.cull = getenv("MOJOUI_TILE_CULL") != "0"
         self.ahead = getenv("MOJOUI_TILE_AHEAD") != "0"
         try:
             if getenv("MOJOUI_TILE_BUDGET") != "":  # (an A/B of the per-frame raster budget)
@@ -1149,7 +1152,7 @@ struct Tiles(Movable):
                 _ = self.sets[s].empty.pop(key)
             except:
                 pass
-        out.rasters.append(TileRaster(layer, slot, ii, jj, tk, ops^, qx0, qy0, qx1, qy1))
+        out.rasters.append(TileRaster(layer, slot, ii, jj, tk, ops^, qx0, qy0, qx1, qy1, [lx0, ly0, lx1, ly1] if self.cull else List[Float64]()))
         if not whole:  # (a partial raster: the tile is good for what it was)
             self.rastered += 1
             return True
