@@ -1771,3 +1771,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-23 goal 79 (continuation 18) — autopilot
 - From f5e9bdb9. Order (main session): A Mac reruns with Spotlight done; B fixes by measured split; C two honesty points; D M7, Mac M6, Linux M1–M6 on one commit. The Mac's caffeinate ends 21:42: Mac time first.
+- A (Mac, 17:34–17:40, Spotlight gone, load 1.4–2.9 at each start; bundle at fa1c5179's code; build/g79/c18-mac-A.txt beside c17-mac-reruns.txt): the failing rows are real. 600: first frame 6.6/7.2/8.7, press 8.4–10.7 (press_max 8.7/10.7/8.4), drag 40 max 8.4–10.5, undo 5.3–6.3, redo 6.2–6.6. stress: first frame 11.8/13.8/13.0, press 11.9/13.3/12.0, zoom p95 7.3–8.1 max 13.5–15.4, drag 40 max 15.2–17.0, undo 5.7–6.2, redo 8.1/9.4/10.9 (max 15.1–16.9). Note switch p95 22.1–24.9 (p50 7.3–8.5), omnibar 17.1–19.0.
