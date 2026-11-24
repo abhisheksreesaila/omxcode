@@ -848,15 +848,37 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         var hy0 = b + hole
                         var hx1 = a + c - hole
                         var hy1 = b + d - hole
-                        if not cull or (b <= q3 and hy0 >= q1):
-                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
-                        if not cull or (hy1 <= q3 and b + d >= q1):
-                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), c2, c3)
-                        if not cull or (hy0 <= q3 and hy1 >= q1):
-                            if not cull or (a <= q2 and hx0 >= q0):
-                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
-                            if not cull or (hx1 <= q2 and a + c >= q0):
-                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
+                        var br = scene.corner_of(op)
+                        if br > 0:  # (and its bottom-right corner's own radius: the bands cut again where that corner begins)
+                            var bx = a + c - br
+                            var cy = min(b + d - br, hy1)
+                            if not cull or (b <= q3 and hy0 >= q1):
+                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
+                            if not cull or (hy1 <= q3 and b + d >= q1):
+                                if not cull or (a <= q2 and bx >= q0):
+                                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), min(c2, bx), c3)
+                                if not cull or (bx <= q2 and a + c >= q0):
+                                    _quad(f.quads, a, b, c, d, br, SHAPE_BOX, color, max(c0, bx), max(c1, hy1), c2, c3)
+                            if not cull or (hy0 <= q3 and hy1 >= q1):
+                                if not cull or (a <= q2 and hx0 >= q0):
+                                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
+                                if not cull or (hx1 <= q2 and a + c >= q0):
+                                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, cy))
+                                    if cy < hy1:
+                                        _quad(f.quads, a, b, c, d, br, SHAPE_BOX, color, max(c0, max(hx1, bx)), max(c1, cy), c2, min(c3, hy1))
+                                        if bx > hx1:
+                                            _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, cy), min(c2, bx), min(c3, hy1))
+                            added = len(f.quads) // QUAD_FLOATS - before
+                        else:
+                            if not cull or (b <= q3 and hy0 >= q1):
+                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, c1, c2, min(c3, hy0))
+                            if not cull or (hy1 <= q3 and b + d >= q1):
+                                _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy1), c2, c3)
+                            if not cull or (hy0 <= q3 and hy1 >= q1):
+                                if not cull or (a <= q2 and hx0 >= q0):
+                                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, c0, max(c1, hy0), min(c2, hx0), min(c3, hy1))
+                                if not cull or (hx1 <= q2 and a + c >= q0):
+                                    _quad(f.quads, a, b, c, d, e, SHAPE_BOX, color, max(c0, hx1), max(c1, hy0), c2, min(c3, hy1))
                         added = len(f.quads) // QUAD_FLOATS - before
                 elif kind == OP_CIRCLE:
                     _quad(f.quads, a, b, a, b, c, SHAPE_CAPSULE, color, c0, c1, c2, c3)

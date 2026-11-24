@@ -147,7 +147,7 @@ def _esc(s: String) -> String:
 # ------------------------------------------------ surfaces
 
 def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, shadows: List[Shadow],
-                             hole_margin: Float64 = -1):
+                             hole_margin: Float64 = -1, corner: Float64 = -1):
     """CSS box-shadows under a rounded rect: a spread ring as one rect, a blurred one as layered rects whose summed alpha
     follows the Gaussian's falloff (σ = blur / 2), so the same picture reaches the CPU painter and the GPU.
     hole_margin ≥ 0 (D-7973): the caller covers the box, inset by hole_margin, with something opaque right after: each
@@ -175,7 +175,12 @@ def draw_shadows[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Fl
             if la <= 0.002:
                 continue
             var e = d + s.spread
-            if hole_margin >= 0:
+            if corner >= 0:  # (the bottom-right corner's own radius: a sticky's turned corner)
+                if hole_margin >= 0:
+                    p.rect_hole_corner(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e), e + hole_margin + off, max(0.0, corner + e))
+                else:
+                    p.rect_corner(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e), max(0.0, corner + e))
+            elif hole_margin >= 0:
                 p.rect_hole(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e), e + hole_margin + off)
             else:
                 p.rect(x - e + s.dx, y - e + s.dy, w + 2 * e, h + 2 * e, with_alpha(s.color, min(1.0, la)), max(0.0, radius + e))

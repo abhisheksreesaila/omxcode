@@ -13,6 +13,7 @@
 from std.collections import Dict
 from std.math import cos, sin, sqrt
 from mojoui.canvas import Surface
+from std.memory import bitcast
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
@@ -110,7 +111,7 @@ def _copy_ops(sk: List[UInt8], sn: List[Float32], sc: List[UInt32], st: List[Int
     for op in range(a, b):
         var t = Int(st[op])
         if t < 0:
-            dt.append(-1)
+            dt.append(Int32(t))
         else:
             if t0 < 0 or t != t0 + tn:
                 if tn > 0:
@@ -252,6 +253,10 @@ trait Painter:
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         """(D-7973) A rounded rect a caller will cover, inside the box shrunk by `hole`, with something opaque: a
         painter may leave that middle out (the same picture, less fill). The CPU painter draws it whole."""
+        ...
+
+    def rect_hole_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64, br: Float64):
+        """Both: a middle that may be left out and a bottom-right corner with a radius of its own (a sticky's shadow)."""
         ...
 
     def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
@@ -462,6 +467,9 @@ struct SurfacePainter(Painter, Movable):
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         self.rect(x, y, w, h, color, radius)
+
+    def rect_hole_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64, br: Float64):
+        self.rect_corner(x, y, w, h, color, radius, br)
 
     def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
         self.polygon(corner_rect(x, y, w, h, radius, radius, br, radius), color)
@@ -843,7 +851,7 @@ struct Scene(Painter, Movable, Copyable):
         self.nums += kept.nums.copy()
         self.colors += kept.colors.copy()
         for t in kept.text_of:
-            self.text_of.append(Int32(Int(t) + t0) if t >= 0 else Int32(-1))
+            self.text_of.append(Int32(Int(t) + t0) if t >= 0 else t)
         for op in range(len(kept.kinds)):
             var kind = Int(kept.kinds[op])
             if kind == OP_IMAGE:
@@ -956,6 +964,20 @@ struct Scene(Painter, Movable, Copyable):
         var hl = hole if hole > 0 and w - 2 * hole > 1 and h - 2 * hole > 1 else 0.0  # (no middle worth leaving out: 0)
         self._op(OP_RECT, x, y, w, h, radius, hl, color, -1)
 
+    def rect_hole_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64, br: Float64):
+        if w <= 0 or h <= 0:
+            return
+        if not (hole > 0 and w - 2 * hole > 1 and h - 2 * hole > 1) or br <= 0:
+            self.rect_corner(x, y, w, h, color, radius, br)
+            return
+        # (the corner in the text's place, which a rect doesn't use: −2 − its radius' float bits)
+        self._op(OP_RECT, x, y, w, h, radius, hole, color, Int32(-2) - bitcast[DType.int32](Float32(min(br, min(w, h) / 2))))
+
+    def corner_of(self, op: Int) -> Float64:
+        """A holed rect's bottom-right corner, when it has a radius of its own (0: it doesn't)."""
+        var t = Int(self.text_of[op])
+        return Float64(bitcast[DType.float32](Int32(-2 - t))) if t < -1 else 0.0
+
     def rect_corner(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, br: Float64):
         if w <= 0 or h <= 0:
             return
@@ -1047,6 +1069,8 @@ struct Scene(Painter, Movable, Copyable):
             if self.nums[p * STRIDE + x] != other.nums[q * STRIDE + x]:
                 return False
         if self.text_of[p] >= 0 and self.text_at(p) != other.text_at(q):
+            return False
+        if self.text_of[p] < 0 and self.text_of[p] != other.text_of[q]:  # (a holed rect's corner)
             return False
         if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))] != other.images[Int(other.num(q, 4))]:
             return False
@@ -1229,6 +1253,10 @@ struct Scene(Painter, Movable, Copyable):
                 if len(clips) > 0:
                     _ = clips.pop()
             elif kind == OP_RECT:
+                if self.corner_of(op) > 0:
+                    var r0 = self.num(op, 4)
+                    polygon(s, corner_rect(self.num(op, 0), self.num(op, 1), self.num(op, 2), self.num(op, 3), r0, r0, self.corner_of(op), r0), c, tx, ty, tk)
+                    continue
                 if self.num(op, 5) < 0:  # (a corner of its own)
                     var r0 = self.num(op, 4)
                     polygon(s, corner_rect(self.num(op, 0), self.num(op, 1), self.num(op, 2), self.num(op, 3), r0, r0, -self.num(op, 5), r0), c, tx, ty, tk)

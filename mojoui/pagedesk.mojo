@@ -758,7 +758,7 @@ struct BoardLook(Movable):
             ref o = layer.objs[i]
             # (D-7973) an opaque sticky hides its shadow's middle: inset 10 page px stays inside its 24 px corner
             var hm = 10.0 if self.shadow_holes and ((o.color >> 24) & 0xFF) == 0xFF else -1.0
-            draw_shadows(p, o.x, o.y, o.w, o.h, 6, [Shadow(0, 9, 16, 0, rgba(0, 0, 0, 66))], hm)
+            draw_shadows(p, o.x, o.y, o.w, o.h, 6, [Shadow(0, 9, 16, 0, rgba(0, 0, 0, 66))], hm, 24)
             if self.corner_quads:
                 p.rect_corner(o.x, o.y, o.w, o.h, o.color, 4, 24)
             else:
