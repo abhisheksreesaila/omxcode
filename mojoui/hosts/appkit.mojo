@@ -4587,6 +4587,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 last_done = Int(now_ns())
                 if is_press:
                     presses.append(work + press_ev)
+                    if env("MOJOUI_FRAMEBENCH_FRAMES") == "1":  # (where a press during an open goes: its handling, then its frame)
+                        print("PRESS: event " + one_decimal(press_ev) + " frame " + one_decimal(work) + " scene " + one_decimal(host[].g2d_parts[0]) + " batch " + one_decimal(host[].g2d_parts[1])
+                              + " rest " + one_decimal(host[].g2d_parts[2]), flush=True)
                 elif work >= 0:
                     during.append(work)
             if what == "openpress" and not pressed:
