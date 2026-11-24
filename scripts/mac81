@@ -15,6 +15,6 @@ if ! ssh "${opts[@]}" "$user" true 2>/dev/null; then  # (Tailscale down: the hou
   ssh "${opts[@]}" "$user" true 2>/tmp/mac81.err || { echo "UNREACHABLE: $(head -c 200 /tmp/mac81.err)"; exit 75; }
 fi
 mkdir -p build/g81
-tar -czf build/g81/mac-src.tar.gz --exclude=__pycache__ mojoui themes hosts vendor fonts tests apple scripts/mac81-run
+tar -czf build/g81/mac-src.tar.gz --exclude=__pycache__ mojoui themes hosts vendor fonts tests apple scripts/mac81-run scripts/mac81-clock
 ssh "${opts[@]}" "$user" 'mkdir -p ~/omxcode-g81' && scp -q "${opts[@]}" build/g81/mac-src.tar.gz "$user":omxcode-g81/ || { echo "UNREACHABLE: copy"; exit 75; }
-ssh "${opts[@]}" "$user" "cd ~/omxcode-g81 && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && bash src/scripts/mac81-run $what"
+ssh "${opts[@]}" "$user" "cd ~/omxcode-g81 && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && caffeinate -is bash src/scripts/mac81-run $what"

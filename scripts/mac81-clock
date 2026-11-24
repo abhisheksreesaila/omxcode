@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Goal 81 M7 on the Mac (run by mac81-run in ~/omxcode-g81/src): builds tests/gtkapps/clock and runs it with the screen's
+# clock, then with one that never ticks (the timer must take over). Prints FACT lines; LOCKED when the screen is locked.
+set -uo pipefail
+export PATH=$HOME/.pixi/bin:$PATH
+E=$HOME/omxcode-g54/pixi.toml
+cat > ../locked.mojo <<'M'
+from mojoui.hosts.objc import msg, cls, ns_string
+from std.ffi import external_call
+from std.memory import Pointer
+
+
+def main():
+    var lib = String("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    _ = external_call["dlopen", Int](lib.as_c_string_span(), Int32(1))
+    var name = String("CGSessionCopyCurrentDictionary")
+    var f = external_call["dlsym", Int](Int(-2), name.as_c_string_span())
+    if f == 0:
+        print("LOCKSTATE unknown")
+        return
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
+    var d = Pointer(to=raw).unsafe_bitcast[def() thin abi("C") -> Int]()[]()
+    if d == 0:
+        print("LOCKSTATE nosession")
+        return
+    var v = msg(d, "objectForKey:", ns_string("CGSSessionScreenIsLocked"))
+    print("LOCKSTATE", "locked" if v != 0 and msg(v, "intValue") != 0 else "open")
+M
+pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && mojo build -I . ../locked.mojo -o ../lockstate -Xlinker -lobjc -Xlinker -framework -Xlinker Foundation" > ../lock.log 2>&1
+state=$(../lockstate 2>&1 | grep -o 'LOCKSTATE [a-z]*' | tail -1); echo "${state:-no lock state: $(tail -2 ../lock.log)}"
+pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && mojo build -I tests/gtkapps/clock -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../clockapp -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../clock-build.log 2>&1 || { grep error -A3 ../clock-build.log | head -20; exit 1; }
+[ "$state" = "LOCKSTATE locked" ] && [ "${G81_ANYWAY:-}" != 1 ] && { echo "LOCKED: the Mac's screen is locked"; exit 75; }
+one() { # one <clock mode> <out>: the app, ended after 40 s at most
+  MOJOUI_FRAME_CLOCK=$1 MOJOUI_FRAME_LOG=1 MOJOUI_STATE=$HOME/omxcode-g81/state ../clockapp > "$2" 2>&1 & local p=$!
+  for _ in $(seq 40); do kill -0 $p 2>/dev/null || break; sleep 1; done
+  kill $p 2>/dev/null; wait $p 2>/dev/null
+}
+caffeinate -u -t 120 & c=$!
+one "" ../clock1.log; one dead ../clock2.log
+kill $c 2>/dev/null
+cat ../clock1.log; echo "--- a clock that never ticks"; sed 's/^FACT/fact/' ../clock2.log
+idle=$(sed -n 's/^FACT idle_frames //p' ../clock1.log)
+grep -q 'FRAMES: started screen' ../clock1.log && [ -n "$idle" ] && echo "FACT idle_ticks $idle"
+rate=$(sed -n 's/^FACT ticks_per_s //p' ../clock2.log)
+grep -q "doesn't tick: timer" ../clock2.log && awk -v r="${rate:-0}" 'BEGIN{exit !(r>50 && r<66)}' && echo "FACT fallback_ok 1" || echo "FACT fallback_ok 0"
+grep -q 'FACT ticks_per_s' ../clock1.log && echo "mac_clock: ok"
