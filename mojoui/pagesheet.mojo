@@ -220,6 +220,9 @@ struct PageSheet(Movable):
         if plain and name == "Tab":
             self.indent(-1 if shift else 1, now)
             return 2 if self.ed.version != version else 1
+        if ctrl and not alt and not shift and (name == "[" or name == "]"):
+            self.indent(-1 if name == "[" else 1, now)
+            return 2 if self.ed.version != version else 1
         if ctrl and (name == "v" or name == "V"):
             return 0
         if ctrl and (name == "z" or name == "Z" or name == "y" or name == "Y"):

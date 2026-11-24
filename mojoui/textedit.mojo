@@ -577,12 +577,70 @@ struct TextEdit(Movable):
                 return True
         return self.edit_key(name, mods, now_ms)
 
+    def line_block(self) -> Tuple[Int, Int]:
+        """The paragraphs the selection is in (one it only reaches the very start of isn't)."""
+        var a = self.sel_start()
+        var b = self.sel_end()
+        return (a.para, b.para - 1 if b.para > a.para and b.byte == 0 else b.para)
+
+    def _lines(self, a: Int, b: Int) -> String:
+        return self.text_between(Pos(a, 0), Pos(b, self.paras[b].byte_length()))
+
+    def line_key(mut self, name: String, shift: Bool, ctrl: Bool, alt: Bool, now_ms: Int) -> Bool:
+        """The keys for whole lines (CodeMirror's defaultKeymap): Alt+Up and Down move them, with Shift copy them; Ctrl+Shift+K
+        deletes them; Ctrl+Enter begins a line under this one. One undo step each. True when it was one."""
+        var l = self.line_block()
+        var a = l[0]
+        var b = l[1]
+        var last = len(self.paras) - 1
+        var caret = self.caret
+        var anchor = self.anchor
+        if alt and not ctrl and (name == "ArrowUp" or name == "ArrowDown"):
+            var up = name == "ArrowUp"
+            var block = self._lines(a, b)
+            if shift:
+                self.replace(Pos(b, self.paras[b].byte_length()), Pos(b, self.paras[b].byte_length()), "\n" + block, EDIT_OTHER, now_ms)
+                var by = 0 if up else b - a + 1
+                self.caret = Pos(caret.para + by, caret.byte)
+                self.anchor = Pos(anchor.para + by, anchor.byte)
+                return True
+            if (up and a == 0) or (not up and b == last):
+                return True
+            if up:
+                var other = String(self.paras[a - 1])
+                self.replace(Pos(a - 1, 0), Pos(b, self.paras[b].byte_length()), block + "\n" + other, EDIT_OTHER, now_ms)
+            else:
+                var other = String(self.paras[b + 1])
+                self.replace(Pos(a, 0), Pos(b + 1, self.paras[b + 1].byte_length()), other + "\n" + block, EDIT_OTHER, now_ms)
+            var by = -1 if up else 1
+            self.caret = self.clamp(Pos(caret.para + by, caret.byte))
+            self.anchor = self.clamp(Pos(anchor.para + by, anchor.byte))
+            return True
+        if ctrl and shift and not alt and (name == "k" or name == "K"):
+            if a > 0 and b == last:
+                self.replace(Pos(a - 1, self.paras[a - 1].byte_length()), Pos(b, self.paras[b].byte_length()), "", EDIT_OTHER, now_ms)
+            elif b < last:
+                self.replace(Pos(a, 0), Pos(b + 1, 0), "", EDIT_OTHER, now_ms)
+            else:
+                self.replace(Pos(a, 0), Pos(b, self.paras[b].byte_length()), "", EDIT_OTHER, now_ms)
+            var p = min(a, len(self.paras) - 1)
+            self.move_to(self.clamp(Pos(p, caret.byte)), False)
+            return True
+        if ctrl and not shift and not alt and name == "Enter":
+            var e = Pos(b, self.paras[b].byte_length())
+            self.replace(e, e, "\n", EDIT_OTHER, now_ms)
+            self.move_to(Pos(b + 1, 0), False)
+            return True
+        return False
+
     def edit_key(mut self, name: String, mods: Int, now_ms: Int) -> Bool:
         """The keys that need no layout (everything but up, down, page up and down, and a line's edges): for an editor
         that lays its text out itself (mojoui.pagesheet). True when it was used."""
         var shift = (mods & SHIFT) != 0
         var ctrl = (mods & CTRL) != 0
         var alt = (mods & ALT) != 0
+        if self.line_key(name, shift, ctrl, alt, now_ms):
+            return True
         if alt and not ctrl:  # (Option on a Mac: by words)
             if name == "ArrowLeft":
                 self.move_to(self.prev_word(self.caret), shift)

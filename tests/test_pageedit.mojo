@@ -5,7 +5,7 @@
 
 from std.testing import assert_equal, assert_true
 from mojoui.pagesheet import PageSheet, PAGE_SELECTION
-from mojoui.textedit import Pos
+from mojoui.textedit import Pos, ALT
 from mojoui.notesshell import Boxes
 from mojoui.scene import Scene
 from mojoui.canvas import rgba
@@ -315,6 +315,41 @@ def test_long_pages() raises:
     _ = mid
 
 
+def line_keys() raises:
+    """CodeMirror's keys for whole lines."""
+    var p = PageSheet()
+    p.set_markdown("one\ntwo\nthree\nfour")
+    p.ed.move_to(Pos(1, 1), False)
+    assert_equal(p.key("ArrowDown", ALT, 0), 2)
+    assert_equal(p.markdown(), "one\nthree\ntwo\nfour")
+    assert_true(p.ed.caret == Pos(2, 1), "with it")
+    _ = p.key("ArrowUp", ALT, 0)
+    _ = p.key("ArrowUp", ALT, 0)
+    assert_equal(p.markdown(), "two\none\nthree\nfour")
+    assert_equal(p.key("ArrowUp", ALT, 0), 1)
+    assert_true(p.undo() and p.markdown() == "one\ntwo\nthree\nfour", "one step each")
+    p.ed.move_to(Pos(1, 0), False)
+    p.ed.move_to(Pos(3, 0), True)  # (two lines: the fourth only touched)
+    _ = p.key("ArrowDown", ALT | SHIFT, 0)
+    assert_equal(p.markdown(), "one\ntwo\nthree\ntwo\nthree\nfour")
+    assert_true(p.ed.sel_start() == Pos(3, 0) and p.ed.sel_end() == Pos(5, 0), "the copy selected")
+    _ = p.key("K", CTRL | SHIFT, 0)
+    assert_equal(p.markdown(), "one\ntwo\nthree\nfour")
+    p.ed.move_to(Pos(3, 2), False)
+    _ = p.key("k", CTRL | SHIFT, 0)
+    assert_equal(p.markdown(), "one\ntwo\nthree")
+    p.ed.move_to(Pos(0, 1), False)
+    _ = p.key("Enter", CTRL, 0)
+    assert_true(p.markdown() == "one\n\ntwo\nthree" and p.ed.caret == Pos(1, 0), "a line under this one")
+    _ = p.key("]", CTRL, 0)
+    assert_true(p.markdown().split("\n")[1] == "  ", "indented")
+    _ = p.key("[", CTRL, 0)
+    assert_true(p.markdown().split("\n")[1] == "", "and back")
+    p.set_markdown("only")
+    _ = p.key("k", CTRL | SHIFT, 0)
+    assert_equal(p.markdown(), "")
+
+
 def main() raises:
     test_long_pages()
     test_styles()
@@ -324,4 +359,5 @@ def main() raises:
     test_undo()
     test_tab()
     test_scroll()
+    line_keys()
     print("pageedit: ok")
