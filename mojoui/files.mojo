@@ -6,7 +6,7 @@ from std.os.path import getsize, isfile
 from std.sys import CompilationTarget
 from std.os import listdir, stat
 from mojoui.shared import environment, make_dir, arguments, serial
-from mojoui.libc import chmod, unlink, rename, open_append, write_fd, close, getpid, clock_gettime
+from mojoui.libc import chmod, unlink, rename, open_append, write_fd, close, getpid, clock_gettime, flock
 
 
 def file_name(path: String) -> String:
@@ -235,6 +235,44 @@ def media_path_ok(path: String, own: List[String]) -> Bool:
 
 
 # ------------------------------------------------ private files (review 3, MUST 7): what an app keeps of its user's documents
+
+struct FileLock(Movable):
+    """A file only its holder has (flock): held until release(), this value's end or the process's, however it ends. Says
+    "someone is alive" to other processes, and to other holders in this one."""
+
+    var fd: Int
+    var path: String
+
+    def __init__(out self):
+        self.fd = -1
+        self.path = ""
+
+    def __del__(deinit self):
+        if self.fd >= 0:
+            _ = close(self.fd)
+
+    def take(mut self, path: String) -> Bool:
+        """Made if missing (0600) and taken, not waited for. False: another holds it, or the file system has no locks."""
+        self.release()
+        var fd = open_append(path)
+        if fd < 0:
+            return False
+        if flock(fd, 2 | 4) != 0:
+            _ = close(fd)
+            return False
+        self.fd = fd
+        self.path = path
+        return True
+
+    def held(self) -> Bool:
+        return self.fd >= 0
+
+    def release(mut self):
+        if self.fd >= 0:
+            _ = close(self.fd)
+        self.fd = -1
+        self.path = ""
+
 
 def private_dir(dir: String) -> Bool:
     """The folder, made if missing (its parents too), readable by this user alone (0700, also when it was there). False

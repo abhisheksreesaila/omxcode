@@ -53,6 +53,7 @@ from mojoui.hosts.gtk_webview import Inbound, IN_EVENT, IN_REPLY, theme_message
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
 from mojoui.macactivity import InputActivity
+from mojoui.hosts.framewatch import FrameWatch
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
     new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT,
@@ -317,6 +318,7 @@ struct AppKitHost[A: App](Movable):
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
     var activity: InputActivity
+    var watch: FrameWatch
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -416,6 +418,7 @@ struct AppKitHost[A: App](Movable):
         self.canvases = List[AppleCanvas]()
         self.link = 0
         self.activity = InputActivity()
+        self.watch = FrameWatch(env("MOJOUI_FRAME_WATCH") == "1")
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -3081,6 +3084,7 @@ struct AppKitHost[A: App](Movable):
         if self.g2d_frames != frames0:
             self.drew_tick_ns = began
         self.finish_frame()
+        self.watch.ticked(began, self.g2d_frames != frames0)
         if self.link != 0 and self.idle():  # nothing to animate or redraw: stop waking up
             self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
             _ = msg(self.link, "invalidate")
@@ -3115,6 +3119,7 @@ struct AppKitHost[A: App](Movable):
             return
         self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
         _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, ns_string("kCFRunLoopCommonModes"))
+        self.watch.started()
         if self.ticks == 0:
             self.report.note("frames: timer started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO TIMER") + ")")
 
@@ -3777,6 +3782,18 @@ def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
 def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
     var t = from_tag(view)
     host_at[A](t[0])[].tick(msg[Float64](msg(cls("NSProcessInfo"), "processInfo"), "systemUptime"), t[0])
+
+
+def on_vsync_seen[A: App](view: Int, cmd: Int, link: Int) abi("C"):
+    """MOJOUI_FRAME_WATCH's own display link: which surface the window server holds now."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var holding = 0
+    if len(host[].canvases) > 0:
+        for j in range(len(host[].canvases[0].surfaces)):
+            if cfunc[UInt8]("IOSurfaceIsInUse", host[].canvases[0].surfaces[j]) != 0:
+                holding |= 1 << j
+    host[].watch.refreshed(holding)
 
 
 def on_canvas_resized[A: App](view: Int, cmd: Int, notification: Int) abi("C"):
@@ -4510,6 +4527,15 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
         host[].canvases[k].moved = True
         bench_settle[A](host_addr, 300_000_000)
     var opens = what == "open" or what == "openpress"
+    if host[].watch.on:
+        if host[].watch.link == 0 and host[].window != 0:
+            host[].watch.link = msg(msg(host[].window, "displayLinkWithTarget:selector:", host[].canvases[k].view, sel("vsyncSeen:")), "retain")
+            _ = msg(host[].watch.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), ns_string("kCFRunLoopCommonModes"))
+        var scr = msg(host[].window, "screen")
+        print("FRAMEWATCH: screen maximumFramesPerSecond=" + String(msg(scr, "maximumFramesPerSecond") if scr != 0 else -1) + " backingScale=" + one_decimal(msg[Float64](host[].window, "backingScaleFactor"))
+              + " occlusion=" + String(msg(host[].window, "occlusionState")) + " canvas " + one_decimal(w) + "x" + one_decimal(h), flush=True)
+        bench_settle[A](host_addr, 200_000_000)
+        host[].watch.clear()
     var gaps = List[Float64]()
     var lats = List[Float64]()
     var press_lats = List[Float64]()
@@ -4598,6 +4624,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             completes.append(Float64(Int(now_ns()) - t0) / 1e6)
             bench_settle[A](host_addr, 300_000_000)
             last = -1
+    if host[].watch.on:
+        print("FRAMEWATCH: " + what + host[].watch.line(), flush=True)
     node = canvas_node_at(host[], tag)
     if node >= 0 and (what == "pan" or what == "draw"):
         host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
@@ -6078,6 +6106,7 @@ def run[A: App]() -> c_int:
     register_class(c)
     var canvas = new_class("MojoCanvas", "NSImageView")
     add_method(canvas, "canvasFrame:", on_canvas_frame[A], "v@:@")
+    add_method(canvas, "vsyncSeen:", on_vsync_seen[A], "v@:@")
     add_method(canvas, "canvasResized:", on_canvas_resized[A], "v@:@")
     add_method(canvas, "canvasPan:", on_canvas_pan[A], "v@:@")
     add_method(canvas, "canvasPinch:", on_canvas_pinch[A], "v@:@")

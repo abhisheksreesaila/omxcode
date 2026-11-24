@@ -320,6 +320,13 @@ def open_append(var path: String) -> Int:
     return fd
 
 
+def flock(fd: Int, op: Int) -> Int:
+    """An advisory lock on an open file, the kernel's: it goes when the last descriptor of that open closes, however the
+    process ends. op: 1 shared, 2 exclusive, 8 unlock, + 4 don't wait. 0: taken."""
+    var f = _sym("flock")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, c_int) thin abi("C") -> c_int]()[](c_int(fd), c_int(op)))
+
+
 def write_fd(fd: Int, addr: Int, n: Int) -> Int:
     var f = _sym("write")
     return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))

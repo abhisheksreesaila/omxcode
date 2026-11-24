@@ -15,8 +15,10 @@
 
 from mojoui.sqlite import Database, Statement
 from mojoui.json import Json, json_string
-from mojoui.files import private_write
-from mojoui.libc import unlink, usleep
+from mojoui.files import private_write, FileLock
+from mojoui.libc import unlink, usleep, getpid, kill, rename
+from mojoui.shared import new_key
+from std.memory import ArcPointer
 from std.os import listdir, getenv
 from std.time import perf_counter_ns
 
@@ -395,22 +397,61 @@ def _stage(name: String):
 
 
 struct SaveOutbox(Movable):
-    """(review 3, SHOULD 7) Saves that failed or met a conflict, held until they land or the person drops them: in memory,
-    and as files (0600, in a 0700 folder of the app's) written at once, so a switch, a quit or a crash loses nothing. One
-    per document: a later failed save of it takes the place of the earlier. `space` names the store the ids belong to (two
-    databases share no file)."""
+    """(review 3, SHOULD 7; review 4, MUST 1) Saves that failed or met a conflict, held until they land or the person drops
+    them: in memory, and as files (0600, in a 0700 folder of the app's) written at once, so a switch, a quit or a crash
+    loses nothing. One per document: a later failed save of it takes the place of the earlier. `space` names the store the
+    ids belong to (two databases share no file).
+
+    Several windows or processes share the folder. Each outbox's files carry its own name (`owner`), it alone removes them,
+    and while it lives it holds a lock file of that name. load() takes over the files of owners that are gone (their lock can
+    be taken); the living ones' are left alone. Two held versions of one document: one is `items`', the other in `extras`
+    (what the app makes a document of its own from, then extra_done())."""
 
     var dir: String
     var space: String
+    var owner: String
+    var lock: FileLock
+    var claimed: String  # the folder `owner` is claimed in
     var items: List[Unsaved]
+    var extras: List[Unsaved]
+    var extra_files: List[String]
 
     def __init__(out self, dir: String = "", space: String = ""):
         self.dir = dir
         self.space = space
+        self.owner = ""
+        self.lock = FileLock()
+        self.claimed = ""
         self.items = List[Unsaved]()
+        self.extras = List[Unsaved]()
+        self.extra_files = List[String]()
 
-    def path(self, id: Int) -> String:
-        return self.dir + "/unsaved-" + self.space + "-" + String(id) + ".json"
+    def __del__(deinit self):
+        if len(self.items) == 0 and len(self.extras) == 0 and self.lock.held():  # (nothing of it left: its name neither)
+            _ = unlink(self.lock.path)
+
+    def claim(mut self):
+        """This outbox's own name in its folder, and the lock that says it lives. Where files can't be locked the name says
+        the process instead ("n<pid>-…")."""
+        if self.dir == "" or self.claimed == self.dir:
+            return
+        self.claimed = self.dir
+        for _ in range(8):  # (another start may look at a lock file in the instant between its making and its taking)
+            self.owner = "p" + String(getpid()) + "-" + new_key("k")
+            if self.lock.take(self.lock_path(self.owner)):
+                return
+        _ = unlink(self.lock_path(self.owner))
+        self.owner = "n" + String(getpid()) + "-" + new_key("k")
+
+    def lock_path(self, owner: String) -> String:
+        return self.dir + "/unsaved-" + self.space + "." + owner + ".lock"
+
+    def path(mut self, id: Int) -> String:
+        """This outbox's file for document `id` ("": it has no folder)."""
+        if self.dir == "":
+            return ""
+        self.claim()
+        return self.dir + "/unsaved-" + self.space + "-" + String(id) + "." + self.owner + ".json"
 
     def find(self, id: Int) -> Int:
         for i in range(len(self.items)):
@@ -436,28 +477,103 @@ struct SaveOutbox(Movable):
         var i = self.find(id)
         if i >= 0:
             _ = self.items.pop(i)
-        if self.dir != "":
+        if self.dir != "" and self.claimed == self.dir:
             _ = unlink(self.path(id))
 
+    def extra_done(mut self, i: Int):
+        """extras[i] is a document of its own now."""
+        _ = self.extras.pop(i)
+        _ = unlink(self.extra_files.pop(i))
+
+    def gone(self, owner: String, mut lock: FileLock) -> Bool:
+        """Whether `owner` is no more (its lock is then ours, in `lock`)."""
+        if owner == "":  # (a file from before owners)
+            return True
+        if owner.startswith("n"):
+            var dash = owner.find("-")
+            try:
+                return kill(Int(String(owner[byte = 1 : max(dash, 1)])), 0) != 0
+            except:
+                return False
+        return lock.take(self.lock_path(owner))
+
     def load(mut self):
-        """What an earlier session left."""
+        """What earlier sessions left: the files of owners that are gone, now this outbox's. One that can't be read stays where
+        it is and hides no other."""
         if self.dir == "":
             return
+        self.claim()
+        var names = List[String]()
         try:
             for name in listdir(self.dir):
-                var n = String(name)
-                if not n.startswith("unsaved-" + self.space + "-") or not n.endswith(".json"):
-                    continue
+                names.append(String(name))
+        except e:
+            print("SaveOutbox: " + self.dir + ": " + String(e), flush=True)
+            return
+        sort(names)
+        var start = "unsaved-" + self.space + "-"
+        var asked = List[String]()  # the owners asked after, and whether each is gone
+        var answer = List[Bool]()
+        var locks = List[ArcPointer[FileLock]]()
+        for n in names:
+            if not n.startswith(start) or not n.endswith(".json"):
+                continue
+            var stem = String(n[byte = start.byte_length() : n.byte_length() - 5])  # <id>[x<k>][.<owner>]
+            var dot = stem.find(".")
+            var owner = String(stem[byte = dot + 1 :]) if dot >= 0 else String("")
+            if owner == self.owner:
+                continue
+            var at = -1
+            for k in range(len(asked)):
+                if asked[k] == owner:
+                    at = k
+            if at < 0:
+                var lock = ArcPointer(FileLock())
+                at = len(asked)
+                asked.append(owner)
+                answer.append(self.gone(owner, lock[]))
+                locks.append(lock^)
+            if not answer[at]:
+                continue
+            var full = self.dir + "/" + n
+            try:
                 var t: String
-                with open(self.dir + "/" + n, "r") as f:
+                with open(full, "r") as f:
                     t = f.read()
                 var j = Json.parse(t)
                 var u = Unsaved(j.number(j.get(0, "id"), -1), j.text(j.get(0, "kind")), j.number(j.get(0, "revision"), -1), j.text(j.get(0, "content")),
                                 j.text(j.get(0, "body")), j.text(j.get(0, "why")), j.flag(j.get(0, "conflict")))
-                if u.id >= 0 and u.content != "" and self.find(u.id) < 0:
-                    self.items.append(u^)
-        except e:
-            print("SaveOutbox: " + self.dir + ": " + String(e), flush=True)
+                if u.id < 0 or u.content == "":
+                    continue
+                var have = self.find(u.id)
+                if have < 0:
+                    if rename(full, self.path(u.id)) == 0:
+                        self.items.append(u^)
+                    continue
+                var mine = self.path(u.id)
+                var spare = String(mine[byte = 0 : mine.find(".", mine.rfind("/"))]) + "x" + new_key("e") + "." + self.owner + ".json"
+                if u.revision > self.items[have].revision:  # (the later one is the document's, the earlier the spare)
+                    if rename(mine, spare) == 0 and rename(full, mine) == 0:
+                        swap(u, self.items[have])
+                        self.extras.append(u^)
+                        self.extra_files.append(spare)
+                elif rename(full, spare) == 0:
+                    self.extras.append(u^)
+                    self.extra_files.append(spare)
+            except e:
+                print("SaveOutbox: " + full + ": " + String(e), flush=True)
+        for k in range(len(asked)):  # (a gone owner's name goes with its last file)
+            if not answer[k] or asked[k] == "":
+                continue
+            var left = False
+            try:
+                for name in listdir(self.dir):
+                    if String(name).endswith("." + asked[k] + ".json"):
+                        left = True
+            except:
+                left = True
+            if not left:
+                _ = unlink(self.lock_path(asked[k]))
 
 
 struct KeptDocs[T: Movable & Deinitable](Movable):

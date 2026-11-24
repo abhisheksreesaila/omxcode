@@ -2058,6 +2058,16 @@ struct WebShell(Movable):
                     self.outbox.drop(u.id)
             except:
                 pass
+        while len(self.outbox.extras) > 0:  # (two windows held edits of one note: the other's are a note of their own)
+            var u = self.outbox.extras[0].copy()
+            var i = self.note_index(u.id)
+            var name = (self.notes[i].title if i >= 0 else String("Recovered note")) + " (my copy)"
+            var made = make_note(self.dbs[0], u.kind, name, self.notes[i].notebook if i >= 0 else 0, u.content, u.body)
+            if made.id == 0:  # (kept in its file for the next start)
+                break
+            self.outbox.extra_done(0)
+            self.add_record(made.id, u.kind, name)
+            print("PNOTE SAVE: another window's held edits of note " + String(u.id) + " are note " + String(made.id), flush=True)
 
     def save_from(mut self) -> Int:
         """The note the pending save is of, when it may be saved (-1: not), the pending save taken."""

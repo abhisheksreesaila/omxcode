@@ -2,13 +2,13 @@
 # kept), OpenBoard's failed opens (a job that fails, a text that isn't a canvas, another app's format: an empty read-only
 # board that can't be taken as a document), the board tools on one, and SaveOutbox (edits that couldn't be written survive a
 # switch, a restart, and are dropped when they land). opendoc: ok
-from std.os import stat, getenv
+from std.os import stat, getenv, listdir
 from std.testing import assert_true, assert_equal
 from std.time import sleep
 from mojoui.libc import unlink
-from mojoui.files import private_dir
+from mojoui.files import private_dir, file_exists
 from mojoui.sqlite import Database
-from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved, DOC_FAILED
+from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved, unsaved_text, DOC_FAILED
 from mojoui.canvasload import OpenBoard, SqlText, text_hash
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, export_json_canvas
 from mojoui.pagedesk import BoardTools, DeskView
@@ -118,7 +118,60 @@ def outbox() raises:
     assert_equal(len(nowhere.items), 1, "held in memory all the same")
 
 
+def two_windows() raises:
+    """(review 4, MUST 1) Two windows on one folder: neither removes or takes over what the other holds while it lives; a window
+    that ended leaves its edits to the next start; two versions of one document are both kept; a broken file hides no other."""
+    var dir = getenv("TMPDIR", "/tmp") + "/mojoui-outbox2"
+    assert_true(private_dir(dir))
+    for n in listdir(dir):
+        _ = unlink(dir + "/" + String(n))
+    var a = SaveOutbox(dir, "s")
+    var b = SaveOutbox(dir, "s")
+    a.load()
+    b.load()
+    assert_true(a.put(Unsaved(5, "page", 3, "a's words", "", "conflict", True)))
+    assert_true(b.put(Unsaved(5, "page", 4, "b's words", "", "locked", False)))
+    b.drop(5)  # (b's save landed)
+    var c = SaveOutbox(dir, "s")
+    c.load()
+    assert_equal(len(c.items), 0, "a lives: its file isn't another's to take")
+    with open(a.path(5), "r") as f:
+        assert_true("a's words" in f.read(), "nor to remove")
+    assert_true(b.put(Unsaved(5, "page", 4, "b's again", "", "locked", False)))
+    assert_true(b.put(Unsaved(6, "page", 1, "b's other", "", "locked", False)))
+    b.drop(77)
+    var bp = b.path(6)
+    _ = a^  # (both end, however they end)
+    _ = b^
+    with open(dir + "/unsaved-s-1.p1-gone.json", "w") as f:
+        f.write("{not json")
+    with open(dir + "/unsaved-s-8.json", "w") as f:  # (an older version's name)
+        f.write(unsaved_text(Unsaved(8, "page", 1, "older", "", "", False)))
+    var d = SaveOutbox(dir, "s")
+    d.load()
+    assert_true(d.find(6) >= 0 and d.find(8) >= 0, "the gone ones' edits are found")
+    assert_true(d.items[d.find(5)].content == "b's again" and len(d.extras) == 1 and d.extras[0].content == "a's words", "both versions")
+    var e = SaveOutbox(dir, "s")
+    e.load()
+    assert_equal(len(e.items) + len(e.extras), 0, "d lives")
+    d.extra_done(0)
+    for id in [5, 6, 8]:
+        d.drop(id)
+    _ = d^
+    _ = e^
+    _ = c^
+    var f2 = SaveOutbox(dir, "s")
+    f2.load()
+    assert_equal(len(f2.items) + len(f2.extras), 0)
+    var left = 0
+    for n in listdir(dir):
+        if String(n).endswith(".lock"):
+            left += 1
+    assert_true(left <= 2 and not file_exists(bp), "names of the gone don't pile up: " + String(left))
+
+
 def main() raises:
+    two_windows()
     gate()
     failed_boards()
     outbox()
