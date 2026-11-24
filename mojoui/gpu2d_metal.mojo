@@ -541,6 +541,8 @@ struct Metal2D(Movable):
     var atlas_w: Int
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last copied into the atlas's dynamic rows
+    var page_syncs: Int  # (goal 81, always on) copies of glyph rows, and the rows they sent
+    var page_rows: Int
     var p_tri: Int
     var p_cover: Int
     var atlas: Int  # the R8 texture
@@ -636,6 +638,8 @@ struct Metal2D(Movable):
         self.atlas_w = atlas.width
         self.atlas_dyn = atlas.dyn_y0
         self.pages_version = -1
+        self.page_syncs = 0
+        self.page_rows = 0
         self.p_tri = 0
         self.p_cover = 0
         self.atlas = 0
@@ -1274,19 +1278,25 @@ struct Metal2D(Movable):
         _ = len(self.uniform)
 
     def sync_pages(mut self):
-        """fonttext's glyphs packed since the last copy (GlyphPages' rows in use) into the atlas's dynamic rows. New
-        glyphs only ever take rows no frame in flight reads; a full restart of the pages drains first."""
+        """fonttext's glyphs packed since the last copy into the atlas's dynamic rows: only the rows written since (goal
+        81; goal 80 did GL's). New glyphs only ever take rows no frame in flight reads, or rows whose other glyphs are
+        written again as they are; a full restart of the pages drains first."""
         var pg = glyph_pages(self.atlas_w)
-        if self.atlas == 0 or pg[].version == self.pages_version or pg[].used == 0:
+        if self.atlas == 0 or pg[].version == self.pages_version:
+            return
+        var rows = pg[].rows_since(self.pages_version)
+        self.pages_version = pg[].version
+        if rows[1] <= rows[0]:
             return
         var region = List[Int](length=6, fill=0)
-        region[1] = self.atlas_dyn
+        region[1] = self.atlas_dyn + rows[0]
         region[3] = self.atlas_w
-        region[4] = min(pg[].used, DYN_ROWS)
+        region[4] = rows[1] - rows[0]
         region[5] = 1
-        _ = msg[NoneType](self.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, Int(pg[].bytes.unsafe_ptr()), self.atlas_w)
+        _ = msg[NoneType](self.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", Int(region.unsafe_ptr()), 0, Int(pg[].bytes.unsafe_ptr()) + rows[0] * self.atlas_w, self.atlas_w)
         _ = len(region)
-        self.pages_version = pg[].version
+        self.page_syncs += 1
+        self.page_rows += rows[1] - rows[0]
 
     def wake(mut self):
         """Input reached a GPU canvas: when the GPU has been idle (30 ms since the last frame went to it), a tiny blit
