@@ -3,6 +3,7 @@
 # <config>/settings.txt).
 
 from std.os.path import getsize, isfile
+from std.sys import CompilationTarget
 from std.os import listdir, stat
 from mojoui.shared import environment, make_dir, arguments, serial
 from mojoui.libc import chmod, unlink, rename, open_append, write_fd, close, getpid, clock_gettime
@@ -48,6 +49,19 @@ def file_argument(suffixes: List[String]) -> String:
 def config_dir(app: String) -> String:
     """Where an app keeps its settings: $OMX_CONFIG if set (tests), else ~/.config/<app>."""
     return environment("OMX_CONFIG", environment("HOME", ".") + "/.config/" + app)
+
+
+def data_dir(app: String) -> String:
+    """Where an app keeps what a person makes in it (its documents' database): $OMX_DATA if set (tests), else the
+    platform's place: ~/Library/Application Support/<app> on a Mac, $XDG_DATA_HOME/<app> or ~/.local/share/<app> elsewhere."""
+    var given = environment("OMX_DATA", "")
+    if given != "":
+        return given
+    var home = environment("HOME", ".")
+    comptime if CompilationTarget.is_macos():
+        return home + "/Library/Application Support/" + app
+    var xdg = environment("XDG_DATA_HOME", "")
+    return (xdg if xdg.startswith("/") else home + "/.local/share") + "/" + app
 
 
 def adopt_config(app: String, old: String):

@@ -194,6 +194,92 @@ def save_row(mut db: Database, s: RowSave) -> SaveResult:
         return SaveResult(FAILED, s.expected, "", String(e))
 
 
+comptime NEW_ROW = -9_000_000_001  # (as a follow-up's int_arg) the id of the row just inserted
+
+
+struct RowNew(Copyable, Movable):
+    """A new row: its columns and the statements in the same transaction; int_arg(NEW_ROW) in one of them is its id."""
+
+    var table: String
+    var cols: List[String]
+    var vals: List[SqlArg]
+    var after: List[Followup]
+
+    def __init__(out self, table: String):
+        self.table = table
+        self.cols = List[String]()
+        self.vals = List[SqlArg]()
+        self.after = List[Followup]()
+
+    def set(mut self, col: String, v: SqlArg):
+        self.cols.append(col)
+        self.vals.append(v.copy())
+
+    def then(mut self, sql: String, args: List[SqlArg]):
+        self.after.append(Followup(sql, args.copy()))
+
+
+@fieldwise_init
+struct NewResult(Copyable, Movable):
+    var id: Int  # 0: it wasn't made
+    var message: String
+
+
+def new_row(mut db: Database, s: RowNew) -> NewResult:
+    """Inserts the row and runs its follow-ups, all or nothing."""
+    try:
+        db.begin()
+    except e:
+        return NewResult(0, String(e))
+    try:
+        var sql = "INSERT INTO " + s.table + " ("
+        var marks = String("")
+        for i in range(len(s.cols)):
+            sql += (", " if i > 0 else "") + s.cols[i]
+            marks += ", ?" if i > 0 else "?"
+        var st = db.prepare(sql + ") VALUES (" + marks + ")")
+        for i in range(len(s.vals)):
+            _bind(st, i + 1, s.vals[i])
+        _ = st.step()
+        var id = db.last_id()
+        for ref f in s.after:
+            var q = db.prepare(f.sql)
+            for i in range(len(f.args)):
+                _bind(q, i + 1, int_arg(id) if f.args[i].is_number and f.args[i].number == NEW_ROW else f.args[i].copy())
+            _ = q.step()
+        db.commit()
+        return NewResult(id, "")
+    except e:
+        _undo(db)
+        return NewResult(0, String(e))
+
+
+def drop_row(mut db: Database, table: String, key: String, id: Int, before: List[Followup]) -> String:
+    """Deletes a row after the statements that go with it (its index, its change log: they run first, while it is there),
+    all or nothing. "" or why not; a row already gone is "gone"."""
+    try:
+        db.begin()
+    except e:
+        return String(e)
+    try:
+        for ref f in before:
+            var q = db.prepare(f.sql)
+            for i in range(len(f.args)):
+                _bind(q, i + 1, f.args[i])
+            _ = q.step()
+        var st = db.prepare("DELETE FROM " + table + " WHERE " + key + " = ?")
+        st.bind(1, id)
+        _ = st.step()
+        if db.changes() == 0:
+            _undo(db)
+            return "gone"
+        db.commit()
+        return ""
+    except e:
+        _undo(db)
+        return String(e)
+
+
 def row_revision(mut db: Database, table: String, key: String, id: Int, rev: String) -> Int:
     """The row's revision now (-1: no such row)."""
     try:
