@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Frames a second on the Mac, as the screen shows them (goal 79, continuation 22, D-8060): a steady pan of the stress note
+# (and one of the 600 note), counted apart from the bench by a display link of its own and the window server's use of the
+# canvas's surfaces. Fails under 90 % of the screen's refresh; refuses (2) when the screen is locked or the app isn't in front.
+# The build before D-8060 fails it (36 a second on a 144 Hz screen, build/ms-base600.log).
+#   MAC_SSH=user@host scripts/mac-frames [MAC_ENV extra, e.g. MOJOUI_FRAME_CLOCK=timer]
+set -uo pipefail
+cd "$(dirname "$0")/.."
+: "${MAC_SSH:?set MAC_SSH=user@host}"
+export MAC_SSH
+bad=0 first=${MAC_NOBUILD:-0}
+for db in build/g79/race/race-600.db build/g79/race/race-stress.db; do
+  printf '%s\n' wait:800 window:1440x900 appbench:desk=coldopens framebench:desk=open,1 appbench:desk=zoom100 framebench:desk=pan,360 quit > build/mac-frames.steps
+  MAC_NOBUILD=$first MAC_ENV="PNOTE_DB={data}/$(basename $db),OMX_CONFIG={data}/cfg-frames-$(date +%s),MOJOUI_BENCH_PACED=1,MOJOUI_FRAME_WATCH=1${1:+,$1}" scripts/mac-ssh pnote build/mac-frames.steps "$db" > build/mac-frames.log 2>&1
+  first=1
+  r=$(tail -1 build/mac-frames.log)
+  grep -q "^BENCHSTATE: pan active=1 key=1 locked=0" "$r/stdout.txt" 2>/dev/null || { echo "REFUSED: the screen is locked or the app isn't in front"; exit 2; }
+  python3 - "$r/stdout.txt" "$(basename $db)" <<'P' || bad=1
+import re, sys
+t = open(sys.argv[1]).read()
+hz = float(re.search(r"maximumFramesPerSecond=(\d+)", t).group(1))
+line = re.findall(r"^FRAMEWATCH: pan .*", t, re.M)[-1]
+drawn, new = (re.search(k + r"=([\d.]+)", line) for k in ("drawn_hz", "new_pictures_hz"))
+drawn, new = float(drawn.group(1)) if drawn else 0.0, float(new.group(1)) if new else 0.0
+ok = drawn >= 0.9 * hz and new >= 0.9 * hz
+print(f"{sys.argv[2]}: screen {hz:.0f} Hz, drawn {drawn:.1f}, new pictures seen {new:.1f} a second: {'PASS' if ok else 'FAIL (under 90 %)'}")
+sys.exit(0 if ok else 1)
+P
+done
+exit $bad

@@ -82,7 +82,8 @@ struct FrameWatch(Movable):
                 waits.append(self.waits[i])
             if not self.drew[i]:
                 empty += 1
-        return (" refreshes=" + String(len(self.refreshes)) + " refresh_hz=" + _hz(len(self.refreshes) - 1, secs) + " new_pictures_hz=" + _hz(self.changes, secs)
+        var span = Float64(self.begins[len(self.begins) - 1] - self.begins[0]) / 1e9 if len(self.begins) > 1 else 0.0
+        return (" drawn_hz=" + _hz(len(self.begins) - 1 - empty, span) + " refreshes=" + String(len(self.refreshes)) + " refresh_hz=" + _hz(len(self.refreshes) - 1, secs) + " new_pictures_hz=" + _hz(self.changes, secs)
                 + " ticks=" + String(len(self.begins)) + " empty=" + String(empty) + " tick_gap_p50=" + _ms(gaps, 0.5) + " tick_gap_p95=" + _ms(gaps, 0.95)
                 + " tick_took_p50=" + _ms(took, 0.5) + " tick_took_p95=" + _ms(took, 0.95) + " clock_starts=" + String(len(waits))
                 + self.stalls() + " start_to_tick_p50=" + _ms(waits, 0.5) + " start_to_tick_p95=" + _ms(waits, 0.95))

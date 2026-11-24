@@ -18,9 +18,13 @@ case $state in
   *) echo "REFUSED: the screen is locked, or the app isn't in front. Nothing was measured."; exit 2 ;;
 esac
 [ "${1:-}" = --probe ] && exit 0
+scripts/mac-frames || echo "(mac-frames failed: the rows below are judged all the same)"
 pixi run python -B - <<'P'
-import importlib.util
+import importlib.util, subprocess
 sp = importlib.util.spec_from_file_location("c", "docs/goals/79-check.py"); c = importlib.util.module_from_spec(sp); sp.loader.exec_module(c)
+t = subprocess.run(["scripts/mac-ssh-test", "tests/test_canvasload.mojo"], capture_output=True, text=True, timeout=900)  # (the open's contract, run there; M6 runs it here first, and this script didn't, so the rows said it failed)
+c.OPEN_TEST_OK[0] = "canvasload: ok" in t.stdout
+print("test_canvasload on the Mac:", "ok" if c.OPEN_TEST_OK[0] else t.stdout[-400:])
 print("M6, the Mac's half:", *c.m6_mac(c.OUT / "race"))
 P
-scripts/mac-firstframes
+[ "${MAC_FIRSTFRAMES:-1}" = 0 ] || scripts/mac-firstframes

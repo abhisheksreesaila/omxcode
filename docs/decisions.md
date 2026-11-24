@@ -1995,3 +1995,13 @@ Markdown: one file a note, a folder a notebook, words only (no pictures), locked
 
 ## D-8059: the Mac's menu bar has New, Quick note, exports, zoom and skins (ours; continuation 21)
 macOS only; Edit, Window and the app menu stay the host's. The first Mac run of it drew nothing (the bar's empty view took the whole column): AppKit now hides that view in a vertical stack, a fault no Linux test can see. ⌘N, ⌘=, ⌘−, ⌘0 act through the menu. The Mac's screen is locked, so nobody has clicked it yet.
+
+## D-8060: on the Mac frames come by the screen's own clock (ours; continuation 22)
+Unlocked, the app showed 15–36 frames a second while a frame's work was 1–4 ms. Each drawn frame left the canvas idle, so the host threw its NSTimer away; the next event made a new one, first due 16.7 ms later and then held back by macOS's timer coalescing (24 ms typical, 57 at worst). The display link that was tried on 10-22 "never fired" because we passed a string reading "kCFRunLoopCommonModes": Core Foundation knows that mode by address, so the link was in a mode nobody runs.
+Now: a CADisplayLink of the window's screen, in the real common modes; it ticks on for 1 s with nothing to draw, so the next event of a gesture meets a running clock; a first tick comes right after the event that starts it. A clock that doesn't tick within 0.1 s (locked, covered) gets the old 60 Hz timer beside it until it does. `MOJOUI_FRAME_CLOCK=timer` is the old source. Cons: up to a second of empty ticks after each gesture; 144 draws a second where the screen asks for them. Proof: `scripts/mac-frames` (MOJOUI_FRAME_WATCH: a display link of its own and the window server's use of our surfaces), 144 of 144 on both notes; the build before fails it.
+
+## D-8061: a progressive open takes 2.5 ms a frame, not 0.5 (ours; continuation 22)
+D-7969's 0.5 ms aimed at a 8.3 ms work bar the owner's ruling has since replaced. On the M4 at 144 Hz the stress note is complete in 105–192 ms (1,524 before, web 603), frames 6.9–10.1 ms meanwhile; the 600 note in 44–60 (329; web 199). A press during an open 11–13 ms.
+
+## D-8062: scripts/mac-unlocked says what test_canvasload does on the Mac (ours; continuation 22)
+Its rows read "tests/test_canvasload fails" though the test passes there: the flag is set by M6's Linux half, which that script doesn't run. It runs the test on the Mac now. No bar changed.
