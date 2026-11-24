@@ -106,7 +106,7 @@ highlight, the search's caret, a quote's `>` and code ticks.
 - **M2's check passed emoji 8–16 px off**: its region compare isn't enough for a glyph that small. It wasn't changed this round.
 - **The reference isn't quite the real web** (D-8048): its fonts are whole families (D-7901), so its map's centre is weight 700; the real page loads 400 and 600 only. Native follows the reference.
 - test_webpieces and test_notesshell now hold the Mac to the Mac's reference (D-8049): the Linux numbers are untouched.
-- test_pnnotes (mine, this continuation): one claim changed, a row dragged onto a notebook doesn't open it (D-8047); the assertion text stands because that notebook is open already.
+- test_pnnotes (mine, this continuation): one claim turned round: a row dragged onto a folded notebook leaves it folded, as the web does (D-8047). It had passed on Linux only because an earlier test left that notebook open; the Mac run showed it. The test now folds the notebook itself.
 - D-7912 (the map centre's 20 px) was wrong as a rule and is replaced by the web's (D-8048).
 - The first run of the Mac half at 03:57 waited on its own lock for 8 minutes (my mistake: the lock taken twice); killed and run again.
 

@@ -586,9 +586,16 @@ def dragging_and_notebooks() raises:
         s.panel.open_shelves[k] = True
     s.sidebar = True
     s.open(s.notes[0].id)
-    paint(s)
-    var other = s.notes[2].id  # (not the open one)
     var book = s.panel.notebooks[0].id
+    var other = 0  # (one in the Inbox, not the open one)
+    for ref n in s.notes:
+        if n.notebook == 0 and n.id != s.current:
+            other = n.id
+    s.panel.open_books = List[Int]()  # (every notebook folded, whatever a test before left)
+    for ref n in s.notes:  # (but the others' notes in view)
+        if n.notebook != 0 and n.notebook != book:
+            s.panel.reveal_book(n.notebook)
+    paint(s)
     var a = place(s, 0, other)
     var b = place(s, 1, book)
     _ = s.press(a[0], a[1])
@@ -597,7 +604,7 @@ def dragging_and_notebooks() raises:
     paint(s)
     assert_true(s.release(b[0], b[1]) and s.tap(b[0], b[1]), "dropped")
     assert_equal(count("SELECT notebook_id FROM notes WHERE id = " + String(other)), book)
-    assert_true(s.notes[s.note_index(other)].notebook == book and book in s.panel.open_books and s.current != other, "filed, shown there, not opened")
+    assert_true(s.notes[s.note_index(other)].notebook == book and book not in s.panel.open_books and s.current != other, "filed there, neither opened (the web's: D-8047)")
     s.dropped_us = -1_000_000
     s.open(other)
     assert_true(s.doc.may_edit(), "opens at its new revision")
