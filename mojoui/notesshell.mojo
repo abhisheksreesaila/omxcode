@@ -912,6 +912,23 @@ def draw_tool_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, 
             by += 44 + (2.0 if i + 1 < len(labels) and labels[i + 1] != "" else 0.0)
 
 
+def draw_popup_menu[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w: Float64, labels: List[String], icons: List[String], k: Float64, sk: Skin,
+                                px: Float64 = -1, py: Float64 = -1):
+    """A small menu at (x, y): 36 px rows with an icon, the one under the pointer washed. Boxes "menu", "menu.item:<i>"."""
+    var h = Float64(len(labels)) * 36 + 12
+    draw_lifted(p, x, y, w, h, 14, sk.shadow2, sk.panel)
+    bx.add("menu", x, y, w, h)
+    var st = TextStyle(UI, 400, False, 13)
+    for i in range(len(labels)):
+        var ry = y + 6 + Float64(i) * 36
+        var on = px >= x + 6 and px < x + w - 6 and py >= ry and py < ry + 36
+        if on:
+            p.rect(x + 6, ry, w - 12, 36, sk.hover, 9)
+        draw_icon(p, icons[i], x + 16, ry + 10, 16, k, sk.accent)
+        text_at(p, st, labels[i], x + 42, ry, 36, sk.ink if on else sk.ink_soft)
+        bx.add("menu.item:" + String(i), x + 6, ry, w - 12, 36)
+
+
 def draw_zoom_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
     """The map's zoom island: minus, the zoom as a label (a press resets it), plus."""
     p.rect(x, y, 132, 42, sk.panel, sk.radius_control)  # (workspace-theme.css: the surface, no edge, no shadow)

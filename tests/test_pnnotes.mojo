@@ -2,7 +2,7 @@
 # kinds and a "New note" row from the search, two notes with one name, deleting with Undo and for good, filing, the panel's
 # list scrolled and a notebook opened, the search's groups, clicks and filters, words inside notes; Clear all. No window.
 #   pixi run mojo run -I . -I vendor -I examples/pnote tests/test_pnnotes.mojo
-from std.os import setenv
+from std.os import setenv, listdir
 from std.sys import CompilationTarget
 from std.testing import assert_true, assert_equal
 from mojoui.libc import unlink
@@ -656,6 +656,46 @@ def icons() raises:
     s.close()
 
 
+def menus_and_exports() raises:
+    """Quick note held (or the other button): what kind; Markdown files and a whole backup written where told."""
+    _ = setenv("OMX_EXPORTS", "build/test_pnnotes_exports")
+    var s = WebShell(DB, "paper")
+    s.sidebar = True
+    s.create("page", "Ex/port: me")
+    typed(s, "words to export")
+    paint(s)
+    var b = at(s, "#rail-new-note")
+    assert_true(s.secondary(b[0], b[1]) and s.new_menu, "the other button")
+    paint(s)
+    tap(s, "menu.item:2")
+    assert_equal(s.notes[s.note_index(s.current)].kind, "mindmap")
+    _ = s.key("Tab", 0)
+    typed(s, "Leaf é")
+    _ = s.key("Enter", 0)
+    _ = s.press(b[0], b[1])
+    s.pressed_us -= 500_000
+    assert_true(s.tap(b[0], b[1]) and s.new_menu, "held")
+    _ = s.key("Escape", 0)
+    assert_true(not s.new_menu, "Escape")
+    s.export_markdown()
+    var said = s.toast
+    var root = String(said[byte=said.find("build/"):said.byte_length()])
+    var found = 0
+    for f in listdir(root + "/Inbox"):
+        var t: String
+        with open(root + "/Inbox/" + String(f), "r") as h:
+            t = h.read()
+        if String(f).startswith("Ex-port- me") and t == "words to export\n":
+            found += 1
+        if "- Leaf é" in t:
+            found += 10
+    assert_equal(found, 11)
+    s.export_backup()
+    var path = String(s.toast[byte=s.toast.find("build/"):s.toast.byte_length()])
+    assert_equal(Database(path).count("SELECT COUNT(*) FROM notes"), count("SELECT COUNT(*) FROM notes"))
+    s.close()
+
+
 def dragging_and_notebooks() raises:
     var s = WebShell(DB, "paper")
     s.open(s.notes[0].id)
@@ -759,4 +799,5 @@ def main() raises:
     pointing()
     double_tap()
     icons()
+    menus_and_exports()
     print("pnnotes: ok")

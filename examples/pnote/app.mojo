@@ -38,11 +38,15 @@ from pnstore import default_notes_file
 from mojoui.files import read_setting
 from mojoui.fonttext_check import fontcheck
 from mojoui.glyphwarm import WARM_TICK_MS
+from mojoui.menus import MenuBar, Menu, Item, Separator
+from mojoui import SECONDARY
+from std.sys import CompilationTarget
 
 comptime NEW_PAGE = 1
 comptime NEW_CANVAS = 2
 comptime NEW_MAP = 3
 comptime OPEN0 = 1000  # + the row in the list
+comptime MENU0 = 300  # + the Mac menu bar's item
 comptime SEARCH = 4
 comptime GESTURE = 5
 comptime PALETTE_TYPE = 6
@@ -810,6 +814,10 @@ struct Main(App):
                 self.web[0].ready_step()
                 return
             self.web[0].warm.touch()
+            if m >= MENU0 and m < MENU0 + 32:
+                self.web[0].menu(m - MENU0)
+                self.version += 1
+                return
             if m == GESTURE and event.number == HOVER:
                 if self.web[0].hover(event.x, event.y):
                     self.version += 1
@@ -840,6 +848,9 @@ struct Main(App):
                     self.version += 1
             elif m == GESTURE and event.number == RELEASE:
                 if self.web[0].release(event.x, event.y):
+                    self.version += 1
+            elif m == GESTURE and event.number == SECONDARY:
+                if self.web[0].secondary(event.x, event.y):
                     self.version += 1
             elif m == GESTURE and event.number == WHEEL:
                 if self.web[0].wheel(event.x, event.y, event.dx, event.dy):
@@ -951,6 +962,17 @@ struct Main(App):
     def view(self) -> View:
         if len(self.web) > 0:
             var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
+            comptime if CompilationTarget.is_macos():  # (the system menu bar: Personal Note's own menus, desktop_menu.py; Edit is the system's)
+                var bar = MenuBar([
+                    Menu("File", [Item("New note", MENU0 + 0, shortcut="Ctrl+N"), Item("Quick note", MENU0 + 1), Separator(),
+                                  Item("Export backup…", MENU0 + 2), Item("Export Markdown…", MENU0 + 3)]),
+                    Menu("View", [Item("Zoom In", MENU0 + 4, shortcut="Ctrl+="), Item("Zoom Out", MENU0 + 5, shortcut="Ctrl+-"), Item("Fit", MENU0 + 6, shortcut="Ctrl+0"), Separator(),
+                                  Item("Crayon", MENU0 + 7, checked=self.web[0].panel.skin_name == "crayon"), Item("Paper", MENU0 + 8, checked=self.web[0].panel.skin_name == "paper"),
+                                  Item("Night", MENU0 + 9, checked=self.web[0].panel.skin_name == "night")]),
+                ])
+                if self.web[0].clip_version > 0:
+                    return VStack(bar^, HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill(), spacing=0).grow().fill()
+                return VStack(bar^, desk^, spacing=0).grow().fill()
             if self.web[0].clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
                 return HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
             return desk^

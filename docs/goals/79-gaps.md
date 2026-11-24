@@ -19,17 +19,17 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | # | Gap | What the web does | Component | Size | State |
 |---|---|---|---|---|---|
 | 3 | Quick note (the panel's button, Alt+N) | a canvas note "Untitled note" in the Inbox, opened | button yes, row insert with its change log: RowSave only updates | S | **built** |
-| 4 | New page / New canvas / New mind map (omnibar actions; hold the button for a menu) | as 3 with that kind, in the selected notebook | yes (omnibar rows); hold-menu: menus.mojo | S | **built** (omnibar; the hold menu not) |
+| 4 | New page / New canvas / New mind map (omnibar actions; hold the button for a menu) | as 3 with that kind, in the selected notebook | yes (omnibar rows); hold-menu: menus.mojo | S | **built** (the menu by a hold or the other button, continuation 21; arrow keys in it not) |
 | 5 | "Create …" when a search finds nothing | a canvas note with that title | yes | S | **built** |
 | 6 | Delete a note (properties card → Delete note) | gone from the list at once, a toast with Undo for 8 s, then the row deleted | confirm/toast: mojoui.letgo, overlays; the web-look toast isn't drawn | M | **built** |
 | 7 | Move a note to a notebook (properties card; drag a row onto a notebook) | menu of notebooks; drag and drop with a drop line | dragdrop.mojo, menus.mojo; the web look's menu isn't drawn | M | **built** (the card's menu, or a row dragged onto a notebook or the Inbox) |
 | 8 | New notebook, rename, colour, icon, category, delete (its notes return to the Inbox), drag between shelves | inline namer, dialog | no (namer in the panel) | M | **partly built**: new, renamed, moved to another shelf, deleted (its notes to the Inbox); colour, icon, dragging a notebook not |
 | 9 | A notebook in the panel opens to its notes; click one | its rows under it, folded state kept | yes, the panel draws the count only | S | **built**, folds remembered |
-| 10 | Change a note's icon (emoji picker) | picker with search and tints | no (an emoji grid) | M | |
+| 10 | Change a note's icon (emoji picker) | picker with search and tints | no (an emoji grid) | M | **built** (emojipicker) |
 | 11 | "Save a copy" when another app changed the note (review 3) | the web merges (pages: text merge; canvases: object merge) | docstore holds the edits; no copy or merge | M | **partly built**: "Save a copy"; merging not |
 | 12 | Changes made by another app (or the web) show without reopening | a change feed is polled (workspace_changes) | watch.mojo; no merge into an open note | M | **partly built**: looked at every 2 s: the list, and the open note when nothing here is unsaved; no merge |
 | 13 | Secure notes: unlock, make secure, ordinary again | passphrase / Touch ID, sealed words | no | L | |
-| 14 | Backups and exports (JSON, Markdown zip, Obsidian vault, PNG of a note), import | menu entries | png.mojo; no zip of Markdown | M | |
+| 14 | Backups and exports (JSON, Markdown zip, Obsidian vault, PNG of a note), import | menu entries | png.mojo; no zip of Markdown | M | **partly built** (D-8058): a whole database copy, Markdown files without pictures; not the JSON, zip, vault, PNG, import |
 | 15 | Print preview and printing | pages, A4/Letter, the system's print | no | L | |
 | 16 | Links between notes (a card on a canvas, `[[ ]]` in a page, backlinks) | drop or pick a note; a click opens it | no | L | |
 
@@ -44,7 +44,7 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 21 | Copy, cut, paste (paste only arrives from the host's paste event) | all | Clipboard view, PASTE event | S | **built** (the host's clipboard; copy and paste between apps not run here) |
 | 22 | Undo, redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y), words and ink in one history | CodeMirror history | history.mojo | M | **built** |
 | 23 | Tab indents, Shift+Tab outdents; Enter continues nothing (the web's neither) | indentWithTab | no | S | **built** |
-| 24 | Ctrl+Backspace/Delete by word, Alt+Up/Down moves a line, Ctrl+D etc. | defaultKeymap | TextEdit has words | S (words), M (lines) | **built** (words); moving lines not |
+| 24 | Ctrl+Backspace/Delete by word, Alt+Up/Down moves a line, Ctrl+D etc. | defaultKeymap | TextEdit has words | S (words), M (lines) | **built** (words, lines: move, copy, delete, one under, indent); Ctrl+D and several carets not |
 | 25 | Find in the page | none of its own: the browser's Ctrl+F | no | M | |
 | 26 | Task boxes, links, strikethrough, tables, code blocks styled | Markdown highlighting; tasks tick | mdedit.mojo draws them | M | **partly built**: struck text, links, addresses, code blocks, marks in headings and quotes, `_` and `*` by CommonMark's rules: 565 of 600 random lines styled as the web's own parser (Lezer) styles them; tables, underlined headings and emphasis over a line's end not (task boxes: the web's page ticks none) |
 | 27 | "Page N" marks where paper breaks, the sheet grows | drawn | no | S | **built** |
@@ -85,11 +85,11 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 47 | Escape closes the panel, menus, cards in the web's order | yes | partly (card, settings, search) | S | **built** (the cases the native app has) |
 | 48 | Omnibar: actions run (New…, Open settings, Switch skin); pills filter (click, Tab); click a row; notebooks, words inside notes, by meaning | all | rows drawn; only notes open, with Enter | S (actions, clicks), M (words), L (meaning) | **built** except by meaning |
 | 49 | Settings: nine pages (general, skins, plugins, AI, sync, storage…) | all work | the skins page only | L | |
-| 50 | Title island: the card's other actions (focus, print, picture, backup, icon, link, properties, clear) | all | rename, properties→settings | S each; focus M | **partly built**: properties, settings, Clear all; the others say "Not in the native app yet" |
+| 50 | Title island: the card's other actions (focus, print, picture, backup, icon, link, properties, clear) | all | rename, properties→settings | S each; focus M | **partly built**: properties, settings, Clear all, icon, backup, Markdown; focus, print, picture, Obsidian, link say "Not in the native app yet" |
 | 51 | Focus mode (Ctrl+.) | yes | no | M | |
-| 52 | Menus on the Mac (File, Edit, View, Window, Help), with ⌘ shortcuts | pywebview's native menu | menus.mojo; the app has none in the web look | M | |
+| 52 | Menus on the Mac (File, Edit, View, Window, Help), with ⌘ shortcuts | pywebview's native menu | menus.mojo; the app has none in the web look | M | **built** (D-8059), not yet clicked on a Mac; no Help menu |
 | 53 | Folded shelves and the open panel are remembered | yes | settings (read_setting) | S | **built** (folds and opened notebooks; the open panel not) |
-| 54 | Double tap Ctrl switches writing and the pen | yes | no | S | |
+| 54 | Double tap Ctrl switches writing and the pen | yes | no | S | **built** (doubletap) |
 | 55 | Speed meter, speed test | yes | meter.mojo | S | |
 | 56 | Phone layout | yes | not in this goal | L | |
 
@@ -106,16 +106,16 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 63 | A shape made here wasn't written to the file at all | written | S | **built** (Personal Note's reader reads it, the highlight and the text: run, scratch) |
 | 64 | No words at all on a machine without a GPU | (the browser falls back) | S | **built** (D-8043) |
 | 65 | Spaces typed through the input method were dropped in search, titles and ideas; search had no caret | kept; a caret | S | **built** |
-| 66 | Strokes lost points in slow frames; translucent strokes darkened where they overlap; the eraser missed fast strokes | coalesced events; one path | M | **built** on Linux; coalesced events not on the Mac (D-8044) |
+| 66 | Strokes lost points in slow frames; translucent strokes darkened where they overlap; the eraser missed fast strokes | coalesced events; one path | M | **built**; on the Mac every point while the button is down (D-8054), not yet seen by hand |
 | 67 | A new canvas opened zoomed out with no caret; words being written were lost when another note opened; pages opened without a caret | opens for writing; kept | S | **built** (D-8045) |
-| 68 | A map's own sizes, wrapping, emoji, font and italic ignored; no caret while an idea is written; the ring without corners | all drawn | M | **built** (D-8048). Not: icons, due, done marks, votes, images, hidden branches, branch-style ideas |
+| 68 | A map's own sizes, wrapping, emoji, font and italic ignored; no caret while an idea is written; the ring without corners | all drawn | M | **built** (D-8048, D-8055): icons, due, done, votes, folded and branch-style ideas drawn. Pictures are placeholders; none of these can be edited |
 | 69 | Emoji 8–16 px too high on Linux | in their line | S | **built** (D-8046); M2 had passed it |
 | 70 | Texts saved with a CSS family list drawn in the sans; "bold" read as regular | the list | S | **built** (D-8046) |
 | 71 | The open note's notebook isn't marked; New note ignored it; a notebook opened by its note closed again at a restart | all | S | **built** (D-8047) |
-| 72 | A sticky's shadow ignores its round corner (a faint square corner under it) | follows the paper | S | open: needs a corner radius in the GPU's thinned shadow; not changed just before a race |
+| 72 | A sticky's shadow ignores its round corner (a faint square corner under it) | follows the paper | S | **built** (D-8056) |
 | 73 | Rows don’t answer the pointer; a notebook’s + and … missing (a pencil stood there); the panel only redrew over shelf heads | all | S | **built** |
 | 74 | The software raster drew circles, lines and polygons past a clip (the map’s dots over the panel) | cut | S | **built** (Scene.raster; the GPU was right) |
 | 75 | Each autosave of a big note stopped the window for 50–190 ms | no such stop in the window (a server writes it) | M | **built** (D-8050), after the race |
 
-**Still open, by size.** M: 10, 14, 25 (the web has none of its own), 36, 39, 51, 52, and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 54 (needs key releases), 55.
+**Still open, by size (continuation 21).** M: 25 (the web has none of its own), 36, 39, 51, rest of 14 and 50, and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 55.
 **Seen:** driven with real input on a headless display, drawn by the CPU (docs/goals/79/first5.py, pictures build/g79/first5-*.png), and the same notes file read and edited by the web app and read back. **Not seen on a GPU's screen**, nor by a person. Also: CPU tests (test_pageedit, test_pageink, test_pnnotes, test_pnstore, test_boardedit, test_mapedit, test_wordsedit's cases in test_boardedit) and, for the fixture's ten screens, draw operations identical to c761a99f's (86,180 lines compared), but for a quote's `>` (its colour) and inline code's ticks (their face), both moved to what the reference picture shows. The look of the new pieces (properties card, toast, flyout, colours, namer) is ours from the web's CSS, not measured against it.

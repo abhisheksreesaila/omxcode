@@ -1977,3 +1977,21 @@ Saves are a queue (one on its thread; a newer save of a note replaces one waitin
 ## D-8053: two proofs sharpened: the reference's fonts are the live page's, and small marks' ink is compared (ours; continuation 21)
 **The reference.** ref.mjs answered the page's Google Fonts requests with whole variable families (D-7901), so it drew weights the real page never loads: Source Serif 4 at 700 (the map's centre), where style.css asks for 400 and 600 at optical size 24 and font-synthesis is off. It now lets the live answers through, kept in build/g79/webfonts so runs agree (their hashes in meta.json; the Mac gets the same folder); M0 fails without them. Pictures: five screens the same to the last pixel as with the local files, the four with the map behind them differ (SSIM 0.994). Native follows by a generic rule, `fonttext.declare_face`: only the declared weights of a family exist, the nearest by CSS's matching (`css_weight`, test_boardedit), one optical size if it was loaded at one; pnote declares what Personal Note loads (pn_faces). The map's screens went from SSIM 0.987 to 0.989.
 **Small marks.** M2, M3 and M7 passed emoji 8–16 px too high: boxes, fills and SSIM don't see a glyph that small. `ink_wrong` compares where the ink is (edges ≤ 2, middle ≤ 1.7 device px at 1.6×) of every row's, title's and page's emoji and every icon button (3–23 marks a screen). The pictures of 0a8dfa70 (before the emoji fix) fail on eight of nine screens, by 8 px and more; today's pass on all nine. It found two more at once, both fixed: the settings window's ✕ wasn't drawn (the icon was missing from lucide_nodes), and the title island's emoji was 14 px where the web's is 16. Nothing was loosened: boxes, fills and SSIM bars are as they were.
+
+## D-8054: on the Mac every point of a stroke arrives while the button is down (ours; continuation 21)
+AppKit merges mouse moves into one a frame, so a stroke drawn in a slow frame lost its corners. `setMouseCoalescingEnabled:` is off from press to release and on again after. Cost: more events while drawing. Built and cross-compiled; a hand-drawn stroke on the Mac's own screen hasn't been seen (it is locked).
+
+## D-8055: a web map's marks are drawn, read-only (ours; continuation 21)
+Icons, due dates, done marks, votes, folded and branch-style ideas, sides and anchors are laid out by mojoui/mapmarks.mojo, held to the web's geometry.js, pencil.js and due.js by test_mapmarks. An idea's picture is a placeholder of its size: mojoui has no PNG/JPEG decoder of its own. A folded branch shows its count. None of them can be edited here yet; a save keeps them (map_json_from).
+
+## D-8056: a layered shadow can follow one round corner (ours; continuation 21)
+`rect_hole_corner` + `Scene.corner_of` (the radius travels as float bits, so no rounding). The middle is still left out, so overdraw is as before; test_shadowhole is pixel-identical on the GPU. Con: the shadow is ten flat layers, slightly stepped beside the web's blur.
+
+## D-8057: the AppKit paced race, and when the Mac may be judged (ours; continuation 21)
+The paced run times frames as they are shown, on a timer that runs the app's own draw. `mac_live` refuses to judge unless the app is active, its window is key and the screen is unlocked. Locked, macOS throttles a background app (the numbers are 2–5× worse), so those rows stay "work only". `scripts/mac-unlocked` runs the whole half in about 35 minutes; `--probe` alone refused correctly on 11-24 (active=0 key=0 locked=1).
+
+## D-8058: exports are folders and a database, not the web's zips (ours; continuation 21)
+Markdown: one file a note, a folder a notebook, words only (no pictures), locked notes left out. Backup: SQLite's VACUUM INTO, a whole consistent copy. Both go to OMX_EXPORTS or ~/Downloads and the app says where. The web's are JSON and zips with assets. Obsidian, Print, Picture and Link note still say "Not in the native app yet": passing plain Markdown off as an Obsidian vault would be wrong.
+
+## D-8059: the Mac's menu bar has New, Quick note, exports, zoom and skins (ours; continuation 21)
+macOS only; Edit, Window and the app menu stay the host's. ⌘N, ⌘=, ⌘−, ⌘0 act through the menu. The Mac's screen is locked, so nobody has clicked it yet.

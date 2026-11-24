@@ -11,6 +11,7 @@ from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
 from pnlook import pn_faces, pn_emoji, pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
 from mojoui.notesshell import (
+    draw_popup_menu,
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
 from mojoui.pagesheet import PageSheet
@@ -33,6 +34,8 @@ from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome,
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.rowsaver import RowSaver
 from mojoui.emojipicker import EmojiPicker
+from mojoui.mapmarks import local_now
+from std.os import makedirs
 from mojoui.doubletap import DoubleTap, KEY_UP, tap_key
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from pnstore import set_note_icon, make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
@@ -207,6 +210,52 @@ def read_map(content: String, mut map: BuzanMap) raises -> String:
     return root
 
 
+def safe_name(title: String) -> String:
+    """A title as a file's name: no separators or control characters, not empty, not long."""
+    var out = String("")
+    for cp in title.codepoint_slices():
+        var c = String(cp)
+        var b = c.as_bytes()[0]
+        out += "-" if (b < 32 or c == "/" or c == "\\" or c == ":" or c == "\0") else c
+        if out.byte_length() > 120:
+            break
+    var trimmed = String(out.strip())
+    out = trimmed^
+    while out.startswith("."):
+        var rest = String(out[byte=1:out.byte_length()])
+        out = rest^
+    return out if out != "" else String("Untitled")
+
+
+def stamp_now() -> String:
+    """2026-11-24 09.05.31, local time."""
+    var n = local_now()
+    var s = external_call["time", Int](0) % 60
+    def two(v: Int) -> String:
+        return ("0" if v < 10 else "") + String(v)
+    return String(n.year) + "-" + two(n.month) + "-" + two(n.day) + " " + two(n.hour) + "." + two(n.minute) + "." + two(s)
+
+
+def map_outline(m: BuzanMap) -> String:
+    """A mind map as a nested Markdown list, its centre the heading."""
+    var out = String("")
+    for i in range(len(m.topics)):
+        if m.topics[i].parent < 0:
+            out += "# " + m.topics[i].words() + "\n\n"
+            _outline(m, i, 0, out)
+    return out^
+
+
+def _outline(m: BuzanMap, parent: Int, depth: Int, mut out: String):
+    for i in range(len(m.topics)):
+        if m.topics[i].parent == parent:
+            for _ in range(depth):
+                out += "  "
+            ref l = m.topics[i].look
+            out += "- " + ("[x] " if l.done else ("[ ] " if "todo" in l.icons else "")) + m.topics[i].words() + (" (" + l.due + ")" if l.due != "" else "") + "\n"
+            _outline(m, i, depth + 1, out)
+
+
 comptime TOAST_UNDELETE = 1
 comptime TOAST_UNCLEAR = 2
 
@@ -327,6 +376,8 @@ struct WebShell(Movable):
     var dbs: List[Database]  # the open connection (one, kept)
     var writer: RowSaver  # a save on its thread, and what it is of (none or one)
     var written: List[Written]  # the saves on their way, the first on its thread
+    var new_menu: Bool  # what kind of note, asked at the Quick note button (held, or the other button)
+    var pressed_us: Int
     var emoji: EmojiPicker  # the open note's icon being chosen
     var taps: DoubleTap
     var pen_tool: String  # the pen used last (the double tap's)
@@ -443,6 +494,8 @@ struct WebShell(Movable):
         pn_faces()
         self.writer = RowSaver()
         self.written = List[Written]()
+        self.new_menu = False
+        self.pressed_us = 0
         self.emoji = pn_emoji()
         for e in read_setting("pnote", "recent-icons", "").split(" "):
             if String(e) != "":
@@ -919,7 +972,7 @@ struct WebShell(Movable):
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
             draw_locked_cover(p, self.boxes, left, 0, w - left, h, self.notes[i].title, "Locked note", "Secure note · not in the native app yet", k, self.sk)
         if self.sidebar:
-            self.panel.quiet = self.emoji.open or self.searching or self.settings_open or self.card_open or self.props_open or self.book_card >= 0
+            self.panel.quiet = self.emoji.open or self.new_menu or self.searching or self.settings_open or self.card_open or self.props_open or self.book_card >= 0
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
                           44, not self.sidebar and not self.searching and not self.settings_open and _in(self.px, self.py, 16, 16, 44))
@@ -985,7 +1038,7 @@ struct WebShell(Movable):
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
-        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0) or self.book_card >= 0 or self.emoji.open:  # (a layer of their own: opening one leaves the shell's batches as they are)
+        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0) or self.book_card >= 0 or self.emoji.open or self.new_menu:  # (a layer of their own: opening one leaves the shell's batches as they are)
             p.begin_layer("overlay")
             p.layer_transform(0, 0, k)
         if self.card_open and i >= 0:
@@ -1039,6 +1092,8 @@ struct WebShell(Movable):
             pc.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) / 2 + w / 2, 72, k, self.sk)
         if self.emoji.open:
             self.emoji.draw(p, self.boxes, w, h, k, self.sk)
+        if self.new_menu:
+            draw_popup_menu(p, self.boxes, 27, 177, 168, ["Canvas note", "Page", "Mind map"], ["file-text", "file-pen", "git-fork"], k, self.sk, self.px, self.py)
         if self.toast != "":
             _ = draw_toast(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.sk)
         if self.searching:
@@ -2126,6 +2181,89 @@ struct WebShell(Movable):
         s.then("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?",
                [int_arg(id)])
 
+    def menu(mut self, item: Int):
+        """The Mac menu bar's items (app.mojo's order)."""
+        if item == 0:
+            self.act("new-note")
+        elif item == 1:
+            self.act("quick-note")
+        elif item == 2:
+            self.export_backup()
+        elif item == 3:
+            self.export_markdown()
+        elif item == 4 or item == 5:
+            _ = self.zoom(self.win_w / 2, self.win_h / 2, 1.15 if item == 4 else 1 / 1.15)
+        elif item == 6:
+            if self.on_map():
+                self.map.fit_again()
+            elif self.on_canvas():
+                self.view = self.opening(self.cols, self.rows)
+        elif item >= 7 and item <= 9:
+            var names: List[String] = ["crayon", "paper", "night"]
+            self.set_skin(names[item - 7])
+
+    def secondary(mut self, x: Float64, y: Float64) -> Bool:
+        """The other button (or a long press): on Quick note, what kind of note."""
+        if self.sidebar and not self.searching and not self.card_open and not self.settings_open and self.boxes.hit_any(x, y, ["#rail-new-note"]) != "":
+            self.new_menu = True
+            return True
+        return False
+
+    def export_folder(self) -> String:
+        """Where exports go: OMX_EXPORTS, else the person's Downloads."""
+        var d = getenv("OMX_EXPORTS", "")
+        return d if d != "" else getenv("HOME", ".") + "/Downloads"
+
+    def export_markdown(mut self):
+        """Every note that isn't locked as a Markdown file of its own, one folder a notebook: a page is its Markdown, a canvas its
+        words in reading order, a map a nested list. Told where."""
+        self.flush()
+        var root = self.export_folder() + "/Personal Note Markdown " + stamp_now()
+        var n = 0
+        try:
+            makedirs(root, exist_ok=True)
+            for i in range(len(self.notes)):
+                if self.notes[i].secure:
+                    continue
+                var q = self.dbs[0].prepare("SELECT content, (SELECT body FROM note_search WHERE note_id = notes.id) FROM notes WHERE id = ? AND secure = 0")
+                q.bind(1, self.notes[i].id)
+                if not q.step():
+                    continue
+                var words = q.text(1)
+                if self.notes[i].kind == "mindmap":
+                    var m = BuzanMap()
+                    _ = read_map(q.text(0), m)
+                    words = map_outline(m)
+                elif self.notes[i].kind == "page":
+                    words = page_markdown(q.text(0))
+                var book = String("Inbox")
+                for ref nb in self.panel.notebooks:
+                    if nb.id == self.notes[i].notebook:
+                        book = nb.name
+                var dir = root + "/" + safe_name(book)
+                makedirs(dir, exist_ok=True)
+                with open(dir + "/" + safe_name(self.notes[i].title) + " (" + String(self.notes[i].id) + ").md", "w") as f:
+                    f.write(words if words.endswith("\n") else words + "\n")
+                n += 1
+            self.say(String(n) + " notes written (text only) to " + root)
+            print("PNOTE EXPORT: " + root + " " + String(n), flush=True)
+        except e:
+            self.say("Couldn’t export: " + String(e))
+
+    def export_backup(mut self):
+        """The whole notes file, as one database of its own (SQLite's VACUUM INTO: consistent, nothing lost). Told where."""
+        self.flush()
+        try:
+            makedirs(self.export_folder(), exist_ok=True)
+            var path = self.export_folder() + "/Personal Note backup " + stamp_now() + ".db"
+            var q = self.dbs[0].prepare("VACUUM INTO ?")
+            q.bind(1, path)
+            _ = q.step()
+            self.say("Backed up to " + path)
+            print("PNOTE EXPORT: " + path, flush=True)
+        except e:
+            self.say("Couldn’t back up: " + String(e))
+
     def choose_icon(mut self, box: String):
         """The icon picker, opened at a button."""
         var i = self.note_index(self.current)
@@ -2290,6 +2428,9 @@ struct WebShell(Movable):
             return False
         if self.emoji.open:
             return self.emoji.key(name, mods)
+        if self.new_menu:
+            self.new_menu = False
+            return True
         if self.panel.naming >= 0 and self.sidebar:
             var r = self.panel.name_key(name, mods)
             if r == 2:
@@ -2626,7 +2767,8 @@ struct WebShell(Movable):
         self.taps.interrupt()
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
-        if self.emoji.open:
+        self.pressed_us = clock_us()
+        if self.emoji.open or self.new_menu:
             return False
         if self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"]) != "" and not self.searching and not self.card_open and not self.settings_open:
             return False  # (the icon's button: a tap)
@@ -2943,6 +3085,12 @@ struct WebShell(Movable):
         if self.emoji.open:
             self.tap_emoji(x, y)
             return True
+        if self.new_menu:
+            var mh = self.boxes.hit_any(x, y, ["menu.item:"])
+            self.new_menu = False
+            if mh != "":
+                self.create("canvas" if mh.endswith(":0") else ("page" if mh.endswith(":1") else "mindmap"))
+            return True
         if not self.searching and not self.card_open and not self.settings_open and not self.props_open and self.book_card < 0:
             var ih = self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"])
             if ih != "":
@@ -3041,6 +3189,10 @@ struct WebShell(Movable):
                 self.props.menu_open = False
             elif ch == "#clear-note":
                 self.clear_all()
+            elif ch == "#share-markdown":
+                self.export_markdown()
+            elif ch == "#share-backup":
+                self.export_backup()
             elif ch == "#share-icon":
                 self.choose_icon("#island")
             elif ch.startswith("#share-"):
@@ -3065,7 +3217,10 @@ struct WebShell(Movable):
             self.open_search()
             return True
         if hit == "#rail-new-note":
-            self.create("canvas")
+            if clock_us() - self.pressed_us > 420_000 and self.pressed_us > 0:  # (held: what kind)
+                self.new_menu = True
+            else:
+                self.create("canvas")
             return True
         if hit == "#toggle-sidebar":
             self.set_sidebar(not self.sidebar)
