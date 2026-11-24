@@ -110,6 +110,34 @@ highlight, the search's caret, a quote's `>` and code ticks.
 - D-7912 (the map centre's 20 px) was wrong as a rule and is replaced by the web's (D-8048).
 - The first run of the Mac half at 03:57 waited on its own lock for 8 minutes (my mistake: the lock taken twice); killed and run again.
 
+### D: the final run (05:00–05:37, once, commit 9bda0f2b)
+
+| | Linux (RTX 3090) | Mac (M4, screen locked) |
+|---|---|---|
+| M0 | PASS 9bda0f2b | — |
+| M1 | PASS 9bda0f2b: 19 lines, worst 0.00 px | PASS 9bda0f2b: worst 0.03 px |
+| M2 | PASS 9bda0f2b: SSIM 0.976–0.986 | (M7) |
+| M3 | PASS 9bda0f2b: SSIM 0.982–0.993 | (M7) |
+| M4 | PASS 9bda0f2b: 28 steps, worst 0.965 | — |
+| M5 | PASS 9bda0f2b | PASS 9bda0f2b |
+| M6 | **FAIL** 9bda0f2b: 13 judged rows (race.md) | **BLOCKED** 9bda0f2b: work only, not like-for-like, no row judged (race-mac.md) |
+| M7 looks | — | nine PASS 92495bf7 (the app's code at 9bda0f2b), 0.986–0.998 |
+
+**M6's failing rows on Linux** (native against web, p95 / max): drag 40 600 16.7 / 76.8 vs 16.7 / 16.8; pen 600 16.7 / 72.2 vs 16.8 / 16.8;
+typing 600 16.7 / 60.9 vs 16.7 / 16.8; pen stress 16.7 / 163.3 vs 16.8 / 133.3; typing stress 16.8 / 152.2 vs 16.7 / 16.8; each also not
+warmed (ten rows, one cause: one long frame a row, the autosave). Undo 600 17.0 / 18.9 vs 16.9 / 17.1, warm and not, and undo stress
+not warmed 17.4 / 19.1 vs 16.9 / 17.1 (three rows: p95 passes or is within a refresh, the worst frame is 1.8–2.0 ms over the tie's
+18.3). The rest passes, opens by 3 to 13 times, starts by 2 to 2.7, memory by 3.9.
+**Reruns** of the paced race on the same binary (race-reruns.txt): zoom 16.7–17.0 every time; undo's worst 16.9, 18.9, 19.0, 18.7,
+17.0 (600) and 17.2, 17.1, 19.0, 21.8 (stress): noise on both sides of the line.
+
+**After D** (a6766837, 0fe1ed14, D-8050): the save moved to its own thread and the export cut; on the app's thread 600 69 → 1.1 ms, stress
+187 → 4–5 ms (CPU probe). **No race, no GPU run and no Mac run has judged it**: M0–M5 above are of 9bda0f2b, not HEAD.
+
+**For the reviewer, D:** the paced judge found what every earlier race missed, because they timed the work inside frames: the report's
+old "0 missed, max 5 ms" pen and typing rows were true of the frames' work and wrong about what a person saw. race-reruns.txt isn't
+judged and changes no verdict.
+
 ## Continuation 19 (2026-11-23, evening; Linux only; not judged by M6 or M7)
 D-8019…D-8024, b3cb79c6…933bc1f5. Aimed at the old bar's last Linux rows; kept because they are correct and tested, not judged
 since. Measured in the race's own sequence on the desktop before the third power-off: stress zoom's worst frame 18–21 → ~7 ms,

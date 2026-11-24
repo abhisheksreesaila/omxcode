@@ -10,7 +10,8 @@ A dated record of what was tried, what happened, and what it means. Newest first
 - **Broke / fixed.** A grapheme-wide Backspace broke a Hindi proof that nobody reran: run the wide set after a change to a shared piece. A page's marks were left behind by edits and counted bytes for UTF-16 units. A failed read used to open as an empty editable note.
 - **Means.** "Looks identical" hid that a person couldn't select text, make a note or delete one: walk the rival's keys and menus before calling a rebuild done.
 - **First five minutes (part two).** Driving the app with real input and reading the pictures beside the web's found eleven faults no test or checker had: emoji 8–16 px too high on Linux (a bitmap face reports no metrics), a person's own mind map drawn at the wrong sizes, notebooks unmarked. A fixture hides what real data has.
-- **Next.** M0–M6 on a free machine; a sticky's shadow corner; eyes on the new pieces on a GPU's screen.
+- **The race (D, 9bda0f2b).** M0–M5 pass; M6 fails on 13 Linux rows. Judging the gaps between frames instead of their work showed one 60–160 ms stop per row: SQLite's commit of the note on the UI thread. Moved to its own thread after the race (69 → 1 ms, 187 → 5 ms in a CPU probe), not raced again.
+- **Next.** The race again at HEAD; a paced run on the Mac, unlocked; a sticky's shadow corner.
 
 ## 2026-11-23: goal 79, continuation 18 (Mac stress rows, idle warming, kept views)
 Mac stress zoom p95 8.4 → 4.1–5.5, note switch 22–25 → 6–9 ms, omnibar 17–19 → 6–9, first open 12–14 → 9.4–11. A kept view is now always kept (a product bug), and a closing window keeps it too. Found: after 8 ms idle the M4 runs the same paint 7× slower, and no thread policy changes it (probe_coldpaint). Still over the bar: Mac first opens and stress press, Linux stress undo (GPU at idle clocks) and zoom max. Report: docs/goals/79-report.md, continuation 18.

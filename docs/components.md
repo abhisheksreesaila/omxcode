@@ -203,6 +203,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule, the AAT tracking table; CoreText on the Mac)` | `mojoui/fonttext.mojo` | Canvas | ✅ | 🔨 | 🔨 | ✅ | 🔨 | 🔨 | pnote |
 | `Skins as themes (a token set an app fills: desk, panel, ink, accent, tints, faces, radii, shadow scale, locked colours; color-mix; Personal Note's Paper, Night and Crayon live in pnote, D-7928)` | `mojoui/skin.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Document store (rows with a revision: a save debounce, saves written only on the revision the editor read with conflicts reported, parsed documents kept by revision; D-7927, D-7934)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Row saver (a big row written on a thread of its own, one save at a time, its outcome taken back on the UI thread)` | `mojoui/rowsaver.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Open document gate and save outbox (a document that wasn't read whole is never edited, saved or kept; edits that couldn't be written are held on disk until they land; review 3)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Canvas document (a JSON Canvas board that keeps what it was read with: unedited nodes, edges and members are written back as their own text; the progressive open)` | `mojoui/canvassource.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `JSON patch (members of a JSON text changed in place, every other byte kept)` | `mojoui/jsonpatch.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -314,12 +315,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 225 | 11 | 0 |
-| Web | 174 | 45 | 17 |
-| Android | 19 | 95 | 122 |
-| Mac (AppKit) | 9 | 200 | 27 |
-| iPhone (UIKit) | 0 | 166 | 70 |
-| Agent (MCP) | 66 | 73 | 97 |
+| Linux (GTK) | 226 | 11 | 0 |
+| Web | 174 | 46 | 17 |
+| Android | 19 | 96 | 122 |
+| Mac (AppKit) | 9 | 201 | 27 |
+| iPhone (UIKit) | 0 | 167 | 70 |
+| Agent (MCP) | 66 | 74 | 97 |
 
 ## Inside one app, not components yet (the debt)
 
