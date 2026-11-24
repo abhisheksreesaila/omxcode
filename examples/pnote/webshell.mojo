@@ -326,6 +326,10 @@ struct WebShell(Movable):
     var gone_at: Int
     var props_open: Bool
     var props: PropsCard
+    var clip: String  # what was copied last, and how many times something was
+    var clip_version: Int
+    var words_clips: Int
+    var words_at: Tuple[Float64, Float64, Float64, Float64]  # the caret of the canvas words being written, on screen
     var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
 
@@ -412,6 +416,10 @@ struct WebShell(Movable):
         self.cold_opens = False
         self.bench_note = -1
         self.doubled_us = -1_000_000
+        self.clip = ""
+        self.clip_version = 0
+        self.words_clips = 0
+        self.words_at = (-1.0, 0.0, 0.0, 0.0)
         self.omni_kind = List[Int]()
         self.omni_id = List[Int]()
         self.toast = ""
@@ -668,13 +676,9 @@ struct WebShell(Movable):
         var kind = self.notes[i].kind
         try:
             if kind == "page":
-                var clip = self.page.ed.clip
-                var clips = self.page.ed.clip_version
                 var words = page_markdown(content)
                 self.page = PageSheet()
                 self.page.set_markdown(words)
-                self.page.ed.clip = clip  # (what was copied stays copied)
-                self.page.ed.clip_version = clips
                 self.page_src = content^
             elif kind == "canvas":
                 self.open_canvas(i, content^, held >= 0)
@@ -834,6 +838,8 @@ struct WebShell(Movable):
                     self.look.keep_tag = ""
             self.look.paint(p, self.board.layer, self.view, w, h, k, self.tools.lifted(self.board.layer))
             self.tools.paint_overlay(p, self.look, self.board.layer, self.view, k)
+            if self.tools.editing != -1:
+                self.words_at = self.tools.words_caret(self.board.layer, self.view)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
@@ -855,7 +861,7 @@ struct WebShell(Movable):
                 var mw = w - left - 4 - 12
                 var mh = h - 66 - 12
                 self.map.draw(p, self.boxes, left + 4, 66, mw, mh, 0, self.sk, n.title)
-                var fv = self.map.fit(mw, mh, 80)
+                var fv = self.map.view(mw, mh)
                 draw_minimap(self.map, p, self.boxes, left + 4 + mw - 16 - 170, 66 + mh - 72 - 102, mw, mh, self.sk)
                 draw_tool_dock(p, self.boxes, w - 72, (h - 410) / 2, ["Add image", "Import JSON", "Export JSON", "Export PNG", "", "Undo", "Redo", "", "Clean up layout", "Fit map"],
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
@@ -1560,16 +1566,42 @@ struct WebShell(Movable):
                [int_arg(id)])
 
     def text_in(mut self, kind: String, text: String) -> Bool:
-        """An input method's commit or a paste into the open page."""
+        """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or self.searching or self.card_open or self.settings_open or not self.editable():
+        if self.searching:
+            self.omni.query += " ".join(text.split())
+            self.search()
+            return True
+        if self.card_open and self.card.editing:
+            if self.card.all_selected:
+                self.card.title = ""
+                self.card.all_selected = False
+            self.card.title += " ".join(text.split())
+            return True
+        if i < 0 or self.notes[i].secure or self.card_open or self.settings_open or not self.editable():
             return False
-        self.page.insert(text)
-        self.save_page()
-        return True
+        if self.notes[i].kind == "page":
+            if self.page.draw_mode:
+                return False
+            self.page.insert(text)
+            self.save_page()
+            return True
+        if self.notes[i].kind == "canvas" and self.tools.editing != -1:
+            _ = self.tools.text_in(text, self.board.edit())
+            return True
+        if self.notes[i].kind == "mindmap" and self.map.editing >= 0:
+            if self.map.edit_all:
+                self.map.edit_text = ""
+                self.map.edit_all = False
+            self.map.edit_text += " ".join(text.split())
+            return True
+        return False
 
     def preedit(mut self, text: String, cx: Float64, cy: Float64, cw: Float64, ch: Float64) -> Bool:
         var i = self.note_index(self.current)
+        if self.on_canvas() and self.tools.editing != -1:
+            self.tools.words.preedit = text
+            return True
         if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or not self.doc.may_edit():
             return False
         self.page.preedit = text
@@ -1608,11 +1640,23 @@ struct WebShell(Movable):
             if name == "F2":
                 self.map.begin_edit(self.map.selected)
                 return True
+            if (mods & 2) == 0 and (name == "Delete" or name == "Backspace"):
+                if self.map.delete_selected():
+                    self.save_map()
+                return True
+            if (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y" or name == "Y"):
+                var back = (name == "z" or name == "Z") and (mods & 1) == 0
+                if (self.map.undo() if back else self.map.redo()):
+                    self.save_map()
+                return True
         if self.on_canvas() and self.editable():
             var r = self.tools.key(name, mods, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
             if r and (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y"):  # (an undo or redo by key, as by the island)
                 self.tools.hug_routes(self.board.edit(), self.look)
             self.save_canvas()
+            if self.tools.words.ed.clip_version != self.words_clips:
+                self.words_clips = self.tools.words.ed.clip_version
+                self.copied(String(self.tools.words.ed.clip))
             if r:
                 return True
         var ni = self.note_index(self.current)
@@ -1622,7 +1666,10 @@ struct WebShell(Movable):
                     self.page.draw_mode = False
                     return True
                 return False
+            var clips = self.page.ed.clip_version
             var r = self.page.key(name, mods, now_ms())
+            if self.page.ed.clip_version != clips:
+                self.copied(String(self.page.ed.clip))
             if r == 2:
                 self.save_page()
             if r == 0 and name == "Escape" and self.sidebar:
@@ -1662,6 +1709,11 @@ struct WebShell(Movable):
             return False
         return True
 
+    def copied(mut self, words: String):
+        """Words copied here: for the system's clipboard (the app shows mojoui.overlays.Clipboard(clip, clip_version))."""
+        self.clip = words
+        self.clip_version += 1
+
     def open_search(mut self):
         self.searching = True
         self.card_open = False
@@ -1676,6 +1728,8 @@ struct WebShell(Movable):
 
     def caret(self) -> Tuple[Float64, Float64, Float64, Float64]:
         var i = self.note_index(self.current)
+        if i >= 0 and self.notes[i].kind == "canvas" and self.tools.editing != -1:
+            return self.words_at
         if i < 0 or self.notes[i].kind != "page":
             return (-1.0, 0.0, 0.0, 0.0)
         return self.page.caret_rect
@@ -1788,6 +1842,11 @@ struct WebShell(Movable):
         """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
         if self.sidebar and not self.searching and not self.settings_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
             return self.panel.wheel(dy)
+        if self.on_map():
+            var b = self.map_box()
+            var v = self.map.view(b[2], b[3])
+            self.map.zoom_at(v[0] * (0.9 if dy > 0 else 1.1), x - b[0], y - b[1], b[2], b[3])
+            return True
         if not self.on_canvas():
             var i = self.note_index(self.current)
             if i >= 0 and self.notes[i].kind == "page" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open and (
@@ -1799,6 +1858,11 @@ struct WebShell(Movable):
 
     def zoom(mut self, x: Float64, y: Float64, factor: Float64) -> Bool:
         """A pinch or Ctrl+wheel: on a canvas the view zooms about the pointer."""
+        if self.on_map():
+            var b = self.map_box()
+            var v = self.map.view(b[2], b[3])
+            self.map.zoom_at(v[0] * factor, x - b[0], y - b[1], b[2], b[3])
+            return True
         if not self.on_canvas():
             return False
         self.view = self.tools.zoom_at(self.view, factor, x, y, self.win_w, self.win_h, self.cols, self.rows)
@@ -1818,6 +1882,15 @@ struct WebShell(Movable):
                 return False
             var r = self.near_rect(x, y)  # (D-7959: the tools hit-test at the pointer: only what lies there must be in)
             return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
+        if self.on_map():
+            if self.boxes.hit_any(x, y, ["#sidebar", "#island", "#toggle-sidebar", "#search-button", "[Zoom controls]", "#mindmap-rail-actions", "[Map overview]", "[Add branch from "]) != "":
+                return False
+            if self.map.editing >= 0:  # (a click elsewhere keeps the words)
+                _ = self.map.edit_key("Enter", 0)
+                self.save_map()
+            var b = self.map_box()
+            self.map.press(x - b[0], y - b[1], b[2], b[3])
+            return True
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.page.draw_mode and self.doc.may_edit() and not self.searching and not self.card_open:
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
@@ -1827,6 +1900,40 @@ struct WebShell(Movable):
             return self.page.press(x, y, False)
         return False
 
+    def on_map(self) -> Bool:
+        var i = self.note_index(self.current)
+        return (i >= 0 and self.notes[i].kind == "mindmap" and not self.notes[i].secure and self.doc.may_edit() and not self.searching and not self.card_open
+                and not self.settings_open and not self.props_open)
+
+    def map_box(self) -> Tuple[Float64, Float64, Float64, Float64]:
+        """Where the map lies in the window: left, top, width, height."""
+        var left = 296.0 if self.sidebar else 0.0
+        return (left + 4, 66.0, self.win_w - left - 4 - 12, self.win_h - 66 - 12)
+
+    def map_tap(mut self, x: Float64, y: Float64) -> Bool:
+        """The map's own buttons: the rail's undo, redo and Fit, the zoom island, the selected idea's four add handles."""
+        var b = self.map_box()
+        var hit = self.boxes.hit_any(x, y, ["[Undo]", "[Redo]", "[Fit map]", "[Zoom out]", "[Zoom in]", ".mindmap-zoom-label:", "[Add branch from ", "[Add image]", "[Import JSON]", "[Export JSON]", "[Export PNG]", "[Clean up layout]"])
+        if hit == "":
+            return False
+        var v = self.map.view(b[2], b[3])
+        if hit.startswith("[Undo]"):
+            if self.map.undo():
+                self.save_map()
+        elif hit.startswith("[Redo]"):
+            if self.map.redo():
+                self.save_map()
+        elif hit.startswith("[Fit map]") or hit.startswith(".mindmap-zoom-label:"):
+            self.map.fit_again()
+        elif hit == "[Zoom in]" or hit == "[Zoom out]":
+            self.map.zoom_at(v[0] * (1.15 if hit == "[Zoom in]" else 1 / 1.15), b[2] / 2, b[3] / 2, b[2], b[3])
+        elif hit.startswith("[Add branch from "):
+            if self.map.add_idea(False) >= 0:
+                self.save_map()
+        else:
+            self.say("Not in the native app yet")
+        return True
+
     def writing(self) -> Bool:
         """The open note is a page, readable, in Write mode, nothing over it."""
         var i = self.note_index(self.current)
@@ -1835,6 +1942,20 @@ struct WebShell(Movable):
 
     def double(mut self, x: Float64, y: Float64) -> Bool:
         """A double click: on a page's words, the word; a click more soon after, the line."""
+        if self.on_canvas() and self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button", "#sidebar"]) == "":
+            if not self.editable():
+                return False
+            var r = self.tools.edit_at(x, y, self.board.edit(), self.view, self.win_w, self.win_h)
+            self.save_canvas()
+            return r
+        if self.on_map() and self.boxes.hit_any(x, y, ["#sidebar", "#island", "#toggle-sidebar", "#search-button", "[Zoom controls]", "#mindmap-rail-actions"]) == "":
+            var b = self.map_box()
+            var t = self.map.hit(x - b[0], y - b[1], b[2], b[3])
+            if t < 0:
+                return False
+            self.map.selected = t
+            self.map.begin_edit(t)
+            return True
         if not self.writing() or self.boxes.hit_any(x, y, [".page-tool:", "#sidebar", "#island", "#toggle-sidebar", "#search-button"]) != "":
             return False
         self.doubled_us = clock_us()
@@ -1848,6 +1969,9 @@ struct WebShell(Movable):
                 return False
             var r = self.near_rect(x, y)
             return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
+        if self.on_map():
+            var b = self.map_box()
+            return self.map.drag_to(x - b[0], y - b[1], b[2], b[3])
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True
@@ -1861,6 +1985,10 @@ struct WebShell(Movable):
             var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
             return r
+        if self.map.drag != -1:
+            if self.map.release():
+                self.save_map()
+            return True
         if len(self.page.wet) > 0:
             if self.page.mark_release():
                 self.save_page()
@@ -1888,12 +2016,35 @@ struct WebShell(Movable):
         return (i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed() and not self.searching and not self.card_open
                 and not self.settings_open)
 
-    def canvas_tap(mut self, x: Float64, y: Float64) -> Bool:
+    def canvas_tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool (an edit: the whole board
         first, D-7952)."""
         var hit = self.boxes.hit_any(x, y, ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]", "#undo", "#redo",
                                             "#zoom-in", "#zoom-out", "#zoom-fit", "#zoom-value", "#dock-more", "#ink-options-trigger", "#voice-button",
                                             "#selection-bar", "[Canvas tools]", "#history-island", "#zoom-control"])
+        if hit.startswith("#selection-bar"):
+            if not self.editable():
+                return False
+            var at = self.boxes.hit_any(x, y, [".selection-bar:"])
+            ref layer = self.board.edit()
+            if at.endswith(":Back") or at.endswith(":Forward"):
+                self.tools.order(layer, 1 if at.endswith(":Forward") else -1, False)
+            elif at.endswith(":Lock"):
+                layer.lock_selection()
+                self.tools.changed = True
+            elif at.endswith(":Delete"):
+                layer.delete_selection()
+                self.tools.changed = True
+            elif at != "":
+                self.say("Not in the native app yet")
+            self.save_canvas()
+            return True
+        if hit == "#zoom-value":
+            self.view = self.tools.zoom_at(self.view, 1.0 / self.view.scale, self.win_w / 2, self.win_h / 2, self.win_w, self.win_h, self.cols, self.rows)
+            return True
+        if hit == "#voice-button":
+            self.say("Not in the native app yet")
+            return True
         var names: List[String] = ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]"]
         var tools: List[String] = ["select", "text", "pen", "eraser", "shape", "sticky"]
         for t in range(len(names)):
@@ -1916,7 +2067,7 @@ struct WebShell(Movable):
             if not self.editable():
                 return False
             var vr = self.near_rect(x, y)
-            if not self.tools.tap(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view, self.win_w, self.win_h):
+            if not self.tools.tap(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view, self.win_w, self.win_h, mods):
                 return False
         self.save_canvas()
         return True
@@ -2080,8 +2231,10 @@ struct WebShell(Movable):
                     at = -1
             self.panel.toggle_shelf(at)
             return True
+        if self.on_map() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
+            return self.map_tap(x, y)
         if self.on_canvas() and hit == "" and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
-            return self.canvas_tap(x, y)
+            return self.canvas_tap(x, y, mods)
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.doc.may_edit() and not self.searching:
             var tool = self.boxes.hit_any(x, y, [".page-tool:"])

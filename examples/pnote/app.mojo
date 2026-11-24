@@ -935,8 +935,8 @@ struct Main(App):
     def view(self) -> View:
         if len(self.web) > 0:
             var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
-            if self.web[0].page.ed.clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
-                return HStack(desk^, Clipboard(self.web[0].page.ed.clip, self.web[0].page.ed.clip_version), spacing=0).grow().fill()
+            if self.web[0].clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
+                return HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
             return desk^
         var side = List[View]()
         side.append(SidebarHead("Notes", String(len(self.rows))))

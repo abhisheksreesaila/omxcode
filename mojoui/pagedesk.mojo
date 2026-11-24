@@ -14,14 +14,15 @@ from std.collections import Dict
 from std.os import getenv
 from std.sys import CompilationTarget
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
 from mojoui.shared import serial
 from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
 from mojoui.ink import Stroke
-from mojoui.objectlayer import CH_ADD, CH_MOVE
+from mojoui.objectlayer import CH_ADD, CH_MOVE, CH_TEXT, CH_DELETE
+from mojoui.wordsedit import WordsEdit
+from mojoui.textedit import now_ms
 from mojoui.notesshell import Boxes, draw_shadows
 from mojoui.objectlayer import ObjectLayer, Obj, TEXT, STICKY, RECT, ELLIPSE, INK, PICTURE, CONNECTOR
 from mojoui.canvas import rgba
@@ -839,6 +840,10 @@ comptime T_NONE = 0
 comptime T_MOVE = 1
 comptime T_INK = 2
 comptime T_CONNECT = 3
+comptime T_ERASE = 5
+comptime T_WORDS = 6  # a selection in the words being written
+comptime T_BOX = 7  # a marquee
+comptime ERASER_RADIUS = 13.0
 comptime T_PAN = 4  # the hand tool moving the view
 
 
@@ -861,6 +866,40 @@ def page_view(view_w: Float64, view_h: Float64, cx: Float64, cy: Float64, column
     return DeskView(f.x - Float64(col) * page_w * f.scale, f.y - Float64(row) * page_h * f.scale, f.scale)
 
 
+def erase_at(mut layer: ObjectLayer, x: Float64, y: Float64) -> Bool:
+    """The stroke eraser at a page point: the points of a pen stroke within its reach go, what is left of the stroke stays as
+    strokes of its own (ink-model.js createEraser). True when it erased something. Inside the caller's gesture."""
+    var any = False
+    for p in layer.query(x - ERASER_RADIUS, y - ERASER_RADIUS, x + ERASER_RADIUS, y + ERASER_RADIUS):
+        if layer.objs[p].kind != INK or layer.objs[p].locked:
+            continue
+        var st = layer.objs[p].stroke.copy()
+        var reach = ERASER_RADIUS + st.width / 2
+        var runs = List[Stroke]()
+        var run = Stroke(st.width, st.color)
+        var hit = False
+        for k in range(len(st.xs)):
+            var dx = st.xs[k] - x
+            var dy = st.ys[k] - y
+            if dx * dx + dy * dy > reach * reach:
+                run.add(st.xs[k], st.ys[k], 0.5)
+            else:
+                hit = True
+                if run.points() > 1:
+                    runs.append(run.copy())
+                run = Stroke(st.width, st.color)
+        if not hit:
+            continue
+        if run.points() > 1:
+            runs.append(run.copy())
+        any = True
+        layer.delete(layer.objs[p].id)
+        for k in range(len(runs)):
+            _ = layer.add_ink(runs[k])
+        return erase_at(layer, x, y) or any  # (the list of objects changed: again for the others here)
+    return any
+
+
 struct BoardTools(Movable):
     """What a press, a drag, a tap and a key do on a page board, by tool: select (pick, drag to move), text (a new
     Markdown text where tapped, written in place), sticky (a sticky centred where tapped, written in place), pen (a stroke),
@@ -869,7 +908,7 @@ struct BoardTools(Movable):
     to the document (the app saves then)."""
     var tool: String
     var editing: Int  # an object being written (-1: none; -2: a new text not made yet)
-    var edit_words: String
+    var words: WordsEdit  # its words, caret and selection
     var edit_x: Float64
     var edit_y: Float64
     var edit_w: Float64
@@ -892,12 +931,22 @@ struct BoardTools(Movable):
     var sticky_line: Float64
     var pen_color: UInt32
     var pen_width: Float64
+    var marker_color: UInt32  # the highlighter's
+    var marker_width: Float64
     var line_color: UInt32
+    var shape_fill: UInt32
+    var shape_w: Float64
+    var shape_h: Float64
+    var shape_radius: Float64
+    var before_press: List[Int]  # the selection before the last press (a Shift+click adds to it)
+    var erased: Bool  # the eraser's drag has erased something
+    var box_x0: Float64  # a marquee's start (page px)
+    var box_y0: Float64
 
     def __init__(out self):
         self.tool = "text"
         self.editing = -1
-        self.edit_words = ""
+        self.words = WordsEdit()
         self.edit_x = 0
         self.edit_y = 0
         self.edit_w = 0
@@ -921,6 +970,78 @@ struct BoardTools(Movable):
         self.pen_color = 0xFF1E2020
         self.pen_width = 3
         self.line_color = 0xFF1E2020
+        self.marker_color = 0x553FA0D6
+        self.marker_width = 20
+        self.shape_fill = 0xFF0AD6FF  # #ffd60a
+        self.shape_w = 280
+        self.shape_h = 180
+        self.shape_radius = 28
+        self.erased = False
+        self.before_press = List[Int]()
+        self.box_x0 = 0
+        self.box_y0 = 0
+
+    # ------------------------------------------------ the words being written
+
+    def words_box(self, layer: ObjectLayer) -> Tuple[Float64, Float64, Float64, Float64, Float64]:
+        """Where the words being written lie: left, top, width, a line's height, the first baseline under the top (page
+        px), as BoardLook draws them there."""
+        if self.editing == -2:
+            var row = Float64(Int(self.text_size * self.text_line * 100 + 0.5)) / 100
+            return (self.edit_x, self.edit_y, self.edit_w, row, baseline_in(0, row, self.words.style))
+        var q = layer.index(self.editing)
+        if q < 0:
+            return (0.0, 0.0, 1.0, 1.0, 1.0)
+        ref o = layer.objs[q]
+        var pad = STICKY_PAD if o.kind == STICKY else o.pad
+        var lh = o.line_height if o.line_height > 0 else 1.16
+        if o.kind == TEXT and o.markdown or o.markdown:
+            var row = Float64(Int(o.size * lh * 100 + 0.5)) / 100
+            return (o.x + pad, o.y + pad, o.w - 2 * pad, row, baseline_in(0, row, self.words.style))
+        var row = o.size * FONT_SIZE_MULT * lh
+        return (o.x + pad, o.y + pad, o.w - 2 * pad, row, o.size * FONT_SIZE_MULT * (1 - FONT_SIZE_FRACTION))
+
+    def in_words(self, layer: ObjectLayer, px: Float64, py: Float64) -> Bool:
+        """The page point is in the box being written."""
+        if self.editing == -1:
+            return False
+        if self.editing >= 0:
+            var q = layer.index(self.editing)
+            if q < 0:
+                return False
+            ref o = layer.objs[q]
+            return px >= o.x and px <= o.x + o.w and py >= o.y and py <= o.y + o.h
+        var b = self.words_box(layer)
+        return px >= b[0] - 4 and px <= b[0] + b[2] and py >= b[1] and py <= b[1] + b[3] * Float64(max(len(self.words.lines), 1))
+
+    def begin_words(mut self, mut layer: ObjectLayer, id: Int, select_all: Bool = False):
+        """Writing on an object's words begins (an undo step that ends with finish)."""
+        var q = layer.index(id)
+        if q < 0:
+            return
+        layer.begin_gesture(CH_TEXT)
+        self.editing = id
+        var o = layer.objs[q].copy()
+        var st = TextStyle(o.family if o.family != "" else String("Source Serif 4"), o.weight, False, o.size)
+        st.exact = True
+        self.words.begin(o.text, st, o.w - 2 * (STICKY_PAD if o.kind == STICKY else o.pad))
+
+    def text_in(mut self, words: String, mut layer: ObjectLayer) -> Bool:
+        """An input method's commit or a paste, into the words being written."""
+        if self.editing == -1 or layer.read_only:
+            return False
+        self.words.preedit = ""
+        self.words.insert(words, now_ms())
+        if self.editing >= 0:
+            layer.set_words(self.editing, self.words.text())
+        return True
+
+    def words_caret(mut self, layer: ObjectLayer, v: DeskView) -> Tuple[Float64, Float64, Float64, Float64]:
+        """The caret on screen (x, y, w, h): where an input method opens its window."""
+        var b = self.words_box(layer)
+        var c = self.words.caret_at(b[3])
+        var tl = v.to_screen(b[0] + c[0], b[1] + c[1])
+        return (tl[0], tl[1], 2.0, b[3] * v.scale)
 
     def set_tool(mut self, name: String, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64, columns: Int, rows: Int):
         """A tool picked (the dock, a key). A tool that places things on the page opens the page up (the whole page under
@@ -943,29 +1064,42 @@ struct BoardTools(Movable):
     def finish(mut self, mut layer: ObjectLayer):
         """Ends the writing in progress: a new text with words is made (one undo step with them), a sticky keeps its words."""
         if self.editing == -2:
-            var words = String(self.edit_words)
+            var words = self.words.text()
+            self.words.lay()
             if String(words.strip()) != "":
                 layer.begin_gesture(CH_ADD)
-                var id = layer.add_text(self.edit_x, self.edit_y, self.edit_w, Float64(Int(self.text_size * self.text_line * 100 + 0.5)) / 100, words,
+                var id = layer.add_text(self.edit_x, self.edit_y, self.edit_w, Float64(Int(self.text_size * self.text_line * 100 + 0.5)) / 100 * Float64(max(len(self.words.lines), 1)), words,
                                         self.text_size, self.text_color)
                 layer.restyle(id, self.text_family, self.text_size, self.text_line, 400, True, self.text_color)
                 layer.end_gesture()
                 self.changed = True
         elif self.editing >= 0:
+            var q = layer.index(self.editing)
+            if q >= 0 and layer.objs[q].kind == TEXT and self.words.ed.history.can_undo():  # (its words changed: so may its height)
+                self.words.lay()
+                var pad = layer.objs[q].pad
+                var row = self.words_box(layer)[3]
+                layer.set_height(self.editing, row * Float64(max(len(self.words.lines), 1)) + 2 * pad)
             layer.end_gesture()
             self.changed = True
         self.editing = -1
-        self.edit_words = ""
+        self.words.preedit = ""
 
-    def tap(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64) -> Bool:
+    def tap(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64, mods: Int = 0) -> Bool:
+        """mods: SHIFT 1 (a Shift+click adds to the selection, or takes away)."""
         if layer.read_only:
             return False
         # (a tap comes after its press: a drag the press began never happened)
         if self.drag == T_MOVE:
             layer.end_gesture()
+        if self.drag == T_ERASE:
+            layer.end_gesture()
         self.drag = T_NONE
         self.drag_from = -1
         var pt = view.to_page(sx, sy)
+        if self.in_words(layer, pt[0], pt[1]):  # (its press put the caret)
+            self.words.release()
+            return True
         if self.tool == "text":
             self.finish(layer)
             # a new Markdown text, wrapping at its page's right margin (text-ops.js writingBox: margin 56, at least 200 wide)
@@ -973,10 +1107,12 @@ struct BoardTools(Movable):
             var right = Float64(col + 1) * PAGE_W - 56
             var x = min(pt[0], right - 200)
             self.editing = -2
-            self.edit_words = ""
             self.edit_x = x
             self.edit_y = pt[1]
             self.edit_w = Float64(Int(right - x + 0.5))
+            var nst = TextStyle(self.text_family, 400, False, self.text_size)
+            nst.exact = True
+            self.words.begin("", nst, self.edit_w)
             # writing comes back to 100 % (about the page frame's origin), the line kept 16 px above the window's bottom
             if view.scale < 0.99:
                 view = DeskView(view.x, view.y, 1.0)
@@ -993,12 +1129,25 @@ struct BoardTools(Movable):
             layer.restyle(id, self.sticky_family, self.sticky_size, self.sticky_line, self.sticky_weight, False, self.sticky_ink)
             layer.select(id)
             self.editing = id
-            self.edit_words = ""
+            var sst = TextStyle(self.sticky_family, self.sticky_weight, False, self.sticky_size)
+            sst.exact = True
+            self.words.begin("", sst, 240 - 2 * STICKY_PAD)
+            self.changed = True
+            return True
+        if self.tool == "shape":  # (a rounded rectangle centred on the click, selected: text-ops.js newShape)
+            self.finish(layer)
+            var id = layer.add_rect(pt[0] - self.shape_w / 2, pt[1] - self.shape_h / 2, self.shape_w, self.shape_h, self.shape_fill, 0, 0, self.shape_radius)
+            layer.select(id)
+            self.tool = "select"
             self.changed = True
             return True
         if self.tool == "select":
             self.finish(layer)
-            _ = layer.click(pt[0], pt[1])
+            if (mods & 1) != 0 and layer.hit_test(pt[0], pt[1], 2) >= 0:  # (its press took the object alone)
+                layer.selected = self.before_press.copy()
+            var id = layer.click(pt[0], pt[1], (mods & 1) != 0)
+            if id >= 0 and (mods & 1) == 0 and len(layer.selected) > 1:  # (a click, not a drag, on one of several: it alone)
+                layer.select(id)
             return True
         return False
 
@@ -1013,19 +1162,38 @@ struct BoardTools(Movable):
             return True
         if layer.read_only:  # (a document that couldn't be read: only the view moves)
             return False
+        if self.in_words(layer, pt[0], pt[1]):  # (in the words being written: the caret)
+            var b = self.words_box(layer)
+            self.words.press(pt[0] - b[0], pt[1] - b[1], b[3], False)
+            self.drag = T_WORDS
+            return True
         if self.tool == "select":
             var id = layer.hit_test(pt[0], pt[1], 2)
+            if id < 0:  # (on the page: a marquee)
+                self.before_press = layer.selected.copy()
+                self.finish(layer)
+                self.drag = T_BOX
+                self.box_x0 = pt[0]
+                self.box_y0 = pt[1]
+                return True
             if id >= 0:
                 self.finish(layer)
+                self.before_press = layer.selected.copy()
                 if not layer.is_selected(id):
                     layer.select(id)
                 layer.begin_gesture(CH_MOVE)
                 self.drag = T_MOVE
                 self.moved = False
                 return True
-        elif self.tool == "pen":
+        elif self.tool == "eraser":
             self.finish(layer)
-            self.wet = Stroke(self.pen_width, self.pen_color)
+            layer.begin_gesture(CH_DELETE)
+            self.drag = T_ERASE
+            self.erased = erase_at(layer, pt[0], pt[1])
+            return True
+        elif self.tool == "pen" or self.tool == "highlight":
+            self.finish(layer)
+            self.wet = Stroke(self.pen_width, self.pen_color) if self.tool == "pen" else Stroke(self.marker_width, self.marker_color)
             self.wet.add(pt[0], pt[1], 0.5)
             self.drag = T_INK
             return True
@@ -1050,6 +1218,19 @@ struct BoardTools(Movable):
             layer.move_by(pt[0] - self.last_x, pt[1] - self.last_y)
         elif self.drag == T_INK:
             self.wet.add(pt[0], pt[1], 0.5)
+        elif self.drag == T_WORDS:
+            var b = self.words_box(layer)
+            self.words.drag(pt[0] - b[0], pt[1] - b[1], b[3])
+        elif self.drag == T_ERASE:
+            # (along the way from the last point, half a radius at a time: a fast drag leaves no gaps)
+            var dx = pt[0] - self.last_x
+            var dy = pt[1] - self.last_y
+            var n = max(Int(sqrt(dx * dx + dy * dy) / (ERASER_RADIUS / 2)), 1)
+            var any = False
+            for q in range(1, n + 1):
+                if erase_at(layer, self.last_x + dx * Float64(q) / Float64(n), self.last_y + dy * Float64(q) / Float64(n)):
+                    any = True
+            self.erased = self.erased or any
         elif self.drag == T_NONE:
             return False
         self.last_x = pt[0]
@@ -1065,6 +1246,17 @@ struct BoardTools(Movable):
         if kind == T_MOVE:
             layer.end_gesture()
             self.changed = True
+            return True
+        if kind == T_WORDS:
+            self.words.release()
+            return True
+        if kind == T_ERASE:
+            layer.end_gesture()
+            self.changed = self.changed or self.erased
+            return True
+        if kind == T_BOX:
+            if abs(pt[0] - self.box_x0) > 2 or abs(pt[1] - self.box_y0) > 2:
+                layer.marquee(self.box_x0, self.box_y0, pt[0], pt[1])
             return True
         if kind == T_INK:
             if self.wet.points() > 1:
@@ -1091,16 +1283,40 @@ struct BoardTools(Movable):
                 self.finish(layer)
                 self.tool = "select"
                 return True
-            if name == "Backspace":
-                self.edit_words = without_last(self.edit_words)
-            elif name == "Enter":
-                self.edit_words += "\n"
-            elif (mods & 2) == 0 and typed_text(name):
-                self.edit_words += name
-            else:
-                return False
-            if self.editing >= 0:
-                layer.set_words(self.editing, self.edit_words)
+            if (mods & 2) != 0 and name == "Enter":  # (Ctrl+Enter ends it, as Escape)
+                self.finish(layer)
+                self.tool = "select"
+                return True
+            var r = self.words.key(name, mods, now_ms())
+            if r == 2 and self.editing >= 0:
+                layer.set_words(self.editing, self.words.text())
+            return r != 0
+        if (mods & 2) != 0 and (name == "y" or name == "Y"):
+            layer.select_on_undo = True
+            _ = layer.redo()
+            self.changed = True
+            return True
+        if (mods & 6) == 2 and (name == "a" or name == "A") and self.tool != "hand":
+            layer.select_all()
+            return True
+        if len(layer.selected) > 0 and self.tool != "hand":  # (the selection's keys: handleLeaferKey)
+            if (mods & 6) == 0 and (name == "ArrowLeft" or name == "ArrowRight" or name == "ArrowUp" or name == "ArrowDown"):
+                layer.nudge(-1 if name == "ArrowLeft" else (1 if name == "ArrowRight" else 0), -1 if name == "ArrowUp" else (1 if name == "ArrowDown" else 0), (mods & 1) != 0)
+                self.changed = True
+                return True
+            if (mods & 6) == 2 and (name == "]" or name == "[" or name == "}" or name == "{"):
+                self.order(layer, 1 if name == "]" or name == "}" else -1, (mods & 1) != 0 or name == "}" or name == "{")
+                return True
+            if (mods & 7) == 3 and (name == "l" or name == "L"):
+                layer.lock_selection()
+                self.changed = True
+                return True
+            if (mods & 6) == 0 and name == "Escape":
+                layer.clear_selection()
+                return True
+        if (mods & 6) == 0 and name == "Escape" and self.tool != "select":
+            # (drawing goes back to writing, any other tool to selecting)
+            self.set_tool("text" if self.tool == "pen" or self.tool == "highlight" or self.tool == "eraser" else "select", layer, view, view_w, view_h, columns, rows)
             return True
         if (mods & 2) != 0 and (name == "z" or name == "Z"):
             layer.select_on_undo = True  # (the web selects what an undo brings back)
@@ -1124,6 +1340,41 @@ struct BoardTools(Movable):
                 self.set_tool(tools[i], layer, view, view_w, view_h, columns, rows)
                 return True
         return False
+
+    def order(mut self, mut layer: ObjectLayer, dir: Int, far: Bool):
+        """The selection a place up or down the z order, or (far) to its end."""
+        if dir > 0:
+            if far:
+                layer.bring_to_front()
+            else:
+                layer.bring_forward()
+        elif far:
+            layer.send_to_back()
+        else:
+            layer.send_backward()
+        self.changed = True
+
+    def edit_at(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64) -> Bool:
+        """A double click: the words of the text, sticky or shape under it are written on; on the empty page a new text
+        begins there (the web's editOrCreateAt)."""
+        if layer.read_only or self.tool == "hand":
+            return False
+        var pt = view.to_page(sx, sy)
+        if self.in_words(layer, pt[0], pt[1]):
+            var b = self.words_box(layer)
+            self.words.select_word(pt[0] - b[0], pt[1] - b[1], b[3])
+            return True
+        var id = layer.hit_test(pt[0], pt[1], 2)
+        if id < 0:
+            self.tool = "text"
+            return self.tap(sx, sy, layer, view, view_w, view_h)
+        var q = layer.index(id)
+        if q < 0 or (layer.objs[q].kind != TEXT and layer.objs[q].kind != STICKY) or layer.objs[q].locked:
+            return False
+        self.finish(layer)
+        layer.select(id)
+        self.begin_words(layer, id)
+        return True
 
     def undo(mut self, mut layer: ObjectLayer):
         self.finish(layer)
@@ -1205,23 +1456,26 @@ struct BoardTools(Movable):
         """In screen px over the board: the text being written, the stroke being drawn, the selection's outline and handles."""
         p.begin_layer("board-edit")
         p.layer_transform(0, 0, k)
-        if self.editing == -2:
-            var o = Obj(0, TEXT, self.edit_x, self.edit_y, self.edit_w, 34.8, self.text_color)
-            o.text = self.edit_words
-            o.size = self.text_size
-            o.family = self.text_family
-            o.line_height = self.text_line
-            o.markdown = True
-            o.rev = -1 - self.edit_words.byte_length()
-            var st = look.style_of(o)
-            var row = Float64(Int(o.size * o.line_height * 100 + 0.5)) / 100
-            var sz = TextStyle(st.family, st.weight, st.italic, st.size * v.scale)
-            sz.exact = True
-            var tl = v.to_screen(o.x, o.y)
-            if self.edit_words != "":
-                p.run(sz, self.edit_words, tl[0], baseline_in(tl[1], row * v.scale, sz), o.color, 0)
-            var cw = measure(sz, self.edit_words)
-            p.rect(tl[0] + cw, tl[1] + 4 * v.scale, 1.5, (row - 8) * v.scale, o.color, 0)
+        if self.editing != -1:
+            var b = self.words_box(layer)
+            var tl = v.to_screen(b[0], b[1])
+            var color = self.text_color
+            if self.editing >= 0:
+                var q = layer.index(self.editing)
+                if q >= 0:
+                    color = layer.objs[q].ink if layer.objs[q].kind == STICKY else layer.objs[q].color
+            self.words.width = b[2]
+            self.words.paint(p, tl[0], tl[1], b[3], b[4], v.scale, color, self.editing == -2)
+        if self.drag == T_BOX:
+            var a = v.to_screen(min(self.box_x0, self.last_x), min(self.box_y0, self.last_y))
+            var w = abs(self.last_x - self.box_x0) * v.scale
+            var h = abs(self.last_y - self.box_y0) * v.scale
+            if w > 1 or h > 1:
+                p.rect(a[0], a[1], w, h, with_alpha(SELECT_BLUE, 0.10), 0)
+                p.rect(a[0], a[1], w, 1, SELECT_BLUE, 0)
+                p.rect(a[0], a[1] + h - 1, w, 1, SELECT_BLUE, 0)
+                p.rect(a[0], a[1], 1, h, SELECT_BLUE, 0)
+                p.rect(a[0] + w - 1, a[1], 1, h, SELECT_BLUE, 0)
         if self.drag == T_INK and len(self.wet.xs) > 1:
             var rel = List[Float64]()
             var a = v.to_screen(self.wet.xs[0], self.wet.ys[0])

@@ -974,6 +974,17 @@ struct ObjectLayer(Movable):
         self._changed()
         self._commit(CH_TEXT)
 
+    def set_height(mut self, id: Int, h: Float64):
+        """A box's height, for the words it holds (in the open step)."""
+        var p = self.index(id)
+        if p < 0 or self.objs[p].h == h:
+            return
+        self._touch(id)
+        self.objs[p].h = h
+        self.objs[p].rev = self._next_rev()
+        self._changed()
+        self._commit(CH_TEXT)
+
     def restyle(mut self, id: Int, family: String, size: Float64, line_height: Float64, weight: Int, markdown: Bool, ink: UInt32):
         """A text's or a sticky's type, as a document gives it."""
         var p = self.index(id)
@@ -2299,7 +2310,11 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
         var g = j.get(pn, "geometry")
         var gx = j.real(j.get(g, "x"), x)
         var gy = j.real(j.get(g, "y"), y)
-        var st = Stroke(j.real(j.get(pn, "width"), 3), _canvas_color(j.text(j.get(pn, "color")), 0xFF1E2020))
+        var ink = _canvas_color(j.text(j.get(pn, "color")), 0xFF1E2020)
+        var alpha = j.real(j.get(pn, "alpha"), 1)  # (the highlighter's)
+        if alpha > 0 and alpha < 1:
+            ink = (ink & 0xFFFFFF) | (UInt32(Int(alpha * 255 + 0.5)) << 24)
+        var st = Stroke(j.real(j.get(pn, "width"), 3), ink)
         var path = j.get(pn, "path")
         for c in range(j.size(path)):
             var cmd = j.at(path, c)
@@ -2435,8 +2450,13 @@ def _made_node(ref o: Obj, key: String) -> String:
         path += "]"
         return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
                      + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"ink","geometry":'
-                     + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"pen","width":'
-                     + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '","path":' + path + "}}")
+                     + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"' + ("pen" if (st.color >> 24) == 0xFF else "highlight") + '","width":'
+                     + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '"' + ((',"alpha":' + _jn(Float64(Int(Float64(st.color >> 24) / 255 * 10000 + 0.5)) / 10000)) if (st.color >> 24) != 0xFF else String("")) + ',"path":' + path + "}}")
+    elif o.kind == RECT and o.line == 0:  # (a shape made here: text-ops.js newShape)
+        var fill = _hex(o.color)
+        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
+                + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"shape","geometry":'
+                + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"kind":"rect","fill":"' + fill + '","cornerRadius":' + _jn(o.radius) + ',"cornerRadiusY":' + _jn(o.radius) + ',"strokeWidth":0,"extras":{}}}')
     return ""
 
 

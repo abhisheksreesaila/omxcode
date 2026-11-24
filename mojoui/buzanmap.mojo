@@ -14,6 +14,7 @@ from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
+from mojoui.history import History, Snapshot
 from mojoui.shared import new_key
 from mojoui.jsonpatch import Change, patched, members, elements, find_member, part
 from mojoui.json import Json, json_string
@@ -39,6 +40,13 @@ struct Topic(Copyable, Movable):
     var extra: String  # the document's other members of this idea ("due":…,"done":…), written back as they came (D-7927)
 
 
+@fieldwise_init
+struct MapState(Copyable, Movable):
+    """A map's ideas and which is selected (an undo step's before and after)."""
+    var topics: List[Topic]
+    var selected: Int
+
+
 comptime BRANCH_COLORS: List[String] = ["#ef684b", "#efad28", "#65ae4f", "#2d9c91", "#3d8fe8", "#8c67cf", "#d85da8", "#5e6570"]
 
 
@@ -59,6 +67,16 @@ struct BuzanMap(Movable):
     var made: Int  # ideas made here (for their ids)
     var frozen: Bool  # the view's bounds are the ones the map opened with (adding ideas never re-fits it)
     var bounds: Tuple[Float64, Float64, Float64, Float64]
+    var cam: Tuple[Float64, Float64, Float64]  # the view a person zoomed or panned to: scale, x, y (screen px of the map's origin)
+    var pinned: Bool  # cam is the view; else the map fits the room it has
+    var past: History[Snapshot[MapState]]  # undo and redo
+    var drag: Int  # the pointer's: -1 none, -2 pans the sheet, else the idea it moves
+    var drag_dx: Float64  # from the pointer to the idea's centre (map units); a pan: where the view was
+    var drag_dy: Float64
+    var drag_sx: Float64  # where it went down (screen)
+    var drag_sy: Float64
+    var drag_moved: Bool
+    var before: MapState  # the map as the gesture or the writing began
 
     def __init__(out self):
         self.topics = List[Topic]()
@@ -69,6 +87,156 @@ struct BuzanMap(Movable):
         self.made = 0
         self.frozen = False
         self.bounds = (0.0, 0.0, 0.0, 0.0)
+        self.cam = (1.0, 0.0, 0.0)
+        self.pinned = False
+        self.past = History[Snapshot[MapState]](cap=100)
+        self.drag = -1
+        self.drag_dx = 0
+        self.drag_dy = 0
+        self.drag_sx = 0
+        self.drag_sy = 0
+        self.drag_moved = False
+        self.before = MapState(List[Topic](), 0)
+
+    # ------------------------------------------------ the view
+
+    def view(self, w: Float64, h: Float64, padding: Float64 = 80) -> Tuple[Float64, Float64, Float64]:
+        """(scale, x, y): the map fitted, or where a person put it."""
+        return self.cam if self.pinned else self.fit(w, h, padding)
+
+    def zoom_at(mut self, scale: Float64, x: Float64, y: Float64, w: Float64, h: Float64):
+        """Another scale (kept from 25 % to 220 %), the map unit under (x, y) staying there."""
+        var v = self.view(w, h)
+        var sc = min(2.2, max(0.25, scale))
+        self.cam = (sc, x - (x - v[1]) / v[0] * sc, y - (y - v[2]) / v[0] * sc)
+        self.pinned = True
+
+    def fit_again(mut self):
+        """The whole map in view (the rail's Fit, the zoom island's number)."""
+        self.pinned = False
+        self.frozen = False
+        self.freeze()
+
+    def hit(self, x: Float64, y: Float64, w: Float64, h: Float64) -> Int:
+        """The idea at (x, y) in the map's box (the one drawn last wins); -1: none."""
+        var v = self.view(w, h)
+        var mx = (x - v[1]) / v[0]
+        var my = (y - v[2]) / v[0]
+        for i in range(len(self.topics) - 1, -1, -1):
+            var f = self.frame(i)
+            if mx >= f.x - f.hw and mx <= f.x + f.hw and my >= f.y - f.hh and my <= f.y + f.hh:
+                return i
+        return -1
+
+    # ------------------------------------------------ the pointer, in the map's box
+
+    def press(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
+        """Down on an idea: selects it, and a drag moves it; on the sheet: a drag pans."""
+        var i = self.hit(x, y, w, h)
+        var v = self.view(w, h)
+        self.drag_sx = x
+        self.drag_sy = y
+        self.drag_moved = False
+        if i >= 0:
+            self.before = self.state()
+            self.drag = i
+            self.drag_dx = self.topics[i].x - (x - v[1]) / v[0]
+            self.drag_dy = self.topics[i].y - (y - v[2]) / v[0]
+            self.selected = i
+        else:
+            self.drag = -2
+            self.drag_dx = v[1]
+            self.drag_dy = v[2]
+            self.cam = v
+
+    def drag_to(mut self, x: Float64, y: Float64, w: Float64, h: Float64) -> Bool:
+        """The pointer moved with the button down; True when something did. (An idea moves by itself, its branches follow
+        it: the web's; its children stay where they are.)"""
+        if self.drag == -1:
+            return False
+        var far = sqrt((x - self.drag_sx) * (x - self.drag_sx) + (y - self.drag_sy) * (y - self.drag_sy))
+        if not self.drag_moved and far <= (7.0 if self.drag >= 0 else 4.0):
+            return False
+        self.drag_moved = True
+        if self.drag == -2:
+            self.cam = (self.cam[0], self.drag_dx + x - self.drag_sx, self.drag_dy + y - self.drag_sy)
+            self.pinned = True
+            return True
+        var v = self.view(w, h)
+        self.topics[self.drag].x = (x - v[1]) / v[0] + self.drag_dx
+        self.topics[self.drag].y = (y - v[2]) / v[0] + self.drag_dy
+        return True
+
+    def release(mut self) -> Bool:
+        """Up: True when an idea was moved (one undo step)."""
+        var d = self.drag
+        self.drag = -1
+        if d >= 0 and self.drag_moved:
+            self.record()
+            return True
+        if d == -2 and not self.drag_moved:  # (a click on the sheet selects nothing)
+            self.selected = -1
+        return False
+
+    # ------------------------------------------------ undo
+
+    def state(self) -> MapState:
+        return MapState(self.topics.copy(), self.selected)
+
+    def record(mut self):
+        """What changed since `before` is an undo step."""
+        self.past.push(Snapshot[MapState](0, self.before.copy(), self.state()), 0)
+
+    def _restore(mut self, st: MapState):
+        self.editing = -1
+        self.topics = st.topics.copy()
+        self.selected = st.selected
+
+    def undo(mut self) -> Bool:
+        var e = self.past.undo()
+        if not e:
+            return False
+        self._restore(e.value().before)
+        return True
+
+    def redo(mut self) -> Bool:
+        var e = self.past.redo()
+        if not e:
+            return False
+        self._restore(e.value().after)
+        return True
+
+    def delete_selected(mut self) -> Bool:
+        """The selected idea and everything under it, gone; its parent is selected. The central one stays."""
+        if self.selected < 0 or self.selected >= len(self.topics) or self.topics[self.selected].parent < 0:
+            return False
+        self.before = self.state()
+        var parent = self.topics[self.selected].parent
+        var gone = List[Bool](length=len(self.topics), fill=False)
+        gone[self.selected] = True
+        var more = True
+        while more:
+            more = False
+            for i in range(len(self.topics)):
+                var pa = self.topics[i].parent
+                if not gone[i] and pa >= 0 and gone[pa]:
+                    gone[i] = True
+                    more = True
+        var at = List[Int]()  # where each kept one goes
+        var n = 0
+        for i in range(len(self.topics)):
+            at.append(-1 if gone[i] else n)
+            n += 0 if gone[i] else 1
+        var kept = List[Topic]()
+        for i in range(len(self.topics)):
+            if not gone[i]:
+                var t = self.topics[i].copy()
+                t.parent = at[t.parent] if t.parent >= 0 else t.parent
+                kept.append(t^)
+        self.topics = kept^
+        self.selected = at[parent]
+        self.record()
+        return True
 
     def add(mut self, parent: Int, text: String, x: Float64, y: Float64, color: UInt32, id: String = "", font_size: Float64 = 0,
             bold: Bool = False, font: String = "", extra: String = "") -> Int:
@@ -89,6 +257,7 @@ struct BuzanMap(Movable):
         Returns its index (-1: none)."""
         if self.selected < 0 or self.selected >= len(self.topics):
             return -1
+        self.before = self.state()
         var parent = self.selected
         if sibling and self.topics[parent].parent >= 0:
             parent = self.topics[parent].parent
@@ -105,12 +274,14 @@ struct BuzanMap(Movable):
         var i = self.add(parent, "New idea", self.topics[parent].x + side * max(190.0, 330.0 - Float64(depth) * 55),
                          self.topics[parent].y + position * 76, color, new_key("node-"), max(15.0, 25.0 - Float64(depth) * 3), depth == 1, font)
         self.selected = i
+        self.record()
         self.begin_edit(i)
         return i
 
     def begin_edit(mut self, i: Int):
         if i < 0 or i >= len(self.topics):
             return
+        self.before = self.state()
         self.editing = i
         self.edit_text = self.topics[i].text
         self.edit_all = True
@@ -121,8 +292,9 @@ struct BuzanMap(Movable):
             return 0
         if name == "Enter":
             var t = String(" ".join(self.edit_text.split()))
-            if t != "":
+            if t != "" and t != self.topics[self.editing].text:
                 self.topics[self.editing].text = t
+                self.record()
             self.editing = -1
             return 2
         if name == "Escape":
@@ -222,7 +394,7 @@ struct BuzanMap(Movable):
         bx.add("map.canvas", x0, y0, w, h)
         bx.add("map.named:" + label, x0, y0, w, h)
         p.push_clip(x0, y0, w, h)
-        var fv = self.fit(w, h, 80)
+        var fv = self.view(w, h)
         var zoom = fv[0] if zoom_in <= 0 else zoom_in
         var cx = x0 + fv[1]
         var cy = y0 + fv[2]
@@ -515,7 +687,7 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     var sc = min(200 / max(1.0, maxx - minx), 110 / max(1.0, maxy - miny))
     var offx = 110 - (minx + maxx) / 2 * sc
     var offy = 65 - (miny + maxy) / 2 * sc
-    var fv = m.fit(view_w, view_h, 80)
+    var fv = m.view(view_w, view_h)
     var vx = (-fv[1] / fv[0]) * sc + offx
     var vy = (-fv[2] / fv[0]) * sc + offy
     var vw = view_w / fv[0] * sc

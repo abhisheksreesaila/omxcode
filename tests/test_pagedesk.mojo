@@ -219,15 +219,15 @@ def main() raises:
     pg.set_markdown("- [ ] Binoculars\n\nend")
     var bxs = pn_boxes()
     pg.draw(sc, bxs, 4, 66, 1436, 888, 1.6, "", 0, 14)
-    check(not pg.tap(900, pg.line_top[0] + 5), "a tap far past the words starts a mark")
-    check(pg.tap(pg.text_x + 3, pg.line_top[0] + 5), "a tap on the words places the caret")
+    check(not pg.tap(900, pg.tops[0] + 5), "a tap far past the words starts a mark")
+    check(pg.tap(pg.text_x + 3, pg.tops[0] + 5), "a tap on the words places the caret")
     pg.caret_home()
     pg.caret_right()
     pg.caret_right()
     pg.caret_right()
     pg.delete_forward()
     pg.insert("x")
-    check(pg.lines[0] == "- [x] Binoculars", "ticked: " + pg.lines[0])
+    check(pg.ed.paras[0] == "- [x] Binoculars", "ticked: " + pg.ed.paras[0])
     # ---- the island card's name field
     var card = IslandCard()
     card.title = "Lighthouse trip"
