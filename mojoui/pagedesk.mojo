@@ -828,6 +828,7 @@ struct BoardTools(Movable):
     var edit_x: Float64
     var edit_y: Float64
     var edit_w: Float64
+    var moved: Bool  # the move under way has moved something (what lifts it)
     var drag: Int
     var drag_from: Int
     var last_x: Float64
@@ -855,6 +856,7 @@ struct BoardTools(Movable):
         self.edit_x = 0
         self.edit_y = 0
         self.edit_w = 0
+        self.moved = False
         self.drag = T_NONE
         self.drag_from = -1
         self.last_x = 0
@@ -889,7 +891,7 @@ struct BoardTools(Movable):
     def lifted(self, layer: ObjectLayer) -> List[Int]:
         """What a drag is moving (the selection while a move is under way), for BoardLook.paint to lift out of the
         board's tiles (D-7940); empty otherwise."""
-        if self.drag == T_MOVE:
+        if self.drag == T_MOVE and self.moved:  # (D-8018: from the first movement, not the press: a press alone changes nothing on the board, and a click rastered its tiles twice for nothing)
             return layer.selected.copy()
         return List[Int]()
 
@@ -970,6 +972,7 @@ struct BoardTools(Movable):
                     layer.select(id)
                 layer.begin_gesture(CH_MOVE)
                 self.drag = T_MOVE
+                self.moved = False
                 return True
         elif self.tool == "pen":
             self.finish(layer)
@@ -993,6 +996,8 @@ struct BoardTools(Movable):
             return True
         var pt = view.to_page(sx, sy)
         if self.drag == T_MOVE:
+            if pt[0] != self.last_x or pt[1] != self.last_y:
+                self.moved = True
             layer.move_by(pt[0] - self.last_x, pt[1] - self.last_y)
         elif self.drag == T_INK:
             self.wet.add(pt[0], pt[1], 0.5)

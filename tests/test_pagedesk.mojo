@@ -37,7 +37,28 @@ def near(a: List[Float64], b: List[Float64], tol: Float64 = 0.01) -> Bool:
     return True
 
 
+def test_lift_at_first_move() raises:
+    """(D-8018) A press on an object lifts nothing (a click leaves the board's tiles as they are); the first movement
+    lifts the selection, the release drops it; a press and release alone is no undo step."""
+    var layer = ObjectLayer()
+    var a = layer.add_sticky(100, 100, 120, "a")
+    _ = layer.add_sticky(400, 100, 120, "b")
+    var tools = BoardTools()
+    tools.tool = "select"
+    var v = DeskView(0, 0, 1)
+    check(tools.press(150, 150, layer, v), "press on a")
+    check(layer.is_selected(a) and len(tools.lifted(layer)) == 0, "pressed: selected, not lifted")
+    check(tools.pan(150, 150, layer, v) and len(tools.lifted(layer)) == 0, "a pointer that didn't move: not lifted")
+    check(tools.pan(153, 150, layer, v) and len(tools.lifted(layer)) == 1, "moved: lifted")
+    check(tools.pan(150, 150, layer, v) and len(tools.lifted(layer)) == 1, "back where it began: still the same drag")
+    _ = tools.release(150, 150, layer, v)
+    check(len(tools.lifted(layer)) == 0, "released: dropped")
+    check(tools.press(150, 150, layer, v) and len(tools.lifted(layer)) == 0, "a new press starts again")
+    _ = tools.release(150, 150, layer, v)
+
+
 def main() raises:
+    test_lift_at_first_move()
     # the opening view (navigation.js openingView with main.js's margins): one page fits, a 4 × 3 grid opens at 0.4
     var v = opening_view(1440, 900, PAGE_W, PAGE_H)
     check(near([v.scale, v.x, v.y], [0.5611111111111111, 478.72222222222223, 104.0], 1e-9), "opening view of one page")
