@@ -15,7 +15,7 @@
 
 from std.time import perf_counter_ns
 from std.math import sqrt
-from mojoui.graphemes import prev_grapheme, next_grapheme
+from mojoui.graphemes import prev_grapheme, next_grapheme, safe_start
 from mojoui.linebreak import browser_breaks
 from mojoui.mdinline import inline_flags, MARK, BOLD, ITALIC, STRIKE, CODE, LINK, URL
 from mojoui.textedit import TextEdit, Pos, SHIFT, CTRL, ALT, EDIT_OTHER, now_ms, decode_at, is_word_byte
@@ -93,6 +93,7 @@ struct ParaLay(Copyable, Movable):
     var lines: List[VLine]
     var height: Float64
     var code: Bool  # inside a fenced block
+    var starts: List[Int]  # the byte each piece starts at, and the end
     var lines_text: String  # what `segs` and `lines` are of, while the words have moved on (the next layout builds on it)
     var lines_width: Float64
     var lines_code: Bool
@@ -104,6 +105,7 @@ struct ParaLay(Copyable, Movable):
         self.segs = List[Seg]()
         self.lines = List[VLine]()
         self.height = 0
+        self.starts = List[Int]()
         self.lines_text = ""
         self.lines_width = -1
         self.lines_code = False
@@ -581,6 +583,7 @@ struct PageSheet(Movable):
             pl.lines.append(VLine(cuts[c], cuts[c + 1], y, lb[0], lb[1]))
             y += lb[0]
         pl.height = y
+        pl.starts = starts^
         pl.text = words^
         self.laid[i] = pl^
         return y
@@ -603,6 +606,19 @@ struct PageSheet(Movable):
             if x1 > x0 or (n == 0 and off >= a and off <= b):
                 out.append(Seg(String(s.text[byte=x0:x1]), s.style, s.color, s.lh, s.strike))
             off += n
+        return out^
+
+    def part_in(self, segs: List[Seg], starts: List[Int], a: Int, b: Int) -> List[Seg]:
+        """part, the first piece found by its start."""
+        var out = List[Seg]()
+        for k in range(first_seg(starts, a), len(segs)):
+            var n = starts[k + 1] - starts[k]
+            if starts[k] > b or (starts[k] == b and n > 0):
+                break
+            var x0 = max(a - starts[k], 0)
+            var x1 = min(b - starts[k], n)
+            if x1 > x0 or (n == 0 and starts[k] >= a and starts[k] <= b):
+                out.append(Seg(String(segs[k].text[byte=x0:x1]), segs[k].style, segs[k].color, segs[k].lh, segs[k].strike))
         return out^
 
     def width_of(self, segs: List[Seg], a: Int, b: Int) -> Float64:
@@ -1312,7 +1328,7 @@ struct PageSheet(Movable):
         var tw = self.text_w
         var joined = String("")
         for ref l in self.ed.paras:
-            joined += l
+            joined += l if l.byte_length() <= 2000 else String(l[byte = 0 : safe_start(l, 2000)])
             if joined.byte_length() > 400:
                 break
         var name = String(" ".join(String(joined).split()))
@@ -1347,6 +1363,10 @@ struct PageSheet(Movable):
                 var l = self.laid[para].lines[v]
                 var ly = ty + l.top
                 var base = ly + l.base
+                if ly + l.height < dy - 8:  # (a long paragraph: only its lines in view)
+                    continue
+                if ly > dy + dh + 8:
+                    break
                 ref segs = self.laid[para].segs
                 if selected and para >= sel0.para and para <= sel1.para:
                     var from_ = sel0.byte if para == sel0.para else 0
@@ -1357,7 +1377,7 @@ struct PageSheet(Movable):
                         if x1_ > x0_:
                             p.rect(x0_, ly, x1_ - x0_, l.height, PAGE_SELECTION, 0)
                 var x = tx
-                for ref s in self.part(segs, l.start, l.end):
+                for ref s in self.part_in(segs, self.laid[para].starts, l.start, l.end):
                     p.run(s.style, s.text, x, base, s.color, ALIGN_LEFT)
                     var sw = measure(s.style, s.text)
                     if s.strike:

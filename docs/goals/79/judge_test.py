@@ -24,7 +24,7 @@ W = lambda p=16.7, m=16.8: {"p95": p, "max": m, "missed": 1, "n": 100}
 
 
 def world():
-    web = {"cold_desktop_ms": 700, "cold_chromium_ms": 500, "rss_mb": 800, "switch": 50, "switch_max": 60, "omnibar": 30, "omnibar_max": 31}
+    web = {"cold_desktop_ms": 700, "cold_chromium_ms": 500, "rss_mb": 800, "switch": 50, "switch_max": 60, "omnibar": 30, "omnibar_max": 31, "type page": {"p95": 19.4, "max": 20.3}}
     nat, paced, unwarm, opens = {}, {}, {}, {}
     n = {"p95": 4.0, "max": 5.0, "cpu": 0, "gap_n": 100, "gap_p95": 16.7, "gap_max": 16.8, "gap_over20": 0, "lat_p95": 12, "lat_max": 13}
     o = dict(n, complete_max=200, complete_p95=190, complete_p50=100, press_lat_n=10, press_lat_p95=12, press_lat_max=13, during_p95=3, during_max=4, press_n=10, press_p95=3, press_max=3)
@@ -40,11 +40,14 @@ def world():
     return web, nat, start, paced, unwarm, opens
 
 
-def judged(change=None, machine="linux", live=False):
+TYPED = {"p95": 2.0, "max": 3.0, "cpu": 0, "lat_p95": 16.8, "lat_max": 16.9}
+
+
+def judged(change=None, machine="linux", live=False, typed=TYPED):
     web, nat, start, paced, unwarm, opens = world()
     if change:
         change(web, nat, start, paced, unwarm, opens)
-    return c.race_table(web, nat, start, {}, machine=machine, paced=paced, unwarm=unwarm, opens=opens, live=live)
+    return c.race_table(web, nat, start, {}, machine=machine, paced=paced, unwarm=unwarm, opens=opens, live=live, typed=typed)
 
 
 t, ok = judged()
@@ -66,6 +69,12 @@ fails(lambda w, n, s, p, u, o: o["stress"]["A"].update(complete_max=400), "first
 fails(lambda w, n, s, p, u, o: p["600"].pop("drag one"), "not measured")
 fails(lambda w, n, s, p, u, o: w.update(rss_mb=None), "RSS")
 fails(lambda w, n, s, p, u, o: s.update(wswitch_max=90), "note switch")
+# (continuation 22) typing in a long paragraph: both sides measured, the web's worst key included, no CPU frame
+fails(lambda w, n, s, p, u, o: w.update({"type page": None}), "20,000-character")
+for typed in (None, dict(TYPED, lat_max=40), dict(TYPED, cpu=3)):
+    t, ok = judged(typed=typed)
+    assert not ok and any("20,000-character" in l and "✗" in l for l in t.splitlines()), typed
+assert c.web_type("WEBTYPE p95: 19.4 max: 20.3 n: 80\n") == {"p95": 19.4, "max": 20.3} and c.web_type("WEBTYPE p95: 1.0 max: 2.0 n: 80 (no editor)") is None and c.web_type("") is None
 # over the old marks and still better than the web: passes, and says so
 t, ok = judged(lambda w, n, s, p, u, o: n["stress"]["zoom from 30%"].update(p95=9.0, max=21.0))
 assert ok and "over: p95 > 8.3, max > 16.7" in t

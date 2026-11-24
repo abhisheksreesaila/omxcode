@@ -2776,6 +2776,13 @@ struct WebShell(Movable):
             if self.searching:
                 self.omni.query = ""
                 self.search()
+        elif name == "bench:type" and self.note_index(self.current) >= 0 and self.notes[self.note_index(self.current)].kind == "page":
+            var longest = 0  # (the middle of its longest paragraph)
+            for q in range(len(self.page.ed.paras)):
+                if self.page.ed.paras[q].byte_length() > self.page.ed.paras[longest].byte_length():
+                    longest = q
+            self.page.ed.move_to(Pos(longest, self.page.ed.paras[longest].byte_length() // 2), False)
+            self.page.follow = True
         elif name == "bench:openall":
             var kinds: List[String] = ["page", "canvas", "mindmap"]
             var at = self.bench_kind % 3
