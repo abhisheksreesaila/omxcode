@@ -813,6 +813,7 @@ struct GtkHost[A: App](Movable):
     var layout_nodes: List[Int]  # each one's text as a render node, built once (its colour is part of the key)
     var pango: Int  # the PangoContext text is laid out in
     var pic_hash: List[UInt64]  # pictures drawn by GTK's own renderer, as textures (picture_texture)
+    var pic_w: List[Int]
     var pic_tex: List[Int]
     var pic_used: List[Int]
     var pic_turn: Int
@@ -955,6 +956,7 @@ struct GtkHost[A: App](Movable):
         self.key_slant = 0
         self.pango = 0
         self.pic_hash = List[UInt64]()
+        self.pic_w = List[Int]()
         self.pic_tex = List[Int]()
         self.pic_used = List[Int]()
         self.pic_turn = 0
@@ -4307,24 +4309,27 @@ struct GtkHost[A: App](Movable):
         return self.build_ops(sc, r[0], r[1])
 
     def picture_texture(mut self, b: Bitmap) -> Int:
-        """A picture as a GdkTexture, made once (its pixels copied into it) and kept while it's drawn: by its hash."""
+        """A picture as a GdkTexture, made once (its pixels copied into it) and kept: the 16 drawn last (a texture holds a
+        copy of its picture's pixels, 8 MB for a 1920 × 1080 one)."""
         self.pic_turn += 1
         for k in range(len(self.pic_hash)):
-            if self.pic_hash[k] == b[].hash:
+            if self.pic_hash[k] == b[].hash and self.pic_w[k] == b[].w:
                 self.pic_used[k] = self.pic_turn
                 return self.pic_tex[k]
         var k = 0
-        while k < len(self.pic_hash) and len(self.pic_hash) >= 32:  # (the one drawn longest ago goes)
+        while k < len(self.pic_hash) and len(self.pic_hash) >= 16:  # (the one drawn longest ago goes)
             var oldest = 0
             for j in range(len(self.pic_used)):
                 if self.pic_used[j] < self.pic_used[oldest]:
                     oldest = j
             external_call["g_object_unref", NoneType](self.pic_tex[oldest])
             _ = self.pic_hash.pop(oldest)
+            _ = self.pic_w.pop(oldest)
             _ = self.pic_tex.pop(oldest)
             _ = self.pic_used.pop(oldest)
         var tex = texture(b[].levels[0], b[].w, b[].h)
         self.pic_hash.append(b[].hash)
+        self.pic_w.append(b[].w)
         self.pic_tex.append(tex)
         self.pic_used.append(self.pic_turn)
         return tex
@@ -6502,10 +6507,13 @@ def on_paste_read[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var t = external_call["gdk_clipboard_read_text_finish", Int](clipboard, result, 0)
     if t == 0:
+        host[].paste_node = -1
         return
     var text = c_str(t)
     external_call["g_free", NoneType](t)
-    host[].canvas_words(host[].canvas_at(host[].paste_node), PASTE, text, host_addr)
+    var ci = host[].canvas_at(host[].paste_node)
+    host[].paste_node = -1
+    host[].canvas_words(ci, PASTE, text, host_addr)
 
 
 def im_place[A: App](host_addr: Int, ci: Int):

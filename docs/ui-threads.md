@@ -77,8 +77,8 @@ it hangs** and again when it ends, on stdout and in `hangs.log` (`~/.local/state
     HANG: ended after 1204 ms: update msg=77 (1200 ms)
 
 It names an `update()` by its message, a canvas by its number, the host's own work (building the window, changing widgets),
-or "the main loop" for anything else. Numbers only: none of the app's words or paths. It costs 0.17 µs an event and nothing
-while the app is idle. `MOJOUI_HANGS=0` turns it off, `MOJOUI_HANGS_MS=200` makes it stricter. A `MOJOUI_TEST` run
+or "the main loop" for anything else. Numbers only: none of the app's words or paths. It costs 0.17 µs an event; an idle app
+woke 0 times a second with it on (counted over 6 s). `MOJOUI_HANGS=0` turns it off, `MOJOUI_HANGS_MS=200` makes it stricter. A `MOJOUI_TEST` run
 is one long turn, so it's off there unless `MOJOUI_HANGS=1`. Checked on GTK (`tests/test_hang.py`); on the Mac it is built and
 runs, but no hang has been measured there yet. Start-up (the first turn) isn't watched.
 
