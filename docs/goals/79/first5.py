@@ -94,7 +94,7 @@ def fresh():
     check(bool(md), "undone")
     b = a.boxes()
     px, py, pw, ph = b[".page-paper"]
-    a.click(px + 160, py + 140, n=2)
+    a.click(px + 160, py + 115, n=2)
     shot(a, "06-word")
     a.drag(px + 130, py + 120, px + 500, py + 260)
     shot(a, "07-drag-selection")

@@ -126,6 +126,15 @@ def main() raises:
     assert_true(p.key("z", 2, 0) == 2 and p.key("z", 2, 0) == 2 and len(p.ink.marks) == 2, "then the marks")
     assert_equal(p.page_json(SRC), SRC)
     assert_true(p.key("y", 2, 0) == 2 and p.key("y", 2, 0) == 2 and p.key("y", 2, 0) == 2 and p.key("y", 2, 0) == 2 and len(p.ink.marks) == 3, "all of it again")
+    # a fast mark (two points), a fast eraser across it
+    p.tool = "pen"
+    p.mark_press(x, y + 200)
+    p.mark_move(x + 200, y + 200)
+    assert_true(p.mark_release(), "made")
+    p.tool = "eraser"
+    p.mark_press(x + 100, y + 150)
+    p.mark_move(x + 100, y + 260)
+    assert_true(p.mark_release(), "erased between its points, between the eraser's")
     # the document's own mark erased
     o = p.mark_origin(0)
     assert_true(drag(p, o[0], o[1], o[0] + 2, o[1]), "the document's own")

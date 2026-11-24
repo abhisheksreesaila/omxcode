@@ -11,7 +11,7 @@
 #       ...
 
 from std.collections import Dict
-from std.math import cos, sin
+from std.math import cos, sin, sqrt
 from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
@@ -284,6 +284,43 @@ trait Painter:
         """`text` in a real face (mojoui.fonttext: shaped, fallback faces, glyphs rasterized at device pixels), its
         baseline at `baseline`, at x by `align` (fonttext.ALIGN_*). Sizes are the layer's units (layout px)."""
         ...
+
+
+def stroke_outline(pts: List[Float64], width: Float64) -> List[Float64]:
+    """A polyline `width` wide with round caps and joins as ONE polygon (non-zero winding), for a translucent stroke: drawn
+    as capsules and discs it darkens wherever they overlap. Each segment's rectangle and each point's disc, all turning the
+    same way, joined by a path that goes out and comes back."""
+    var out = List[Float64]()
+    var starts = List[Float64]()
+    var hw = width / 2
+    var n = len(pts) // 2
+    comptime DISC = 16
+    for i in range(n):
+        var px = pts[2 * i]
+        var py = pts[2 * i + 1]
+        if i + 1 < n:
+            var dx = pts[2 * i + 2] - px
+            var dy = pts[2 * i + 3] - py
+            var len_ = sqrt(dx * dx + dy * dy)
+            if len_ > 1e-9:
+                var nx = -dy / len_ * hw
+                var ny = dx / len_ * hw
+                starts.append(px + nx)
+                starts.append(py + ny)
+                for v in [px + nx, py + ny, px - nx, py - ny, px + dx - nx, py + dy - ny, px + dx + nx, py + dy + ny, px + nx, py + ny]:
+                    out.append(v)
+        starts.append(px + hw)
+        starts.append(py)
+        for q in range(DISC + 1):
+            var a = 6.283185307179586 * Float64(q) / DISC
+            out.append(px + hw * cos(a))
+            out.append(py + hw * sin(a))
+    var k = len(starts) // 2 - 2
+    while k >= 0:  # (back along the same way)
+        out.append(starts[2 * k])
+        out.append(starts[2 * k + 1])
+        k -= 1
+    return out^
 
 
 def blit(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):

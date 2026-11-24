@@ -6,7 +6,9 @@
 
 from std.testing import assert_equal, assert_true
 from mojoui.objectlayer import ObjectLayer, TEXT, STICKY, RECT, INK, export_json_canvas, import_json_canvas
-from mojoui.pagedesk import BoardTools, DeskView, BoardLook, erase_at
+from mojoui.pagedesk import BoardTools, DeskView, BoardLook, erase_at, polyline
+from mojoui.canvas import Surface
+from mojoui.text import Font
 from mojoui.ink import Stroke
 from mojoui.wordsedit import WordsEdit
 from mojoui.fonttext import TextStyle
@@ -140,6 +142,29 @@ def erasing() raises:
     var r = b.l.add_rect(700, 300, 50, 50, 0xFF0000FF)
     b.drag(690, 320, 760, 320)
     assert_true(b.l.has(r), "only ink")
+    # a fast stroke has few points: erased where the eraser crosses its line, between them
+    var f = Board()
+    f.tool("pen")
+    f.drag(100, 300, 500, 300, 2)
+    f.tool("eraser")
+    f.drag(400, 250, 400, 350, 4)
+    assert_true(len(f.l.objs) == 2 and f.l.objs[0].stroke.xs[len(f.l.objs[0].stroke.xs) - 1] < 400, "in two")
+    # placing and drawing tools let the selection go (the web's setTool)
+    f.l.select_all()
+    f.tool("pen")
+    assert_equal(len(f.l.selected), 0)
+    # a translucent stroke is one polygon, so it doesn't darken where it crosses itself
+    var sc = Scene(400, 200, 1.0)
+    polyline(sc, 0, 0, [10.0, 100.0, 200.0, 100.0, 60.0, 100.0, 300.0, 120.0], 20, 0x553FA0D6)
+    assert_true(len(sc.kinds) == 1 and Int(sc.kinds[0]) == 9, "one polygon")
+    var px = List[UInt32](length=400 * 200, fill=0xFFFFFFFF)
+    var s = Surface(Int(px.unsafe_ptr()), 400, 200, 1.0)
+    var font = Font()
+    sc.raster(s, font)
+    var once = px[100 * 400 + 30]  # (under one pass, under three: the same)
+    assert_true(once != 0xFFFFFFFF, "drawn")
+    for x in range(30, 190):
+        assert_equal(px[100 * 400 + x], once)
 
 
 def words() raises:

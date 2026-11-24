@@ -6079,9 +6079,38 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
     var ci = get_index(drag)
     if ci < 0 or ci >= len(host[].canvases):
         return
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
+    # the places the pointer was since the last frame, which GDK puts into one event (a web page's getCoalescedEvents):
+    # a pen's stroke keeps its shape when frames are slow
+    var ev = external_call["gtk_event_controller_get_current_event", Int](drag)
+    if ev != 0 and host[].canvases[ci].moved:
+        var n = List[c_uint](length=1, fill=0)
+        var coords = external_call["gdk_event_get_history", Int](ev, Int(n.unsafe_ptr()))
+        if coords != 0:
+            var at = List[Float64](length=2, fill=0)
+            if external_call["gdk_event_get_position", c_int](ev, Int(at.unsafe_ptr()), Int(at.unsafe_ptr()) + 8) != 0:
+                for k in range(Int(n[0])):
+                    var rec = coords + k * 104  # (GdkTimeCoord: time, flags, axes[12])
+                    var flags = Int(Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=rec + 4)[])
+                    if (flags & 6) != 6:  # (GDK_AXIS_FLAG_X | GDK_AXIS_FLAG_Y)
+                        continue
+                    var hx = off_x + Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=rec + 8 + 8)[] - at[0]
+                    var hy = off_y + Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=rec + 8 + 16)[] - at[1]
+                    var px = host[].canvases[ci].drag_x
+                    var py = host[].canvases[ci].drag_y
+                    if abs(hx - px) + abs(hy - py) < 0.5:
+                        continue
+                    host[].canvases[ci].drag_x = hx
+                    host[].canvases[ci].drag_y = hy
+                    host[].canvas_send(ci, PAN, host[].canvases[ci].start_x + hx, host[].canvases[ci].start_y + hy, hx - px, hy - py, 1, host_addr)
+                    if busy() or ci >= len(host[].canvases):
+                        external_call["g_free", NoneType](coords)
+                        return
+            _ = at
+            external_call["g_free", NoneType](coords)
+        _ = n
     var dx = off_x - host[].canvases[ci].drag_x
     var dy = off_y - host[].canvases[ci].drag_y
-    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = off_x
     host[].canvases[ci].drag_y = off_y
     if abs(off_x) + abs(off_y) > 3:

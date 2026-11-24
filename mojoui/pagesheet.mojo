@@ -14,11 +14,12 @@
 #   page.ed.clip, page.ed.clip_version       # what was copied: show overlays.Clipboard(clip, clip_version)
 
 from std.time import perf_counter_ns
+from std.math import sqrt
 from mojoui.graphemes import prev_grapheme, next_grapheme
 from mojoui.linebreak import browser_breaks
 from mojoui.mdinline import inline_flags, MARK, BOLD, ITALIC, STRIKE, CODE, LINK, URL
 from mojoui.textedit import TextEdit, Pos, SHIFT, CTRL, ALT, EDIT_OTHER, now_ms, decode_at, is_word_byte
-from mojoui.scene import Painter
+from mojoui.scene import Painter, stroke_outline
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_bordered, draw_emoji_tile, text_at, text_normal
@@ -126,6 +127,8 @@ struct PageSheet(Movable):
     var sweep: List[PageMark]  # what the eraser's drag has taken so far, and from where
     var sweep_at: List[Int]
     var erasing: Bool
+    var erase_x: Float64
+    var erase_y: Float64
     var preedit: String  # an input method's composition, shown at the caret, underlined (not in the text)
     var caret_rect: Tuple[Float64, Float64, Float64, Float64]  # where the caret was last drawn (layout px)
     var scroll: Float64
@@ -161,6 +164,8 @@ struct PageSheet(Movable):
         self.sweep = List[PageMark]()
         self.sweep_at = List[Int]()
         self.erasing = False
+        self.erase_x = 0
+        self.erase_y = 0
         self.preedit = ""
         self.caret_rect = (-1.0, 0.0, 0.0, 0.0)
         self.scroll = 0
@@ -707,14 +712,22 @@ struct PageSheet(Movable):
         if self.erasing:
             self.sweep.clear()
             self.sweep_at.clear()
+            self.erase_x = x
+            self.erase_y = y
             self._erase_at(x, y)
             return
         self.wet.append(x)
         self.wet.append(y)
 
     def mark_move(mut self, x: Float64, y: Float64):
-        if self.erasing:
-            self._erase_at(x, y)
+        if self.erasing:  # (along the way from the last place: a fast drag leaves no gaps)
+            var dx = x - self.erase_x
+            var dy = y - self.erase_y
+            var n = max(Int(sqrt(dx * dx + dy * dy) / 8), 1)
+            for q in range(1, n + 1):
+                self._erase_at(self.erase_x + dx * Float64(q) / Float64(n), self.erase_y + dy * Float64(q) / Float64(n))
+            self.erase_x = x
+            self.erase_y = y
         elif len(self.wet) > 0:
             self.wet.append(x)
             self.wet.append(y)
@@ -763,8 +776,17 @@ struct PageSheet(Movable):
             if o[2]:
                 ref pts = self.ink.marks[i].points
                 for k in range(0, len(pts), 2):
-                    var dx = o[0] + pts[k] - x
-                    var dy = o[1] + pts[k + 1] - y
+                    # (the nearest point of the line from the one before: a fast stroke has few points)
+                    var bx = o[0] + pts[k] - x
+                    var by = o[1] + pts[k + 1] - y
+                    var ax = o[0] + pts[max(k - 2, 0)] - x
+                    var ay = o[1] + pts[max(k - 2, 0) + 1] - y
+                    var lx = bx - ax
+                    var ly = by - ay
+                    var l2 = lx * lx + ly * ly
+                    var t = min(max(-(ax * lx + ay * ly) / l2, 0.0), 1.0) if l2 > 0 else 0.0
+                    var dx = ax + lx * t
+                    var dy = ay + ly * t
                     if dx * dx + dy * dy < 144:
                         self.sweep.append(self.ink.erase(i))
                         self.sweep_at.append(i)
@@ -791,16 +813,16 @@ struct PageSheet(Movable):
     def _char_top(self, para: Int, v: Int, byte: Int) -> Float64:
         """How far under a shown line's top a character's own box begins (its face's ascent above the baseline), which is
         what the web measures a mark's place from."""
-        var l = self.laid[para].lines[v]
+        return self.laid[para].lines[v].base - Float64(line_metrics(self._style_at(para, byte)).ascent)
+
+    def _style_at(self, para: Int, byte: Int) -> TextStyle:
         var off = 0
-        var st = TextStyle(TEXT_FACE, 400, False, BODY)
         for ref s in self.laid[para].segs:
             var n = s.text.byte_length()
             if byte >= off and byte < off + n:
-                st = s.style
-                break
+                return s.style.copy()
             off += n
-        return l.base - Float64(line_metrics(st).ascent)
+        return TextStyle(TEXT_FACE, 400, False, BODY)
 
     def _nearest_word(self, x: Float64, y: Float64, cx: Float64, cy: Float64) -> Tuple[Int, Int, Float64, Float64]:
         """(start, end) of the word whose box is nearest (x, y), as offsets into the Markdown, and (cx, cy) from the box of
@@ -1104,8 +1126,14 @@ struct PageSheet(Movable):
                 if v == caret_v and self.show_caret and not self.draw_mode:
                     var caret_x = tx + self.width_of(segs, l.start, caret_byte)
                     var cx = (caret_x - 0.59) if caret_x > tx else tx - 0.59
-                    p.rect(cx, ly + 4, 2, 20, PAGE_INK, 0)
-                    self.caret_rect = (cx, ly + 4, 2.0, 20.0)
+                    var ct = ly + 4
+                    var ch = 20.0
+                    if l.height > 33:  # (a heading's line: as tall as its own words)
+                        var m = line_metrics(self._style_at(para, min(caret_byte, max(l.end - 1, l.start))))
+                        ct = ly + l.base - Float64(m.ascent)
+                        ch = Float64(m.ascent + m.descent)
+                    p.rect(cx, ct, 2, ch, PAGE_INK, 0)
+                    self.caret_rect = (cx, ct, 2.0, ch)
             ty += ph
         # the marks, over the words
         for i in range(len(self.ink.marks)):
@@ -1282,5 +1310,5 @@ def _smooth[P: Painter](mut p: P, x0: Float64, y0: Float64, pts: List[Float64], 
     for i in range(0, len(pts) - 1, 2):
         abs_pts.append(x0 + pts[i])
         abs_pts.append(y0 + pts[i + 1])
-    p.stroke(abs_pts, width, color)
+    p.polygon(stroke_outline(abs_pts, width), color)
 

@@ -887,7 +887,7 @@ struct WebShell(Movable):
                 var items = canvas_dock_items(self.tools.pen_color)
                 var active = self.dock_name()
                 if active == "#dock-more":  # (a tool from the flyout shows in its place)
-                    items[8].icon = "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9"
+                    items[8].icon = canvas_more_items()[0 if self.tools.tool == "hand" else (1 if self.tools.tool == "highlight" else 2)].icon
                 draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, active, k, self.sk, "#dock-canvas")
                 if len(self.board.layer.selected) > 0 and self.tools.editing == -1:
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)

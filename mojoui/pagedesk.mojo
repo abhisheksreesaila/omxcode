@@ -13,7 +13,7 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
+from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint, stroke_outline
 from mojoui.shared import serial
 from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
@@ -824,6 +824,9 @@ def polyline[P: Painter](mut p: P, x0: Float64, y0: Float64, pts: List[Float64],
     for i in range(0, len(pts) - 1, 2):
         abs_pts.append(x0 + pts[i])
         abs_pts.append(y0 + pts[i + 1])
+    if (color >> 24) != 0xFF:  # (a highlighter's: one polygon, even where it crosses itself)
+        p.polygon(stroke_outline(abs_pts, width), color)
+        return
     p.stroke(abs_pts, width, color)
 
 
@@ -864,6 +867,21 @@ def page_view(view_w: Float64, view_h: Float64, cx: Float64, cy: Float64, column
     return DeskView(f.x - Float64(col) * page_w * f.scale, f.y - Float64(row) * page_h * f.scale, f.scale)
 
 
+def _dense(mut st: Stroke, step: Float64):
+    """Points added along a stroke so that none is further than `step` from the next."""
+    var out = Stroke(st.width, st.color)
+    for k in range(len(st.xs)):
+        if k > 0:
+            var dx = st.xs[k] - st.xs[k - 1]
+            var dy = st.ys[k] - st.ys[k - 1]
+            var n = Int(sqrt(dx * dx + dy * dy) / step)
+            for q in range(1, n + 1):
+                var t = Float64(q) / Float64(n + 1)
+                out.add(st.xs[k - 1] + dx * t, st.ys[k - 1] + dy * t, 0.5)
+        out.add(st.xs[k], st.ys[k], st.ps[k] if k < len(st.ps) else 0.5)
+    st = out^
+
+
 def erase_at(mut layer: ObjectLayer, x: Float64, y: Float64) -> Bool:
     """The stroke eraser at a page point: the points of a pen stroke within its reach go, what is left of the stroke stays as
     strokes of its own (ink-model.js createEraser). True when it erased something. Inside the caller's gesture."""
@@ -872,6 +890,7 @@ def erase_at(mut layer: ObjectLayer, x: Float64, y: Float64) -> Bool:
         if layer.objs[p].kind != INK or layer.objs[p].locked:
             continue
         var st = layer.objs[p].stroke.copy()
+        _dense(st, ERASER_RADIUS / 2)  # (a fast stroke has few points)
         var reach = ERASER_RADIUS + st.width / 2
         var runs = List[Stroke]()
         var run = Stroke(st.width, st.color)
@@ -1050,6 +1069,8 @@ struct BoardTools(Movable):
         the window's centre) when the view is closer than that."""
         self.finish(layer)
         self.tool = name
+        if name != "select" and name != "hand":  # (placing or drawing: no handles meanwhile)
+            layer.clear_selection()
         if name == "shape" or name == "sticky" or name == "connect":  # (OPENS_PAGE)
             var c = view.to_page(view_w / 2, view_h / 2)
             var t = page_view(view_w, view_h, c[0], c[1], columns, rows)
