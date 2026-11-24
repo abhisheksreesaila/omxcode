@@ -1343,13 +1343,10 @@ struct BoardTools(Movable):
         self.drag = T_NONE
         if kind == T_PAN:
             return True
-        if kind == T_MOVE:
+        if kind == T_MOVE or kind == T_HANDLE:  # (a drag that ended where it began, or of something locked, changed nothing)
+            var steps = layer.history.version
             layer.end_gesture()
-            self.changed = True
-            return True
-        if kind == T_HANDLE:
-            layer.end_gesture()
-            self.changed = self.changed or self.moved
+            self.changed = self.changed or layer.history.version != steps
             return True
         if kind == T_WORDS:
             self.words.release()

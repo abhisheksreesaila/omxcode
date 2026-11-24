@@ -102,6 +102,21 @@ struct Stroke(Copyable, Movable):
         self.y1 = max(self.y1, y)
         self.sealed = False
 
+    def move(mut self, dx: Float64, dy: Float64):
+        """Every point, the outline and the bounds by (dx, dy)."""
+        if len(self.xs) == 0:
+            return
+        for i in range(len(self.xs)):
+            self.xs[i] += dx
+            self.ys[i] += dy
+        for i in range(0, len(self.shape), 2):
+            self.shape[i] += dx
+            self.shape[i + 1] += dy
+        self.x0 += dx
+        self.x1 += dx
+        self.y0 += dy
+        self.y1 += dy
+
     def centre(self) -> Centre:
         """The smoothed centre line: a Catmull-Rom curve through every point (so it passes through each exactly),
         about one sample per 2.5 units, with the half-width interpolated along it."""

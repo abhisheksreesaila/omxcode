@@ -43,6 +43,7 @@ comptime ELLIPSE = 4
 comptime PICTURE = 5
 comptime INK = 6
 comptime CONNECTOR = 7
+comptime KINDS = 7  # (the last kind: tests run every one)
 
 comptime H_NW = 0  # resize handles, clockwise from the top-left; H_ROTATE turns
 comptime H_N = 1
@@ -275,6 +276,22 @@ struct Obj(Copyable, Movable):
     def cy(self) -> Float64:
         return self.y + self.h / 2
 
+    def move(mut self, dx: Float64, dy: Float64):
+        """All of it by (dx, dy): THE one place that knows every field of every kind that is a place on the page (a move, a
+        shifted page frame, what undo holds). A new kind or field with a place belongs here; tests/test_shift.mojo runs
+        every kind through it and compares frame, ink, ends, hits, the saved document and what it opens as."""
+        self.x += dx
+        self.y += dy
+        if self.kind == INK:
+            self.stroke.move(dx, dy)
+        if self.kind == CONNECTOR:
+            self.fx += dx
+            self.fy += dy
+            self.ax += dx
+            self.ay += dy
+            self.bx += dx
+            self.by += dy
+
     def to_page(self, lx: Float64, ly: Float64) -> Tuple[Float64, Float64]:
         """A point in the box's own frame (relative to its centre, unturned) on the page."""
         var c = cos(self.rot)
@@ -327,24 +344,13 @@ struct Obj(Copyable, Movable):
         return s^
 
 
-def _shift(mut o: Obj, dx: Float64, dy: Float64):
-    o.x += dx
-    o.y += dy
-    if o.kind == CONNECTOR:
-        o.fx += dx
-        o.fy += dy
-        o.ax += dx
-        o.ay += dy
-        o.bx += dx
-        o.by += dy
-
-
 def _shift_step(mut c: Change, dx: Float64, dy: Float64):
     for k in range(len(c.before)):
         if c.before[k]:
-            _shift(c.before[k].value(), dx, dy)
+            c.before[k].value().move(dx, dy)
+    for k in range(len(c.after)):  # (an open step has no after yet)
         if c.after[k]:
-            _shift(c.after[k].value(), dx, dy)
+            c.after[k].value().move(dx, dy)
 
 
 struct Change(Undoable):
@@ -368,6 +374,8 @@ struct Change(Undoable):
 struct ObjectLayer(Movable):
     var doc: Int  # which document this is (a process-wide serial, never shared): its versions and ids mean something only with it
     var read_only: Bool  # (review 3) a document that couldn't be read: editing tools refuse it
+    var frame_dx: Float64  # how far shift_frame has moved the page frame since the document was read
+    var frame_dy: Float64
     var draft: Optional[Obj]  # (review 4) an object still being written: saved and searched as if it were there, not yet on the board
     var src: CanvasSource  # (review 3) the document's own text, when it was read from one: what wasn't edited is saved as it was
     var adopted: Dict[Int, Bool]  # ids of its document that became objects (or joined a delete made while it was opening)
@@ -441,6 +449,8 @@ struct ObjectLayer(Movable):
         self.doc = serial()
         self.read_only = False
         self.draft = None
+        self.frame_dx = 0
+        self.frame_dy = 0
         self.src = CanvasSource()
         self.touched = Dict[Int, Bool]()
         self.adopted = Dict[Int, Bool]()
@@ -1326,18 +1336,7 @@ struct ObjectLayer(Movable):
             var sx = nw / o.w if o.w > 0 else 1.0
             var sy = nh / o.h if o.h > 0 else 1.0
             if sx == 1 and sy == 1:
-                var dx = nx - o.x
-                var dy = ny - o.y
-                for i in range(len(o.stroke.xs)):
-                    o.stroke.xs[i] += dx
-                    o.stroke.ys[i] += dy
-                for i in range(0, len(o.stroke.shape), 2):
-                    o.stroke.shape[i] += dx
-                    o.stroke.shape[i + 1] += dy
-                o.stroke.x0 += dx
-                o.stroke.x1 += dx
-                o.stroke.y0 += dy
-                o.stroke.y1 += dy
+                o.move(nx - o.x, ny - o.y)
             else:
                 var x0 = 1e300
                 var y0 = 1e300
@@ -1397,7 +1396,7 @@ struct ObjectLayer(Movable):
             return
         for p in range(len(self.objs)):
             self._log(self.objs[p].id)
-            _shift(self.objs[p], dx, dy)
+            self.objs[p].move(dx, dy)
             self.objs[p].rev = self._next_rev()
         for k in range(len(self.history.done)):
             _shift_step(self.history.done[k], dx, dy)
@@ -1405,6 +1404,10 @@ struct ObjectLayer(Movable):
             _shift_step(self.history.undone[k], dx, dy)
         if self.txn_open:
             _shift_step(self.txn, dx, dy)
+        if self.draft:
+            self.draft.value().move(dx, dy)
+        self.frame_dx += dx
+        self.frame_dy += dy
         self._changed()
 
     def move_by(mut self, dx: Float64, dy: Float64):
@@ -2482,8 +2485,8 @@ def _made_node(ref o: Obj, key: String) -> String:
         if o.kind == TEXT:
             style += ',"padding":8'
         style += ',"color":"' + _hex(o.color if o.kind == TEXT else o.ink) + '"}'
-        var node = ('{"id":' + json_string(key) + ',"type":"text","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
-                    + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"text":' + json_string(o.text))
+        var node = ('{"id":' + json_string(key) + ',"type":"text","x":' + _jn(floor(o.x + 0.5)) + ',"y":' + _jn(floor(o.y + 0.5))
+                    + ',"width":' + _jn(floor(o.w + 0.5)) + ',"height":' + _jn(floor(o.h + 0.5)) + ',"text":' + json_string(o.text))
         if o.kind == STICKY:
             node += ',"color":"' + _hex(o.color) + '"'
         node += ',"pn":{"type":"' + ("sticky" if o.kind == STICKY else "text") + '","geometry":' + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"style":' + style + ',"extras":{}'
@@ -2500,14 +2503,14 @@ def _made_node(ref o: Obj, key: String) -> String:
                 path += ","
             path += '["' + ("M" if k == 0 else "L") + '",' + _jn(st.xs[k] - o.x) + "," + _jn(st.ys[k] - o.y) + "]"
         path += "]"
-        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
-                     + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"ink","geometry":'
+        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(floor(o.x + 0.5)) + ',"y":' + _jn(floor(o.y + 0.5))
+                     + ',"width":' + _jn(floor(o.w + 0.5)) + ',"height":' + _jn(floor(o.h + 0.5)) + ',"file":"","pn":{"type":"ink","geometry":'
                      + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"' + ("pen" if (st.color >> 24) == 0xFF else "highlight") + '","width":'
                      + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '"' + ((',"alpha":' + _jn(Float64(Int(Float64(st.color >> 24) / 255 * 10000 + 0.5)) / 10000)) if (st.color >> 24) != 0xFF else String("")) + ',"path":' + path + "}}")
     elif o.kind == RECT and o.line == 0:  # (a shape made here: text-ops.js newShape)
         var fill = _hex(o.color)
-        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
-                + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"shape","geometry":'
+        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(floor(o.x + 0.5)) + ',"y":' + _jn(floor(o.y + 0.5))
+                + ',"width":' + _jn(floor(o.w + 0.5)) + ',"height":' + _jn(floor(o.h + 0.5)) + ',"file":"","pn":{"type":"shape","geometry":'
                 + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"kind":"rect","fill":"' + fill + '","cornerRadius":' + _jn(o.radius) + ',"cornerRadiusY":' + _jn(o.radius) + ',"strokeWidth":0,"extras":{}}}')
     return ""
 
