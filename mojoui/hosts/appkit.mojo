@@ -3825,6 +3825,7 @@ def on_canvas_mouse_moved[A: App](view: Int, cmd: Int, event: Int) abi("C"):
 
 def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     """The button goes down: PRESS there at once (GTK's drag-begin), or DOUBLE on a second click."""
+    _ = msg(cls("NSEvent"), "setMouseCoalescingEnabled:", 0)  # (every point of a stroke, not one a frame, while the button is down: D-8054)
     var t = from_tag(view)
     var host = host_at[A](t[0])
     _ = msg(msg(view, "window"), "makeFirstResponder:", view)  # the keyboard, too
@@ -3860,6 +3861,7 @@ def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
 
 def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     """The button comes up: RELEASE after a drag, TAP after a click (as GTK's click gesture's released)."""
+    _ = msg(cls("NSEvent"), "setMouseCoalescingEnabled:", 1)
     var t = from_tag(view)
     var host = host_at[A](t[0])
     var at = event_point(view, event)
@@ -3912,6 +3914,33 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
         if took != 0:
             return
     host[].canvas_key(t[1], name, mods, t[0])
+
+
+def on_canvas_flags[A: App](view: Int, cmd: Int, event: Int) abi("C"):
+    """flagsChanged: a modifier went down or came up on a canvas (mojoui.doubletap): KEY named as GTK names it, KeyUp:… when it
+    came up."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    if t[1] >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[t[1]].size != 1:
+        return
+    var code = Int(msg(event, "keyCode")) & 0xFFFF
+    var flags = msg(event, "modifierFlags")
+    var name = String("")
+    var down = False
+    if code == 55 or code == 54:
+        name = "Meta_L" if code == 55 else "Meta_R"
+        down = flags & MASK_COMMAND != 0
+    elif code == 59 or code == 62:
+        name = "Control_L" if code == 59 else "Control_R"
+        down = flags & (1 << 18) != 0
+    elif code == 56 or code == 60:
+        name = "Shift_L" if code == 56 else "Shift_R"
+        down = flags & MASK_SHIFT != 0
+    elif code == 58 or code == 61:
+        name = "Alt_L" if code == 58 else "Alt_R"
+        down = flags & MASK_OPTION != 0
+    if name != "":
+        host[].canvas_key(t[1], name if down else "KeyUp:" + name, 0, t[0])
 
 
 # ---------- (D-7979) the input methods: bridge/mac_ime.m calls these with scalars only ----------
@@ -5872,6 +5901,7 @@ def run[A: App]() -> c_int:
     add_method(canvas, "mouseDragged:", on_canvas_mouse_dragged[A], "v@:@")
     add_method(canvas, "mouseUp:", on_canvas_mouse_up[A], "v@:@")
     add_method(canvas, "keyDown:", on_canvas_key[A], "v@:@")
+    add_method(canvas, "flagsChanged:", on_canvas_flags[A], "v@:@")
     if ime_install[A](canvas):  # (D-7979: bridge/mac_ime.m linked in)
         put_shared(SLOT_MAC_IME, 1)
     register_class(canvas)

@@ -172,6 +172,16 @@ def fresh():
     a.key("Enter")
     a.type("second é line")
     shot(a, "22-words")
+    # Control tapped twice: the pen; and back to the words, the caret where it was
+    for _ in range(2):
+        a.key("Control_L", wait=0.08)
+    time.sleep(0.3)
+    shot(a, "22b-pen")
+    for _ in range(2):
+        a.key("Control_L", wait=0.08)
+    time.sleep(0.3)
+    a.type(" !")
+    shot(a, "22c-words-again")
     a.key("Escape", wait=0.4)
     a.tap("[Shape]")
     shot(a, "23-shape-tool")

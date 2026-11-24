@@ -3,6 +3,7 @@
 # list scrolled and a notebook opened, the search's groups, clicks and filters, words inside notes; Clear all. No window.
 #   pixi run mojo run -I . -I vendor -I examples/pnote tests/test_pnnotes.mojo
 from std.os import setenv
+from std.sys import CompilationTarget
 from std.testing import assert_true, assert_equal
 from mojoui.libc import unlink
 from mojoui.files import private_dir
@@ -587,6 +588,39 @@ def pointing() raises:
     s.searching = False
 
 
+def double_tap() raises:
+    """The modifier tapped twice: the pen, and back to the words where the caret was."""
+    var s = WebShell(DB, "paper")
+    s.create("canvas")
+    paint(s)
+    typed(s, "some words")
+    _ = s.key("Home", 0)
+    var k = String("Control_L")
+    comptime if CompilationTarget.is_macos():
+        k = "Meta_L"
+    for _ in range(2):
+        _ = s.key(k, 0)
+        _ = s.key("KeyUp:" + k, 0)
+    assert_equal(s.tools.tool, "pen")
+    assert_true(s.tools.editing == -1 and s.toast == "Pen", "drawing")
+    _ = s.press(600, 500)
+    _ = s.release(600, 500)
+    for _ in range(2):
+        _ = s.key(k, 0)
+        _ = s.key("KeyUp:" + k, 0)
+    assert_equal(s.tools.tool, "text")
+    assert_true(s.tools.editing >= 0 and s.tools.words.ed.caret.byte == 0, "the caret where it was")
+    typed(s, "X")
+    assert_equal(s.tools.words.text(), "Xsome words")
+    _ = s.key(k, 0)
+    _ = s.key("a", 2)
+    _ = s.key("KeyUp:" + k, 2)
+    _ = s.key(k, 0)
+    _ = s.key("KeyUp:" + k, 0)
+    assert_equal(s.tools.tool, "text")
+    s.close()
+
+
 def dragging_and_notebooks() raises:
     var s = WebShell(DB, "paper")
     s.open(s.notes[0].id)
@@ -688,4 +722,5 @@ def main() raises:
     dragging_and_notebooks()
     selected()
     pointing()
+    double_tap()
     print("pnnotes: ok")

@@ -1778,6 +1778,7 @@ struct GtkHost[A: App](Movable):
                 keys = external_call["gtk_event_controller_key_new", Int]()
                 set_index(keys, ci)
                 connect_any(keys, "key-pressed", on_key_pressed[Self.A], self_addr)
+                connect_any(keys, "key-released", on_key_released[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](w, keys)
                 # (goal 79) keys go through the system's input method first: commits and preedits come back as text
                 var im = external_call["gtk_im_multicontext_new", Int]()
@@ -6264,6 +6265,17 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
     return c_int(0 if (mods & (CTRL | ALT)) != 0 and name != "Home" and name != "End" else 1)
+
+
+def on_key_released[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C"):
+    """A modifier came up (mojoui.doubletap): KEY named KeyUp:Control_L …; other keys' releases aren't sent."""
+    if busy():
+        return
+    var host = host_at[A](host_addr)
+    var ci = get_index(keys)
+    var name = key_name(Int(keyval))
+    if ci >= 0 and ci < len(host[].canvases) and (name.startswith("Control_") or name.startswith("Meta_") or name.startswith("Alt_") or name.startswith("Shift_") or name.startswith("Super_")):
+        host[].canvas_key(ci, "KeyUp:" + name, 0, host_addr)
 
 
 def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):

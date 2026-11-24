@@ -17,7 +17,7 @@ from mojoui.pagesheet import PageSheet
 from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
-from mojoui.textedit import now_ms
+from mojoui.textedit import now_ms, Pos
 from mojoui.graphemes import one_line
 from mojoui.files import write_setting, read_setting
 from mojoui.islandcard import IslandCard, CardTile
@@ -32,6 +32,7 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.rowsaver import RowSaver
+from mojoui.doubletap import DoubleTap, KEY_UP, tap_key
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
 from mojoui.keycaps import keycap, device_name
@@ -325,6 +326,11 @@ struct WebShell(Movable):
     var dbs: List[Database]  # the open connection (one, kept)
     var writer: RowSaver  # a save on its thread, and what it is of (none or one)
     var written: List[Written]  # the saves on their way, the first on its thread
+    var taps: DoubleTap
+    var pen_tool: String  # the pen used last (the double tap's)
+    var caret_note: Int  # where the caret was when the pen was taken: the note (-1: nowhere), the object, the place
+    var caret_id: Int
+    var caret_pos: Pos
     var at_risk: List[Int]  # notes whose edits are held in memory only
     var closing_until: Int  # (µs) closing was asked and refused until then: asked again, it closes
     var saver: SaveTimer  # the web's save debounce (save-flush.js: 650 ms after the last edit)
@@ -435,6 +441,11 @@ struct WebShell(Movable):
         pn_faces()
         self.writer = RowSaver()
         self.written = List[Written]()
+        self.taps = DoubleTap()
+        self.pen_tool = "pen"
+        self.caret_note = -1
+        self.caret_id = -1
+        self.caret_pos = Pos(0, 0)
         self.at_risk = List[Int]()
         self.closing_until = 0
         self.saver = SaveTimer(650)
@@ -2107,8 +2118,46 @@ struct WebShell(Movable):
         s.then("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?",
                [int_arg(id)])
 
+    def writing_or_pen(mut self) -> Bool:
+        """The modifier tapped twice: from writing to the pen used last, and back to writing where the caret was (main.js
+        toggleWritingAndPen)."""
+        if not self.on_canvas() or not self.editable() or self.searching or self.card_open or self.settings_open or self.props_open:
+            return False
+        var pens: List[String] = ["pen", "highlight", "eraser"]
+        ref layer = self.board.edit()
+        if self.tools.tool in pens:
+            self.pen_tool = self.tools.tool
+            self.tools.set_tool("text", layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
+            self.flash("Text")
+            if self.caret_note == self.current and layer.index(self.caret_id) >= 0:
+                self.tools.begin_words(layer, self.caret_id)
+                var n = len(self.tools.words.ed.paras)
+                var para = min(self.caret_pos.para, n - 1)
+                self.tools.words.ed.move_to(Pos(para, min(self.caret_pos.byte, self.tools.words.ed.paras[para].byte_length())), False)
+            self.caret_note = -1
+            return True
+        var pos = self.tools.words.ed.caret
+        var id = self.tools.editing
+        var before = layer.next_id
+        self.tools.finish(layer)
+        if id == -2 and layer.next_id > before:  # (a new text just made of the words)
+            id = layer.next_id - 1
+        self.save_canvas()
+        self.tools.set_tool(self.pen_tool, layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
+        self.caret_note = self.current if id >= 0 else -1
+        self.caret_id = id
+        self.caret_pos = pos
+        self.flash("Highlight" if self.pen_tool == "highlight" else ("Eraser" if self.pen_tool == "eraser" else "Pen"))
+        return True
+
+    def flash(mut self, words: String):
+        """A word for a moment (the web's tool pill, 900 ms)."""
+        self.say(words)
+        self.toast_until = clock_us() + 900_000
+
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
+        self.taps.interrupt()
         var i = self.note_index(self.current)
         if self.panel.naming >= 0 and self.sidebar:
             self.panel.naming_text += one_line(text)
@@ -2158,6 +2207,10 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        if self.taps.key(name, clock_us() // 1000):
+            return self.writing_or_pen()
+        if name.startswith(KEY_UP) or tap_key(name):  # (a modifier by itself)
+            return False
         if self.panel.naming >= 0 and self.sidebar:
             var r = self.panel.name_key(name, mods)
             if r == 2:
@@ -2458,6 +2511,7 @@ struct WebShell(Movable):
 
     def wheel(mut self, x: Float64, y: Float64, dx: Float64, dy: Float64) -> Bool:
         """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
+        self.taps.interrupt()
         if self.sidebar and not self.searching and not self.settings_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
             return self.panel.wheel(dy)
         if self.on_map():
@@ -2490,6 +2544,7 @@ struct WebShell(Movable):
 
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
+        self.taps.interrupt()
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
         if self.sidebar and not self.searching and not self.settings_open and not self.props_open and not self.card_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
