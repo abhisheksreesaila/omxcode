@@ -23,6 +23,41 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 21 (2026-11-24, 06:17–10:40): the save thread attacked, two proofs sharpened, the last everyday gaps
+
+**The judged commit is 3a3886bd** for both machines (later commits: the race's tables and documents only).
+
+| | Linux (RTX 3090) | Mac (M4, screen locked) |
+|---|---|---|
+| M0–M5 | PASS, all six | M1 and M5 PASS |
+| M6 | **FAIL**: 57 passing marks in race.md, 2 rows over | **BLOCKED**: locked, so no frames judged; work rows in race-mac.md (they finished 4 min after caffeinate ended, the Mac still awake) |
+| M7 | not a Linux milestone | nine looks PASS, .987–.998, with the ink check and live fonts. Its whole-milestone verdict needs the rest of the Mac |
+| Tests | 49 of the 51 touched CPU and GPU tests pass; the other two are Metal tests, which only link on the Mac (wide run at c1aaf958; pnnotes again at 3a3886bd) | 4 at 3a3886bd (pnnotes, pnshell, savelater, saveattack), 10 at 656df2fe |
+| Walk | real input, web reads it, native reads it back: ok, on a binary checked newer than its sources | menus driven by the menu step (Night, New note, exports, zoom, Fit) |
+
+**M6's two Linux rows, not passed.** Stress undo max 25.6 ms (web 17.0, p95 better: 16.8 against 17.0), and stress typing not warmed max 21.5 ms with one missed frame (web 16.8, p95 equal). The first race of this round had three undo rows over, at 18.9–19.1.
+- 24 diagnostic stress runs at 3a3886bd (build/rerace.py: the race's own steps, printed, never judged): undo's worst was 16.8–17.4 in 20 and 18.3–18.9 in 4 (limit 17.5). Typing not warmed was 16.9–17.2 in 8 of 12 and 17.4–18.9 in 4 (limit 17.3).
+- What is in those late frames: the wait for the frame to start (18–19 ms), not the app's work (event 0.1–0.2, draw 0.4–0.6, paint 0.2–0.3; no timer tick between, with MOJOUI_TRACE). A few undo steps carry a 2.5 ms paint instead.
+- **The 25.6 ms undo is not explained**: its frame did 12.2 ms of work, of which draw was at most 3.8 and nothing else was recorded. It didn't recur in 24 runs. Either row can pass or fail on a given run; the judge is unchanged and no run was picked.
+
+**What was built.** The save thread attacked (D-8050, D-8052), undo drawn ahead (D-8051), proofs sharpened (D-8053), then D-8054–D-8059: sticky shadow's corner (72), double tap (54), the map's marks (68), the emoji picker (10), line keys (24), Quick note's menu (4), the Mac's menu bar (52), a database copy and Markdown files (14, 50 partly), the AppKit paced race and `scripts/mac-unlocked`.
+
+**Caught on the way, by running it:** a page's icon scrolled under the tools took the press on Write (my emoji commit); a menu bar in a column gave the Mac an empty window; the first final walk had run on an app an hour old (void; the walk refuses that now); `mojo build` crashed once with no message and built the next time.
+
+**Gaps left.** 36 pictures, 39 typography card, 51 focus mode; rest of 14 and 50 (JSON, zip, Obsidian vault, PNG, import, print, picture, link); 25 (the web has none of its own); L rows as told: 13, 15, 16, 29, 40, 41, 45, 49, 56; S: 55. Within built rows: arrow keys in Quick note's menu; map pictures are placeholders and map marks can't be edited; sticky shadow is stepped (ten layers); on a full disk the app opens to an error; the Mac menu bar has no Help.
+
+**Not seen by a person or a real hand:** nothing on the Mac's own screen (locked): the AppKit close hooks, the menu bar's clicks, strokes with coalescing off, the paced race. `scripts/mac-unlocked` needs the Mac unlocked and left alone for about 35 minutes; its probe refused correctly (active=0 key=0 locked=1).
+
+**For the reviewer: proofs, checks and tests changed this round.** None loosened a bar.
+- ref.mjs: the page's live fonts by default, cached (D-8053); M0 requires them; macref.py ships the cache.
+- 79-check.py: `ink_wrong` added to M2, M3, M7 (stricter); `mac_live` refuses to judge the Mac's frames when locked, and m6_mac gains paced, unwarmed and open rows; `race_table(live=)`. judge_test.py gained cases. No judge threshold changed.
+- test_pnshell `held`: adapted to the save queue (the old text assumed one save at a time).
+- GTK draws ahead after input by default, for every GPU canvas app (`MOJOUI_DRAW_AHEAD=frames` is the old way).
+- first5.py: a Quick note menu step in `back`; it refuses a stale app. first5web.mjs unchanged.
+- gpu-free saw `omarchy-agent-usage-ollama` (a usage reader whose name contains "llama") for an instant and voided M6's first start. Not touched; for the main session to rule on.
+
+**Where the risk is, most first:** webshell.mojo's save queue, rescue and hold (what happens to a person's edits); rowsaver.mojo and docstore.mojo (threads, give-up, kill points); `App.may_close` on GTK and, unrun unlocked, on AppKit; GTK's draw-ahead default; buzanmap/mapmarks (a web map drawn and saved back); fonttext's declared faces (every text app); scene/gpu2d's rect_hole_corner; AppKit paced bench, mouse coalescing and the hidden menu bar view.
+
 ## Continuation 20 (2026-11-24, 00:03 on; autopilot overnight): review round 3 fixed, the owner's ruling, the everyday gaps
 
 **M6 has no numbers for HEAD.** See "D" below for what ran. Everything in `docs/goals/79/race.md` and `race-mac.md` that isn't
