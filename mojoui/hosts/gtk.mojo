@@ -867,7 +867,7 @@ struct GtkHost[A: App](Movable):
     var offload_why: String
     var snap_css: Int  # the snap boxes' backgrounds (D-7577): one style sheet for the display, #mui-snap-<canvas> rules
     var draw_ahead: Bool  # animating GPU 2D canvases draw their next frame after this frame's paint (D-7560; MOJOUI_DRAW_AHEAD=0: off)
-    var ahead_input: Bool  # (trial) a GPU 2D canvas input made stale between frames draws then too, not at the next tick
+    var ahead_input: Bool  # a GPU 2D canvas a key or a press made stale between frames draws then too, in an idle turn, not at the next tick, when little of the frame is left (D-8051; MOJOUI_DRAW_AHEAD=frames: animations only)
     var ahead_hooked: Bool  # the frame clock's after-paint is connected for it, and an idle turn is queued to draw ahead
     var ahead_queued: Bool
     var ahead_due_us: Int  # the next frame's time (frame-clock µs) and the display's refresh interval, from the last paint
@@ -905,7 +905,7 @@ struct GtkHost[A: App](Movable):
         self.snap_css = 0
         self.g2d_wait = False
         self.draw_ahead = getenv("MOJOUI_DRAW_AHEAD") != "0"
-        self.ahead_input = getenv("MOJOUI_DRAW_AHEAD") == "input"
+        self.ahead_input = getenv("MOJOUI_DRAW_AHEAD") == "" or getenv("MOJOUI_DRAW_AHEAD") == "input"
         self.ahead_hooked = False
         self.ahead_queued = False
         self.ahead_due_us = 0
@@ -5434,6 +5434,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 gaps.append(Float64(start_us - last_start) / 1000.0)
             last_start = start_us
             lats.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
+            if getenv("MOJOUI_TRACE_LATS") == "1":  # (which step was late, and what of it was the app's: event, the wait for the frame, its paint)
+                print("TRACELAT: " + what + " " + String(i) + " t " + String(Int(perf_counter_ns()) // 1_000_000) + " lat " + one_decimal(Float32(lats[len(lats) - 1])) + " event " + one_decimal(Float32(ev_ms)) + " draw "
+                      + one_decimal(Float32(host[].canvases[ci].bench_draw_ms)) + " paint " + one_decimal(Float32(host[].paint_ring[shown_in % 64]))
+                      + " to_paint " + one_decimal(Float32(Float64(start_us) / 1000.0 - Float64(Int(t0)) / 1e6)) + " gap " + one_decimal(Float32(gaps[len(gaps) - 1] if len(gaps) > 0 else 0.0)), flush=True)
         var dm = host[].canvases[ci].bench_draw_ms
         scenes.append(host[].canvases[ci].bench_scene_ms)
         batches.append(host[].canvases[ci].bench_batch_ms)

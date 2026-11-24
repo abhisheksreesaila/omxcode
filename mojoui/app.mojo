@@ -298,7 +298,7 @@ struct Runtime[A: App](Movable):
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
     var closed: Bool  # App.closing was told
-    var changes: Int  # the app's state changed this many times (every update, resize, appearance): a host that drew a
+    var changes: Int  # the app's state changed this many times (every update but a timer's that changed no part of the screen, resize, appearance): a host that drew a
     # frame ahead of time shows it only if this hasn't moved since (D-7560)
 
     def __init__(out self, var app: Self.A):
@@ -560,13 +560,18 @@ struct Runtime[A: App](Movable):
             if t.start_us >= 0 and now_us >= t.due_us():
                 t.count = (now_us - t.start_us) // (t.ms * 1000)  # (a host that slept past several ticks: one event, the count jumps)
                 due.append((t.msg, t.count))
+        var before = self.changes
+        var only_timers = not changed
         for d in due:
             self._update(Event(d[0], "", d[1]))
             self.take_effects()
             changed = True
         if not changed:
             return Diff(False, [])
-        return self.refresh()
+        var diff_ = self.refresh()
+        if only_timers and not diff_.rebuild and len(diff_.patches) == 0:
+            self.changes = before  # (a tick that changed nothing on the screen: a frame drawn ahead is still the one to show, D-8051)
+        return diff_^
 
     def view(self) -> View:
         """The app's screen with its spacing tokens in the theme's points (what every host shows)."""
