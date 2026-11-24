@@ -18,7 +18,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from std.collections import Dict
 from mojoui.json import Json, json_string
-from mojoui.objectlayer import ObjectLayer, import_json_canvas_doc, export_json_canvas, CH_MOVE, CONNECTOR
+from mojoui.objectlayer import ObjectLayer, import_json_canvas_doc, objects_json_canvas, CH_MOVE, CONNECTOR
 from mojoui.canvasload import CanvasLoad, skim, OpenBoard, SqlText
 from mojoui.sqlite import Database
 from mojoui import libc
@@ -99,7 +99,7 @@ def same_layers(a: ObjectLayer, b: ObjectLayer) raises:
         assert_equal(a.objs[i].z, b.objs[i].z)
         assert_equal(a.objs[i].kind, b.objs[i].kind)
         assert_equal(a.objs[i].key, b.objs[i].key)
-    assert_equal(export_json_canvas(a, 4, 3), export_json_canvas(b, 4, 3))
+    assert_equal(objects_json_canvas(a, 4, 3), objects_json_canvas(b, 4, 3))
 
 
 def main() raises:
@@ -169,10 +169,10 @@ def main() raises:
     w2.begin_gesture(CH_MOVE)
     w2.move_by(37, -21)
     w2.end_gesture()
-    assert_equal(export_json_canvas(l3, 4, 3), export_json_canvas(w2, 4, 3))
+    assert_equal(objects_json_canvas(l3, 4, 3), objects_json_canvas(w2, 4, 3))
     assert_true(l3.unsaved(), "the edit is an edit")
     assert_true(l3.undo(), "the edit is in the history after the open")
-    assert_equal(export_json_canvas(l3, 4, 3), export_json_canvas(whole, 4, 3))
+    assert_equal(objects_json_canvas(l3, 4, 3), objects_json_canvas(whole, 4, 3))
 
     # 5. the first slice: every node meeting the rect, and both ends of edges crossing it
     var ld4 = CanvasLoad(text)
@@ -233,9 +233,9 @@ def main() raises:
     lay.begin_gesture(CH_MOVE)
     lay.move_by(37, -21)
     lay.end_gesture()
-    assert_equal(export_json_canvas(ob.layer, 4, 3), export_json_canvas(w2, 4, 3))
+    assert_equal(objects_json_canvas(ob.layer, 4, 3), objects_json_canvas(w2, 4, 3))
     assert_true(ob.edit().undo())
-    assert_equal(export_json_canvas(ob.layer, 4, 3), export_json_canvas(whole, 4, 3))
+    assert_equal(objects_json_canvas(ob.layer, 4, 3), objects_json_canvas(whole, 4, 3))
     assert_true(ob.open("{not a canvas", 0, 0, 1, 1) != "", "a text the skim can't open comes back")
 
     # 8. open_later: the read, the skim and the rect's take on a job thread
@@ -287,7 +287,7 @@ def main() raises:
     lay2.begin_gesture(CH_MOVE)
     lay2.move_by(37, -21)
     lay2.end_gesture()
-    assert_equal(export_json_canvas(lb2.layer, 4, 3), export_json_canvas(w2, 4, 3))
+    assert_equal(objects_json_canvas(lb2.layer, 4, 3), objects_json_canvas(w2, 4, 3))
     var lb4 = OpenBoard()  # (take_on_job: the rect's nodes parsed on the job, there when it's adopted)
     lb4.open_later(SqlText(dbp, q, 7), 1000, 1000, 2000, 1800, -1, True)
     while lb4.pending():
@@ -339,10 +339,10 @@ def main() raises:
     while pb.step(R0, R1, R2, R3, 300):
         pass
     assert_false(pb.loading())
-    assert_equal(export_json_canvas(pb.layer, 4, 3), export_json_canvas(edited, 4, 3))
+    assert_equal(objects_json_canvas(pb.layer, 4, 3), objects_json_canvas(edited, 4, 3))
     assert_true(pb.layer.unsaved(), "the edits are edits")
     for _ in range(3):
         assert_true(pb.edit().undo(), "undoable after the open")
-    assert_equal(export_json_canvas(pb.layer, 4, 3), export_json_canvas(whole, 4, 3))
+    assert_equal(objects_json_canvas(pb.layer, 4, 3), objects_json_canvas(whole, 4, 3))
     print("canvasload open_later: " + String(adopted) + " objects in the rect after " + String(frames) + " polls and " + String(slices_held) + " slices (" + lb.times + " us on the job)")
     print("canvasload: ok · " + String(len(whole.objs)) + " objects, first slice " + String(first) + ", " + String(slices) + " slices, " + String(crossing) + " crossing edges")

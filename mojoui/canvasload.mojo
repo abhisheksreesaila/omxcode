@@ -29,6 +29,8 @@ from max.algorithm import parallelize
 from mojoui.json import Json, c_locale, c_float, pow5_table
 from mojoui.objectlayer import ObjectLayer, Obj, canvas_node_obj, canvas_edge_obj, CONNECTOR
 from mojoui.docstore import clock_us
+from mojoui.canvassource import CanvasSource
+from mojoui.shared import serial
 from mojoui.objectlayer import import_json_canvas_doc
 from mojoui.sqlite import Database
 from mojoui.uijobs import start_ui_job
@@ -337,6 +339,9 @@ struct CanvasLoad(Movable):
     var bad: Int  # nodes that weren't JSON (made nothing)
     var trace: Bool  # MOJOUI_LOAD_TRACE=1: each slice's parse and adopt times (diagnosis)
     var serial: Bool  # parse on this thread only (a job thread's load, D-7956)
+    var nodes_m: Int  # the members "nodes" and "edges" (-1: none)
+    var edges_m: Int
+    var src_id: Int  # (review 3) the document's source (CanvasSource): objects name it as they come in, its text is handed over at the end
     var cores: Int  # workers for a slice (the machine's logical cores: 12 → 24 measured 6.5 → 4.8 ms; MOJOUI_LOAD_CORES=n for an A/B)
 
     def __init__(out self, var text: String):
@@ -365,6 +370,9 @@ struct CanvasLoad(Movable):
         self.trace = getenv("MOJOUI_LOAD_TRACE") == "1"
         self.cores = num_logical_cores()
         self.serial = False
+        self.src_id = serial()
+        self.nodes_m = -1
+        self.edges_m = -1
         try:
             if getenv("MOJOUI_LOAD_CORES") != "":
                 self.cores = max(1, Int(getenv("MOJOUI_LOAD_CORES")))
@@ -384,6 +392,8 @@ struct CanvasLoad(Movable):
                 edges_m = i
         if nodes_m < 0:
             return
+        self.nodes_m = nodes_m
+        self.edges_m = edges_m
         for k in range(len(sk.el_start)):
             if sk.el_member[k] == nodes_m:
                 var a = sk.el_start[k]
@@ -408,11 +418,34 @@ struct CanvasLoad(Movable):
             self.e_from.append(self.at_key.get(_string_at(addr, v[0], v[1]), -1))
             self.e_to.append(self.at_key.get(_string_at(addr, v[2], v[3]), -1))
             self.e_left.append(e)
+        # (review 3) an element that isn't an object or array (a stray number, null) isn't in the skim: such a document is
+        # imported whole, so every element keeps its place
+        if not self._bare(sk.members[nodes_m], self.ns, self.ne) or (edges_m >= 0 and not self._bare(sk.members[edges_m], self.es, self.ee)):
+            return
         self.state = List[UInt8](length=len(self.ns), fill=_PENDING)
         self.left = len(self.ns)
         self.members = sk.members.copy()
         self.ok = True
         self.skim_us = clock_us() - t0
+
+    def _bare(self, m: Member, a: List[Int], b: List[Int]) -> Bool:
+        """Between the elements found, the array m holds commas and spaces only."""
+        ref t = self.text
+        var at = m.start + 1
+        for i in range(len(a) + 1):
+            var end = a[i] if i < len(a) else m.end - 1
+            var commas = 0
+            for q in range(at, end):
+                var c = t.as_bytes()[q]
+                if c == 44:
+                    commas += 1
+                elif c != 32 and c != 9 and c != 10 and c != 13:
+                    return False
+            if commas != (1 if 0 < i < len(a) else 0):
+                return False
+            if i < len(b):
+                at = b[i]
+        return True
 
     def nodes(self) -> Int:
         return len(self.ns)
@@ -447,6 +480,7 @@ struct CanvasLoad(Movable):
     def _parse(mut self, mut layer: ObjectLayer, idx: List[Int], stepping: Bool = False):
         """Nodes idx (pending, in file order) parsed on every core and adopted with their file ids, then the edges whose
         ends are both there."""
+        layer.src.id = self.src_id
         layer.reserve_ids(len(self.ns) + len(self.es))  # (D-7959: an edit meanwhile makes ids above the document's)
         var count = len(idx)
         if count > 0:
@@ -661,6 +695,25 @@ struct CanvasLoad(Movable):
     def _settle(mut self, mut layer: ObjectLayer):
         if self.done():
             var was_saved = not layer.unsaved()
+            if not layer.src.ok and self.ok:  # (its own text goes with it: what isn't edited is saved as it was)
+                var src = CanvasSource()
+                src.id = self.src_id
+                src.ns = self.ns.copy()
+                src.ne = self.ne.copy()
+                src.es = self.es.copy()
+                src.ee = self.ee.copy()
+                src.nodes_at = self.members[self.nodes_m].start
+                src.nodes_end = self.members[self.nodes_m].end
+                if self.edges_m >= 0:
+                    src.edges_at = self.members[self.edges_m].start
+                    src.edges_end = self.members[self.edges_m].end
+                src.text = self.text
+                src.ok = True
+                if self.edges_m < 0 and self.text.find('"edges"') >= 0:  # (an "edges" the skim has no place for: null, a number)
+                    var whole = CanvasSource.of(self.text)
+                    whole.id = self.src_id
+                    src = whole^
+                layer.src = src^
             layer.order_by_z()
             if was_saved:  # (D-7959: an edit made during the open stays undoable)
                 layer.history.clear()
@@ -848,7 +901,7 @@ struct OpenBoard(Movable):
         if got.back != "":  # (not something the skim opens: the whole import, which raises the why)
             try:
                 var j = Json.parse(got.back)
-                self.layer = import_json_canvas_doc(j)
+                self.layer = import_json_canvas_doc(j, got.back)
                 if self.gap >= 0:
                     self.layer.set_connector_gap(self.gap)
                 self.layer.mark_saved()

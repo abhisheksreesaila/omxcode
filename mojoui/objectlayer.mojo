@@ -26,12 +26,15 @@
 from std.math import sqrt, cos, sin, floor, ceil
 
 from mojoui.shared import serial
+from mojoui.clock import now_ns
+from mojoui.canvassource import CanvasSource
+from mojoui.jsonpatch import Change as Patch, patched, patched_in, member_text
 from mojoui.scene import Painter
 from mojoui.ink import Stroke
 from mojoui.history import History, Undoable
 from mojoui.textedit import TextEdit, PlainStyler, Styler, Pos
 from mojoui.text import Font, REGULAR, LEFT
-from mojoui.json import Json, J_ARRAY, J_STRING, J_NUMBER, json_string
+from mojoui.json import Json, J_OBJECT, J_ARRAY, J_STRING, J_NUMBER, json_string
 
 comptime TEXT = 1
 comptime STICKY = 2
@@ -223,6 +226,8 @@ struct Obj(Copyable, Movable):
     var weight: Int  # TEXT, STICKY: the face's weight
     var markdown: Bool  # TEXT: its words are Markdown (laid out in CSS line boxes), else plain
     var key: String  # the document's own id for it (a JSON Canvas node's), "" for one made here
+    var src_doc: Int  # the CanvasSource it was read from (its id; 0: made here) and its place there: node src_at, or edge src_at − nodes
+    var src_at: Int
 
     def __init__(out self, id: Int, kind: Int, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32):
         self.id = id
@@ -258,6 +263,8 @@ struct Obj(Copyable, Movable):
         self.pad = 0
         self.ink = 0xFF222222
         self.head_end = True
+        self.src_doc = 0
+        self.src_at = -1
         self.weight = 400
         self.markdown = False
         self.key = ""
@@ -340,6 +347,9 @@ struct Change(Undoable):
 
 struct ObjectLayer(Movable):
     var doc: Int  # which document this is (a process-wide serial, never shared): its versions and ids mean something only with it
+    var src: CanvasSource  # (review 3) the document's own text, when it was read from one: what wasn't edited is saved as it was
+    var adopted: Dict[Int, Bool]  # ids of its document that became objects (or joined a delete made while it was opening)
+    var touched: Dict[Int, Bool]  # objects that may differ from their source (edited, undone, re-routed: compared at a save)
     var objs: List[Obj]
     var pos_of: Dict[Int, Int]  # id → index in objs
     var next_id: Int
@@ -407,6 +417,9 @@ struct ObjectLayer(Movable):
 
     def __init__(out self):
         self.doc = serial()
+        self.src = CanvasSource()
+        self.touched = Dict[Int, Bool]()
+        self.adopted = Dict[Int, Bool]()
         self.objs = List[Obj]()
         self.pos_of = Dict[Int, Int]()
         self.next_id = 1
@@ -508,6 +521,7 @@ struct ObjectLayer(Movable):
 
     def _log(mut self, id: Int):
         """(D-7978) Object `id` changes in the version about to be made: changes_since() names it."""
+        self.touched[id] = True
         self.chg_ids.append(id)
         self.chg_vers.append(self.version + 1)
         self.logged_n += 1
@@ -521,6 +535,26 @@ struct ObjectLayer(Movable):
                 vers2.append(self.chg_vers[q])
             self.chg_ids = ids2^
             self.chg_vers = vers2^
+
+    def was_object(self, id: Int) -> Bool:
+        """(review 3) Id `id` of the document it was read from was an object here (one that isn't now was deleted)."""
+        return id in self.adopted
+
+    def node_moved(self, p: Int) -> Bool:
+        """Object objs[p] isn't where (or as big as) its document had it."""
+        ref o = self.objs[p]
+        if o.src_doc != self.src.id or o.src_at < 0 or not self.src.ok or o.src_at >= len(self.src.ns) or o.id != o.src_at + 1:
+            return True  # (made here)
+        if not (o.id in self.touched):
+            return False
+        try:
+            var j = Json.parse(self.src.node(o.src_at))
+            var was = Obj(0, RECT, 0, 0, 0, 0, 0)
+            if canvas_node_obj(j, 0, was):
+                return was.x != o.x or was.y != o.y or was.w != o.w or was.h != o.h
+        except:
+            pass
+        return True
 
     def changes_since(self, since: Int) -> Optional[List[Int]]:
         """(D-7978) The ids changed since version `since` (made, changed, re-routed, removed or adopted) when every change
@@ -708,6 +742,7 @@ struct ObjectLayer(Movable):
         self.next_id += 1
         self.z_top += 1
         o.z = self.z_top
+        o.key = new_key()  # (its own name in any document, whatever ids it already holds: a layer id is given again after a reload)
         var id = o.id
         self._touch(id)
         self.pos_of[id] = len(self.objs)
@@ -2011,6 +2046,9 @@ struct ObjectLayer(Movable):
         deleted an end (it is dropped, as the delete would have dropped it)."""
         o.id = id
         o.z = z
+        o.src_at = id - 1
+        o.src_doc = self.src.id
+        self.adopted[id] = True
         self.next_id = max(self.next_id, id + 1)
         self.z_top = max(self.z_top, z)
         for c in range(len(self.history.done)):
@@ -2034,13 +2072,22 @@ struct ObjectLayer(Movable):
         undo step; later objects get ids and z above every one given so far."""
         o.id = id
         o.z = z
+        o.src_at = id - 1
+        o.src_doc = self.src.id
+        self.adopted[id] = True
         self.next_id = max(self.next_id, id + 1)
         self.z_top = max(self.z_top, z)
         if o.kind == TEXT or o.kind == STICKY:
             o.rev = self._next_rev()
         self.pos_of[id] = len(self.objs)
         self.objs.append(o^)
+        var was = id in self.touched
         self._log(id)
+        if not was:  # (as its document has it)
+            try:
+                _ = self.touched.pop(id)
+            except:
+                pass
         self.adopting = True
         if self.objs[len(self.objs) - 1].kind == CONNECTOR:
             self._route(len(self.objs) - 1)
@@ -2196,7 +2243,22 @@ def import_json_canvas(json_text: String) raises -> ObjectLayer:
     placeholder card, an edge a connector between the nodes it names. Goal 79: the fixture's canvas and PN's 5,000-object
     stress note."""
     var j = Json.parse(json_text)
-    return import_json_canvas_doc(j)
+    return import_json_canvas_doc(j, json_text)
+
+
+def _placeholder_name(j: Json, n: Int, kind: String, pk: String) -> String:
+    """What a node that isn't drawn says on its card: its file's name, its address, its label, else its kind."""
+    var name = j.text(j.get(n, "label"))
+    if name == "":
+        var file = j.text(j.get(n, "file"))
+        if file != "" and not file.startswith("data:"):
+            var cut = file.split("/")
+            name = String(cut[len(cut) - 1])
+    if name == "":
+        name = j.text(j.get(n, "url"))
+    if name == "":
+        name = pk if pk != "" else kind
+    return name if name.byte_length() <= 120 else String("…")
 
 
 def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
@@ -2211,7 +2273,8 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
     var pn = j.get(n, "pn")
     var color = j.text(j.get(n, "color"))
     var made = False
-    if kind == "text":
+    var own = j.text(j.get(pn, "type"))
+    if kind == "text" and (own == "" or own == "text" or own == "sticky"):
         var style = j.get(pn, "style")
         var size = j.real(j.get(style, "fontSize"), 16)
         var ink = _canvas_color(j.text(j.get(style, "color")), 0xFF222222)
@@ -2248,11 +2311,24 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
             o.stroke.seal()
             o.line_width = 0
             made = True
-    elif kind == "file" or kind == "link" or kind == "group":
-        o = Obj(0, RECT, x, y, w, h, 0xFFF0F2F4)  # (as add_rect: a placeholder card)
-        o.line = 0xFFD4D8DC
-        o.line_width = 1
-        o.radius = 6
+    if not made and j.kind(n) == J_OBJECT:
+        # (what isn't drawn as itself: a picture, a file, a link, a group, a shape, a kind this program has never heard of:
+        # a plain card with its name, that moves; the rest of the node stays as its document has it)
+        var pk = j.text(j.get(pn, "type"))
+        if pk == "shape":  # (Personal Note's rectangle or circle)
+            o = Obj(0, ELLIPSE if j.text(j.get(pn, "kind")) == "circle" else RECT, x, y, w, h, parse_color(j.text(j.get(pn, "fill")), 0))
+            o.line = parse_color(j.text(j.get(pn, "stroke")), 0)
+            o.line_width = j.real(j.get(pn, "strokeWidth"), 1) if o.line != 0 else 0
+            o.radius = j.real(j.get(pn, "cornerRadius"), 0)
+            if o.line == 0 and (o.color >> 24) == 0:  # (neither: still something to see and to hold)
+                o.line = 0xFFD4D8DC
+                o.line_width = 1
+        else:
+            o = Obj(0, RECT, x, y, w, h, UInt32(0x40F0F2F4) if kind == "group" else UInt32(0xFFF0F2F4))  # (as add_rect: a placeholder card)
+            o.line = 0xFFD4D8DC
+            o.line_width = 1
+            o.radius = 6
+            o.text = _placeholder_name(j, n, kind, pk)
         made = True
     if made:
         o.key = j.text(j.get(n, "id"))
@@ -2270,13 +2346,17 @@ def canvas_edge_obj(j: Json, e: Int) -> Tuple[String, String, Obj]:
     return (j.text(j.get(e, "fromNode")), j.text(j.get(e, "toNode")), o^)
 
 
-def import_json_canvas_doc(j: Json) raises -> ObjectLayer:
-    """import_json_canvas from a document already parsed (an app reading other fields of it parses it once). A node's
+def import_json_canvas_doc(j: Json, text: String = "") raises -> ObjectLayer:
+    """import_json_canvas from a document already parsed (an app reading other fields of it parses it once; `text`: what it
+    was parsed from, kept so a save writes back what isn't edited; without it a save writes only what is drawn). A node's
     id and z are its index + 1 and an edge's come after every node's (mojoui.canvasload opens the same text a part at a
     time to the same layer)."""
     var ol = ObjectLayer()
+    if text != "":
+        ol.src = CanvasSource.of(text)
     var nodes = j.get(0, "nodes")
     var count = j.size(nodes)
+    ol.reserve_ids(count + j.size(j.get(0, "edges")))
     var ids = Dict[String, Int]()
     for i in range(count):
         var o = Obj(0, RECT, 0, 0, 0, 0, 0)
@@ -2317,61 +2397,375 @@ def _geometry(x: Float64, y: Float64, w: Float64, h: Float64, rot: Float64) -> S
             + ',"scaleX":1,"scaleY":1,"flipX":false,"flipY":false,"skewX":0,"skewY":0}')
 
 
+def new_key() -> String:
+    """A document id never given before: the clock's nanoseconds and the process's next serial, in hex."""
+    var out = String("obj-")
+    for v in [Int(now_ns()), serial()]:
+        var digits = String("")
+        var x = v
+        while x > 0:
+            digits = String("0123456789abcdef"[byte=x % 16:x % 16 + 1]) + digits
+            x //= 16
+        out += digits
+    return out^
+
+
 def node_key(ref o: Obj) -> String:
     """The document id of an object: its own, or one made from its layer id (stable while the layer lives)."""
     return o.key if o.key != "" else "obj-" + String(o.id)
 
 
-def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page_w: Float64 = 860, page_h: Float64 = 1080) -> String:
-    """The layer as a JSON Canvas 1.0 document with Personal Note's `pn` extras (the inverse of import_json_canvas): a
+def _made_node(ref o: Obj, key: String) -> String:
+    """A node for an object made here ("" for a kind that isn't one)."""
+    if o.kind == TEXT or o.kind == STICKY:
+        var style = '{"fontFamily":' + json_string(o.family) + ',"fontSize":' + _jn(o.size)
+        if o.weight != 400:
+            style += ',"fontWeight":' + String(o.weight)
+        style += ',"lineHeight":' + _jn(o.line_height if o.line_height > 0 else 1.16)
+        if o.kind == TEXT:
+            style += ',"padding":8'
+        style += ',"color":"' + _hex(o.color if o.kind == TEXT else o.ink) + '"}'
+        var node = ('{"id":' + json_string(key) + ',"type":"text","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
+                    + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"text":' + json_string(o.text))
+        if o.kind == STICKY:
+            node += ',"color":"' + _hex(o.color) + '"'
+        node += ',"pn":{"type":"' + ("sticky" if o.kind == STICKY else "text") + '","geometry":' + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"style":' + style + ',"extras":{}'
+        if o.kind == STICKY:
+            node += ',"color":"' + _hex(o.color) + '"'
+        else:
+            node += ',"mode":"box"' + (',"format":"markdown"' if o.markdown else "")
+        return node + "}}"
+    elif o.kind == INK:
+        ref st = o.stroke
+        var path = String("[")
+        for k in range(len(st.xs)):
+            if k > 0:
+                path += ","
+            path += '["' + ("M" if k == 0 else "L") + '",' + _jn(st.xs[k] - o.x) + "," + _jn(st.ys[k] - o.y) + "]"
+        path += "]"
+        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
+                     + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"ink","geometry":'
+                     + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"pen","width":'
+                     + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '","path":' + path + "}}")
+    return ""
+
+
+def _made_edge(layer: ObjectLayer, ref o: Obj, key: String) -> String:
+    """An edge for a connector made here ("" when an end is gone)."""
+    if o.kind == CONNECTOR and o.from_id >= 0 and o.to_id >= 0:
+        var a = layer.index(o.from_id)
+        var b = layer.index(o.to_id)
+        if a < 0 or b < 0:
+            return ""
+        return ('{"id":' + json_string(key) + ',"fromNode":' + json_string(node_key(layer.objs[a])) + ',"toNode":' + json_string(node_key(layer.objs[b]))
+                     + ',"color":"' + _hex(o.color) + '","pn":{"type":"connector","geometry":' + _geometry(min(o.ax, o.bx), min(o.ay, o.by), max(abs(o.bx - o.ax), 1.0), max(abs(o.by - o.ay), 1.0), 0)
+                     + ',"color":"' + _hex(o.color) + '","lineWidth":' + _jn(o.line_width) + ',"reverseX":' + ("true" if o.bx < o.ax else "false")
+                     + ',"reverseY":' + ("true" if o.by < o.ay else "false") + ',"arrowheads":{"start":false,"end":' + ("true" if o.head_end else "false") + '},"extras":{}}}')
+    return ""
+
+
+def objects_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page_w: Float64 = 860, page_h: Float64 = 1080) -> String:
+    """The layer's own objects (nothing of the document they were read from: export_json_canvas is what saves one) as a JSON Canvas 1.0 document with Personal Note's `pn` extras (the inverse of import_json_canvas): a
     text box or a sticky is a text node (a sticky with its colour), a pen stroke a file node whose pn holds its path (the
     derived SVG left to the app that wants one: "file": ""), a connector an edge; the page grid in pn.page."""
     var nodes = List[String]()
     var edges = List[String]()
     for i in layer._order():
         ref o = layer.objs[i]
-        var key = node_key(o)
-        if o.kind == TEXT or o.kind == STICKY:
-            var style = '{"fontFamily":' + json_string(o.family) + ',"fontSize":' + _jn(o.size)
-            if o.weight != 400:
-                style += ',"fontWeight":' + String(o.weight)
-            style += ',"lineHeight":' + _jn(o.line_height if o.line_height > 0 else 1.16)
-            if o.kind == TEXT:
-                style += ',"padding":8'
-            style += ',"color":"' + _hex(o.color if o.kind == TEXT else o.ink) + '"}'
-            var node = ('{"id":' + json_string(key) + ',"type":"text","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
-                        + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"text":' + json_string(o.text))
-            if o.kind == STICKY:
-                node += ',"color":"' + _hex(o.color) + '"'
-            node += ',"pn":{"type":"' + ("sticky" if o.kind == STICKY else "text") + '","geometry":' + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"style":' + style + ',"extras":{}'
-            if o.kind == STICKY:
-                node += ',"color":"' + _hex(o.color) + '"'
-            else:
-                node += ',"mode":"box"' + (',"format":"markdown"' if o.markdown else "")
-            nodes.append(node + "}}")
-        elif o.kind == INK:
-            ref st = o.stroke
-            var path = String("[")
-            for k in range(len(st.xs)):
-                if k > 0:
-                    path += ","
-                path += '["' + ("M" if k == 0 else "L") + '",' + _jn(st.xs[k] - o.x) + "," + _jn(st.ys[k] - o.y) + "]"
-            path += "]"
-            nodes.append('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(Float64(Int(o.x + 0.5))) + ',"y":' + _jn(Float64(Int(o.y + 0.5)))
-                         + ',"width":' + _jn(Float64(Int(o.w + 0.5))) + ',"height":' + _jn(Float64(Int(o.h + 0.5))) + ',"file":"","pn":{"type":"ink","geometry":'
-                         + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"pen","width":'
-                         + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '","path":' + path + "}}")
-        elif o.kind == CONNECTOR and o.from_id >= 0 and o.to_id >= 0:
-            var a = layer.index(o.from_id)
-            var b = layer.index(o.to_id)
-            if a < 0 or b < 0:
-                continue
-            edges.append('{"id":' + json_string(key) + ',"fromNode":' + json_string(node_key(layer.objs[a])) + ',"toNode":' + json_string(node_key(layer.objs[b]))
-                         + ',"color":"' + _hex(o.color) + '","pn":{"type":"connector","geometry":' + _geometry(min(o.ax, o.bx), min(o.ay, o.by), max(abs(o.bx - o.ax), 1.0), max(abs(o.by - o.ay), 1.0), 0)
-                         + ',"color":"' + _hex(o.color) + '","lineWidth":' + _jn(o.line_width) + ',"reverseX":' + ("true" if o.bx < o.ax else "false")
-                         + ',"reverseY":' + ("true" if o.by < o.ay else "false") + ',"arrowheads":{"start":false,"end":' + ("true" if o.head_end else "false") + '},"extras":{}}}')
+        if o.kind == CONNECTOR:
+            var e = _made_edge(layer, o, node_key(o))
+            if e != "":
+                edges.append(e)
+        else:
+            var n = _made_node(o, node_key(o))
+            if n != "":
+                nodes.append(n)
     return ('{"nodes":[' + ",".join(nodes) + '],"edges":[' + ",".join(edges) + '],"pn":{"schemaVersion":1,"page":{"columns":' + String(columns)
             + ',"rows":' + String(rows) + '},"grid":{"width":' + _jn(page_w) + ',"height":' + _jn(page_h) + "}}}")
+
+
+def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page_w: Float64 = 860, page_h: Float64 = 1080) -> String:
+    """The board as a JSON Canvas 1.0 document, to save (the inverse of import_json_canvas). A board read from a document
+    is that document with what was edited changed (review 3): every node, edge and top-level member that wasn't is its own
+    text, in its own order, kinds and keys nobody here knows included; an edited node has only the members it changed
+    replaced; one made here is appended, one deleted is gone with its edges. Unedited, it is the very text. The page grid
+    is the document's own (columns, rows, page_w, page_h: for a board made here: objects_json_canvas)."""
+    if not layer.src.ok:
+        return objects_json_canvas(layer, columns, rows, page_w, page_h)
+    ref src = layer.src
+    var count = len(src.ns)
+    var nodes = List[String]()
+    var node_at = List[Int]()  # each item's place in the document (-1: made here)
+    var edges = List[String]()
+    var edge_at = List[Int]()
+    var used = List[Bool](length=count + len(src.es), fill=False)
+    var same = True  # nothing differs
+    var last = -1
+    var last_edge = -1
+    for i in layer._order():
+        ref o = layer.objs[i]
+        var mine = o.src_doc == src.id and o.src_at >= 0
+        if o.kind == CONNECTOR:
+            var e = o.src_at - count if mine else -1
+            if e >= 0 and e < len(src.es) and not used[count + e]:
+                var raw = src.edge(e)
+                var out = raw
+                if o.id in layer.touched:
+                    out = _edge_patched(layer, o, raw)
+                if out != raw or e < last_edge:
+                    same = False
+                last_edge = max(last_edge, e)
+                used[count + e] = True
+                edges.append(out)
+                edge_at.append(e)
+            else:
+                var made = _made_edge(layer, o, node_key(o))
+                if made != "":
+                    same = False
+                    edges.append(made)
+                    edge_at.append(-1)
+            continue
+        if mine and o.src_at < count and not used[o.src_at] and o.id == o.src_at + 1:
+            var raw = src.node(o.src_at)
+            var out = raw
+            if o.id in layer.touched:
+                out = _node_patched(o, raw)
+            if out != raw or o.src_at < last:
+                same = False
+            last = max(last, o.src_at)
+            used[o.src_at] = True
+            nodes.append(out)
+            node_at.append(o.src_at)
+            continue
+        same = False
+        if mine and o.src_at < count:  # (a copy of one of its nodes: its text, under its own id)
+            var out = _node_patched(o, src.node(o.src_at))
+            try:
+                out = patched(out, [Patch("id", json_string(node_key(o)))])
+            except:
+                pass
+            nodes.append(out)
+            node_at.append(-1)
+            continue
+        var made = _made_node(o, node_key(o))
+        if made != "":
+            nodes.append(made)
+            node_at.append(-1)
+    # what made no object stays (its node isn't an object, an edge whose end isn't a node): deleted objects don't, nor
+    # edges that end at one
+    var gone = Dict[String, Bool]()
+    var j = Json()
+    for i in range(count):
+        if used[i]:
+            continue
+        var raw = src.node(i)
+        if layer.was_object(i + 1):
+            same = False
+            try:
+                j = Json.parse(raw)
+                gone[j.text(j.get(0, "id"))] = True
+            except:
+                pass
+            continue
+        _insert_at(nodes, node_at, raw, i)
+    for e in range(len(src.es)):
+        if used[count + e]:
+            continue
+        if layer.was_object(count + e + 1):
+            same = False
+            continue
+        var raw = src.edge(e)
+        if len(gone) > 0:
+            try:
+                j = Json.parse(raw)
+                if j.text(j.get(0, "fromNode")) in gone or j.text(j.get(0, "toNode")) in gone:
+                    same = False
+                    continue
+            except:
+                pass
+        _insert_at(edges, edge_at, raw, e)
+    if same:
+        return src.text
+    var all_nodes = "[" + ",".join(nodes) + "]"
+    var all_edges = "[" + ",".join(edges) + "]"
+    var t = src.text.byte_length()
+    if src.edges_at < 0:
+        if len(edges) == 0:
+            return String(src.text[byte=0:src.nodes_at]) + all_nodes + String(src.text[byte=src.nodes_end:t])
+        return String(src.text[byte=0:src.nodes_at]) + all_nodes + ',"edges":' + all_edges + String(src.text[byte=src.nodes_end:t])
+    if len(edges) == 0 and len(src.es) == 0:
+        all_edges = String(src.text[byte=src.edges_at:src.edges_end])
+    if src.nodes_at < src.edges_at:
+        return (String(src.text[byte=0:src.nodes_at]) + all_nodes + String(src.text[byte=src.nodes_end:src.edges_at]) + all_edges
+                + String(src.text[byte=src.edges_end:t]))
+    return (String(src.text[byte=0:src.edges_at]) + all_edges + String(src.text[byte=src.edges_end:src.nodes_at]) + all_nodes
+            + String(src.text[byte=src.nodes_end:t]))
+
+
+def _insert_at(mut items: List[String], mut at: List[Int], raw: String, i: Int):
+    """Document item i, which made no object, put back after the one that stood before it (or first)."""
+    var best = -1
+    var pos = 0
+    for q in range(len(at)):
+        if at[q] >= 0 and at[q] < i and at[q] >= best:
+            best = at[q]
+            pos = q + 1
+    items.insert(pos, raw)
+    at.insert(pos, i)
+
+
+def _whole(v: Float64) -> String:
+    """A coordinate as JSON Canvas has them: whole page px, the nearest."""
+    return String(Int(floor(v + 0.5)))
+
+
+def _moved_number(j: Json, n: Int, key: String, by: Float64, default: Float64, whole: Bool) -> String:
+    """Member `key`, a number, changed by `by`: whole when it was (or when a missing one is to be), else as it comes."""
+    var m = j.get(n, key)
+    var v = j.real(m, default) + by
+    if (m >= 0 and j.is_whole(m) and whole) or (m < 0 and whole):
+        return _whole(v)
+    return _jn(v)
+
+
+def _node_patched(ref o: Obj, raw: String) -> String:
+    """Node `raw` as object `o` has it now: the members whose meaning changed since it was read replaced, the others its own
+    (geometry both in the node and in pn.geometry, as Personal Note keeps it)."""
+    try:
+        var j = Json.parse(raw)
+        var was = Obj(0, RECT, 0, 0, 0, 0, 0)
+        if not canvas_node_obj(j, 0, was) or was.kind != o.kind:
+            return raw
+        var top = List[Patch]()
+        var geo = List[Patch]()
+        var pn = List[Patch]()
+        var style = List[Patch]()
+        var pnode = j.get(0, "pn")
+        var g = j.get(pnode, "geometry")
+        var dx = o.x - was.x
+        var dy = o.y - was.y
+        var dw = o.w - was.w
+        var dh = o.h - was.h
+        if abs(dx) > 1e-9:
+            top.append(Patch("x", _moved_number(j, 0, "x", dx, 0, True)))
+            if g >= 0:
+                geo.append(Patch("x", _moved_number(j, g, "x", dx, was.x, False)))
+        if abs(dy) > 1e-9:
+            top.append(Patch("y", _moved_number(j, 0, "y", dy, 0, True)))
+            if g >= 0:
+                geo.append(Patch("y", _moved_number(j, g, "y", dy, was.y, False)))
+        if abs(dw) > 1e-9:
+            top.append(Patch("width", _moved_number(j, 0, "width", dw, was.w, True)))
+            if g >= 0:
+                var sx = j.real(j.get(g, "scaleX"), 1)
+                geo.append(Patch("width", _moved_number(j, g, "width", dw / (sx if abs(sx) > 1e-9 else 1.0), was.w, False)))
+        if abs(dh) > 1e-9:
+            top.append(Patch("height", _moved_number(j, 0, "height", dh, was.h, True)))
+            if g >= 0:
+                var sy = j.real(j.get(g, "scaleY"), 1)
+                geo.append(Patch("height", _moved_number(j, g, "height", dh / (sy if abs(sy) > 1e-9 else 1.0), was.h, False)))
+        if abs(o.rot - was.rot) > 1e-9 and (g >= 0 or pnode >= 0):
+            geo.append(Patch("rotation", _moved_number(j, g, "rotation", (o.rot - was.rot) * 180 / PI, 0, False)))
+        if o.kind == TEXT or o.kind == STICKY:
+            if o.text != was.text:
+                top.append(Patch("text", json_string(o.text)))
+            if o.family != was.family:
+                style.append(Patch("fontFamily", json_string(o.family)))
+            if o.size != was.size:
+                style.append(Patch("fontSize", _jn(o.size)))
+            if o.weight != was.weight:
+                style.append(Patch("fontWeight", String(o.weight)))
+            if o.line_height != was.line_height:
+                style.append(Patch("lineHeight", _jn(o.line_height if o.line_height > 0 else 1.16)))
+            if o.kind == TEXT and o.color != was.color:
+                style.append(Patch("color", '"' + _hex(o.color) + '"'))
+            if o.kind == STICKY and o.ink != was.ink:
+                style.append(Patch("color", '"' + _hex(o.ink) + '"'))
+            if o.kind == STICKY and o.color != was.color:
+                top.append(Patch("color", '"' + _hex(o.color) + '"'))
+                if j.get(pnode, "color") >= 0:
+                    pn.append(Patch("color", '"' + _hex(o.color) + '"'))
+            if o.markdown != was.markdown:
+                pn.append(Patch("format", '"markdown"' if o.markdown else String("")))
+        elif o.kind == INK:
+            var differs = len(o.stroke.xs) != len(was.stroke.xs)
+            for k in range(len(o.stroke.xs)):
+                if differs or abs((o.stroke.xs[k] - o.x) - (was.stroke.xs[k] - was.x)) > 1e-6 or abs((o.stroke.ys[k] - o.y) - (was.stroke.ys[k] - was.y)) > 1e-6:
+                    differs = True
+                    break
+            if differs:
+                var path = String("[")
+                for k in range(len(o.stroke.xs)):
+                    path += ("," if k > 0 else "") + '["' + ("M" if k == 0 else "L") + '",' + _jn(o.stroke.xs[k] - o.x) + "," + _jn(o.stroke.ys[k] - o.y) + "]"
+                pn.append(Patch("path", path + "]"))
+                geo.clear()  # (its points are relative to its geometry: that is its box now)
+                geo += [Patch("x", _jn(o.x)), Patch("y", _jn(o.y)), Patch("width", _jn(o.w)), Patch("height", _jn(o.h))]
+            if o.stroke.color != was.stroke.color:
+                pn.append(Patch("color", '"' + _hex(o.stroke.color) + '"'))
+            if o.stroke.width != was.stroke.width:
+                pn.append(Patch("width", _jn(o.stroke.width)))
+        elif o.kind == ELLIPSE and (abs(dw) > 1e-9 or abs(dh) > 1e-9) and j.get(pnode, "radius") >= 0:
+            pn.append(Patch("radius", _jn(min(o.w, o.h) / 2)))
+        var out = patched(raw, top)
+        if len(geo) + len(style) + len(pn) > 0:
+            var inner = member_text(out, "pn")
+            if not inner.startswith("{"):
+                inner = "{}"
+            inner = patched_in(inner, "geometry", geo)
+            inner = patched_in(inner, "style", style)
+            inner = patched(inner, pn)
+            out = patched(out, [Patch("pn", inner)])
+        return out
+    except:
+        return raw
+
+
+def _edge_patched(layer: ObjectLayer, ref o: Obj, raw: String) -> String:
+    """Edge `raw` as connector `o` has it now. Where its ends are drawn (pn.geometry) is written again only when an end was
+    moved or resized."""
+    try:
+        var j = Json.parse(raw)
+        var r = canvas_edge_obj(j, 0)
+        ref was = r[2]
+        var top = List[Patch]()
+        var pn = List[Patch]()
+        var pnode = j.get(0, "pn")
+        var a = layer.index(o.from_id)
+        var b = layer.index(o.to_id)
+        if a < 0 or b < 0:
+            return raw
+        if node_key(layer.objs[a]) != r[0]:
+            top.append(Patch("fromNode", json_string(node_key(layer.objs[a]))))
+        if node_key(layer.objs[b]) != r[1]:
+            top.append(Patch("toNode", json_string(node_key(layer.objs[b]))))
+        if o.color != was.color:
+            top.append(Patch("color", '"' + _hex(o.color) + '"'))
+            if j.get(pnode, "color") >= 0:
+                pn.append(Patch("color", '"' + _hex(o.color) + '"'))
+        if o.line_width != was.line_width:
+            pn.append(Patch("lineWidth", _jn(o.line_width)))
+        var heads = List[Patch]()
+        if o.head_end != was.head_end:
+            heads.append(Patch("end", "true" if o.head_end else "false"))
+        var geo = List[Patch]()
+        if j.get(pnode, "geometry") >= 0 and (layer.node_moved(a) or layer.node_moved(b)):
+            geo += [Patch("x", _jn(min(o.ax, o.bx))), Patch("y", _jn(min(o.ay, o.by))), Patch("width", _jn(max(abs(o.bx - o.ax), 1.0))), Patch("height", _jn(max(abs(o.by - o.ay), 1.0)))]
+            if j.get(pnode, "reverseX") >= 0:
+                pn.append(Patch("reverseX", "true" if o.bx < o.ax else "false"))
+            if j.get(pnode, "reverseY") >= 0:
+                pn.append(Patch("reverseY", "true" if o.by < o.ay else "false"))
+        var out = patched(raw, top)
+        if len(geo) + len(pn) + len(heads) > 0:
+            var inner = member_text(out, "pn")
+            if not inner.startswith("{"):
+                inner = "{}"
+            inner = patched_in(inner, "geometry", geo)
+            inner = patched_in(inner, "arrowheads", heads)
+            inner = patched(inner, pn)
+            out = patched(out, [Patch("pn", inner)])
+        return out
+    except:
+        return raw
 
 
 def reading_text(layer: ObjectLayer) -> String:
