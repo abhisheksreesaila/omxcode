@@ -170,9 +170,9 @@ def test_undo() raises:
     _ = p.key("y", 0, 20000)
     assert_equal(p.key("z", CTRL, 0), 2)  # the y
     assert_equal(p.markdown(), "one two\nx")
-    assert_equal(len(p.marks), 1)
+    assert_equal(len(p.ink.marks), 1)
     assert_equal(p.key("z", CTRL, 0), 2)  # the mark
-    assert_equal(len(p.marks), 0)
+    assert_equal(len(p.ink.marks), 0)
     assert_equal(p.markdown(), "one two\nx")
     _ = p.key("z", CTRL, 0)
     _ = p.key("z", CTRL, 0)
@@ -182,7 +182,7 @@ def test_undo() raises:
     for _ in range(6):
         _ = p.key("y", CTRL, 0)
     assert_equal(p.markdown(), "one two\nxy")
-    assert_equal(len(p.marks), 1)
+    assert_equal(len(p.ink.marks), 1)
     assert_equal(p.key("y", CTRL, 0), 1)  # nothing more
     p.set_markdown("another")
     assert_equal(p.key("z", CTRL, 0), 1)  # another note's history isn't this one's

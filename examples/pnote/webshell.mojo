@@ -679,6 +679,7 @@ struct WebShell(Movable):
                 var words = page_markdown(content)
                 self.page = PageSheet()
                 self.page.set_markdown(words)
+                self.page.load_ink(content)
                 self.page_src = content^
             elif kind == "canvas":
                 self.open_canvas(i, content^, held >= 0)
@@ -1662,6 +1663,10 @@ struct WebShell(Movable):
         var ni = self.note_index(self.current)
         if not self.searching and not self.card_open and not self.settings_open and ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.doc.may_edit():
             if self.page.draw_mode:
+                if (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y" or name == "Y"):
+                    if self.page.key(name, mods, now_ms()) == 2:
+                        self.save_page()
+                    return True
                 if name == "Escape":
                     self.page.draw_mode = False
                     return True
@@ -1972,7 +1977,7 @@ struct WebShell(Movable):
         if self.on_map():
             var b = self.map_box()
             return self.map.drag_to(x - b[0], y - b[1], b[2], b[3])
-        if len(self.page.wet) > 0:
+        if self.page.marking():
             self.page.mark_move(x, y)
             return True
         return self.page.drag(x, y)
@@ -1989,7 +1994,7 @@ struct WebShell(Movable):
             if self.map.release():
                 self.save_map()
             return True
-        if len(self.page.wet) > 0:
+        if self.page.marking():
             if self.page.mark_release():
                 self.save_page()
             return True
@@ -2238,11 +2243,20 @@ struct WebShell(Movable):
         var ni = self.note_index(self.current)
         if ni >= 0 and self.notes[ni].kind == "page" and not self.notes[ni].secure and self.doc.may_edit() and not self.searching:
             var tool = self.boxes.hit_any(x, y, [".page-tool:"])
-            if tool == ".page-tool:Draw" or tool == ".page-tool:Pen":
+            if tool == ".page-tool:Draw":
+                self.page.draw_mode = True
+                return True
+            if tool == ".page-tool:Pen" or tool == ".page-tool:Red" or tool == ".page-tool:Highlighter" or tool == ".page-tool:Eraser":
+                self.page.tool = "pen" if tool.endswith("Pen") else ("red" if tool.endswith("Red") else ("highlight" if tool.endswith("Highlighter") else "eraser"))
                 self.page.draw_mode = True
                 return True
             if tool == ".page-tool:Write":
                 self.page.draw_mode = False
+                if self.page.tool == "eraser":
+                    self.page.tool = "pen"
+                return True
+            if tool != "":
+                self.say("Not in the native app yet")
                 return True
             if tool == "" and not self.page.draw_mode and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
                 if (mods & 1) != 0:

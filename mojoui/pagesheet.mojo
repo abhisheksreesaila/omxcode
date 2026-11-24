@@ -21,7 +21,8 @@ from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_bordered, draw_emoji_tile, text_at, text_normal
 from mojoui.canvas import rgba
-from mojoui.jsonpatch import Change, patched, member_text
+from mojoui.jsonpatch import Change, patched
+from mojoui.pageink import PageInk, PageMark
 from mojoui.json import Json, json_string
 
 comptime PAGE_DESK: UInt32 = 0xFFDAE4E9  # #e9e4da
@@ -45,19 +46,13 @@ def lu(v: Float64) -> Float64:
 
 
 @fieldwise_init
-struct PageMark(Copyable, Movable):
-    """A pen mark drawn over the page (the web's ink.marks): its points relative to its start (x0, y0), both in the paper's
-    own px; the tool's colour and width; the word it is anchored to (a char range of the Markdown) and its offset."""
-    var x0: Float64
-    var y0: Float64
-    var points: List[Float64]
-    var color: UInt32
-    var width: Float64
-    var tool: String
-    var pos: Int
-    var end: Int
-    var dx: Float64
-    var dy: Float64
+struct InkStep(Copyable, Movable):
+    """One undo step of the ink: the marks it took away (with where they were) or the one it made (gone empty), after
+    `depth` steps of the words."""
+    var depth: Int
+    var made: List[PageMark]
+    var gone: List[PageMark]
+    var gone_at: List[Int]
 
 
 @fieldwise_init
@@ -106,9 +101,13 @@ struct PageSheet(Movable):
     var view_top: Float64
     var before_press: Pos  # the selection's start before the last press (a Shift+click reaches from it)
     var follow: Bool  # the next draw scrolls the caret into view
-    var mark_depth: List[Int]  # per mark made here: how many text steps were before it (one history for words and ink)
-    var mark_redo: List[PageMark]
-    var mark_redo_depth: List[Int]
+    var ink: PageInk  # the marks on the words, the document's and the ones made here
+    var ink_done: List[InkStep]  # (one history for words and ink)
+    var ink_undone: List[InkStep]
+    var tool: String  # in Draw: pen | red | highlight | eraser
+    var sweep: List[PageMark]  # what the eraser's drag has taken so far, and from where
+    var sweep_at: List[Int]
+    var erasing: Bool
     var preedit: String  # an input method's composition, shown at the caret, underlined (not in the text)
     var caret_rect: Tuple[Float64, Float64, Float64, Float64]  # where the caret was last drawn (layout px)
     var scroll: Float64
@@ -118,7 +117,6 @@ struct PageSheet(Movable):
     var paper_x: Float64
     var paper_y: Float64
     var draw_mode: Bool  # Draw (a press on the page makes a pen mark) or Write
-    var marks: List[PageMark]
     var wet: List[Float64]  # the mark being drawn (layout px), empty: none
 
     def __init__(out self):
@@ -133,9 +131,13 @@ struct PageSheet(Movable):
         self.view_top = 0
         self.follow = False
         self.before_press = Pos(0, 0)
-        self.mark_depth = List[Int]()
-        self.mark_redo = List[PageMark]()
-        self.mark_redo_depth = List[Int]()
+        self.ink = PageInk()
+        self.ink_done = List[InkStep]()
+        self.ink_undone = List[InkStep]()
+        self.tool = "pen"
+        self.sweep = List[PageMark]()
+        self.sweep_at = List[Int]()
+        self.erasing = False
         self.preedit = ""
         self.caret_rect = (-1.0, 0.0, 0.0, 0.0)
         self.scroll = 0
@@ -144,7 +146,6 @@ struct PageSheet(Movable):
         self.paper_x = 0
         self.paper_y = 0
         self.draw_mode = False
-        self.marks = List[PageMark]()
         self.wet = List[Float64]()
 
     def set_markdown(mut self, md: String):
@@ -156,9 +157,14 @@ struct PageSheet(Movable):
         self.preedit = ""
         self.scroll = 0
         self.follow = False
-        self.mark_depth.clear()
-        self.mark_redo.clear()
-        self.mark_redo_depth.clear()
+        self.ink = PageInk()
+        self.ink.text = md
+        self.ink_done.clear()
+        self.ink_undone.clear()
+
+    def load_ink(mut self, content: String) raises:
+        """The ink a page's content (JSON) holds, over the Markdown set."""
+        self.ink.load(content, self.markdown())
 
     def markdown(self) -> String:
         return self.ed.text()
@@ -200,29 +206,61 @@ struct PageSheet(Movable):
         if not (ctrl and (name == "c" or name == "C" or name == "a" or name == "A")):
             self.follow = True
         if self.ed.version != version:
-            self.mark_redo.clear()
-            self.mark_redo_depth.clear()
+            self.ink_undone.clear()
+            self.ink.follow(self.markdown())
             return 2
         return 1
 
     def undo(mut self) -> Bool:
         """The last step back: words or ink, whichever came last (the web keeps one history for both)."""
         var n = len(self.ed.history.done)
-        if len(self.mark_depth) > 0 and self.mark_depth[len(self.mark_depth) - 1] >= n:
-            self.mark_redo.append(self.marks.pop())
-            self.mark_redo_depth.append(self.mark_depth.pop())
+        if len(self.ink_done) > 0 and self.ink_done[len(self.ink_done) - 1].depth >= n:
+            var st = self.ink_done.pop()
+            for ref m in st.made:
+                self._drop_mark(m.key)
+            for k in range(len(st.gone) - 1, -1, -1):
+                self.ink.marks.insert(min(st.gone_at[k], len(self.ink.marks)), st.gone[k].copy())
+            self.ink_undone.append(st^)
             return True
         self.follow = True
-        return self.ed.undo()
+        var r = self.ed.undo()
+        self.ink.follow(self.markdown())
+        return r
 
     def redo(mut self) -> Bool:
         var n = len(self.ed.history.done)
-        if len(self.mark_redo_depth) > 0 and self.mark_redo_depth[len(self.mark_redo_depth) - 1] == n:
-            self.marks.append(self.mark_redo.pop())
-            self.mark_depth.append(self.mark_redo_depth.pop())
+        if len(self.ink_undone) > 0 and self.ink_undone[len(self.ink_undone) - 1].depth == n:
+            var st = self.ink_undone.pop()
+            for k in range(len(st.gone)):
+                var at = self._mark_like(st.gone[k])
+                if at >= 0:
+                    _ = self.ink.marks.pop(at)
+            for ref m in st.made:
+                self.ink.marks.append(m.copy())
+            self.ink_done.append(st^)
             return True
         self.follow = True
-        return self.ed.redo()
+        var r = self.ed.redo()
+        self.ink.follow(self.markdown())
+        return r
+
+    def _drop_mark(mut self, key: String):
+        for i in range(len(self.ink.marks)):
+            if self.ink.marks[i].source == "" and self.ink.marks[i].key == key:
+                _ = self.ink.marks.pop(i)
+                return
+
+    def _mark_like(self, m: PageMark) -> Int:
+        for i in range(len(self.ink.marks)):
+            if self.ink.marks[i].key == m.key and self.ink.marks[i].source == m.source:
+                return i
+        return -1
+
+    def _ink_step(mut self, var made: List[PageMark], var gone: List[PageMark], var gone_at: List[Int]):
+        self.ed.history.seal()
+        self.ed.history.undone.clear()
+        self.ink_undone.clear()
+        self.ink_done.append(InkStep(len(self.ed.history.done), made^, gone^, gone_at^))
 
     def indent(mut self, dir: Int, now: Int):
         """Tab: two spaces before each line of the selection (the caret's line), Shift+Tab takes them away again
@@ -262,6 +300,7 @@ struct PageSheet(Movable):
         self.ed.caret = self.ed.clamp(caret)
         self.ed.anchor = self.ed.clamp(anchor)
         self.follow = True
+        self.ink.follow(self.markdown())
 
     def caret_home(mut self):
         self.ed.move_to(Pos(self.ed.caret.para, 0), False)
@@ -280,7 +319,7 @@ struct PageSheet(Movable):
 
     def delete_forward(mut self):
         """Delete: the character after the caret (at a line's end, the next line joins it)."""
-        _ = self.ed.edit_key("Delete", 0, now_ms())
+        _ = self.key("Delete", 0, now_ms())
 
     # ------------------------------------------------ layout
 
@@ -574,17 +613,37 @@ struct PageSheet(Movable):
 
     def mark_press(mut self, x: Float64, y: Float64):
         self.wet.clear()
+        self.erasing = self.tool == "eraser"
+        if self.erasing:
+            self.sweep.clear()
+            self.sweep_at.clear()
+            self._erase_at(x, y)
+            return
         self.wet.append(x)
         self.wet.append(y)
 
     def mark_move(mut self, x: Float64, y: Float64):
-        if len(self.wet) > 0:
+        if self.erasing:
+            self._erase_at(x, y)
+        elif len(self.wet) > 0:
             self.wet.append(x)
             self.wet.append(y)
 
+    def marking(self) -> Bool:
+        """A mark is being drawn, or erased."""
+        return self.erasing or len(self.wet) > 0
+
     def mark_release(mut self) -> Bool:
-        """The mark being drawn becomes a mark of the page (anchored to the word nearest its start); True when it had
-        length."""
+        """The mark being drawn becomes a mark of the page (anchored to the word nearest its start), or what the eraser
+        took is gone, one undo step; True when the ink changed."""
+        if self.erasing:
+            self.erasing = False
+            if len(self.sweep) == 0:
+                return False
+            self._ink_step(List[PageMark](), self.sweep.copy(), self.sweep_at.copy())
+            self.sweep.clear()
+            self.sweep_at.clear()
+            return True
         if len(self.wet) < 4:
             self.wet.clear()
             return False
@@ -600,15 +659,58 @@ struct PageSheet(Movable):
             pts.append(Float64(Int((self.wet[i] - x0) * 10 + (0.5 if self.wet[i] >= x0 else -0.5))) / 10)
             pts.append(Float64(Int((self.wet[i + 1] - y0) * 10 + (0.5 if self.wet[i + 1] >= y0 else -0.5))) / 10)
         var anchor = self._nearest_word(self.wet[0], self.wet[1], x0, y0)
-        self.marks.append(PageMark(x0 - self.paper_x, y0 - self.paper_y, pts^, hexc("#1d3f9e"), 2.4, "pen", anchor[0], anchor[1],
-                                   anchor[2], anchor[3]))
-        self.ed.history.seal()
-        self.mark_depth.append(len(self.ed.history.done))
-        self.mark_redo.clear()
-        self.mark_redo_depth.clear()
-        self.ed.history.undone.clear()
+        self.ink.text = self.markdown()
+        self.ink.add(self.tool, pts^, anchor[0], anchor[1], anchor[2], anchor[3])
+        self._ink_step([self.ink.marks[len(self.ink.marks) - 1].copy()], List[PageMark](), List[Int]())
         self.wet.clear()
         return True
+
+    def _erase_at(mut self, x: Float64, y: Float64):
+        """The marks with a point within 12 px of (x, y), taken."""
+        var i = len(self.ink.marks) - 1
+        while i >= 0:
+            var o = self.mark_origin(i)
+            if o[2]:
+                ref pts = self.ink.marks[i].points
+                for k in range(0, len(pts), 2):
+                    var dx = o[0] + pts[k] - x
+                    var dy = o[1] + pts[k + 1] - y
+                    if dx * dx + dy * dy < 144:
+                        self.sweep.append(self.ink.erase(i))
+                        self.sweep_at.append(i)
+                        break
+            i -= 1
+
+    def mark_origin(mut self, i: Int) -> Tuple[Float64, Float64, Bool]:
+        """Where mark i's top left is (layout px, as the last draw laid the page out); False: it is on no word here."""
+        var pos = self.ink.marks[i].pos
+        if pos < 0 or len(self.tops) == 0:
+            return (0.0, 0.0, False)
+        var base = 0
+        for para in range(min(len(self.tops), len(self.ed.paras))):
+            var n = self.ed.paras[para].byte_length()
+            if pos <= base + n:
+                var byte = pos - base
+                var v = self.vline_of(Pos(para, byte), False)
+                var l = self.laid[para].lines[v]
+                var x = self.text_x + (0.0 if self.ink.marks[i].margin else self.width_of(self.laid[para].segs, l.start, byte))
+                return (x + self.ink.marks[i].dx, self.tops[para] + l.top + self._char_top(para, v, byte) + self.ink.marks[i].dy, True)
+            base += n + 1
+        return (0.0, 0.0, False)
+
+    def _char_top(self, para: Int, v: Int, byte: Int) -> Float64:
+        """How far under a shown line's top a character's own box begins (its face's ascent above the baseline), which is
+        what the web measures a mark's place from."""
+        var l = self.laid[para].lines[v]
+        var off = 0
+        var st = TextStyle(TEXT_FACE, 400, False, BODY)
+        for ref s in self.laid[para].segs:
+            var n = s.text.byte_length()
+            if byte >= off and byte < off + n:
+                st = s.style
+                break
+            off += n
+        return l.base - Float64(line_metrics(st).ascent)
 
     def _nearest_word(self, x: Float64, y: Float64, cx: Float64, cy: Float64) -> Tuple[Int, Int, Float64, Float64]:
         """(start, end) of the word whose box is nearest (x, y), as offsets into the Markdown, and (cx, cy) from the box of
@@ -618,7 +720,8 @@ struct PageSheet(Movable):
         var base = 0
         for para in range(min(len(self.tops), len(self.ed.paras))):
             if para < len(self.laid):
-                for ref l in self.laid[para].lines:
+                for vi in range(len(self.laid[para].lines)):
+                    var l = self.laid[para].lines[vi]
                     var top = self.tops[para] + l.top
                     var ly = top + l.height / 2
                     var px = self.text_x
@@ -634,7 +737,7 @@ struct PageSheet(Movable):
                                 var d = (x - at) * (x - at) + (y - ly) * (y - ly)
                                 if d < best_d:
                                     best_d = d
-                                    best = (base + woff, base + woff + w.byte_length(), cx - wx, cy - top)
+                                    best = (base + woff, base + woff + w.byte_length(), cx - wx, cy - top - self._char_top(para, vi, woff))
                             wx += ww + measure(sg.style, " ")
                             woff += w.byte_length() + 1
                         px += measure(sg.style, sg.text)
@@ -642,50 +745,18 @@ struct PageSheet(Movable):
             base += self.ed.paras[para].byte_length() + 1
         return best
 
-    def ink_json(self) -> String:
-        """The marks as the web stores them in a page's content.ink ({marks, drawings})."""
-        return '{"marks":[' + self.marks_json() + '],"drawings":[]}'
-
-    def marks_json(self) -> String:
-        """The marks made here, as elements of content.ink.marks."""
-        var out = String("")
-        for i in range(len(self.marks)):
-            ref m = self.marks[i]
-            if i > 0:
-                out += ","
-            out += '{"id":"m' + String(i) + "-" + String(Int(m.x0)) + String(Int(m.y0)) + '","tool":"' + m.tool + '","points":['
-            for k in range(0, len(m.points), 2):
-                if k > 0:
-                    out += ","
-                out += "[" + _num(m.points[k]) + "," + _num(m.points[k + 1]) + "]"
-            var md = self.markdown()
-            var exact = String(md[byte=m.pos:m.end]) if m.end <= md.byte_length() else String("")
-            out += '],"anchor":{"pos":' + String(m.pos) + ',"end":' + String(m.end) + ',"quote":{"exact":' + json_string(exact) + "}}"
-            out += ',"dx":' + _num(m.dx) + ',"dy":' + _num(m.dy) + "}"
-        return out
-
     def page_json(self, source: String) raises -> String:
         """The page as it is saved when it was read from `source` (review 3): that text with its markdown replaced, when it
         changed, and the marks made here added after the ones it had; every other member (its other ink, keys nobody here
         knows) as it was. A page made here: the web's shape."""
         var md = self.markdown()
         if source == "":
-            return '{"version":1,"markdown":' + json_string(md) + ',"ink":' + self.ink_json() + "}"
+            return self.ink.save('{"version":1,"markdown":' + json_string(md) + ',"ink":{"marks":[],"drawings":[]}}')
         var j = Json.parse(source)
         var out = source
         if j.get(0, "markdown") < 0 or j.text(j.get(0, "markdown")) != md:
             out = patched(out, [Change("markdown", json_string(md))])
-        if len(self.marks) > 0:
-            var ink = member_text(out, "ink")
-            if not ink.startswith("{"):
-                ink = '{"marks":[],"drawings":[]}'
-            var had = member_text(ink, "marks")
-            if not had.startswith("["):
-                had = "[]"
-            var inner = String(had[byte=1:had.byte_length() - 1].strip())
-            ink = patched(ink, [Change("marks", "[" + inner + ("," if inner != "" else "") + self.marks_json() + "]")])
-            out = patched(out, [Change("ink", ink)])
-        return out
+        return self.ink.save(out)
 
     def caret_end(mut self):
         var last = len(self.ed.paras) - 1
@@ -699,8 +770,8 @@ struct PageSheet(Movable):
         self.at_end = False
         self.goal_x = -1
         self.follow = True
-        self.mark_redo.clear()
-        self.mark_redo_depth.clear()
+        self.ink_undone.clear()
+        self.ink.follow(self.markdown())
 
     def newline(mut self):
         self.insert("\n")
@@ -881,9 +952,15 @@ struct PageSheet(Movable):
         var selected = self.ed.has_selection() and self.preedit == "" and not self.draw_mode
         var caret = self.ed.caret
         var pre_at = caret.byte if self.preedit != "" else -1
+        var at_y = ty
+        for para in range(len(self.ed.paras)):
+            self.tops.append(at_y)
+            at_y += self.lay(para)
+        for i in range(len(self.ink.marks)):  # (the highlighter under the words: the web multiplies it over them)
+            if self.ink.marks[i].tool == "highlight":
+                self._draw_mark(p, i)
         for para in range(len(self.ed.paras)):
             var ph = self.lay(para)
-            self.tops.append(ty)
             if ty + ph < dy - 8 and caret.para != para or ty > dy + dh + 8 and caret.para != para:  # (out of view)
                 ty += ph
                 continue
@@ -919,14 +996,19 @@ struct PageSheet(Movable):
                     self.caret_rect = (cx, ly + 4, 2.0, 20.0)
             ty += ph
         # the marks, over the words
-        for ref m in self.marks:
-            _polyline(p, sx + m.x0, paper_y + m.y0, m.points, m.width, m.color)
+        for i in range(len(self.ink.marks)):
+            if self.ink.marks[i].tool != "highlight":
+                self._draw_mark(p, i)
         if len(self.wet) >= 4:
             var rel = List[Float64]()
             for i in range(0, len(self.wet), 2):
                 rel.append(self.wet[i] - self.wet[0])
                 rel.append(self.wet[i + 1] - self.wet[1])
-            _polyline(p, self.wet[0], self.wet[1], rel, 2.4, hexc("#1d3f9e"))
+            var look = tool_look(self.tool)
+            if self.tool == "highlight":
+                _smooth(p, self.wet[0], self.wet[1], rel, look[1], look[0])
+            else:
+                _polyline(p, self.wet[0], self.wet[1], rel, look[1], look[0])
         # the toolbar, sticky at the desk's top
         self._toolbar(p, bx, sx, max(top, dy), stage_w, mode_draw or self.draw_mode)
         if self.draw_mode:
@@ -939,6 +1021,16 @@ struct PageSheet(Movable):
             text_normal(p, hst, words, hx + 14, hy + 6, PAGE_PAPER)
             bx.add("page.draw-hint", hx, hy, hw, 27)
         p.pop_clip()
+
+    def _draw_mark[P: Painter](mut self, mut p: P, i: Int):
+        var o = self.mark_origin(i)
+        if not o[2]:
+            return
+        var look = tool_look(self.ink.marks[i].tool)
+        if self.ink.marks[i].tool == "highlight":
+            _smooth(p, o[0], o[1], self.ink.marks[i].points, look[1], look[0])
+        else:
+            _polyline(p, o[0], o[1], self.ink.marks[i].points, look[1], look[0])
 
     def _text_height(mut self) -> Float64:
         var h = 0.0
@@ -962,6 +1054,7 @@ struct PageSheet(Movable):
         groups.append(["Pen", "Red", "Highlighter", "Eraser"])
         groups.append(["Rectangle", "Ellipse", "Text"])
         var swatch: List[UInt32] = [hexc("#1d3f9e"), hexc("#d23b26"), hexc("#ffd400")]
+        var tools: List[String] = ["pen", "red", "highlight", "eraser"]
         var group_names: List[String] = ["page.group:Mode", "page.group:Ink", "page.group:Shapes and text"]
         # widths first (max-content), then centred
         var widths = List[List[Float64]]()
@@ -984,7 +1077,7 @@ struct PageSheet(Movable):
                 if bi > 0:
                     bxp += 4
                 var bw = widths[g][bi]
-                var on = (g == 0 and ((bi == 0) != mode_draw)) or (g == 1 and bi == 0 and mode_draw)
+                var on = (g == 0 and ((bi == 0) != mode_draw)) or (g == 1 and mode_draw and tools[bi] == self.tool)
                 draw_bordered(p, bxp, y + 6, bw, 32, 8, PAGE_INK if on else PAGE_PAPER, PAGE_INK if on else PAGE_LINE)
                 var lx = bxp + 11
                 if g == 1 and bi < 3:
@@ -1044,8 +1137,20 @@ def _polyline[P: Painter](mut p: P, x0: Float64, y0: Float64, pts: List[Float64]
         p.circle(x0 + pts[i], y0 + pts[i + 1], width / 2, color)
 
 
-def _num(v: Float64) -> String:
-    if v == Float64(Int(v)):
-        return String(Int(v))
-    return String(v)
+def tool_look(tool: String) -> Tuple[UInt32, Float64]:
+    """A pen's colour and width (strokes.js TOOLS)."""
+    if tool == "red":
+        return (hexc("#d23b26"), 2.6)
+    if tool == "highlight":
+        return (with_alpha(hexc("#ffd400"), 0.38), 16.0)
+    return (hexc("#1d3f9e"), 2.4)
+
+
+def _smooth[P: Painter](mut p: P, x0: Float64, y0: Float64, pts: List[Float64], width: Float64, color: UInt32):
+    """A translucent stroke: one op, so it doesn't darken where it crosses itself."""
+    var abs_pts = List[Float64](capacity=len(pts))
+    for i in range(0, len(pts) - 1, 2):
+        abs_pts.append(x0 + pts[i])
+        abs_pts.append(y0 + pts[i + 1])
+    p.stroke(abs_pts, width, color)
 
