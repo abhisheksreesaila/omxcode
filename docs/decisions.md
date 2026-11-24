@@ -1942,3 +1942,25 @@ tests/test_rectcorner_metal.mojo holds Metal to what test_rectcorner holds GL to
 
 ## D-8042: a page's Markdown is styled by the web's own rules (ours)
 `mojoui.mdinline` is held to Personal Note's parser (@lezer/markdown with GFM, run from its node_modules on our lines): 19 lines in test_mdinline, and a one-off 600 random lines (565 the same; the rest are bare addresses against marks, and long runs of `*`). Two things the fixture's page drew differently turned up and were checked in the reference picture before changing: a quote's `>` is the quote's colour (#6B6357 sampled) and inline code's ticks stand in the text face ("for the cottage" begins at 132 px, as with Literata's ticks; Geist Mono's put it at 134).
+
+## D-8043: text without a GPU is drawn on the CPU (goal 79, continuation 20; ours)
+With no GL the canvas showed shapes and no words at all. The GTK host now rasters a scene that has text runs with SurfacePainter. Slow (seconds per big frame) but whole; the GPU path isn't touched.
+
+## D-8044: pointer history between frames on GTK (ours)
+A slow frame lost the points the pointer passed: a drawn zigzag came out as corners. `on_drag_update` reads GDK's motion history. Not done on AppKit (its events are coalesced too): a Mac stroke drawn during a slow frame still loses points.
+
+## D-8045: a canvas of writing opens like a document, a page at its caret (ours)
+As the web: 100 %, the caret in the first writing, the zoom island quiet while writing, the panel keeping the board's middle; a fit view only for boards of other things (or past 2 MB, where reading all of it first would hold the open up: ours). The reference and race boards are over that size or hold no writing, so their views are what they were.
+
+## D-8046: CSS family lists and bitmap faces' own metrics in fonttext (ours)
+A text the web saved as `"Geist Mono", monospace` was drawn in the sans: `pick` reads the list. A bitmap (emoji) face reports no ascent, so **every emoji on Linux stood 8–16 px too high in every picture since M2**, and M2's checker passed it; `line_metrics` takes the strike's own numbers now (35/9 at 38 px). The Mac was right all along.
+
+## D-8047: the marked notebook (ours)
+NotesPanel.selected is the web's selectedNotebookId: the open note's notebook, one just made or just chosen. Its row is shaded, it opens to its notes, "New note" goes into it, and which notebooks are open is remembered however they were opened. A row dragged onto a notebook no longer opens that notebook (the web doesn't; test_pnnotes asserted it for a notebook that is open anyway because it was just made).
+
+## D-8048: a map's words are the document's (ours; amends D-7912)
+D-7912 measured 20 px for the root because the fixture's map gives no size. The rule is model.js's: `Number(node.fontSize) || 20`, the root's too. A map made in either app gives 28, and native drew it at 20. Now: own size, wrapped past 28 letters, emoji first, IBM Plex Sans for "clean", italic, the filter's shadow cut where SVG cuts it, the dashed ring round its corners, the highlight as one outline. Writing an idea is the web's box on `WordsEdit` (caret, arrows, words, copy, undo, pointer, input method); before, native had no caret there and didn't show the root's new words at all. Not drawn still: icons, due chips, done marks, votes, images, hidden branches, branch-style ideas (79-gaps.md 68).
+**The reference isn't the real web in one thing:** the shooter answers Google Fonts with whole families (D-7901), so the reference's centre is weight 700. The real page loads Source Serif 4 at 400 and 600 only (opsz 24) with font-synthesis off, so a person sees 600 there. Native follows the reference, as the contract says.
+
+## D-8049: tests compare with their own machine's reference (ours)
+test_webpieces and test_notesshell held the Mac to the Linux reference's whole-pixel advances. On the Mac native gives a pill at 398.26, 67.81 wide, and a 147.904 title island; the Mac's own web reference says 398.27, 67.83 and 145.91 + 2. Both tests name each machine's numbers; the Mac's are held to 0.05 px, tighter than Linux's 0.6.

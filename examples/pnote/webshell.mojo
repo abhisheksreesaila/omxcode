@@ -875,6 +875,7 @@ struct WebShell(Movable):
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
             draw_locked_cover(p, self.boxes, left, 0, w - left, h, self.notes[i].title, "Locked note", "Secure note · not in the native app yet", k, self.sk)
         if self.sidebar:
+            self.panel.quiet = self.searching or self.settings_open or self.card_open or self.props_open or self.book_card >= 0
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
                           44, not self.sidebar and not self.searching and not self.settings_open and _in(self.px, self.py, 16, 16, 44))
@@ -2544,11 +2545,12 @@ struct WebShell(Movable):
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
         var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"])
+        var row = self.panel.hovered() if self.sidebar else -1
         self.px = x
         self.py = y
         self.panel.px = x
         self.panel.py = y
-        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"]) != before
+        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"]) != before or (self.sidebar and self.panel.hovered() != row)
 
     def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
@@ -2693,6 +2695,9 @@ struct WebShell(Movable):
                 self.panel.naming_text = ""
                 self.panel.open_shelves[at] = True
                 return True
+        if hit.startswith(".nav-row:") and self.panel.edit_at(x, y, 5) >= 0:  # (a note in that notebook)
+            self.create("canvas", "", self.panel.edit_at(x, y, 5))
+            return True
         if hit.startswith(".nav-row:") and self.panel.edit_at(x, y) >= 0:
             self.book_card = self.panel.edit_at(x, y)
             self.props.menu_open = False

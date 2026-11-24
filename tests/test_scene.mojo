@@ -155,7 +155,39 @@ def test_clips_images_and_versions() raises:
     assert_equal(s2.get(39, 39), 0xFFFFFFFF, "replayed at its own height (two rows), not the buffer's (three)")
 
 
+def test_everything_drawn_is_cut_at_a_clip() raises:
+    """Circles, lines, polygons, strokes and images end at the clip in the CPU raster, as at the GPU's scissor (the mind map's
+    dots ran over the panel beside it)."""
+    var font = Font()
+    for kind in range(5):
+        var a = Scene(40, 40, 1.0)
+        a.push_clip(10, 10, 10, 10)
+        if kind == 0:
+            a.circle(10, 15, 6, 0xFF000000)
+        elif kind == 1:
+            a.line(0, 15, 40, 15, 4, 0xFF000000)
+        elif kind == 2:
+            a.polygon([0.0, 0.0, 40.0, 0.0, 40.0, 40.0, 0.0, 40.0], 0xFF000000)
+        elif kind == 3:
+            a.stroke([0.0, 15.0, 40.0, 15.0], 4, 0xFF000000)
+        else:
+            var px: List[UInt32] = [0xFF000000]
+            a.image(px, 1, 1, 0, 0, 40, 40)
+        a.pop_clip()
+        a.circle(30, 30, 3, 0xFF0000FF)
+        var buf = List[UInt32](length=40 * 40, fill=0xFFFFFFFF)
+        var s = Surface(Int(buf.unsafe_ptr()), 40, 40, 1.0)
+        a.raster(s, font)
+        assert_equal(s.get(12, 15), 0xFF000000, "inside, kind " + String(kind))
+        for y in range(40):
+            for x in range(40):
+                if not (x >= 10 and x < 20 and y >= 10 and y < 20) and s.get(x, y) == 0xFF000000:
+                    raise Error("kind " + String(kind) + " drew outside the clip at " + String(x) + "," + String(y))
+        assert_equal(s.get(30, 30), 0xFF0000FF, "and after it, everywhere")
+
+
 def main() raises:
+    test_everything_drawn_is_cut_at_a_clip()
     test_a_scene_replays_to_the_same_pixels()
     test_the_grid_as_a_scene_is_the_grid()
     test_only_the_ring_changes_when_the_selection_glides()

@@ -12,7 +12,7 @@
 from std.collections import Dict
 from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
-from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
+from mojoui.skin import Skin, Shadow, mix, over, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT
 from mojoui.strokeicon import draw_icon
 from mojoui.canvas import rgba
@@ -409,6 +409,7 @@ struct NotesPanel(Movable):
     var skin_name: String
     var cfg: PanelConfig
     var open_books: List[Int]  # the notebooks opened to their notes, by id
+    var quiet: Bool  # something lies over the panel: nothing in it answers the pointer
     var selected: Int  # the notebook marked (the open note's, or one just chosen or made), by id; 0: none (the web's selectedNotebookId)
     var scroll: Float64  # the list, scrolled (layout px); how far it can go, and where it shows, at the last draw
     var scroll_max: Float64
@@ -437,6 +438,7 @@ struct NotesPanel(Movable):
         self.cfg = cfg.copy()
         self.open_books = List[Int]()
         self.selected = 0
+        self.quiet = False
         self.scroll = 0
         self.scroll_max = 0
         self.list_y0 = 0
@@ -492,12 +494,25 @@ struct NotesPanel(Movable):
         var to = self.drop_at(x, y)
         return (id, to) if to >= 0 else (-1, -1)
 
-    def edit_at(self, x: Float64, y: Float64) -> Int:
-        """The notebook whose pencil is at (x, y) (drawn while the pointer is on its row); -1: none."""
+    def under(self, x: Float64, y: Float64, w: Float64, h: Float64) -> Bool:
+        """The pointer is on this row of the list (and nothing is dragged, named or over the panel)."""
+        return (not self.quiet and not self.dragging and self.naming < 0 and self.px >= x and self.px < x + w and self.py >= y and self.py < y + h
+                and self.py >= self.list_y0 and self.py < self.list_y1)
+
+    def hovered(self) -> Int:
+        """Which row or row's button the pointer is on (an index of `hits`, -1 none): a change asks for a redraw."""
+        var at = -1
+        for i in range(0, len(self.hits), 6):
+            if self.under(self.hits[i + 2], self.hits[i + 3], self.hits[i + 4], self.hits[i + 5]):
+                at = i
+        return at
+
+    def edit_at(self, x: Float64, y: Float64, kind: Int = 4) -> Int:
+        """The notebook whose … (kind 5: its +) is at (x, y) (drawn while the pointer is on its row); -1: none."""
         if y < self.list_y0 or y >= self.list_y1:
             return -1
         for i in range(0, len(self.hits), 6):
-            if Int(self.hits[i]) == 4 and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
+            if Int(self.hits[i]) == kind and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
                 return Int(self.hits[i + 1])
         return -1
 
@@ -705,9 +720,9 @@ struct NotesPanel(Movable):
             if open:
                 p.rect(cx, cy, cw, sh, sk.shelf, 13)
             cy = self._shelf(p, bx, k, sk, cx, cy, cw, shelf.label, shelf.icon, open, String(len(books)) if is_archive else "", False, is_archive)
-            if self.py >= cy - 34 and self.py < cy and self.px >= cx and self.px < cx + cw and not is_archive and self.naming < 0:  # (the pointer on the head: its +)
-                draw_icon(p, "plus", cx + cw - 2 - 8 - 14 - 8 - 14, cy - 34 + 10, 14, k, sk.ink_soft)
-                self._hit(2, s, cx + cw - 2 - 8 - 14 - 8 - 14 - 5, cy - 34 + 5, 24, 24)
+            if self.under(cx + 2, cy - 34, cw - 4, 34) and not is_archive:  # (the pointer on the head: its +)
+                draw_icon(p, "plus", cx + cw - 50, cy - 34 + 10, 14, k, sk.ink_soft)
+                self._hit(2, s, cx + cw - 54, cy - 34 + 6, 22, 22)
             if open and self.naming == s:  # (the new notebook's name, being written: Enter makes it)
                 p.rect(cx + 2 + 8, cy + 8, 14, 14, sk.accent, 4)
                 var nst = TextStyle(UI, 400, False, 13)
@@ -728,10 +743,12 @@ struct NotesPanel(Movable):
                     for i in books:
                         self._notebook_row(p, bx, k, sk, cx + 2, ny, cw - 4, self.notebooks[i])
                         self._hit(1, self.notebooks[i].id, cx + 2, ny, cw - 4, 30)
-                        if self.py >= ny and self.py < ny + 30 and self.px >= cx and self.px < cx + cw and not self.dragging and self.naming < 0:  # (its …)
-                            p.rect(cx + cw - 72, ny + 4, 22, 22, sk.panel, 7)
-                            draw_icon(p, "pencil", cx + cw - 68, ny + 8, 14, k, sk.ink_soft)
-                            self._hit(4, self.notebooks[i].id, cx + cw - 74, ny + 2, 26, 26)
+                        if self.under(cx + 2, ny, cw - 4, 30):  # (its + and …, over the count)
+                            for b in range(2):
+                                var ex = cx + 2 + cw - 4 - (46.0 if b == 0 else 22.0) - 22
+                                p.rect(ex, ny + 4, 22, 22, mix(sk.panel, 70, over(sk.accent_soft, sk.panel)), 7)
+                                draw_icon(p, "plus" if b == 0 else "ellipsis", ex + 3.5, ny + 7.5, 15, k, sk.ui_muted)
+                                self._hit(5 if b == 0 else 4, self.notebooks[i].id, ex, ny + 4, 22, 22)
                         var bh = self._book_height(self.notebooks[i].id)
                         if bh > 0:
                             var inside = self._book_notes(self.notebooks[i].id)
@@ -800,6 +817,8 @@ struct NotesPanel(Movable):
         var hx = x + 2
         var hy = y + 2
         bx.add("panel.shelf-head", hx, hy, w - 4, 34)
+        if self.under(hx, hy, w - 4, 34):
+            p.rect(hx, hy, w - 4, 34, sk.hover, 10)
         draw_icon(p, icon, hx + 8, hy + 9, 16, k, sk.ink_soft, 1.8 if icon == "archive" else 2.0)
         bx.add("panel.shelf-icon", hx + 8, hy + 9, 16, 16)
         var st = TextStyle(UI, 600, False, 13.5)
@@ -821,9 +840,12 @@ struct NotesPanel(Movable):
 
     def _note_row[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, n: PanelNote):
         var active = n.id == self.active
+        var pointed = not active and self.under(x, y, w, 34)
         if active:
             p.rect(x, y, w, 34, with_alpha(sk.state, 0.12), 8)
-        var fg = sk.accent_text if active else sk.ink_soft
+        elif pointed:
+            p.rect(x, y, w, 34, sk.hover, 8)
+        var fg = sk.accent_text if active else (sk.ink if pointed else sk.ink_soft)
         draw_emoji_tile(p, n.emoji, x + 8, y + 5, 24, 7, 14, mix(sk.tint(n.tint), 36, sk.panel))
         var st = TextStyle(UI, 400, False, 12.5)
         text_at(p, st, fitted(st, n.title, w - 8 - 24 - 8 - 8 - 14 - 8), x + 8 + 24 + 8, y + 8.875, 16.25, fg)
@@ -833,8 +855,11 @@ struct NotesPanel(Movable):
 
     def _notebook_row[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, nb: PanelNotebook):
         var marked = nb.id == self.selected and nb.id != 0
+        var pointed = self.under(x, y, w, 30)
         if marked:
             p.rect(x, y, w, 30, sk.accent_soft, 9)
+        elif pointed:
+            p.rect(x, y, w, 30, sk.hover, 9)
         if nb.icon == "":
             p.rect(x + 6, y + 6, 18, 18, nb.color, 6)
             var lst = TextStyle(UI, 600, False, 11)
@@ -844,12 +869,13 @@ struct NotesPanel(Movable):
             draw_icon(p, nb.icon, x + 7, y + 7, 16, k, nb.color)
         bx.add("panel.group-icon:" + nb.name, x, y, 30, 30)
         var st = TextStyle(UI, 500 if marked else 400, False, 13)
-        var fg = sk.ink if marked else sk.ink_soft
+        var fg = sk.ink if marked or pointed else sk.ink_soft
         text_normal(p, st, fitted(st, nb.name, w - 33 - 8 - 14 - 9 - 24), x + 33, y + 6.5, fg)
         var cst = TextStyle(MONO, 400, False, 11)
         var cnt = String(nb.count)
         var tw = measure(cst, cnt)
-        text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
+        if not pointed:  # (its + and … stand there)
+            text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
         draw_icon(p, "chevron-down" if nb.id in self.open_books else "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(fg, 0.7))
         bx.add("panel.group-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
 

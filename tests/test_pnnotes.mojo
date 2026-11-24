@@ -548,6 +548,33 @@ def place(s: WebShell, kind: Int, id: Int) raises -> Tuple[Float64, Float64]:
     raise Error("no hit " + String(kind) + " " + String(id))
 
 
+def pointing() raises:
+    """A row under the pointer answers it (and asks for a redraw): its wash, a notebook's + and … over its count; nothing
+    while something lies over the panel."""
+    var s = WebShell(DB, "paper")
+    s.sidebar = True
+    s.open(s.notes[0].id)
+    paint(s)
+    var n = place(s, 1, 1)
+    _ = s.hover(5, 5)
+    assert_true(s.hover(n[0], n[1]), "a redraw")
+    paint(s)
+    assert_true(not s.hover(n[0] + 1, n[1]), "none while on the same row")
+    var plus = place(s, 5, 1)
+    _ = place(s, 4, 1)
+    var before = len(s.notes)
+    assert_true(s.tap(plus[0], plus[1]) and len(s.notes) == before + 1, "its + makes a note")
+    assert_equal(s.notes[s.note_index(s.current)].notebook, 1, "in that notebook")
+    s.searching = True
+    paint(s)
+    var quiet = True
+    for k in range(0, len(s.panel.hits), 6):
+        if Int(s.panel.hits[k]) == 4:
+            quiet = False
+    assert_true(quiet and not s.panel.under(n[0] - 4, n[1] - 4, 8, 8), "nothing while the search lies over it")
+    s.searching = False
+
+
 def dragging_and_notebooks() raises:
     var s = WebShell(DB, "paper")
     s.open(s.notes[0].id)
@@ -641,4 +668,5 @@ def main() raises:
     notebooks()
     dragging_and_notebooks()
     selected()
+    pointing()
     print("pnnotes: ok")

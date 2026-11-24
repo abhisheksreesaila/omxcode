@@ -69,6 +69,15 @@ check(JSON.stringify(canvas.content).includes('second é line'), 'the canvas')
 const found = await get('/search?q=tickets')
 check(found.some((x) => x.id === goa.id), 'the web searches its words')
 check(errors.length === 0, 'no errors in the web app: ' + errors.slice(0, 3).join(' | '))
+// the panel's rows under the pointer
+for (const [sel, name] of [['.note-list-item:not(.active)', 'a-hover-row'], ['.notebook-tab:not(.active)', 'b-hover-notebook'], ['.sec[data-sec="projects"] .sec-head', 'c-hover-shelf']]) {
+  const el = page.locator(sel).first()
+  if (!await el.isVisible().catch(() => false)) { console.log('     no', sel); continue }
+  const r = await el.boundingBox()
+  await page.mouse.move(r.x + 60, r.y + r.height / 2)
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: path.join(out, `first5-web-${name}.png`) })
+}
 // the web's own edits
 await open(goa)
 await page.locator('.cm-content').click()

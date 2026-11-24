@@ -290,6 +290,12 @@ def again():
         a.type(q)
         a.key("Enter", wait=1.0)
         shot(a, name)
+    b = a.boxes()
+    for k, name in [("row:🎨 Untitled note", "45-hover-row"), (next(k for k in b if k.startswith(".nav-row:My Notes")), "46-hover-notebook"), (".sec-head@2", "47-hover-shelf")]:
+        x, y, w, h = b[k]
+        a.move(x + 60, y + h / 2)
+        time.sleep(0.5)
+        shot(a, name)
     check(a.close() == 0, "closes")
 
 

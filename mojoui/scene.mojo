@@ -1185,6 +1185,7 @@ struct Scene(Painter, Movable, Copyable):
         """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path), each layer
         through its transform."""
         var clips = List[Tuple[Float64, Float64, Float64, Float64]]()  # (x0, y0, x1, y1): rects are cut to the innermost
+        var whole = (s.clip_x0, s.clip_y0, s.clip_x1, s.clip_y1)
         var layer = -1
         var end = 0
         var tx = 0.0
@@ -1199,6 +1200,17 @@ struct Scene(Painter, Movable, Copyable):
                 tk = self.layer_tk[layer]
             var kind = Int(self.kinds[op])
             var c = self.colors[op]
+            if len(clips) > 0 and kind != OP_TEXT:  # (every primitive but the plain text is cut, as the GPU's scissor does)
+                ref q = clips[len(clips) - 1]
+                s.clip_x0 = Int(q[0] + 0.5)
+                s.clip_y0 = Int(q[1] + 0.5)
+                s.clip_x1 = Int(q[2] + 0.5)
+                s.clip_y1 = Int(q[3] + 0.5)
+            else:
+                s.clip_x0 = whole[0]
+                s.clip_y0 = whole[1]
+                s.clip_x1 = whole[2]
+                s.clip_y1 = whole[3]
             if kind == OP_FILL:
                 s.fill(c)
             elif kind == OP_CLIP:
@@ -1267,3 +1279,7 @@ struct Scene(Painter, Movable, Copyable):
                     ref q = clips[len(clips) - 1]
                     cl = Clip(Int(q[0] + 0.5), Int(q[1] + 0.5), Int(q[2] + 0.5), Int(q[3] + 0.5))
                 draw_run(s, r, run_x(r, self.num(op, 0), self.run_align(op)) * tk + tx, self.num(op, 1) * tk + ty, tk, c, cl)
+        s.clip_x0 = whole[0]
+        s.clip_y0 = whole[1]
+        s.clip_x1 = whole[2]
+        s.clip_y1 = whole[3]
