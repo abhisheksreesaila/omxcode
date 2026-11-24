@@ -24,6 +24,23 @@ Decisions D-7976–D-8002; journal "continuation 14" to "continuation 17"; EXPER
 - **Mac:** NSTextInputClient (M5 PASS), the Mac's own Chrome as reference and the race on the Mac's GPU, AppKit bench steps, PingFang and kern-round rules, the tracking table (`trak`), Menlo fallback; raster tiles and kept views on Metal (D-7993, D-7994); the launcher's lower bound (D-7996).
 - **Linux:** the incremental op index (D-7987), a patch-in-place index, real re-routes only in the change log and bulk replay (D-7999); the glyph warm-up (D-8002).
 
+## Continuation 17, final table (2026-11-23; every number labelled with its commit)
+Code measured: Linux M0–M6 at b86e4ce0 (its code is 1c8de571's); Mac M1 at f96c5dbf, M5 at 1c8de571, M7 at 97129b6c, M6 at 1c8de571 (race-mac.md) with three reruns of the failing rows (build/g79/c17-mac-reruns.txt).
+
+| # | Linux | Mac (M4, AppKit, Metal) |
+|---|---|---|
+| M0 | PASS (f0093bd5) | PASS |
+| M1 | PASS (1c8de571) | **PASS** (f96c5dbf: worst 0.03 device px, emoji included) |
+| M2, M3, M4 | PASS (1c8de571) | pass inside M7 |
+| M5 | PASS (1c8de571) | PASS |
+| M6 | **FAIL, one row**: stress zoom max 19.0–19.6 (bar 16.7), 3 reruns and both binaries alike; quiet (load 0.3–1.3), GPU at idle clocks (P8) | **FAIL**: see below |
+| M7 | — | **PASS** (97129b6c) |
+
+**Mac M6 rows that fail** (quiet-checked, load 1.6–3.0, Spotlight on one core throughout; native bar p95 ≤ 8.3, max ≤ 16.7, faster than the web):
+600 note: first open of the process 9.8 (three reruns of the cold opens 6.7–8.0 ✓); press during an open 8.7–9.8 (bar 8.3). Stress: first frame 9.3–12.2 (14.5 in the race), press 12.1–15.2, drag 40's max 16.7/18.2/20.0, redo p95 8.5–10.5. Note switch p95 24–27 and omnibar 18–19 against the web's 66 and 34: faster than the web, not silky. Everything else in the two note's rows passes.
+
+**What moved it (D-7999, D-8005, D-8006):** an edit's and a drag's frame cost what changed, not the board: undo 8.0 / 8.4, drag one's max 17.4 → 11.8–14.5, drag 40's max 20.4 → 16.7–20.0, redo's max 17.5 → 15.0–16.5.
+
 ## Continuation 13 (2026-11-22, evening, autopilot): the retained-scene patch, the open's spike; Linux M6 down to one row
 Decisions D-7974–D-7975; journal "continuation 13". The race (18:04–18:11) and the reruns ran on a quiet machine (goal 77
 idle in all 14 samples, load ~1).

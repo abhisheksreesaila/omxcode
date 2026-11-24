@@ -4,6 +4,12 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 79, continuation 17: one row left on Linux; M1 and M7 pass on the Mac (2026-11-23)
+- **Setup:** the desktop hard-stopped twice (an unproven link to another project's llama memory failures); builds and races now wait for memory and a quiet machine. The Mac is shared under a lock with goal 80 and measured only when quiet. Rulings and derivations in these messages are the main session's, not the owner's (D-7976 and others corrected).
+- **Worked:** an undo, drag or redo frame pays for its change, not for the board (D-7999, D-8005: connectors that didn't move no longer log, kept ops replay in bulk, drags lift by patch; D-8006: an index bug found and fixed on the way, where a replay could reuse another view's boxes). Glyph warm-up at idle (D-8002) and note switch/omnibar raced against the web (D-8001). M1 passes on both machines (0.03 device px, emoji included, rule on 63 sizes), M5 and M7 on the Mac. Linux M6 fails one row.
+- **Broke / open:** Linux stress zoom's worst frame is 19 ms with the GPU at idle clocks (every build). Mac: first frame and press during an open, drag 40's worst frame and redo, note switch, omnibar.
+- **Next:** raster fewer tiles at once on zoom reveals and drops; the process's first open frame on the Mac; the first switch's CoreText cost (glyph warm-up for a whole overlay).
+
 ## Goal 79, continuation 16: raster tiles on Metal (2026-11-22, night)
 - **Setup.** Rulings C (the emoji reference is the live page) and D (PN's Mac launcher judged by a lower bound) written as D-7991 and D-7992. The Mac kept dropping off the network, so Mac runs now retry.
 - **Worked.**
