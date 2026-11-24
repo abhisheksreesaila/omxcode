@@ -204,6 +204,8 @@ COMPOSITES = [
     ("Map marks (a mind map idea's icons, due date, done mark, votes, picture's place, folded count, branch style, laid out; drawn, not edited)", "mojoui/mapmarks.mojo", ["Canvas"], "mojoui.mapmarks"),
     ("Emoji picker (search, recent, tints, a guess from the title, remove; drawn in a Canvas)", "mojoui/emojipicker.mojo", ["Canvas", "Canvas: keys (focus on press)"], "EmojiPicker"),
     ("Modifier double tap (a modifier pressed twice alone within a time)", "mojoui/doubletap.mojo", ["Canvas: keys (focus on press)"], "DoubleTap"),
+    ("Paper that grows (how many pages a board's content needs after an edit, a drag, typing; a page on the left or top moves the frame and its undo)", "mojoui/pagegrow.mojo", ["Canvas"], "mojoui.pagegrow"),
+    ("Frame watch (pictures a second as the screen shows them, counted apart from the bench; MOJOUI_FRAME_WATCH=1 on AppKit)", "mojoui/hosts/framewatch.mojo", ["Canvas"], "FrameWatch"),
     ("Open document gate and save outbox (a document that wasn't read whole is never edited, saved or kept; edits that couldn't be written are held on disk until they land; review 3)", "mojoui/docstore.mojo", [], "OpenDoc("),
     ("Canvas document (a JSON Canvas board that keeps what it was read with: unedited nodes, edges and members are written back as their own text; the progressive open)", "mojoui/canvassource.mojo", [], "import_json_canvas"),
     ("JSON patch (members of a JSON text changed in place, every other byte kept)", "mojoui/jsonpatch.mojo", [], "page_json("),
@@ -316,6 +318,8 @@ APP_LOCAL = [
     ("Import review (columns, types, empties, first rows)", "examples/omxplorer", "the Import step's table; a component once a second app imports files"),
     ("Chart / pivot inspector sections", "examples/omxplorer", "type, value, group by, rows and columns as Inspector sections; belongs beside mojoui.sheetpage"),
     ("Report toolbar controls (tile column, add-tile tools, filter)", "examples/omxplorer", "the column new tiles use, the Sum / Average / Count / Chart tile tools and the filter (column, value), in the Report's toolbar; belongs in mojoui.reportpage"),
+    ("NoteFile", "`examples/pnote/webshell.mojo`", "a document app's file kept safe: the queue of saves, edits rescued when their row is gone, held and spilled edits, the close that waits, the watcher of what other apps did, a delete held for Undo (about 600 lines over mojoui.docstore and rowsaver; tied to the shell's open document, so moving it is a round of its own: goal 79, review 4 S13)"),
+    ("CanvasNote", "`examples/pnote/webshell.mojo`", "a canvas note's page grid in its JSON Canvas text (read_page_grid, with_page_grid) and when its paper is settled (mojoui.pagegrow has the rules)"),
 ]
 
 

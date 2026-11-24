@@ -116,6 +116,13 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 73 | Rows don’t answer the pointer; a notebook’s + and … missing (a pencil stood there); the panel only redrew over shelf heads | all | S | **built** |
 | 74 | The software raster drew circles, lines and polygons past a clip (the map’s dots over the panel) | cut | S | **built** (Scene.raster; the GPU was right) |
 | 75 | Each autosave of a big note stopped the window for 50–190 ms | no such stop in the window (a server writes it) | M | **built** (D-8050), after the race |
+| 76 | The Mac showed 15–36 frames a second | 60 (its page) | M | **built** (D-8060): the screen's own rate, 144 |
+| 77 | A long paragraph froze the page (3 s a key at 20,000 characters) | 17 ms | M | **built** (D-8067) |
+| 78 | The canvas's paper didn't grow; words past it couldn't be reached | grows, folds back | M | **built** (D-8068); pages on the left and top appear at the drop |
+| 79 | Two windows on one file lost held edits | (one server) | M | **built** (D-8064) |
+| 80 | A new canvas text wasn't saved until it was finished | within 2 s | S | **built** (D-8065) |
+| 81 | Right-to-left words: the caret, a press and the selection are on the wrong side (measured from the left) | right | M | open |
+| 82 | Markdown in a canvas text being written again shows as drawn, its caret by the raw words | raw while written | S | open |
 
-**Still open, by size (continuation 21).** M: 25 (the web has none of its own), 36, 39, 51, rest of 14 and 50, and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 55.
+**Still open, by size (continuation 21).** M: 25 (the web has none of its own), 36, 39, 51, rest of 14 and 50, 81, 82, and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 55.
 **Seen:** driven with real input on a headless display, drawn by the CPU (docs/goals/79/first5.py, pictures build/g79/first5-*.png), and the same notes file read and edited by the web app and read back. **Not seen on a GPU's screen**, nor by a person. Also: CPU tests (test_pageedit, test_pageink, test_pnnotes, test_pnstore, test_boardedit, test_mapedit, test_wordsedit's cases in test_boardedit) and, for the fixture's ten screens, draw operations identical to c761a99f's (86,180 lines compared), but for a quote's `>` (its colour) and inline code's ticks (their face), both moved to what the reference picture shows. The look of the new pieces (properties card, toast, flyout, colours, namer) is ours from the web's CSS, not measured against it.

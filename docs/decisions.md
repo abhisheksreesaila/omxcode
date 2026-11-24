@@ -2005,3 +2005,24 @@ D-7969's 0.5 ms aimed at a 8.3 ms work bar the owner's ruling has since replaced
 
 ## D-8062: scripts/mac-unlocked says what test_canvasload does on the Mac (ours; continuation 22)
 Its rows read "tests/test_canvasload fails" though the test passes there: the flag is set by M6's Linux half, which that script doesn't run. It runs the test on the Mac now. No bar changed.
+
+## D-8063: a drag's points are taken once a frame on the Mac, every one of them (ours; continuation 22)
+With mouse coalescing off (D-8054) a mouse may send 1,000 points a second and each cost an update, a view() and a diff (0.1–0.7 ms). They are kept until the next tick, or until anything else happens; the app gets each as its own PAN (with its pressure) and the screen is worked out once, after the last (Runtime.pans, test_pans). No point is dropped and none waits longer than the frame that would have shown it.
+
+## D-8064: held edits belong to the window that holds them (ours; review 4 MUST 1)
+Two windows on one notes file wrote and removed the same held file, so one's landing save deleted the other's conflict. Now each SaveOutbox has its own name in its files' names and a lock file (flock) while it lives; nobody else removes or reads them. A start takes over the files of owners whose lock can be taken (gone, however they ended). Two held versions of one note: the later is the note's, the other becomes a note of its own. Where files can't be locked the name carries the process id instead.
+
+## D-8065: a new canvas text is saved as it is written (ours; review 4 MUST 2)
+The board doesn't change while a text is being written (its undo, tiles and picture stay); the save takes a draft of it (ObjectLayer.draft) under the name it keeps when it is made. While a draft is in the file no kept view is written for it. Words taken back before the text is made are taken out of the file too.
+
+## D-8066: what else review 4 changed in how edits are kept (ours)
+Saves queue while one waits for a locked file, and those that wait are on disk after 0.3 s. Closing waits 3 s once, not 10 s a note. A warning is its own note's; leaving a note with one says so. A note locked in another app keeps the unsaved words here (said; Save a copy). A change of only a note's notebook, name or icon elsewhere doesn't reopen it. The feed is not read while a stroke or a drag is under way. A note that can't be written out at all keeps the window open once. Con: a copy of the words stays on this disk, private to the person (0600), until the save lands.
+
+## D-8067: a paragraph's layout is built on the one before (ours; review 4 MUST 5)
+Graphemes are found from a few characters back; a line's end is looked for near the line before's length; after an edit only the lines from the one before the change are broken again, until a break falls where an old one did. Held to the old algorithm on 160 texts and to a fresh layout over 2,000 random edits (test_longpara). 20,000 characters: 3,070 → 0.3 ms a key; without a space 2.9 ms; 500 KB on one line opens in 0.3 s and takes 8 ms a key. A page draws only its lines in view.
+
+## D-8068: the canvas's paper grows and folds back as the web's (ours; review 4 MUST 6)
+mojoui.pagegrow is pages.js's rules, held to its own test cases. A page added on the left or top moves the objects and what undo holds (ObjectLayer.shift_frame) and the view. Different from the web: pages on the left and top appear at the drop, not during the drag. While a big board is still loading nothing folds.
+
+## D-8069: the race's CPU rule and its new row (ours; review 4 S12, MUST 5)
+Linux: no measured run, web or native, starts while 3 or more cores' worth of work runs; a race with one that did is BLOCKED, not judged. race.md said "void and run again" though nothing reran. New row, judged: typing in the middle of a page's 20,000-character paragraph, 80 keys each side (webtype.mjs). The judge is unchanged.
