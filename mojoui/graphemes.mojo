@@ -3,11 +3,55 @@
 # field's caret, Backspace and Delete use these. Positions are bytes.
 
 
+def _plain(c: Int) -> Bool:
+    """A character that joins neither the one before nor the one after it: two in a row always have a boundary between them
+    (letters of Latin, Greek, Cyrillic, Hebrew and Arabic, kana, ideographs, whole Hangul syllables; not marks, not emoji)."""
+    if c < 0x80:
+        return c >= 0x20 and c != 0x7F
+    return ((0xC0 <= c <= 0x24F) or (0x391 <= c <= 0x3FF) or (0x400 <= c <= 0x482) or (0x48A <= c <= 0x52F) or (0x5D0 <= c <= 0x5EA) or (0x621 <= c <= 0x64A)
+            or (0x3041 <= c <= 0x3096) or (0x30A1 <= c <= 0x30FA) or (0x3400 <= c <= 0x4DBF) or (0x4E00 <= c <= 0x9FFF) or (0xAC00 <= c <= 0xD7A3))
+
+
+def _char_at(text: String, i: Int) -> Int:
+    var b = text.as_bytes()
+    var c = Int(b[i])
+    if c < 0x80:
+        return c
+    if c >= 0xF0 and i + 3 < len(b):
+        return ((c & 7) << 18) | ((Int(b[i + 1]) & 63) << 12) | ((Int(b[i + 2]) & 63) << 6) | (Int(b[i + 3]) & 63)
+    if c >= 0xE0 and i + 2 < len(b):
+        return ((c & 15) << 12) | ((Int(b[i + 1]) & 63) << 6) | (Int(b[i + 2]) & 63)
+    if c >= 0xC0 and i + 1 < len(b):
+        return ((c & 31) << 6) | (Int(b[i + 1]) & 63)
+    return 0  # (inside a character)
+
+
+def safe_start(text: String, at: Int) -> Int:
+    """A boundary at or before byte `at`, found by looking back a few characters, never from the text's start unless it has
+    to: between two plain characters."""
+    var b = text.as_bytes()
+    var i = min(at, len(b))
+    var after = False  # (the character at i is plain)
+    if i < len(b) and (Int(b[i]) & 0xC0) != 0x80:
+        after = _plain(_char_at(text, i))
+    while i > 0:
+        var k = i - 1
+        while k > 0 and (Int(b[k]) & 0xC0) == 0x80:
+            k -= 1
+        var plain = _plain(_char_at(text, k))
+        if plain and after:
+            return i
+        after = plain
+        i = k
+    return 0
+
+
 def prev_grapheme(text: String, at: Int) -> Int:
     """The boundary before byte `at` (0 at the start)."""
-    var last = 0
-    var pos = 0
-    for g in text.graphemes():
+    var from_ = safe_start(text, at - 1) if at > 0 else 0
+    var last = from_
+    var pos = from_
+    for g in text[byte=from_:].graphemes():
         var n = g.byte_length()
         if pos + n >= at:
             return pos
@@ -18,8 +62,8 @@ def prev_grapheme(text: String, at: Int) -> Int:
 
 def next_grapheme(text: String, at: Int) -> Int:
     """The boundary after byte `at` (the text's length at the end)."""
-    var pos = 0
-    for g in text.graphemes():
+    var pos = safe_start(text, at)
+    for g in text[byte=pos:].graphemes():
         pos += g.byte_length()
         if pos > at:
             return pos

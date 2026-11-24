@@ -454,7 +454,7 @@ struct BuzanMap(Movable):
     def depth(self, i: Int) -> Int:
         var d = 0
         var j = i
-        while self.topics[j].parent >= 0:
+        while self.topics[j].parent >= 0 and d <= len(self.topics):  # (a map whose parents go round in a ring ends somewhere too)
             j = self.topics[j].parent
             d += 1
         return d
@@ -500,7 +500,9 @@ struct BuzanMap(Movable):
     def hidden(self, i: Int) -> Bool:
         """Under an idea folded away (the web's collapsed)."""
         var k = self.topics[i].parent
-        while k >= 0:
+        var steps = 0
+        while k >= 0 and steps <= len(self.topics):
+            steps += 1
             if self.topics[k].look.collapsed:
                 return True
             k = self.topics[k].parent
@@ -511,7 +513,9 @@ struct BuzanMap(Movable):
         var n = 0
         for k in range(len(self.topics)):
             var u = self.topics[k].parent
-            while u >= 0:
+            var steps = 0
+            while u >= 0 and steps <= len(self.topics):
+                steps += 1
                 if u == i:
                     n += 1
                     break
@@ -526,7 +530,9 @@ struct BuzanMap(Movable):
             if not l.done and "todo" not in l.icons:
                 continue
             var u = self.topics[k].parent
-            while u >= 0:
+            var seen = List[Int]()
+            while u >= 0 and u not in seen:
+                seen.append(u)
                 out[2 * u] += 1 if l.done else 0
                 out[2 * u + 1] += 1
                 u = self.topics[u].parent

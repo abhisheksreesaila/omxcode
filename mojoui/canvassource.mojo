@@ -17,6 +17,8 @@ struct CanvasSource(Copyable, Movable):
     var nodes_end: Int
     var edges_at: Int
     var edges_end: Int
+    var columns: Int  # the page grid the text says (0: not looked up yet)
+    var rows: Int
 
     def __init__(out self):
         self.ok = False
@@ -30,6 +32,8 @@ struct CanvasSource(Copyable, Movable):
         self.nodes_end = -1
         self.edges_at = -1
         self.edges_end = -1
+        self.columns = 0
+        self.rows = 0
 
     @staticmethod
     def of(text: String) -> CanvasSource:

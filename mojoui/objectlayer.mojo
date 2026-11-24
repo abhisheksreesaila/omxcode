@@ -27,6 +27,7 @@ from std.math import sqrt, cos, sin, floor, ceil
 
 from mojoui.shared import serial, new_key
 from mojoui.canvassource import CanvasSource
+from mojoui.pagegrow import PageBox
 from mojoui.jsonpatch import Change as Patch, patched, patched_in, member_text
 from mojoui.scene import Painter
 from mojoui.ink import Stroke
@@ -324,6 +325,26 @@ struct Obj(Copyable, Movable):
             s += " " + String(self.from_id) + "->" + String(self.to_id) + " f" + String(self.fx) + "," + String(self.fy)
             s += " a" + String(self.ax) + "," + String(self.ay) + " b" + String(self.bx) + "," + String(self.by)
         return s^
+
+
+def _shift(mut o: Obj, dx: Float64, dy: Float64):
+    o.x += dx
+    o.y += dy
+    if o.kind == CONNECTOR:
+        o.fx += dx
+        o.fy += dy
+        o.ax += dx
+        o.ay += dy
+        o.bx += dx
+        o.by += dy
+
+
+def _shift_step(mut c: Change, dx: Float64, dy: Float64):
+    for k in range(len(c.before)):
+        if c.before[k]:
+            _shift(c.before[k].value(), dx, dy)
+        if c.after[k]:
+            _shift(c.after[k].value(), dx, dy)
 
 
 struct Change(Undoable):
@@ -1359,6 +1380,31 @@ struct ObjectLayer(Movable):
                 self._set_frame(p, self.objs[p].x + dx, self.objs[p].y + dy, self.objs[p].w, self.objs[p].h)
             moved.append(id)
         self._reroute(moved)
+        self._changed()
+
+    def content_box(self) -> PageBox:
+        """What the objects cover, connectors left out."""
+        var b = PageBox.none()
+        for ref o in self.objs:
+            if o.kind != CONNECTOR:
+                var r = o.bounds()
+                b.take(r[0], r[1], r[2], r[3])
+        return b
+
+    def shift_frame(mut self, dx: Float64, dy: Float64):
+        """The page frame's origin moved: every object by (dx, dy), those undo and redo hold among them. Not an undo step."""
+        if dx == 0 and dy == 0:
+            return
+        for p in range(len(self.objs)):
+            self._log(self.objs[p].id)
+            _shift(self.objs[p], dx, dy)
+            self.objs[p].rev = self._next_rev()
+        for k in range(len(self.history.done)):
+            _shift_step(self.history.done[k], dx, dy)
+        for k in range(len(self.history.undone)):
+            _shift_step(self.history.undone[k], dx, dy)
+        if self.txn_open:
+            _shift_step(self.txn, dx, dy)
         self._changed()
 
     def move_by(mut self, dx: Float64, dy: Float64):

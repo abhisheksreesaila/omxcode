@@ -9,7 +9,6 @@
 #   w.paint(p, x, top, row, base, scale, style_on_screen, colour, words=True)
 
 from mojoui.fonttext import TextStyle, measure
-from mojoui.graphemes import next_grapheme
 from mojoui.scene import Painter
 from mojoui.textedit import TextEdit, Pos, SHIFT, CTRL, ALT, is_word_byte
 
@@ -127,16 +126,27 @@ struct WordsEdit(Movable):
     def byte_at(mut self, k: Int, x_in: Float64) -> Int:
         var l = self.lines[k]
         var x = x_in - self.indent(k)
-        var best = l.start
-        var best_d = abs(x)
-        var i = l.start
-        while i < l.end:
-            i = next_grapheme(self.ed.paras[l.para], i)
-            var d = abs(x - measure(self.style, String(self.ed.paras[l.para][byte=l.start:i])))
-            if d < best_d:
-                best_d = d
-                best = i
-        return best
+        ref t = self.ed.paras[l.para]
+        var stops: List[Int] = [l.start]
+        var pos = l.start
+        for g in t[byte=l.start:l.end].graphemes():
+            pos += g.byte_length()
+            stops.append(pos)
+        # the first stop at or past x (widths only grow), then the nearer of it and the one before
+        var lo = 0
+        var hi = len(stops) - 1
+        while lo < hi:
+            var mid = (lo + hi) // 2
+            if measure(self.style, String(t[byte=l.start:stops[mid]])) < x:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo > 0:
+            var a = measure(self.style, String(t[byte=l.start:stops[lo - 1]]))
+            var b = measure(self.style, String(t[byte=l.start:stops[lo]]))
+            if abs(x - a) <= abs(b - x):
+                lo -= 1
+        return stops[lo]
 
     def key(mut self, name: String, mods: Int, now: Int) -> Int:
         var shift = (mods & SHIFT) != 0

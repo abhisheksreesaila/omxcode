@@ -27,8 +27,11 @@ from std.ffi import external_call
 from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
-from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE
-from mojoui.pagedesk import BoardTools, T_BOX, writing_view, give_way
+from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE, CONNECTOR
+from mojoui.pagedesk import BoardTools, T_BOX, T_MOVE, writing_view, give_way
+from mojoui.pagegrow import PageBox, settle_pages, grow_for_drag, grow_for_text
+from mojoui.jsonpatch import Change as Patch, patched, patched_in
+
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
@@ -64,6 +67,19 @@ from mojoui.buzanmap import map_text, node_extra
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
 comptime S_MAP = 2
+
+
+def with_page_grid(var text: String, columns: Int, rows: Int) -> String:
+    """The document with that page grid in its pn.page (its own text when it says so already)."""
+    try:
+        var sk = skim(Int(text.unsafe_ptr()), text.byte_length())
+        for ref m in sk.members:
+            if m.key == "pn" and m.end > m.start:
+                var pn = patched_in(String(text[byte=m.start:m.end]), "page", [Patch("columns", String(columns)), Patch("rows", String(rows))])
+                return String(text[byte=0:m.start]) + pn + String(text[byte=m.end:text.byte_length()])
+        return patched(text, [Patch("pn", '{"schemaVersion":1,"page":{"columns":' + String(columns) + ',"rows":' + String(rows) + "}}")])
+    except:
+        return text^
 
 
 def read_page_grid(text: String) -> Tuple[Int, Int]:
@@ -197,7 +213,7 @@ def read_map(content: String, mut map: BuzanMap) raises -> String:
         var pid = j.text(j.get(nd, "parentId"))
         var par = -1
         for r in range(len(ids)):
-            if ids[r] == pid:
+            if pid != "" and ids[r] == pid:
                 par = r
         _ = map.add(par, j.text(j.get(nd, "text")), j.real(j.get(nd, "x")), j.real(j.get(nd, "y")), hexc(j.text(j.get(nd, "color"), "#3d8fe8")),
                     ids[q], j.real(j.get(nd, "fontSize"), 0), j.flag(j.get(nd, "bold")), j.text(j.get(nd, "font")), node_extra(j, nd))
@@ -2187,6 +2203,13 @@ struct WebShell(Movable):
                 self.tools.draft(layer)  # (what is being written is in it)
                 self.drafted = Bool(layer.draft)
                 content = export_json_canvas(layer, self.cols, self.rows)
+                if layer.src.ok:  # (a board read from a document keeps its text: its page grid too, unless the paper grew)
+                    if layer.src.columns == 0:
+                        var g = read_page_grid(layer.src.text)
+                        layer.src.columns = g[0]
+                        layer.src.rows = g[1]
+                    if layer.src.columns != self.cols or layer.src.rows != self.rows:
+                        content = with_page_grid(content^, self.cols, self.rows)
                 body = reading_text(layer)
                 layer.draft = None
             elif kind == "mindmap":
@@ -2997,7 +3020,18 @@ struct WebShell(Movable):
             if not self.editable():
                 return False
             var r = self.near_rect(x, y)
-            return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
+            var moved = self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
+            if moved and self.tools.drag == T_MOVE and self.tools.moved:  # (a page before it reaches the edge)
+                var b = PageBox.none()
+                for id in self.board.layer.selected:
+                    var q = self.board.layer.index(id)
+                    if q >= 0 and self.board.layer.objs[q].kind != CONNECTOR:
+                        var o = self.board.layer.objs[q].bounds()
+                        b.take(o[0], o[1], o[2], o[3])
+                var g = grow_for_drag(self.cols, self.rows, b, PAGE_W, PAGE_H)
+                self.cols = g.columns
+                self.rows = g.rows
+            return moved
         if self.on_map():
             var b = self.map_box()
             if self.map.edit_drag(x - b[0], y - b[1], b[2], b[3]):
@@ -3147,7 +3181,30 @@ struct WebShell(Movable):
         if not self.tools.changed:
             return
         self.tools.changed = False
+        self.settle_pages()
         self.queue_save("canvas")
+
+    def settle_pages(mut self):
+        """The paper as the content needs it (mojoui.pagegrow): after an edit it grows and folds back, a page added on the left
+        or top moves the objects and the view; while words are written it only grows, ahead of them."""
+        ref layer = self.board.layer
+        if self.tools.editing != -1:
+            self.tools.words.lay()
+            var b = self.tools.words_box(layer)
+            var h = b[3] * Float64(max(len(self.tools.words.lines), 1))
+            var g = grow_for_text(self.cols, self.rows, PageBox(True, b[0], b[1], b[0] + (b[2] if self.tools.editing >= 0 else 0.0), b[1] + h), b[3], PAGE_W, PAGE_H)
+            self.cols = g.columns
+            self.rows = g.rows
+            return
+        if self.board.loading():  # (not all of it is read yet: the next edit after settles)
+            return
+        var g = settle_pages(self.cols, self.rows, layer.content_box(), PAGE_W, PAGE_H)
+        if g.shift_x != 0 or g.shift_y != 0:
+            self.board.edit().shift_frame(g.shift_x, g.shift_y)
+            self.view.x -= g.shift_x * self.view.scale
+            self.view.y -= g.shift_y * self.view.scale
+        self.cols = g.columns
+        self.rows = g.rows
 
     def save_map(mut self):
         self.queue_save("mindmap")

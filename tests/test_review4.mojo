@@ -326,7 +326,7 @@ def hands_down() raises:
     typed(t, "some words")
     t.flush()
     _ = t.refresh()
-    _ = t.key("Left", 0)
+    _ = t.key("ArrowLeft", 0)
     var at = t.page.ed.caret.byte
     o = Database(DB)
     o.exec("INSERT INTO notebooks (name, color, category) VALUES ('Z', '#ff0000', 'projects')")
@@ -340,9 +340,96 @@ def hands_down() raises:
     print("   hands down; another notebook")
 
 
+def grid_of(id: Int) raises -> String:
+    var q = Database(DB).prepare("SELECT json_extract(content, '$.pn.page.columns') || 'x' || json_extract(content, '$.pn.page.rows') FROM notes WHERE id = " + String(id))
+    return q.text(0) if q.step() else String("")
+
+
+def paper() raises:
+    """(MUST 6) The paper grows as words and objects reach its edges, can be scrolled to, is saved so, and folds back."""
+    fresh()
+    var s = WebShell(DB, "paper")
+    s.create("canvas", "Long")
+    var id = s.current
+    var sc = Scene(1440, 900, 1.0)
+    s.paint(sc, 1440, 900, 1.0)
+    for k in range(62):
+        committed(s, "line " + String(k))
+        _ = s.key("Return", 0)
+    s.paint(sc, 1440, 900, 1.0)
+    assert_true(s.rows >= 2 and s.cols == 1, "grew while typed: " + String(s.cols) + "x" + String(s.rows))
+    var low = s.view.y
+    for _ in range(100):
+        _ = s.wheel(700, 500, 0, -120)
+    assert_true(s.view.y < low - 1000, "its lower pages can be brought on screen: " + String(s.view.y))
+    _ = s.key("Escape", 0)
+    var rows = s.rows
+    s.flush()
+    assert_equal(grid_of(id), "1x" + String(rows))
+    s.close()
+    var t = WebShell(DB, "paper")
+    t.open(id)
+    t.paint(sc, 1440, 900, 1.0)
+    _ = t.board.edit()
+    t.paint(sc, 1440, 900, 1.0)
+    assert_true(t.rows == rows, "opens so")
+    _ = t.key("Escape", 0)
+    ref layer = t.board.edit()
+    var a = layer.add_sticky(100, 100, 200, "note")
+    layer.select(a)
+    layer.move_by(900, 0)
+    t.tools.changed = True
+    t.save_canvas()
+    assert_equal(t.cols, 2)
+    t.flush()
+    assert_equal(grid_of(id), "2x" + String(rows), "a read document's grid is patched")
+    _ = t.board.edit().undo()
+    t.tools.changed = True
+    t.save_canvas()
+    assert_equal(t.cols, 1, "folds back")
+    var vx = t.view.x
+    t.board.edit().select(a)
+    t.board.edit().move_by(-200, 0)
+    t.tools.changed = True
+    t.save_canvas()
+    assert_true(t.cols == 2 and t.view.x < vx, "a page on the left: the view goes with it")
+    t.flush()
+    assert_equal(grid_of(id), "2x" + String(rows))
+    t.close()
+    print("   the paper grows and folds back")
+
+
+def rings() raises:
+    """A map whose parents go round in a ring, name themselves or have no id: opens, draws, saves, exports."""
+    fresh()
+    var s = WebShell(DB, "paper")
+    s.create("mindmap", "Ring")
+    var id = s.current
+    s.flush()
+    var o = Database(DB)
+    for nodes in ['[{"id":"root","parentId":null,"text":"R","x":0,"y":0},{"id":"a","parentId":"b","text":"A","x":200,"y":0},{"id":"b","parentId":"a","text":"B","x":300,"y":60},{"id":"c","parentId":"c","text":"C","x":0,"y":200},{"text":"no id","x":-200,"y":0},{"id":"d","parentId":"b","text":"D","x":10,"y":10}]']:
+        o.exec("UPDATE notes SET content = '{\"schemaVersion\":1,\"rootId\":\"root\",\"nodes\":" + String(nodes) + "}', revision = revision + 1 WHERE id = " + String(id))
+    s.close()
+    var t = WebShell(DB, "paper")
+    t.open(id)
+    var sc = Scene(1440, 900, 1.0)
+    var t0 = clock_us()
+    t.paint(sc, 1440, 900, 1.0)
+    assert_true(clock_us() - t0 < 2_000_000, "drawn")
+    assert_equal(len(t.map.topics), 6)
+    _ = t.key("Tab", 0)
+    typed(t, "new")
+    _ = t.key("Return", 0)
+    t.flush()
+    t.export_markdown()
+    t.close()
+    print("   a ring of ideas")
+
+
 def main() raises:
     _ = private_dir(CFG)
     _ = setenv("OMX_CONFIG", CFG)
+    _ = setenv("OMX_EXPORTS", "build/test_review4_exports")
     two_windows()
     own_warning()
     gone_in_flight()
@@ -350,4 +437,6 @@ def main() raises:
     locked_file()
     locked_note()
     hands_down()
+    paper()
+    rings()
     print("review4: ok")

@@ -93,6 +93,9 @@ struct ParaLay(Copyable, Movable):
     var lines: List[VLine]
     var height: Float64
     var code: Bool  # inside a fenced block
+    var lines_text: String  # what `segs` and `lines` are of, while the words have moved on (the next layout builds on it)
+    var lines_width: Float64
+    var lines_code: Bool
 
     def __init__(out self):
         self.code = False
@@ -101,6 +104,94 @@ struct ParaLay(Copyable, Movable):
         self.segs = List[Seg]()
         self.lines = List[VLine]()
         self.height = 0
+        self.lines_text = ""
+        self.lines_width = -1
+        self.lines_code = False
+
+
+struct WrapAt(Copyable, Movable):
+    """Where a wrap stands: the shown line's start, the last place it may end, the cuts so far; where an earlier wrap's cuts
+    hold again (`old`, from `sync_from` on: the text there is the same), and whether they have been taken up."""
+    var start: Int
+    var fits: Int
+    var cuts: List[Int]
+    var last_len: Int  # the line before's bytes
+    var old: List[Int]
+    var sync_from: Int
+    var synced: Bool
+
+    def __init__(out self, var cuts: List[Int], var old: List[Int], sync_from: Int):
+        self.start = cuts[len(cuts) - 1]
+        self.fits = self.start
+        self.cuts = cuts^
+        self.last_len = 0
+        self.old = old^
+        self.sync_from = sync_from
+        self.synced = False
+
+    def cut(mut self, at: Int):
+        self.last_len = at - self.start
+        self.start = at
+        self.cuts.append(at)
+        if self.synced or at < self.sync_from:
+            return
+        var lo = 0
+        var hi = len(self.old)
+        while lo < hi:
+            var mid = (lo + hi) // 2
+            if self.old[mid] < at:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo < len(self.old) and self.old[lo] == at:
+            for k in range(lo + 1, len(self.old)):
+                self.cuts.append(self.old[k])
+            self.synced = True
+
+
+def seg_starts(segs: List[Seg]) -> List[Int]:
+    """The byte each piece starts at, and the end."""
+    var out = List[Int](capacity=len(segs) + 1)
+    var at = 0
+    for ref s in segs:
+        out.append(at)
+        at += s.text.byte_length()
+    out.append(at)
+    return out^
+
+
+def first_seg(starts: List[Int], a: Int) -> Int:
+    """The first piece that ends after byte a."""
+    var lo = 0
+    var hi = len(starts) - 1
+    while lo < hi:
+        var mid = (lo + hi) // 2
+        if starts[mid + 1] <= a:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def same_from(a: List[Seg], b: List[Seg], end: Bool) -> Int:
+    """How many bytes two lists of pieces lay out the same, from the start (or, `end`, from the end)."""
+    var n = 0
+    for k in range(min(len(a), len(b))):
+        ref x = a[len(a) - 1 - k if end else k]
+        ref y = b[len(b) - 1 - k if end else k]
+        if x.lh != y.lh or not x.style.same(y.style):
+            return n
+        if x.text == y.text:
+            n += x.text.byte_length()
+            continue
+        var p = x.text.as_bytes()
+        var q = y.text.as_bytes()
+        var m = min(len(p), len(q))
+        var i = 0
+        while i < m and (p[len(p) - 1 - i] == q[len(q) - 1 - i] if end else p[i] == q[i]):
+            i += 1
+        return n + i
+    return n
 
 
 struct PageSheet(Movable):
@@ -386,7 +477,15 @@ struct PageSheet(Movable):
                 pl.height = self._guess(i)
                 fresh.append(pl^)
             if len(fresh) == m - k - f:
-                for i in range(len(fresh)):
+                for i in range(len(fresh)):  # (the lines they had: the next layout builds on them)
+                    ref was = self.laid[f + i]
+                    if len(was.lines) > 0:
+                        fresh[i].height = was.height
+                        swap(fresh[i].lines, was.lines)
+                        swap(fresh[i].segs, was.segs)
+                        fresh[i].lines_text = was.text if was.width >= 0 else was.lines_text
+                        fresh[i].lines_width = was.width if was.width >= 0 else was.lines_width
+                        fresh[i].lines_code = was.code if was.width >= 0 else was.lines_code
                     self.laid[f + i] = fresh[i].copy()
             else:
                 var tail = List[ParaLay](capacity=k)
@@ -433,10 +532,52 @@ struct PageSheet(Movable):
         pl.code = self.code[i]
         pl.segs = self.code_segments(words) if self.code[i] else self.segments(words)
         pl.width = self.text_w
-        var cuts = self.wrap(words, pl.segs)
+        var starts = seg_starts(pl.segs)
+        var n = words.byte_length()
+        # what the lines it had were of, and how much of it is the same at both ends: only the lines between are broken again
+        ref had = self.laid[i]
+        var had_text_n = (had.text.byte_length() if had.width >= 0 else had.lines_text.byte_length())
+        var reuse = (len(had.lines) > 1 and (had.width if had.width >= 0 else had.lines_width) == self.text_w
+                     and (had.code if had.width >= 0 else had.lines_code) == pl.code)
+        var kept: List[Int] = [0]
+        var old = List[Int]()
+        var sync_from = n + 1
+        var old_lines = 0  # lines kept from the start
+        if reuse:
+            var head = same_from(had.segs, pl.segs, False)
+            var tail = min(same_from(had.segs, pl.segs, True), min(had_text_n, n) - head)
+            if head + 12 < n or head + 12 < had_text_n:
+                var at = 0
+                while at + 1 < len(had.lines) and had.lines[at].end <= head:  # (the line the change is on)
+                    at += 1
+                old_lines = max(0, at - 1)
+                for c in range(1, old_lines + 1):
+                    kept.append(had.lines[c].start)
+                sync_from = n - tail + 8
+                var delta = n - had_text_n
+                for c in range(len(had.lines)):
+                    if had.lines[c].start + delta >= sync_from:
+                        old.append(had.lines[c].start + delta)
+                old.append(n)
+        var first_old = n + 1 if len(old) < 2 else old[0]
+        var cuts = self.wrap_from(words, pl.segs, starts, kept^, old^, sync_from)
         var y = 0.0
+        pl.lines.reserve(len(cuts))
+        var delta = n - had_text_n
+        var walk = 0  # (the line had at the same place, for what is past the change)
         for c in range(len(cuts) - 1):
-            var lb = self.line_box(self.part(pl.segs, cuts[c], cuts[c + 1]))
+            var lb: Tuple[Float64, Float64]
+            if c < old_lines and reuse:
+                lb = (had.lines[c].height, had.lines[c].base)
+            else:
+                lb = (-1.0, 0.0)
+                if reuse and cuts[c] >= first_old:
+                    while walk < len(had.lines) and had.lines[walk].start + delta < cuts[c]:
+                        walk += 1
+                    if walk < len(had.lines) and had.lines[walk].start + delta == cuts[c] and had.lines[walk].end + delta == cuts[c + 1]:
+                        lb = (had.lines[walk].height, had.lines[walk].base)
+                if lb[0] < 0:
+                    lb = self.line_box_in(pl.segs, starts, cuts[c], cuts[c + 1])
             pl.lines.append(VLine(cuts[c], cuts[c + 1], y, lb[0], lb[1]))
             y += lb[0]
         pl.height = y
@@ -478,58 +619,156 @@ struct PageSheet(Movable):
                 break
         return w
 
+    def width_in(self, segs: List[Seg], starts: List[Int], a: Int, b: Int) -> Float64:
+        """width_of, the first piece found by its start (a paragraph of thousands of pieces)."""
+        var w = 0.0
+        for k in range(first_seg(starts, a), len(segs)):
+            if starts[k] >= b:
+                break
+            var x0 = max(a - starts[k], 0)
+            var x1 = min(b - starts[k], starts[k + 1] - starts[k])
+            if x1 > x0:
+                w += measure(segs[k].style, String(segs[k].text[byte=x0:x1]))
+        return w
+
+    def too_wide(self, words: String, segs: List[Seg], starts: List[Int], a: Int, b: Int) -> Bool:
+        """Wider than the text: no more of it is measured than it takes to say so."""
+        var bytes = words.as_bytes()
+        var look = 256
+        while b - a > look:
+            var e = a + look
+            while e > a and (Int(bytes[e]) & 0xC0) == 0x80:
+                e -= 1
+            if self.width_in(segs, starts, a, e) > self.text_w:
+                return True
+            look *= 8
+        return self.width_in(segs, starts, a, b) > self.text_w
+
     def wrap(self, words: String, segs: List[Seg]) -> List[Int]:
         """Where the shown lines start, and the end: the browser's `white-space: break-spaces; overflow-wrap: anywhere`
         (CodeMirror's lineWrapping): a line may end after a space, or where Chrome breaks; what is still too long is cut
         at a character."""
-        var cuts: List[Int] = [0]
+        return self.wrap_from(words, segs, seg_starts(segs), [0], List[Int](), words.byte_length() + 1)
+
+    def wrap_from(self, words: String, segs: List[Seg], starts: List[Int], var cuts: List[Int], var old: List[Int], sync_from: Int) -> List[Int]:
+        """wrap, from its last known cut on; a cut at or after sync_from that is also one of `old` (an earlier wrap's, of the
+        same text from there on) takes up the rest of them. Most places a line may end are not measured: the ones well
+        under the line before's length only when the line turns out longer."""
         var n = words.byte_length()
-        if n == 0 or self.width_of(segs, 0, n) <= self.text_w:
+        if n == 0 or (len(cuts) == 1 and n <= 4096 and self.width_in(segs, starts, 0, n) <= self.text_w):
             cuts.append(n)
             return cuts^
-        var start = 0  # this shown line's
-        var fits = 0  # the last place it may end
-        var i = 0
+        var st = WrapAt(cuts^, old^, sync_from)
+        var i = st.start
+        var bytes = words.as_bytes()
+        var x = 0  # (the characters before the line: a break may depend on them)
         var before = 0
-        var x = 0
-        while i < n:
-            var e = next_grapheme(words, i)
+        if i > 0:
+            var k = i - 1
+            while k > 0 and (Int(bytes[k]) & 0xC0) == 0x80:
+                k -= 1
+            x = decode_at(words, k)
+            if k > 0:
+                k -= 1
+                while k > 0 and (Int(bytes[k]) & 0xC0) == 0x80:
+                    k -= 1
+                before = decode_at(words, k)
+        var unmeasured = List[Int]()
+        for g in words[byte=i:].graphemes():
             var y = decode_at(words, i)
-            if i > start and x != 0 and _may_break(before, x, y):
-                if self.width_of(segs, start, i) <= self.text_w:
-                    fits = i
+            if i > st.start and x != 0 and _may_break(before, x, y):
+                if (i - st.start) * 8 < st.last_len * 7:
+                    unmeasured.append(i)
                 else:
-                    if fits <= start:
-                        fits = self._cut(words, segs, start, i)
-                    cuts.append(fits)
-                    start = fits
-                    # (what is left up to i may itself be too long: cut on)
-                    while self.width_of(segs, start, i) > self.text_w:
-                        start = self._cut(words, segs, start, i)
-                        cuts.append(start)
-                    fits = i
+                    self.may_end(words, segs, starts, st, unmeasured, i)
+                    if st.synced:
+                        return st.cuts.copy()
             before = x
             x = y
-            i = e
-        while self.width_of(segs, start, n) > self.text_w:
-            if fits > start:
-                start = fits
+            i += g.byte_length()
+        if len(unmeasured) > 0 and self.too_wide(words, segs, starts, st.start, n):
+            self.replay(words, segs, starts, st, unmeasured)
+            if st.synced:
+                return st.cuts.copy()
+        while self.too_wide(words, segs, starts, st.start, n):
+            if st.fits > st.start:
+                st.cut(st.fits)
             else:
-                start = self._cut(words, segs, start, n)
-            cuts.append(start)
-        cuts.append(n)
-        return cuts^
+                st.cut(self._cut(words, segs, starts, st.start, n))
+            if st.synced:
+                return st.cuts.copy()
+        st.cuts.append(n)
+        return st.cuts.copy()
 
-    def _cut(self, words: String, segs: List[Seg], start: Int, end: Int) -> Int:
+    def replay(self, words: String, segs: List[Seg], starts: List[Int], mut st: WrapAt, mut unmeasured: List[Int]):
+        """Every place not measured so far, in order."""
+        var all = unmeasured.copy()
+        unmeasured.clear()
+        for c in all:
+            if not st.synced and c > st.start:
+                self.may_end(words, segs, starts, st, unmeasured, c)
+
+    def may_end(self, words: String, segs: List[Seg], starts: List[Int], mut st: WrapAt, mut unmeasured: List[Int], i: Int):
+        """The shown line may end at i: it does not yet, or the one before i that fitted was its end."""
+        if not self.too_wide(words, segs, starts, st.start, i):
+            st.fits = i
+            unmeasured.clear()
+            return
+        if len(unmeasured) > 0:
+            var last = unmeasured[len(unmeasured) - 1]
+            if not self.too_wide(words, segs, starts, st.start, last):
+                st.fits = last
+                unmeasured.clear()
+            else:  # (the line is shorter than was reckoned: each place, as it comes)
+                self.replay(words, segs, starts, st, unmeasured)
+                if not st.synced and i > st.start:
+                    self.may_end(words, segs, starts, st, unmeasured, i)
+                return
+        if st.fits <= st.start:
+            st.fits = self._cut(words, segs, starts, st.start, i)
+        st.cut(st.fits)
+        # (what is left up to i may itself be too long: cut on)
+        while not st.synced and self.too_wide(words, segs, starts, st.start, i):
+            st.cut(self._cut(words, segs, starts, st.start, i))
+        st.fits = i
+
+    def _cut(self, words: String, segs: List[Seg], starts: List[Int], start: Int, end: Int) -> Int:
         """The last character boundary of [start, end) that still fits the width (at least one character)."""
-        var best = next_grapheme(words, start)
-        var i = best
-        while i < end:
-            i = next_grapheme(words, i)
-            if self.width_of(segs, start, i) > self.text_w:
+        var stops = List[Int]()
+        var pos = start
+        var look = 64
+        for g in words[byte=start:end].graphemes():
+            pos += g.byte_length()
+            stops.append(pos)
+            if len(stops) >= look:
+                if self.width_in(segs, starts, start, pos) > self.text_w:
+                    break
+                look *= 2
+        var lo = 0  # (stops[0] is taken in any case)
+        var hi = len(stops) - 1
+        while lo < hi:
+            var mid = (lo + hi + 1) // 2
+            if self.width_in(segs, starts, start, stops[mid]) <= self.text_w:
+                lo = mid
+            else:
+                hi = mid - 1
+        return stops[lo] if len(stops) > 0 else end
+
+    def line_box_in(self, segs: List[Seg], starts: List[Int], a: Int, b: Int) -> Tuple[Float64, Float64]:
+        """line_box of the pieces of bytes [a, b)."""
+        var body = TextStyle(TEXT_FACE, 400, False, BODY)
+        var above = _above(body, BODY * 1.65)
+        var below = lu(BODY * 1.65) - above
+        for k in range(first_seg(starts, a), len(segs)):
+            var n = starts[k + 1] - starts[k]
+            if starts[k] > b or (starts[k] == b and n > 0):
                 break
-            best = i
-        return best
+            if n == 0 and not (starts[k] >= a and starts[k] <= b):
+                continue
+            var x = _above(segs[k].style, segs[k].lh)
+            above = max(above, x)
+            below = max(below, lu(segs[k].lh) - x)
+        return (lu(above + below), above)
 
     def vline_of(mut self, p: Pos, at_end: Bool) -> Int:
         """The shown line position p is on; at a wrap, the next one unless at_end."""

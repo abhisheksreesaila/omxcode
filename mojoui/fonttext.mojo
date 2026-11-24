@@ -150,6 +150,10 @@ struct TextStyle(ImplicitlyCopyable, Movable):
     var letter_spacing: Float64
     var exact: Bool  # advances unrounded (canvas and SVG text: measureText, <text>), else rounded as HTML text is
 
+    def same(self, o: TextStyle) -> Bool:
+        return (self.size == o.size and self.weight == o.weight and self.italic == o.italic and self.letter_spacing == o.letter_spacing and self.exact == o.exact
+                and self.family == o.family)
+
     def __init__(out self, family: String, weight: Int, italic: Bool, size: Float64):
         self.family = family
         self.weight = weight
