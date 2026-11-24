@@ -31,6 +31,12 @@ into a text field could come back later as if typed, overwriting the app's newer
 ![Pictures before and after](../research/img/g81-pictures.png)
 
 ## Not done, not checked
+- **Correction (2026-11-24, from goal 79's session; read in our code, not run):** the Mac display link (appkit.mojo:3142) is added with a
+  string that reads `kCFRunLoopCommonModes`; Core Foundation knows that mode by address, so the link most likely never ticks and M7
+  would run on the 60 Hz fallback. The hang monitor's Mac run-loop observer (appkit.mojo:3874) passes the same string, so it most likely
+  never fires either: "runs on the Mac" below means the app starts with it, not that it watches. The fallback timer is also dropped
+  when a frame leaves the canvases idle, which goal 79 measured as 24-57 ms late frames. Fixed on goal-79-pnote-lookalike (2e198b04);
+  take its frame clock at the merge, give the observer the real constant, and don't run M7 before.
 - M7's rate is unmeasured: the Mac's screen was locked all night. Its screens are 120 and 144 Hz; the link's path has not run on a visible window.
 - The hang monitor runs on the Mac; no hang was provoked there.
 - Keeping widgets across shape changes on Mac, iPhone, Android, web (F5), F7, F8: not chosen. Text spacing, contrast, snapped borders: skipped by the owner.
