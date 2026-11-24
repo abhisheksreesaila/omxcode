@@ -17,6 +17,7 @@
 # (mojoui.history) as the removed and inserted texts, so typing a word is one undo step.
 
 from std.time import perf_counter_ns
+from mojoui.graphemes import prev_grapheme, next_grapheme
 from mojoui.text import Font, Face, REGULAR, MEDIUM, MONO, MONO_BOLD, LEFT
 from mojoui.scene import Painter
 from mojoui.history import History, Undoable
@@ -517,17 +518,13 @@ struct TextEdit(Movable):
     def prev_char(self, p: Pos) -> Pos:
         if p.byte == 0:
             return Pos(p.para - 1, self.paras[p.para - 1].byte_length()) if p.para > 0 else p
-        var b = self.paras[p.para].as_bytes()
-        var i = p.byte - 1
-        while i > 0 and (Int(b[i]) & 0xC0) == 0x80:
-            i -= 1
-        return Pos(p.para, i)
+        return Pos(p.para, prev_grapheme(self.paras[p.para], p.byte))
 
     def next_char(self, p: Pos) -> Pos:
         var n = self.paras[p.para].byte_length()
         if p.byte >= n:
             return Pos(p.para + 1, 0) if p.para + 1 < len(self.paras) else p
-        return Pos(p.para, p.byte + utf8_len(self.paras[p.para].as_bytes()[p.byte]))
+        return Pos(p.para, next_grapheme(self.paras[p.para], p.byte))
 
     def prev_word(self, p: Pos) -> Pos:
         if p.byte == 0:

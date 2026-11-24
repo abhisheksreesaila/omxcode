@@ -13,6 +13,7 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
+from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
 from mojoui.shared import serial
 from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
@@ -1088,15 +1089,10 @@ struct BoardTools(Movable):
                 self.tool = "select"
                 return True
             if name == "Backspace":
-                var b = self.edit_words.as_bytes()
-                var at = len(b) - 1
-                while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
-                    at -= 1
-                var cut = String(self.edit_words[byte=0:max(at, 0)])
-                self.edit_words = cut
+                self.edit_words = without_last(self.edit_words)
             elif name == "Enter":
                 self.edit_words += "\n"
-            elif (mods & 2) == 0 and (name.byte_length() == 1 or Int(name.as_bytes()[0]) >= 0x80):
+            elif (mods & 2) == 0 and typed_text(name):
                 self.edit_words += name
             else:
                 return False

@@ -6,6 +6,7 @@
 #   var page = PageSheet(); page.set_markdown(md)
 #   page.draw(p, bx, x0, y0, x1, y1, k, emoji, tint)
 
+from mojoui.graphemes import prev_grapheme, next_grapheme
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
@@ -111,22 +112,14 @@ struct PageSheet(Movable):
 
     def caret_left(mut self):
         if self.caret_col > 0:
-            var b = self.lines[self.caret_line].as_bytes()
-            var at = self.caret_col - 1
-            while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
-                at -= 1
-            self.caret_col = at
+            self.caret_col = prev_grapheme(self.lines[self.caret_line], self.caret_col)
         elif self.caret_line > 0:
             self.caret_line -= 1
             self.caret_col = self.lines[self.caret_line].byte_length()
 
     def caret_right(mut self):
-        var b = self.lines[self.caret_line].as_bytes()
-        if self.caret_col < len(b):
-            var at = self.caret_col + 1
-            while at < len(b) and (Int(b[at]) & 0xC0) == 0x80:
-                at += 1
-            self.caret_col = at
+        if self.caret_col < self.lines[self.caret_line].byte_length():
+            self.caret_col = next_grapheme(self.lines[self.caret_line], self.caret_col)
         elif self.caret_line + 1 < len(self.lines):
             self.caret_line += 1
             self.caret_col = 0
@@ -152,9 +145,9 @@ struct PageSheet(Movable):
                 for ref sg in segs:
                     var acc = String("")
                     var k = 0
-                    for c in sg.text.codepoint_slices():
+                    for c in sg.text.graphemes():  # (never inside a character: its accents, an emoji family)
                         acc += String(c)
-                        k += String(c).byte_length()
+                        k += c.byte_length()
                         var cx = px + measure(sg.style, acc)
                         if abs(x - cx) < best_d:
                             best_d = abs(x - cx)
@@ -312,10 +305,7 @@ struct PageSheet(Movable):
     def backspace(mut self):
         if self.caret_col > 0:
             ref l = self.lines[self.caret_line]
-            var b = l.as_bytes()
-            var at = self.caret_col - 1
-            while at > 0 and (Int(b[at]) & 0xC0) == 0x80:  # (a whole UTF-8 character)
-                at -= 1
+            var at = prev_grapheme(l, self.caret_col)
             self.lines[self.caret_line] = String(l[byte=0:at]) + String(l[byte=self.caret_col:])
             self.caret_col = at
         elif self.caret_line > 0:

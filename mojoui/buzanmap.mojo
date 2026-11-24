@@ -8,6 +8,7 @@
 #   m.draw(p, bx, x0, y0, w, h, zoom, sk)        # the view centred on the map's origin
 
 from std.math import sqrt, tanh, pow
+from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
 from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
@@ -136,15 +137,10 @@ struct BuzanMap(Movable):
             if self.edit_all:
                 self.edit_text = ""
             else:
-                var b = self.edit_text.as_bytes()
-                var at = len(b) - 1
-                while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
-                    at -= 1
-                var cut = String(self.edit_text[byte=0:max(at, 0)])
-                self.edit_text = cut
+                self.edit_text = without_last(self.edit_text)
             self.edit_all = False
             return 1
-        if name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
+        if typed_text(name):
             if self.edit_all:
                 self.edit_text = ""
                 self.edit_all = False

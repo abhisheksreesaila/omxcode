@@ -7,6 +7,7 @@
 #   var o = Omnibar(); o.query = "li"; o.pills = …; o.groups = …; o.draw(p, bx, w, h, k, sk)
 
 from std.ffi import external_call
+from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_RIGHT, ALIGN_CENTER
@@ -67,6 +68,18 @@ struct Omnibar(Movable):
         for ref g in self.groups:
             n += len(g.rows)
         return n
+
+    def query_key(mut self, name: String, mods: Int) -> Bool:
+        """A key for the query field: what it types, Backspace by a whole character. True when the query changed."""
+        if name == "Backspace" or name == "BackSpace":
+            if self.query == "":
+                return False
+            self.query = without_last(self.query)
+            return True
+        if (mods & 2) == 0 and typed_text(name):
+            self.query += name
+            return True
+        return False
 
     def draw[P: Painter](self, mut p: P, mut bx: Boxes, w: Float64, h: Float64, k: Float64, sk: Skin):
         p.rect(0, 0, w, h, with_alpha(sk.ink, 0.28), 0)

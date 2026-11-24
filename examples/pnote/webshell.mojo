@@ -38,6 +38,7 @@ from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
+from mojoui.graphemes import typed_text
 from mojoui.files import private_dir, private_write, file_exists
 from mojoui.notesshell import draw_problem, draw_pill_button
 from mojoui.libc import unlink
@@ -1227,7 +1228,7 @@ struct WebShell(Movable):
                 self.page.backspace()
                 self.save_page()
                 return True
-            if (mods & 2) == 0 and name.byte_length() >= 1 and (name.byte_length() == 1 or Int(name.as_bytes()[0]) >= 0x80) and name != "Escape":
+            if (mods & 2) == 0 and typed_text(name):
                 self.page.insert(name)
                 self.save_page()
                 return True
@@ -1260,14 +1261,7 @@ struct WebShell(Movable):
         if name == "Escape":
             self.searching = False
             self.card_open = False
-        elif name == "Backspace":
-            var b = self.omni.query.as_bytes()
-            if len(b) > 0:
-                var cut = String(self.omni.query[byte=0:len(b) - 1])
-                self.omni.query = cut
-                self.search()
-        elif name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
-            self.omni.query += name
+        elif self.omni.query_key(name, mods):
             self.search()
         else:
             return False

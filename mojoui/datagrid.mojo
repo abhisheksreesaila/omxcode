@@ -11,6 +11,7 @@
 # histograms (when the app hands it the shapes), long text cut with "…". What it leaves to the app:
 # the data (a GridSource), writing values and sorting (engine operations: the grid only shows them).
 
+from mojoui.graphemes import without_last
 from mojoui.app import Event
 from mojoui.view import View, TextField, TAP, PAN, ZOOM, PRESS, RELEASE, DOUBLE, KEY, SHIFT, CTRL, ALT
 from mojoui.canvas import Surface
@@ -773,16 +774,7 @@ struct DataGrid(Copyable, Movable):
                 self.then = "ShiftTab" if (name == "Tab" and shift) else ("ArrowUp" if (name == "Enter" and shift) else name)
                 return GRID_COMMIT
             if name == "Backspace":
-                var kept = String("")
-                var n = 0
-                for ch in self.typed.codepoint_slices():
-                    n += 1
-                var k = 0
-                for ch in self.typed.codepoint_slices():
-                    k += 1
-                    if k < n:
-                        kept += String(ch)
-                self.typed = kept
+                self.typed = without_last(self.typed)
                 return GRID_TYPED
             if printable:
                 self.typed += name

@@ -5,6 +5,7 @@
 #
 #   var c = IslandCard(); c.title = "Book mind map"; c.tiles = …; c.draw(p, bx, slot_x0, slot_x1, k, sk)
 
+from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter
 from mojoui.skin import Skin, mix, with_alpha
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_CENTER, ALIGN_RIGHT
@@ -71,15 +72,10 @@ struct IslandCard(Movable):
             if self.all_selected:
                 self.title = ""
             else:
-                var b = self.title.as_bytes()
-                var at = len(b) - 1
-                while at > 0 and (Int(b[at]) & 0xC0) == 0x80:
-                    at -= 1
-                var cut = String(self.title[byte=0:max(at, 0)])
-                self.title = cut
+                self.title = without_last(self.title)
             self.all_selected = False
             return 1
-        if name.byte_length() == 1 or (name.byte_length() > 1 and Int(name.as_bytes()[0]) >= 0x80):
+        if typed_text(name):
             if self.all_selected:
                 self.title = ""
                 self.all_selected = False
