@@ -59,6 +59,14 @@ struct FrameWatch(Movable):
         self.refreshes.clear()
         self.changes = 0
 
+    def stalls(self) -> String:
+        """Each gap between two ticks over 20 ms: at which ms, how long, and what the tick before it took (µs)."""
+        var out = String("")
+        for i in range(1, len(self.begins)):
+            if self.begins[i] - self.begins[i - 1] > 20_000_000:
+                out += " stall@" + String((self.begins[i - 1] - self.begins[0]) // 1_000_000) + ":" + String((self.begins[i] - self.begins[i - 1]) // 1_000_000) + "ms,took" + String((self.ends[i - 1] - self.begins[i - 1]) // 1000)
+        return out
+
     def line(self) -> String:
         """What was seen since clear(): refreshes a second, new pictures a second, the host's ticks."""
         var secs = Float64(self.refreshes[len(self.refreshes) - 1] - self.refreshes[0]) / 1e9 if len(self.refreshes) > 1 else 0.0
@@ -77,7 +85,7 @@ struct FrameWatch(Movable):
         return (" refreshes=" + String(len(self.refreshes)) + " refresh_hz=" + _hz(len(self.refreshes) - 1, secs) + " new_pictures_hz=" + _hz(self.changes, secs)
                 + " ticks=" + String(len(self.begins)) + " empty=" + String(empty) + " tick_gap_p50=" + _ms(gaps, 0.5) + " tick_gap_p95=" + _ms(gaps, 0.95)
                 + " tick_took_p50=" + _ms(took, 0.5) + " tick_took_p95=" + _ms(took, 0.95) + " clock_starts=" + String(len(waits))
-                + " start_to_tick_p50=" + _ms(waits, 0.5) + " start_to_tick_p95=" + _ms(waits, 0.95))
+                + self.stalls() + " start_to_tick_p50=" + _ms(waits, 0.5) + " start_to_tick_p95=" + _ms(waits, 0.95))
 
 
 def _ms(v_in: List[Int], q: Float64) -> String:

@@ -319,6 +319,7 @@ struct AppKitHost[A: App](Movable):
     var canvases: List[AppleCanvas]
     var link: Int  # what ticks every canvas, once a frame (0 = stopped): the screen's own clock (a CADisplayLink), else an NSTimer at 60 Hz
     var link_is_screen: Bool
+    var backup: Int  # the NSTimer that stands in while the screen's clock doesn't tick (0: none)
     var link_ticks: Int  # ticks the clock itself gave (a prompt tick after input isn't one)
     var link_seen: Int  # link_ticks at the last look (frameCheck:)
     var idle_from: Int  # when the canvases went idle with the clock running (ns; 0: they aren't): it stops LINGER_NS later
@@ -425,6 +426,7 @@ struct AppKitHost[A: App](Movable):
         self.canvases = List[AppleCanvas]()
         self.link = 0
         self.link_is_screen = False
+        self.backup = 0
         self.link_ticks = 0
         self.link_seen = 0
         self.idle_from = 0
@@ -2786,12 +2788,15 @@ struct AppKitHost[A: App](Movable):
 
     def queue_snapshot(mut self, self_addr: Int):
         """A picture once the screen settles (0.4 s after the first change; changes in between share it)."""
-        if not self.report.on or self.report.pending or self.report.count >= MAX_SHOTS:
+        if not self.report.on or self.report.quiet or self.report.pending or self.report.count >= MAX_SHOTS:
             return
         self.report.pending = True
         _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("debugQueued:"), ns_number(self_addr), Float64(0.4))
 
     def snapshot(mut self):
+        if self.report.quiet:  # (asked for before the measured step began: not inside it)
+            self.report.pending = False
+            return
         if self.report.on and self.report.count < MAX_SHOTS and self.window != 0 and not self.shots_taken:
             # (a WKWebView draws out of process: cacheDisplayInRect: leaves it blank, so WebKit pictures each first and
             # the last picture to arrive calls this again)
@@ -3104,6 +3109,9 @@ struct AppKitHost[A: App](Movable):
             elif Int(now_ns()) - self.idle_from > LINGER_NS:
                 self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
                 self.stop_frames()
+        if self.link != 0 and not self.link_is_screen and self.ticks % 30 == 0 and env("MOJOUI_FRAME_CLOCK") != "timer" and self.on_screen():  # (the window can be seen again: the screen's clock)
+            self.stop_frames()
+            self.start_frames()
 
     def finish_frame(mut self):
         """After a frame's draws: the window draws and commits its own views, then GPU frames are shown oldest first,
@@ -3138,6 +3146,12 @@ struct AppKitHost[A: App](Movable):
             _ = msg(self.link, "release")
         self.link = 0
         self.idle_from = 0
+        self.drop_backup()
+
+    def drop_backup(mut self):
+        if self.backup != 0:
+            _ = msg(self.backup, "invalidate")
+            self.backup = 0
 
     def start_frames(mut self):
         """Ticks every canvas once a frame, by the clock of the screen the window is on, until they have been idle for a while;
@@ -3162,7 +3176,8 @@ struct AppKitHost[A: App](Movable):
                 self.link_seen = self.link_ticks
                 self.check_frames()
         if self.link == 0:
-            self.start_timer()
+            self.link_is_screen = False
+            self.link = self.frame_timer()
         self.watch.started()
         if not self.prompt_due:
             self.prompt_due = True
@@ -3171,10 +3186,10 @@ struct AppKitHost[A: App](Movable):
         if self.ticks == 0:
             self.report.note("frames: " + ("the screen's clock" if self.link_is_screen else "timer") + " started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO CLOCK") + ")")
 
-    def start_timer(mut self):
-        self.link_is_screen = False
-        self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
-        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, self.common_modes)
+    def frame_timer(self) -> Int:
+        var t = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
+        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", t, self.common_modes)
+        return t
 
     def check_frames(self):
         """Looks at the screen's clock again in 0.1 s (frameCheck:)."""
@@ -3185,15 +3200,22 @@ struct AppKitHost[A: App](Movable):
         """0.1 s later: the screen's clock has ticked, or the timer takes its place."""
         if self.link == 0 or not self.link_is_screen or len(self.canvases) == 0:
             return
+        self.check_frames()
         if self.link_ticks != self.link_seen:
             self.link_seen = self.link_ticks
-            self.check_frames()
-            return
-        self.stop_frames()
-        if len(self.canvases) > 0:
-            self.start_timer()
-        if self.watch.on:
-            print("FRAMEWATCH: the screen's clock doesn't tick: timer", flush=True)
+        elif self.backup == 0:  # (until the screen's clock ticks: ticked_by)
+            self.backup = self.frame_timer()
+            if self.watch.on:
+                print("FRAMEWATCH: the screen's clock doesn't tick: timer", flush=True)
+
+    def ticked_by(mut self, clock: Int):
+        """Which clock this tick is from (0: the one right after the event that started it)."""
+        if clock == 0:
+            self.prompt_due = False
+        elif clock == self.link:
+            self.link_ticks += 1
+            if self.link_is_screen:
+                self.drop_backup()
 
     def keep_views(mut self, self_addr: Int):
         """(D-8016) The window is closing: a tiled canvas whose view is settled but not kept yet (a note opened and left
@@ -3853,10 +3875,7 @@ def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
 
 def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
     var t = from_tag(view)
-    if timer == 0:  # (the tick right after the event that started the clock)
-        host_at[A](t[0])[].prompt_due = False
-    else:
-        host_at[A](t[0])[].link_ticks += 1
+    host_at[A](t[0])[].ticked_by(timer)
     host_at[A](t[0])[].tick(msg[Float64](msg(cls("NSProcessInfo"), "processInfo"), "systemUptime"), t[0])
 
 
@@ -5562,11 +5581,17 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "firstscreen":  # firstscreen: the process's age when its first canvas picture was drawn and shown (as GTK's, D-7988)
         print("FIRSTSCREEN: " + String(round(host[].first_draw_age_ms, 1)), flush=True)
     elif verb == "noteswitch":  # noteswitch:N: App.bench("bench:switch") N times, each to its drawn frame
+        host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "NOTESWITCH", "switch", max(to_int(rest), 1))
+        host_at[A](host_addr)[].report.measure(False)
     elif verb == "omnibar":  # omnibar:N: App.bench("bench:omnibar") N times, each to its drawn frame
+        host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "OMNIBAR", "omnibar", max(to_int(rest), 1))
+        host_at[A](host_addr)[].report.measure(False)
     elif verb == "openall":  # openall: App.bench("bench:openall") (a note of each kind in turn), to the frame
+        host_at[A](host_addr)[].report.measure(True)
         app_step_bench[A](host_addr, "OPENALL", "openall", 3)
+        host_at[A](host_addr)[].report.measure(False)
     elif verb == "rss":  # rss: this process's resident memory (MB), as the kernel reports it (proc_pidinfo)
         print("RSS: " + String(round(rss_mb(), 1)), flush=True)
     elif verb == "appbench":  # appbench:K=<name>: the app readies a bench step on canvas K (App.bench "bench:<name>"), untimed, as GTK's (D-7984)
@@ -5580,7 +5605,9 @@ def run_step[A: App](host_addr: Int, step: String):
         bench_settle[A](host_addr, 500_000_000)
         print("APPBENCH: " + kv[1], flush=True)
     elif verb == "framebench":  # framebench:K=pan|zoom|draw|finish|type|grow,N: N gestures on canvas K, one frame each; percentiles of a frame's work
+        host_at[A](host_addr)[].report.measure(True)
         frame_bench[A](host_addr, rest)
+        host_at[A](host_addr)[].report.measure(False)
     elif verb == "gpushot":  # gpushot:K=path: the picture canvas K shows now (its layer's IOSurface, every frame in flight done), as a PNG (D-7993)
         var node = canvas_node_at(host[], kv[0])
         var k = host[].canvas_at(node) if node >= 0 else -1

@@ -19,6 +19,7 @@ struct MacReport(Movable):
     var count: Int
     var log: String
     var pending: Bool  # a snapshot is queued for the next quiet moment
+    var quiet: Bool  # a measured step is running: no picture is taken and the log isn't written until it ends (a picture is 45 ms of the main thread)
     var cause: String  # what changed the screen since the last snapshot
 
     def __init__(out self):
@@ -27,6 +28,7 @@ struct MacReport(Movable):
         self.count = 0
         self.log = ""
         self.pending = False
+        self.quiet = False
         self.cause = "start"
 
     def start(mut self, app: String, window: Int):
@@ -63,7 +65,14 @@ struct MacReport(Movable):
         if not self.on:
             return
         self.log += line + "\n"
-        self.write("log.txt", self.log)
+        if not self.quiet:
+            self.write("log.txt", self.log)
+
+    def measure(mut self, on: Bool):
+        """A measured step begins (on) or has ended."""
+        self.quiet = on
+        if self.on and not on:
+            self.write("log.txt", self.log)
 
     def write(self, name: String, text: String):
         _ = msg(ns_string(text), "writeToFile:atomically:encoding:error:", ns_string(self.dir + "/" + name), 1, 4, 0)  # NSUTF8StringEncoding
