@@ -5,7 +5,7 @@
 #   pixi run mojo run -I . -I examples/pnote tests/test_pagedesk.mojo        → "pagedesk: ok"
 from mojoui.skin import hexc
 from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
-from mojoui.scene import Scene
+from mojoui.scene import Scene, KeptPaint
 from mojoui.notesshell import Boxes, draw_dock, dock_height, draw_history_island, draw_page_zoom
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, shadow_bands, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CONNECTOR, STICKY, TEXT
@@ -104,7 +104,20 @@ def main() raises:
     var sc = Scene(2304, 1440, 1.6)
     var sk = skin_named("paper")
     var bx = pn_boxes()
-    draw_page_chrome(sc, bx, v, 1440, 900, 1, 1, PAGE_W, PAGE_H, 1.6, sk)
+    var frame_kept = KeptPaint()
+    draw_page_chrome(sc, bx, v, 1440, 900, 1, 1, PAGE_W, PAGE_H, 1.6, sk, frame_kept)
+    # (D-8024) again, moved: replayed op for op under the same version; another zoom, another grid: drawn anew
+    var fa = Scene(2304, 1440, 1.6)
+    draw_page_chrome(fa, bx, v, 1440, 900, 4, 4, PAGE_W, PAGE_H, 1.6, sk, frame_kept)
+    var fb = Scene(2304, 1440, 1.6)
+    draw_page_chrome(fb, bx, DeskView(v.x + 33, v.y - 7, v.scale), 1440, 900, 4, 4, PAGE_W, PAGE_H, 1.6, sk, frame_kept)
+    check(fa.ops() == fb.ops() and fa.ops() > 600, "page frame replayed: " + String(fa.ops()))
+    check(fa.same_layer(0, fb, 0) and fb.layer_tx[0] == (v.x + 33) * 1.6, "the same picture, moved")
+    for op in range(fa.ops()):
+        check(fa.same_op(op, fb, op), "page frame op " + String(op))
+    var fc = Scene(2304, 1440, 1.6)
+    draw_page_chrome(fc, bx, DeskView(v.x, v.y, v.scale * 1.01), 1440, 900, 4, 4, PAGE_W, PAGE_H, 1.6, sk, frame_kept)
+    check(not fc.same_layer(0, fb, 0), "another zoom: another picture")
     look.paint(sc, layer, v, 1440, 900, 1.6)
     check(near(box(bx, "#paper-sheet"), [v.x, v.y, PAGE_W * v.scale, PAGE_H * v.scale], 1e-9), "sheet box")
     # the canvas islands at the web's boxes (canvas.boxes.json)

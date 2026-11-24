@@ -6,8 +6,10 @@ from std.testing import assert_true, assert_equal
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
-from mojoui.notesshell import draw_shadows, draw_lifted, draw_radial_steps, draw_bordered
-from mojoui.skin import Shadow
+from mojoui.notesshell import draw_shadows, draw_lifted, draw_radial_steps, draw_bordered, draw_desk, Boxes
+from mojoui.skin import Shadow, Skin
+from mojoui.scene import KeptPaint
+from mojoui.pagedesk import draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.canvas import Surface, rgba
 from mojoui.scene import SurfacePainter
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, CH_MOVE
@@ -156,6 +158,15 @@ def radial_frame(mode: Int, k: Float64) raises -> Tuple[List[UInt32], Int]:
         draw_bordered(src, bx + 3.3 * Float64(q), 900 - 130 * Float64(q), 60.0 + 70 * Float64(q), 120, 4.0 * Float64(q), rgba(250, 240, 230), rgba(20, 60, 90), 1 + 0.5 * Float64(q))
     draw_bordered(src, 700, 900, 600, 200, 20, rgba(250, 240, 230), rgba(20, 60, 90), 1)
     draw_bordered(src, 340, 900, 340, 200, 20, rgba(250, 240, 230, 180), rgba(20, 60, 90), 1)
+    var kept = KeptPaint()
+    var bxs = Boxes()
+    var sk = Skin("test")
+    sk.paper = rgba(252, 250, 246)
+    sk.edge = rgba(60, 50, 40, 200)
+    sk.page_radius = 6
+    sk.shadow2 = List[Shadow]()
+    sk.shadow2.append(Shadow(0, 8, 24, 0, rgba(0, 0, 0, 60)))
+    draw_page_chrome(src, bxs, DeskView(720, 100, 0.5), 1440, 900, 2, 1, PAGE_W, PAGE_H, k, sk, kept)  # (D-8024: the page's edge, left out under its paper)
     draw_radial_steps(src, 20, 900, 300, 90, 0.3, 0.8, rgba(90, 10, 200), rgba(0, 200, 90), 0.9, 8)
     var sc = Scene(W, H, k)
     sc.begin_layer("a")
@@ -201,8 +212,41 @@ def test_radial() raises:
         print("   radial at", k, ":", a[1], "discs with a hole, pixels identical to whole discs, circles", c[0], "channels apart by", c[1])
 
 
+def test_cover() raises:
+    """(D-8024) draw_desk leaves out the dots an opaque cover hides: the same picture once the cover is drawn."""
+    var sk = Skin("test")
+    sk.desk = rgba(240, 238, 232)
+    sk.desk_dot = rgba(120, 110, 100, 180)
+    for k in [1.0, 1.6]:
+        var ops = List[Int]()
+        var pics = List[List[UInt32]]()
+        for c in [False, True]:
+            var sc = Scene(W, H, 1.0)
+            sc.begin_layer("desk")
+            sc.layer_transform(0, 0, k)
+            var cover = List[Float64]()
+            if c:
+                cover = [4.0 + 15, 66.0 + 15, 1428.0 - 15, 888.0 - 15]
+            draw_desk(sc, 1440, 900, k, sk, cover)
+            ops.append(sc.ops())
+            sc.begin_layer("host")
+            sc.layer_transform(0, 0, k)
+            sc.rect(4, 66, 1424, 822, rgba(255, 254, 250), 14)
+            var g = GPU2D()
+            assert_true(g.start(False), "start")
+            var slot = g.draw(sc, Scene(0, 0, 1.0), 1, W, H)
+            var out = List[UInt32](length=W * H, fill=0)
+            assert_true(slot >= 0 and g.gl.read(g.gl.tex[slot], W, H, Int(out.unsafe_ptr())), "read")
+            g.gl.close()
+            pics.append(out^)
+        assert_equal(apart(pics[0], pics[1])[0], 0, "the same picture")
+        assert_true(ops[1] * 3 < ops[0], "most dots left out")
+        print("   desk at", k, ":", ops[0], "ops ->", ops[1], "under an opaque host, pixels identical")
+
+
 def main() raises:
     assert_true(headless_gl33() != 0, "a headless GL context")
+    test_cover()
     test_radial()
     test_lifted()
     var layer = board()

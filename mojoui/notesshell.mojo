@@ -212,13 +212,19 @@ def draw_bordered[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: F
     p.rect(x + bw, y + bw, w - 2 * bw, h - 2 * bw, fill, max(0.0, radius - bw))
 
 
-def draw_desk[P: Painter](mut p: P, w: Float64, h: Float64, k: Float64, sk: Skin):
-    """The desk: its colour and a dot every 22 px (radial-gradient(dot 1px, transparent 1.2px) / 22px 22px)."""
+def draw_desk[P: Painter](mut p: P, w: Float64, h: Float64, k: Float64, sk: Skin, cover: List[Float64] = List[Float64]()):
+    """The desk: its colour and a dot every 22 px (radial-gradient(dot 1px, transparent 1.2px) / 22px 22px). cover (x0, y0,
+    x1, y1): something opaque drawn over it after: the dots wholly inside are left out (D-8024: a page's host hides 2,400
+    of 2,700)."""
     p.fill(sk.desk)
+    var cov = len(cover) == 4
     var y = 11.0
     while y < h + 11:
         var x = 11.0
         while x < w + 11:
+            if cov and x - 2.5 > cover[0] and x + 2.5 < cover[2] and y - 2.5 > cover[1] and y + 2.5 < cover[3]:
+                x += 22
+                continue
             p.circle(x, y, 1.1, sk.desk_dot)
             x += 22
         y += 22

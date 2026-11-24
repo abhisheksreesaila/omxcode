@@ -31,6 +31,7 @@ from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome,
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
 from mojoui.keycaps import keycap, device_name
+from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
 from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
@@ -241,6 +242,10 @@ struct WebShell(Movable):
     var budget: FrameBudget  # (D-7957) the open's slices sized by what the rest of the frame cost
     var warm: GlyphWarm  # (D-8002) the glyphs drawn last time and the look's own styles, readied while nothing happens
     var warm_styles: Bool
+    var cold_trace: Bool
+    var cold_images: Int
+    var cold_shaped: Int
+    var frame: KeptPaint  # (D-8024) the canvas's page frame
     var desk: KeptPaint  # (D-8013) the desk's dots, replayed while the window and the skin hold
     var screens: SceneWarm  # (D-8011) the screen being readied
     var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
@@ -293,7 +298,11 @@ struct WebShell(Movable):
         self.win_k = 0
         self.warm = GlyphWarm(config_dir("pnote") + "/glyphs.txt")
         self.warm_styles = False
-        self.desk = KeptPaint()
+        self.cold_trace = getenv("MOJOUI_COLD_TRACE") == "1"
+        self.cold_images = 0
+        self.cold_shaped = 0
+        self.frame = KeptPaint(4)
+        self.desk = KeptPaint(3)
         self.screens = SceneWarm()
         self.to_ready = List[Int]()
         self.ready_k = 0
@@ -428,10 +437,11 @@ struct WebShell(Movable):
         if self.notes[i].kind == "canvas" and not self.notes[i].secure and self.snap_dir != "":
             var path = self.snap_path(id)
             var tag = self.snap_tag(i)
-            var grid = parse_grid(self.look.kept_note(path, tag))
+            var head = self.look.kept_head(path)  # (the file's head, read once)
+            var grid = parse_grid(self.look.head_note(head, tag))
             if grid[0] > 0:  # (its last view is kept: the page grid from it, the view laid out, the key asked)
                 var view = opening_view(self.win_w, self.win_h, Float64(grid[0]) * PAGE_W, Float64(grid[1]) * PAGE_H)
-                if self.win_k > 0 and self.look.kept_view(path, tag, view, self.win_w, self.win_h, self.win_k):
+                if self.win_k > 0 and self.look.head_shows(head, tag, view, self.win_w, self.win_h, self.win_k):
                     snap_ahead(path)  # (read while this frame is laid out: D-8015)
                     # the deferred open: the kept view shows this frame, the row is read, skimmed and the view's nodes
                     # parsed on a job thread (OpenBoard.open_later); the board loads underneath, held until they're in
@@ -536,14 +546,25 @@ struct WebShell(Movable):
 
     def paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         self.budget.begin()  # (D-7957: what this frame's own work costs sets the next open slice)
+        if self.cold_trace:  # (MOJOUI_COLD_TRACE=1, diagnosis: first-time work since the last paint: glyphs rastered, runs shaped)
+            var e = engine()
+            print("COLD: note " + String(self.current) + " since the last paint: glyph images " + String(len(e[].image_of) - self.cold_images) + ", runs shaped " + String(e[].shapings - self.cold_shaped)
+                  + ", chrome replays " + String(self.frame.replays) + " draws " + String(self.frame.draws), flush=True)
+            self.cold_images = len(e[].image_of)
+            self.cold_shaped = e[].shapings
         self._paint(p, w, h, k)
         self.budget.end()
 
     def _paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         self.boxes.clear()
         self.boxes.add("#app", 0, 0, w, h)
-        if self.desk.begin(p, "desk", self.panel.skin_name + "|" + String(w) + "|" + String(h) + "|" + String(k), k):
-            draw_desk(p, w, h, k, self.sk)
+        var cover = List[Float64]()  # (the opaque page or map host drawn over the desk, inside its rounded corners)
+        var ci = self.note_index(self.current)
+        if ci >= 0 and self.notes[ci].kind != "canvas" and not self.notes[ci].secure:
+            var m = self.sk.radius + 1
+            cover = [(296.0 if self.sidebar else 0.0) + 4 + m, 66 + m, w - 12 - m, h - 12 - m]
+        if self.desk.begin(p, "desk", self.panel.skin_name + "|" + String(w) + "|" + String(h) + "|" + String(k) + "|" + (String(cover[0]) if len(cover) == 4 else String("")), k):
+            draw_desk(p, w, h, k, self.sk, cover)
             self.desk.end(p)
         p.begin_layer("shell")
         p.layer_transform(0, 0, k)
@@ -561,7 +582,7 @@ struct WebShell(Movable):
             if not self.view_set:
                 self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
                 self.view_set = True
-            draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk)
+            draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk, self.frame)
             var r = self.view_rect()
             if self.board.loading():  # (D-7944: a slice of the rest of the board this frame, the view's part first)
                 var ts = clock_us()
@@ -672,7 +693,7 @@ struct WebShell(Movable):
 
     def readying(self) -> Bool:
         """Something is left to ready while nothing happens (the glyphs drawn last time, the screens likely next)."""
-        return self.warm.more() or (self.win_k > 0 and getenv("MOJOUI_SCENEWARM") != "0" and (self.ready_k != self.win_k or self.screens.more() or len(self.to_ready) > 0))
+        return self.warm.more() or (getenv("MOJOUI_SCENEWARM") != "0" and (self.win_k <= 0 or self.ready_k != self.win_k or self.screens.more() or len(self.to_ready) > 0))
 
     def ready_step(mut self):
         """An idle tick: ≤ 4 ms of glyphs, then a screen's painting (one) or ≤ 4 ms of its text; nothing for 300 ms after
@@ -687,7 +708,7 @@ struct WebShell(Movable):
             self.to_ready.clear()
             var notes = List[Int]()
             for ref n in self.notes:
-                if not n.secure and n.id != self.current and n.content.byte_length() <= WARM_NOTE_BYTES and len(notes) < WARM_NOTES:
+                if not n.secure and n.id != self.current and (n.kind == "canvas" or n.content.byte_length() <= WARM_NOTE_BYTES) and len(notes) < WARM_NOTES:
                     notes.append(n.id)
             for q in range(len(notes)):
                 self.to_ready.append(notes[len(notes) - 1 - q])
@@ -746,15 +767,20 @@ struct WebShell(Movable):
         var bd = OpenBoard()
         var cols = 1
         var rows = 1
-        try:
-            var j = Json.parse(self.notes[i].content)
-            bd.set(import_json_canvas_doc(j))
-            bd.layer.set_connector_gap(6)
-            var pg = j.get(j.get(0, "pn"), "page")
-            cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
-            rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
-        except:
-            return
+        if self.notes[i].content.byte_length() <= WARM_NOTE_BYTES:
+            try:
+                var j = Json.parse(self.notes[i].content)
+                bd.set(import_json_canvas_doc(j))
+                bd.layer.set_connector_gap(6)
+                var pg = j.get(j.get(0, "pn"), "page")
+                cols = max(1, Int(j.real(j.get(pg, "columns"), 1)))
+                rows = max(1, Int(j.real(j.get(pg, "rows"), 1)))
+            except:
+                pass
+        else:  # (a big board: its frame, dock and labels alone, at the page grid its kept view remembers: its first frame is that view)
+            var grid = parse_grid(self.look.kept_note(self.snap_path(self.notes[i].id), self.snap_tag(i)))
+            cols = max(1, grid[0])
+            rows = max(1, grid[1])
         var look = BoardLook()
         var tools = BoardTools()
         var view = self.view

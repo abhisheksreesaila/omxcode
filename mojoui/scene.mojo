@@ -455,39 +455,77 @@ struct KeptPaint(Movable):
     """(D-8013) A layer whose picture depends on little (a desk's dots, a grid): painted once, its ops replayed while the
     token holds, under the same version (a renderer keeps what it built from them, compared by that number alone).
 
-        if desk.begin(p, "desk", token):     # a layer begun; False: replayed, nothing to draw
+        if desk.begin(p, "desk", token, k):     # a layer begun; False: replayed, nothing to draw
             draw_desk(p, …)
-            desk.end(p)"""
+            desk.end(p)
 
-    var kept: KeptOps
-    var token: String
-    var version: Int
+    `cap` pictures are kept (D-8024; the least recently begun goes first): one readied ahead, or the last few seen."""
+
+    var kept: List[KeptOps]
+    var tokens: List[String]
+    var versions: List[Int]
+    var used: List[Int]
+    var cap: Int
+    var next_version: Int
+    var stamp: Int
+    var at: Int  # the picture being drawn
     var mark: Int
+    var replays: Int  # paints answered by the kept ops, and drawn (tests, diagnosis)
+    var draws: Int
 
-    def __init__(out self):
-        self.kept = KeptOps()
-        self.token = ""
-        self.version = 0
+    def __init__(out self, cap: Int = 1):
+        self.replays = 0
+        self.draws = 0
+        self.kept = List[KeptOps]()
+        self.tokens = List[String]()
+        self.versions = List[Int]()
+        self.used = List[Int]()
+        self.cap = max(cap, 1)
+        self.next_version = 1
+        self.stamp = 0
+        self.at = -1
         self.mark = -1
 
-    def begin[P: Painter](mut self, mut p: P, key: String, token: String, k: Float64) -> Bool:
-        """Layer `key` (scale k, no offset) begun; True: draw it now, then end()."""
+    def begin[P: Painter](mut self, mut p: P, key: String, token: String, k: Float64, tx: Float64 = 0, ty: Float64 = 0) -> Bool:
+        """Layer `key` (scale k, moved by (tx, ty) device px) begun; True: draw it now, then end()."""
         p.begin_layer(key)
-        p.layer_transform(0, 0, k)
-        if token == self.token and p.ops_replay(self.kept):
-            p.layer_version(self.version)
+        p.layer_transform(tx, ty, k)
+        self.stamp += 1
+        self.at = -1
+        for i in range(len(self.tokens)):
+            if self.tokens[i] == token:
+                self.at = i
+                break
+        if self.at >= 0 and p.ops_replay(self.kept[self.at]):
+            p.layer_version(self.versions[self.at])
+            self.used[self.at] = self.stamp
+            self.replays += 1
             return False
-        if token != self.token:
-            self.version += 1
-            self.token = token
-            self.kept = KeptOps()
-        p.layer_version(self.version)
+        self.draws += 1
+        if self.at < 0:
+            if len(self.tokens) < self.cap:
+                self.kept.append(KeptOps())
+                self.tokens.append(token)
+                self.versions.append(0)
+                self.used.append(0)
+                self.at = len(self.tokens) - 1
+            else:
+                self.at = 0
+                for i in range(1, len(self.used)):
+                    if self.used[i] < self.used[self.at]:
+                        self.at = i
+                self.kept[self.at] = KeptOps()
+                self.tokens[self.at] = token
+            self.versions[self.at] = self.next_version  # (never an old picture's number)
+            self.next_version += 1
+        self.used[self.at] = self.stamp
+        p.layer_version(self.versions[self.at])
         self.mark = p.ops_mark()
         return True
 
     def end[P: Painter](mut self, mut p: P):
-        if self.mark >= 0:
-            self.kept = p.ops_capture(self.mark)
+        if self.mark >= 0 and self.at >= 0:
+            self.kept[self.at] = p.ops_capture(self.mark)
 
 
 struct Scene(Painter, Movable, Copyable):

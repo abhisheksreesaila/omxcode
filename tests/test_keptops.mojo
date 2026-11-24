@@ -142,6 +142,24 @@ def test_keptpaint() raises:
     var e = desk_scene(plain, "z", 1000, drawn)
     for op in range(a.ops()):
         assert_equal(Int(a.kinds[op]), Int(e.kinds[op]), "as drawn")
+    # (D-8024) three pictures kept: each replayed under its own version; a fourth takes the place of the least recent one
+    var few = KeptPaint(3)
+    var nd = 0
+    var fa = desk_scene(few, "a", 1000, nd)
+    var fb = desk_scene(few, "b", 1200, nd)
+    _ = desk_scene(few, "c", 1400, nd)
+    var fa2 = desk_scene(few, "a", 1000, nd)
+    assert_equal(nd, 3, "a, b, c drawn once each, a again replayed")
+    same_ops(fa, fa2, "a again")
+    assert_true(fa.same_layer(0, fa2, 0) and not fa.same_layer(0, fb, 0), "its own version")
+    var fd = desk_scene(few, "d", 1600, nd)  # (b, the least recent, goes)
+    var fa3 = desk_scene(few, "a", 1000, nd)
+    assert_equal(nd, 4, "d drawn, a still kept")
+    assert_true(fa.same_layer(0, fa3, 0), "a's picture")
+    var fb2 = desk_scene(few, "b", 1200, nd)
+    assert_equal(nd, 5, "b drawn again")
+    same_ops(fb, fb2, "b again")
+    assert_true(not fb2.same_layer(0, fb, 0) and not fb2.same_layer(0, fd, 0), "under a new number")
     print("   KeptPaint: drawn once per token, replayed op for op")
 
 

@@ -13,8 +13,8 @@
 from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
-from mojoui.scene import Painter, snap_px, KeptOps, corner_rect
-from mojoui.viewsnap import snap_read, SnapKey, renderer_id, build_id
+from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
+from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
 from mojoui.ink import Stroke
@@ -113,7 +113,7 @@ def shadow_bands(blur: Float64, spread: Float64, peak: Float64, steps: Int = 32)
 
 
 def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: Float64, win_h: Float64, columns: Int, rows: Int,
-                                 page_w: Float64, page_h: Float64, k: Float64, sk: Skin):
+                                 page_w: Float64, page_h: Float64, k: Float64, sk: Skin, mut kept: KeptPaint):
     """The page frame in screen px (chrome.js pageChrome): the skin's shadow layers as bands, the edge one hairline out,
     the paper, dashed folds between pages, "Page N" under each page of the bottom row (inside the corner above it).
     Its own layer, drawn about the frame's origin and moved there by the layer's transform, with a version from what
@@ -123,10 +123,13 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: F
     if w <= 0 or h <= 0:
         return
     bx.add("desk.sheet", at.x, at.y, w, h)
-    p.begin_layer("page-frame")
-    p.layer_version((Int(at.scale * 1_000_000) * 1000003 + columns * 7919 + rows * 104729 + Int(k * 1000) * 31 + Int(sk.paper) * 131
-                     + Int(sk.edge) * 17 + Int(page_w * 10) * 13 + Int(page_h * 10) * 7) & 0x3FFFFFFFFFFFFFFF)
-    p.layer_transform(at.x * k, at.y * k, k)
+    # (D-8024: painted once per look, its ops replayed: 962 for sixteen pages)
+    var token = (String(at.scale) + "|" + String(columns) + "|" + String(rows) + "|" + String(k) + "|" + String(sk.paper) + "|" + String(sk.edge) + "|" + String(page_w) + "|" + String(page_h)
+                 + "|" + String(sk.page_radius) + "|" + String(sk.ui_muted))
+    for s in sk.shadow2:
+        token += "|" + String(s.dx) + "," + String(s.dy) + "," + String(s.blur) + "," + String(s.spread) + "," + String(s.color)
+    if not kept.begin(p, "page-frame", token, k, at.x * k, at.y * k):
+        return
     var v = DeskView(0, 0, at.scale)
     _ = win_w
     _ = win_h
@@ -152,7 +155,10 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: F
                 p.rect(bx0, by0, bx1 - bx0, by1 - by0, c, 0)
                 continue
             _ring(p, bx0, by0, bx1, by1, v.x + m, v.y + m, v.x + w - m, v.y + h - m, c)
-    p.rect(v.x - 1, v.y - 1, w + 2, h + 2, sk.edge, r + 1)
+    if opaque and min(w, h) > 2 * (2 + 0.3 * (r + 1)) + 48:  # (the paper hides the edge's middle: filled once, not twice)
+        p.rect_hole(v.x - 1, v.y - 1, w + 2, h + 2, sk.edge, r + 1, 2 + 0.3 * (r + 1))
+    else:
+        p.rect(v.x - 1, v.y - 1, w + 2, h + 2, sk.edge, r + 1)
     p.rect(v.x, v.y, w, h, sk.paper, r)
     for c in range(1, columns):
         _dashed(p, v.x + Float64(c) * page_w * v.scale, v.y, v.x + Float64(c) * page_w * v.scale, v.y + h)
@@ -172,6 +178,7 @@ def draw_page_chrome[P: Painter](mut p: P, mut bx: Boxes, at: DeskView, win_w: F
                 var ly = bottom + (11.0 if last else -26.0)
                 # a Leafer text row: the baseline (row + 0.7 · size) / 2 below its top, the row as tall as the size
                 p.run(st, "Page " + String(rw * columns + c + 1), lx, ly + (LABEL_SIZE + 0.7 * LABEL_SIZE) / 2, sk.ui_muted, 0)
+    kept.end(p)
 
 
 def _ring[P: Painter](mut p: P, bx0: Float64, by0: Float64, bx1: Float64, by1: Float64, hx0: Float64, hy0: Float64, hx1: Float64, hy1: Float64,
@@ -363,27 +370,34 @@ struct BoardLook(Movable):
         self.keep_ops = getenv("MOJOUI_KEEP_OPS") != "0"
         self.build = build_id()
 
-    def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
-        """(D-7956) Whether the GPU renderer would show the board's last view kept at path for this tag, view and size
-        (its key read from the file's head, every part compared as the renderer will: a cheap read). An app opening a
-        document asks this first: when True it can show the kept view and load the board underneath."""
-        if path == "" or tag == "" or renderer_id() == 0:
-            return False
-        var h = snap_read(path, True)
-        if not h.ok:
+    def kept_head(self, path: String) -> ViewSnap:
+        """(D-8024) The head of the board's last view kept at path (a small read; ok False: none): ask head_note and
+        head_shows with it, instead of reading it twice."""
+        if path == "" or renderer_id() == 0:
+            return ViewSnap()
+        return snap_read(path, True)
+
+    def head_shows(self, head: ViewSnap, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
+        """Whether the GPU renderer would show that kept view for this tag, view and size (its key, every part compared as
+        the renderer will)."""
+        if tag == "" or not head.ok:
             return False
         var want = SnapKey(tag, renderer_id(), self.build, v.scale * k, snap_px(v.x * k), snap_px(v.y * k), Int(view_w * k + 0.5), Int(view_h * k + 0.5))
-        return h.key.same(want)
+        return head.key.same(want)
+
+    def head_note(self, head: ViewSnap, tag: String) -> String:
+        """The note kept with that view when it was kept for this tag ("" otherwise): what the app needs to lay the view
+        out (its page grid) before the document is read."""
+        return head.note if head.ok and tag != "" and head.key.tag == tag else String("")
+
+    def kept_view(self, path: String, tag: String, v: DeskView, view_w: Float64, view_h: Float64, k: Float64) -> Bool:
+        """(D-7956) Whether the GPU renderer would show the board's last view kept at path for this tag, view and size. An
+        app opening a document asks this first: when True it can show the kept view and load the board underneath."""
+        return self.head_shows(self.kept_head(path), tag, v, view_w, view_h, k)
 
     def kept_note(self, path: String, tag: String) -> String:
-        """(D-7956) The note kept with the board's last view at path when it was kept for this tag ("" otherwise): what
-        the app needs to lay the view out (its page grid) before the document is read, to ask kept_view() with."""
-        if path == "" or tag == "" or renderer_id() == 0:
-            return ""
-        var h = snap_read(path, True)
-        if not h.ok or h.key.tag != tag:
-            return ""
-        return h.note
+        """(D-7956) The note kept with the board's last view at path when it was kept for this tag ("" otherwise)."""
+        return self.head_note(self.kept_head(path), tag)
 
     def style_of(self, ref o: Obj) -> TextStyle:
         var st = TextStyle(o.family if o.family != "" else self.family, o.weight, False, o.size)
