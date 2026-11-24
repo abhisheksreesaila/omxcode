@@ -1,13 +1,17 @@
 """omx's cover clips (docs/omxome.html): short loops of the real app moving, recorded off the private headless display.
 
-    pixi run python scripts/omxomeclip.py take  [tv tiles cards hybrid]    raw takes → build/omxome/<name>/ (raw.mp4, events.json)
-    pixi run python scripts/omxomeclip.py edit  [tv tiles cards hybrid]    compose → docs/img/omx/clip-<name>.mp4 + .jpg (no new take)
-    pixi run python scripts/omxomeclip.py all   [names]                    both                                   (default: all four)
+    pixi run python scripts/omxomeclip.py take  [map live pin …]    raw takes → build/omxome/<name>/ (raw.mp4, events.json)
+    pixi run python scripts/omxomeclip.py edit  [map live pin …]    compose → docs/img/omx/clip-<name>.mp4 + .jpg (no new take)
+    pixi run python scripts/omxomeclip.py all   [names]                    both                                   (default: map live pin, the cover's)
 
-It runs ready builds and never builds: OMXOME_BUILDS (default: this checkout; the 2026-11-22 clips used ../mojo-ui-g77) holds
+It runs ready builds and never builds: OMXOME_BUILDS (default: this checkout) holds
 build/omx/linux/omx (the real app: Qwen3.8-27B in this process, voice, AG-UI cards) and build/stage/linux/stage (the Stage
 demo: sample tiles, canned answers, no model). Its goal 72 checker supplies the model environment (OMX_MODELS, the GPU, a
 silent microphone, a null sink for the speaker): docs/goals/72-check.py.
+
+The cover's takes are the app at night (STAGE_DARK, OMX_DARK), at 7:45 on a Wednesday (the Stage demo: STAGE_CLOCK; omx:
+MOJOUI_NOW), without demo controls or "sample" on the tiles (STAGE_CLEAN, OMX_CLEAN; the page's footer says the day is sample data). Every framing keeps whole words: a crop's edges fall in the gaps between columns,
+or the rails fade out around the TV (Clip.matte).
 
 take: the app at 1280×820 points with GDK_SCALE=2 (2560×1640 pixels, so a push-in on one card stays sharp) on its own Xvfb
   screen (scripts/headless.py), driven by its own test steps (MOJOUI_TEST: tap a button by its title, type into a field,
@@ -25,11 +29,12 @@ take: the app at 1280×820 points with GDK_SCALE=2 (2560×1640 pixels, so a push
             tiles canvas draws empty for 4 frames (133 ms) as the screen rebuilds on each flip: the edit shows the last
             good frame for those (Clip.blank), so that clip is not published (docs/omxome.html doesn't use it) until the flash is understood
 edit: 1600×1024 (the window's shape, as the stills were), a camera that eases in on the card that matters and back out,
-  a few quiet lower-third captions (scripts/director.py's look, scaled), a small touch mark where a test step tapped (the
-  steps send no pointer, so the take shows none). Waiting on the model is cut or sped up, and the caption says so
-  ("thinking, 4× speed"); everything else plays at real time. Each clip starts and ends on the same calm frame so it
+  no lower-third captions on the cover's clips (the page's headings say it), a small touch mark where a test step tapped (the
+  steps send no pointer, so the take shows none). Waiting on the model is cut or sped up, and a small tag says so
+  ("thinking · 6×", "cut · 5 s"); everything else plays at real time. Each clip starts and ends on the same calm frame so it
   loops. H.264, yuv420p, +faststart, no audio, crf 26; the poster is the payoff frame.
 """
+import datetime
 import json
 import math
 import os
@@ -51,6 +56,9 @@ OUT = (1600, 1024)
 FPS = 30
 CRF = int(os.environ.get("OMXOME_CRF", "26"))
 NAMES = ["tv", "tiles", "cards", "hybrid", "map", "live", "pin"]
+COVER = ["map", "live", "pin"]  # the cover's (and live's first frame: stage-day.jpg)
+STAGE = {"STAGE_DARK": "1", "STAGE_CLEAN": "1", "STAGE_CLOCK": "7:45"}
+OMX = {"OMX_DARK": "1", "OMX_CLEAN": "1", "MOJOUI_NOW": str(int(datetime.datetime(2026, 11, 18, 7, 45).timestamp()))}  # the Stage demo's Wednesday
 TODO = '{"items":[{"text":"buy milk","done":false},{"text":"call mum","done":false},{"text":"book the dentist","done":false}]}'
 OPEN = "waitfor:Listening=300000;wait:2500;"  # (the model has loaded; the stage settles)
 
@@ -81,7 +89,7 @@ def plan(name, d):
         steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:1500",
                           "tap:2:30 rain at 4", "wait:4500", "tap:Game tonight", "wait:4500", "tap:7:45 school run", "wait:3500"])
         return BUILDS / "build/stage/linux/stage", steps, {"STAGE_TRACE": str(d / "trace.txt")}, None, 120
-    env = {"OMX_LLM_CTX": "32768", "MOJOUI_TODO": str(d / "todo.json"), "OMX_TV_QUIET": "60000"}
+    env = {"OMX_LLM_CTX": "32768", "MOJOUI_TODO": str(d / "todo.json"), "OMX_TV_QUIET": "60000", **OMX}
     if name == "tv":
         q = os.environ.get("OMXOME_TV_ASK", "What does ephemeral mean?")
         steps = (OPEN + f"regions:{d}/home.json;wait:1200;tap:Type;wait:700;" + typed("Type to omx", q)
@@ -101,14 +109,13 @@ def plan(name, d):
                  + "wait:2500;tap:Back to the tiles;wait:4000;" + f"shot:{d}/last.png")
         return BUILDS / "build/omx/linux/omx", steps, env, "WAITED: Listening", 900
     if name == "live":
-        # (the plain morning long enough for the timer and a score change in Live, then the airport, then the morning)
-        steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:17000",
-                          "tap:Fri 7:20 · near the airport", "wait:6000", "tap:7:45 school run", "wait:3500"])
-        return BUILDS / "build/stage/linux/stage", steps, {"STAGE_TRACE": str(d / "trace.txt")}, None, 120
+        # (the plain morning long enough for the timer and a score change in Live)
+        steps = ";".join([f"shot:{d}/first.png", "wait:2500", f"regions:{d}/regions.json", "wait:17000", f"shot:{d}/last.png"])
+        return BUILDS / "build/stage/linux/stage", steps, {"STAGE_TRACE": str(d / "trace.txt"), **STAGE}, None, 120
     if name == "pin":
         # no test steps: GTK's gestures ignore real pointer input while MOJOUI_TEST drives (a first take's XTest drag never
         # moved the tile), so the whole take is real X input (drag_to_pinned), as scripts/live.py drives an app
-        return BUILDS / "build/stage/linux/stage", None, {"STAGE_TRACE": str(d / "trace.txt"), "MOJOUI_LIVE_REPORT": "1"}, None, 60
+        return BUILDS / "build/stage/linux/stage", None, {"STAGE_TRACE": str(d / "trace.txt"), "MOJOUI_LIVE_REPORT": "1", **STAGE}, None, 60
     if name == "hybrid":
         env["OMX_LANE_SWITCH"] = "1"
         steps = OPEN + f"regions:{d}/home.json;wait:1500;tap:Switch lane;wait:3500;tap:Switch lane;wait:3000;shot:{d}/last.png"
@@ -338,6 +345,8 @@ class Clip:
         self.checks = {}  # name -> out_t
         self.loop = 0.0  # the last seconds dissolve into the first frame, so the loop has no jump
         self.blank = None  # a rect (take pixels) that must never show flat: such a frame is replaced by the last good one
+        self.matte = None  # (out_t0, out_t1, rect): everything outside rect (take pixels) fades to the app's ground between these times
+        self.tags = []  # (out_t0, out_t1, text): a small tag in the top bar's empty middle (the take at another speed)
         self.path = []  # (src_t, x, y, down): a real pointer's moves (take pixels); drawn as a dot while the button is down
 
     def seg(self, t0, t1, speed=1.0):
@@ -419,6 +428,12 @@ class Clip:
             cam = self.camera(t)
             x, y, w, h = cam
             im = Image.fromarray(frames[k]).crop((int(x), int(y), int(x + w), int(y + h))).resize(OUT, Image.LANCZOS).convert("RGBA")
+            if self.matte is not None:
+                m0, m1, r = self.matte
+                a = min(ease((t - m0) / 0.9), ease((m1 - t) / 0.9))
+                if a > 0:
+                    sx, sy = OUT[0] / w, OUT[1] / h
+                    im = matte(im, [(r[0] - x) * sx, (r[1] - y) * sy, (r[0] + r[2] - x) * sx, (r[1] + r[3] - y) * sy], a)
             if self.path:
                 im = carry_dot(im, self.path, st, cam)
             for (ts, tx, ty) in self.taps:
@@ -428,6 +443,9 @@ class Clip:
             for (ct, gap) in cuts:
                 if ct <= t <= ct + 1.0:
                     im = chip(im, f"cut · {gap:.0f} s", min(1.0, (ct + 1.0 - t) / 0.3))
+            for (c0, c1, text) in self.tags:
+                if c0 <= t <= c1:
+                    im = chip(im, text, min(1.0, (t - c0) / 0.25, (c1 - t) / 0.25), middle=True)
             for (c0, c1, text, top) in self.caps:
                 if c0 - 0.25 <= t <= c1 + 0.25:
                     a = min(1.0, (t - (c0 - 0.25)) / 0.25, ((c1 + 0.25) - t) / 0.25)
@@ -495,12 +513,24 @@ def caption(im, text, alpha, top=False):
     return Image.alpha_composite(im, layer)
 
 
-def chip(im, text, alpha):
-    """A small corner tag (top right): where the edit left time out."""
+GROUND = (17, 18, 22)  # the Counter's page at night, between the columns (the app's own pixels)
+
+
+def matte(im, box, a):
+    """Everything outside box (output pixels) faded to the app's own ground: the rails leave as the camera comes in on the
+    TV, so no rail word is cut by the frame's edge."""
+    from PIL import Image, ImageDraw
+    layer = Image.new("RGBA", OUT, GROUND + (int(255 * a),))
+    ImageDraw.Draw(layer).rectangle(box, fill=(0, 0, 0, 0))
+    return Image.alpha_composite(im, layer)
+
+
+def chip(im, text, alpha, middle=False):
+    """A small tag (top right; middle: top centre): where the edit left time out, or plays it faster."""
     from PIL import Image, ImageDraw
     f = font(26, 600)
     w = f.getlength(text)
-    x1, y0 = OUT[0] - 28, 28
+    x1, y0 = (OUT[0] + w + 36) / 2 if middle else OUT[0] - 28, 18 if middle else 28
     x0 = x1 - w - 36
     layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
@@ -531,8 +561,8 @@ def carry_dot(im, path, st, cam):
     layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
     dr = ImageDraw.Draw(layer)
     r = 22
-    dr.ellipse([ox - r - 8, oy - r - 8, ox + r + 8, oy + r + 8], fill=(30, 30, 36, int(40 * a)))
-    dr.ellipse([ox - r, oy - r, ox + r, oy + r], fill=(30, 30, 36, int(110 * a)), outline=(255, 255, 255, int(200 * a)), width=3)
+    dr.ellipse([ox - r - 8, oy - r - 8, ox + r + 8, oy + r + 8], fill=(255, 255, 255, int(30 * a)))
+    dr.ellipse([ox - r, oy - r, ox + r, oy + r], fill=(255, 255, 255, int(90 * a)), outline=(255, 255, 255, int(200 * a)), width=3)
     return Image.alpha_composite(im, layer)
 
 
@@ -544,7 +574,7 @@ def touch(im, xy, u):
     a = int(150 * (1 - ease(u)))
     layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    d.ellipse([x - r, y - r, x + r, y + r], fill=(30, 30, 36, a // 2), outline=(30, 30, 36, a), width=3)
+    d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, a // 2), outline=(255, 255, 255, a), width=3)
     return Image.alpha_composite(im, layer)
 
 
@@ -729,16 +759,21 @@ def edit_answer(name, rect_of, captions, poster_tag, think_speed=4.0, lead=3.0, 
     c.seg(fold - 0.45, fold + 1.6)  # × and the fold back
     c.hold(fold + 1.6, 0.4)
     c.cam(0, FULL)
-    c.cam(c.out_of(sent) + 0.1, FULL)
-    c.cam(c.out_of(card) + 0.2, near)
+    c.cam(c.out_of(card) - 0.1, FULL)  # (the whole Stage while it thinks, then in on the card)
+    c.cam(c.out_of(card) + 1.2, near)
     c.cam(o_fold + 0.3, near)
     c.cam(o_fold + 1.3, FULL)
     c.taps = [(fold, X_PT[0] * SCALE, X_PT[1] * SCALE)]
-    c.cap(0.3, lead - 0.3, captions[0], top=True)
-    c.cap(o_think + 0.1, o_think_end - 0.1, f"thinking · {think_speed:g}× speed")
+    tv = rg["stage-tv"]
+    # (the rails and the top bar gone before the camera moves in, back after it has come out: no word is cut on the way either)
+    c.matte = (c.out_of(card) - 1.0, o_fold + 2.1, [tv[0] - 4 * SCALE, tv[1] - 4 * SCALE, tv[2] + 8 * SCALE, WIN[1]])
+    if captions[0]:
+        c.cap(0.3, lead - 0.3, captions[0], top=True)
+    c.tags = [(o_think + 0.1, o_think_end - 0.1, f"thinking · {think_speed:g}×")]
     if captions[1]:  # (None: the card's own text fills the bottom, and the ring says it alone)
         c.cap(c.out_of(m["points"][1][0]), c.out_of(m["points"][-1][0]) + 0.4, captions[1])
-    c.cap(o_fold + 0.3, c.t - 0.5, captions[2])
+    if captions[2]:
+        c.cap(o_fold + 0.3, c.t - 0.5, captions[2])
     c.loop = 0.4
     tp = [t for t, tag in m["points"] if poster_tag in tag]
     t_poster = (tp[0] if tp else m["points"][len(m["points"]) // 2][0]) + 0.9
@@ -790,9 +825,9 @@ EDITS["cards"] = edit_cards
 
 
 def edit_map():
-    # the map card (taller than the word card: the map runs to ~530 pt) and the talk beside it, above the caption
+    # the map card (taller than the word card: the map runs to ~530 pt) and the talk beside it; the rails fade out around the TV
     edit_answer("map", lambda rg: [rg["stage-tv"][0] + 10 * SCALE, rg["stage-tv"][1] - 4 * SCALE, 680 * SCALE, 580 * SCALE],
-                ["Plan a day out", "It flies to each stop as she names it", "Then it folds back"], "stop2",
+                [None, None, None], "stop2",
                 think_speed=6.0, lead=2.0, linger=1.7, trim_walk=3.0)
 
 
@@ -800,25 +835,29 @@ EDITS["map"] = edit_map
 
 
 def edit_live():
-    """The Stage demo's Live column on the plain morning, the star: a slow push-in on its three rows (the pasta timer
+    """The Stage demo's Live column on the plain morning: the whole Stage, then a push-in on its three rows (the pasta timer
     ticking each second, Hoops' score moving as the home and away sides score, Mum's landing time), all real time, about
-    12 s so the timer and the score both change on screen; the loop dissolves back to the first frame. (The airport moment
-    doesn't fit in 15 s without a cut: left out.)"""
+    12 s so the timer and the score both change on screen; the loop dissolves back to the first frame. The push-in's left
+    edge is the gap between the stage's two columns of tiles, so no word is cut. The first frame is also stage-day.jpg."""
+    from PIL import Image
     c = Clip("live")
     d = WORK / "live"
     rg = regions(d / "regions.json")
-    right = rg["stage-right"]
-    wide = cam_fit([right[0] - 300 * SCALE, 0, right[2] + 300 * SCALE + 18 * SCALE, 430 * SCALE], pad=0.0)  # Live, the stage's edge
-    tight = cam_fit([right[0] - 110 * SCALE, 24 * SCALE, right[2] + 110 * SCALE + 18 * SCALE, 290 * SCALE], pad=0.0)  # the three rows
+    panel = rg["stage-panel"]
+    mid = panel[0] + panel[2] / 2 + 1 * SCALE  # between the tile columns (a 12 pt gap)
+    w = WIN[0] - mid
+    tight = [mid, 10 * SCALE, w, w * OUT[1] / OUT[0]]
     start = 1.6
     c.seg(start, start + 11.6)
-    c.cam(0, wide)
-    c.cam(c.t - 0.5, tight)
-    c.cap(0.6, 9.5, "Live: what keeps changing")
+    c.cam(0, FULL)
+    c.cam(0.9, FULL)
+    c.cam(2.1, tight)
     c.loop = 0.5
     c.poster_t = 9.0
     c.checks = {f"t{k:02d}": k + 0.5 for k in range(12)}
     c.render(d / "check")
+    first = decode(c.raw, start, start + 0.2)[0]
+    Image.fromarray(first).resize(OUT, Image.LANCZOS).save(IMG / "stage-day.jpg", quality=88)
 
 
 EDITS["live"] = edit_live
@@ -842,8 +881,9 @@ def edit_pin():
     end = min(unpin + 2.4, ffprobe_duration(c.raw) - 0.6)
     c.seg(start, end)
     o = lambda st: st - start
-    wide = cam_fit([0, 20 * SCALE, 1000 * SCALE, 640 * SCALE], pad=0.0)  # the left column and the stage
-    near = cam_fit([0, 250 * SCALE, 781 * SCALE, 500 * SCALE], pad=0.0)  # Pinned (mid-frame, above the caption) and the stage
+    wide = FULL
+    near = [0, 190 * SCALE, 640 * SCALE, 640 * SCALE * OUT[1] / OUT[0]]  # Today's rows, Pinned and the stage's first column of tiles: its
+    # right edge is the gap between the tile columns, so no word is cut
     c.cam(0, wide)
     c.cam(o(drop) + 0.3, wide)
     c.cam(o(drop) + 1.2, near)
@@ -851,12 +891,10 @@ def edit_pin():
     c.cam(o(unpin) - 0.2, wide)
     c.path = [(m[0], m[1], m[2], m[3]) for m in moves]
     c.taps = [(unpin, ptr["clicks"][0][1], ptr["clicks"][0][2])] if ptr["clicks"] else []
-    c.cap(o(press) + 0.2, o(unpin) - 0.6, "Pin what you want at your side")
-    c.cap(o(unpin) + 0.3, c.t - 0.5, "Unpin it, and it goes back")
-    c.loop = 0.6
-    c.poster_t = o(drop) + 2.6
+    c.loop = 0.4
+    c.poster_t = o(drop) + 1.9
     c.checks = {"1-start": 0.3, "2-press": o(press) + 0.1, "3-carry-a": o(press) + 0.6, "4-carry-b": o(press) + 1.1,
-                "5-carry-c": o(release) - 0.15, "6-dropped": o(drop) + 0.5, "7-pinned": o(drop) + 2.6, "8-unpin": o(unpin) - 0.1,
+                "5-carry-c": o(release) - 0.15, "6-dropped": o(drop) + 0.5, "7-pinned": o(drop) + 1.9, "8-unpin": o(unpin) - 0.1,
                 "9-back": o(unpin) + 1.2, "10-end": c.t - 0.3}
     print(f"pin: press {press:.2f}, release {release:.2f}, drop {drop:.2f}, unpin {unpin:.2f}", flush=True)
     c.render(d / "check")
@@ -943,7 +981,7 @@ EDITS["hybrid"] = edit_hybrid
 def main():
     args = sys.argv[1:]
     verb = args[0] if args and args[0] in ("take", "edit", "all") else "all"
-    names = [a for a in args if a in NAMES] or NAMES
+    names = [a for a in args if a in NAMES] or COVER
     for n in names:
         if verb in ("take", "all"):
             take(n)

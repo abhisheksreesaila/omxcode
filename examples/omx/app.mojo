@@ -42,7 +42,8 @@
 # card 0; OMX_LANE_SWITCH=1 shows the test button that flips the lane; OMX_CLOUD_CAP = cloud requests a session may make (3),
 # OMX_CLAUDE_CMD = the command that answers them (`claude`), MOJOUI_LEDGER = the record of what went out, MOJOUI_TODO = the to-do
 # file; MOJOUI_AUDIO_SOURCE / MOJOUI_AUDIO_SINK = the microphone and the speaker
-# (mojoui.audio: `file:a.wav@2.5` plays a recorded voice as the microphone); OMX_TV_QUIET = the TV's quiet before it closes (ms).
+# (mojoui.audio: `file:a.wav@2.5` plays a recorded voice as the microphone); OMX_TV_QUIET = the TV's quiet before it closes (ms);
+# OMX_DARK=1 = the night look whatever the system says; OMX_CLEAN=1 = no "sample" on the sample tiles (recordings only: samples.mojo).
 # Run it with scripts/omx.sh, or on a tablet with scripts/tablet.sh omx. Each turn prints OMX lines (what was heard, the reply,
 # the card, the numbers) for the checker.
 
@@ -296,7 +297,7 @@ struct Main(App):
             self.tiles.set_columns(cols)
 
     def appearance(mut self, dark: Bool):
-        self.dark = dark
+        self.dark = dark or environment("OMX_DARK") == "1"
         self.tiles.version += 1  # (the same tiles in the night's palette: their tints are names)
         self.tv.version += 1
 

@@ -13,33 +13,32 @@
 <link rel="stylesheet" href="omxqua/src/tokens.css">
 <link rel="stylesheet" href="omxqua/src/components.css">
 <link rel="stylesheet" href="site.css">
-<!-- omxome's cover (owner, 2026-11-22), round three: simpler, gitaway.me's pattern (travelos assets/js/cover.js): one app window pinned
+<!-- omxome's cover (owner, 2026-11-22; round five 2026-11-24, D-7899: the Stage above the fold, night clips, one honesty note in the
+     footer). gitaway.me's pattern (travelos assets/js/cover.js): one app window pinned
      (position: sticky) while short steps scroll past; an IntersectionObserver on the steps says which one is in the middle of the
      screen, and the window crossfades to its picture (out 260 ms; in after 160 ms over 420 ms, .985 → 1 on the spring). No scroll
      handler, no layout reads. The design history, inside, build steps and limits live in examples/omx/README.md. Clips are from the
-     real app (scripts/omxomeclip.py); each caption says what it is. -->
+     real app (scripts/omxomeclip.py); the footer says what is sample data and what was sped up. -->
 <style>
-.ohero { padding-top: 90px; padding-bottom: 30px; text-align: center; }
-.ohero h1 { font-size: clamp(72px, 12vw, 168px); }
+.ohero { padding-top: 34px; padding-bottom: 38px; text-align: center; }
+.ohero h1 { font-size: clamp(68px, 9.6vw, 132px); margin-top: 8px; }
 .ohero .eyebrow { justify-content: center; }
-.ohero .lede { max-width: 780px; margin-left: auto; margin-right: auto; }
-.needs { font: 12.5px/1.6 var(--mono); color: var(--ink2); margin-top: 14px; }
-.modes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 26px; }
-.modes span { font: 600 14px var(--sans); padding: 8px 14px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
-.modes span i { font-style: normal; color: var(--ink2); font-weight: 500; }
+.ohero .lede { max-width: 780px; margin: 14px auto 0; }
+.ohero .lede.sub { max-width: 980px; margin-top: 12px; font-size: clamp(16.5px, 1.45vw, 20px); line-height: 1.45; }
+.needs { font: 12.5px/1.6 var(--mono); color: var(--ink2); margin: 12px 0 0; }
 
-/* the film: steps on the left scroll; the window on the right stays */
-.film2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 8fr); gap: 56px; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
-.steps { padding: 10svh 0 30svh; }
+/* the film: steps on the left scroll; the window on the right stays. The window starts right under the hero (so the Stage shows
+   above the fold) and sticks once it reaches the middle of the screen; --fh is its height (the grid's 8/13 at 1600:1024). */
+.film2 { --fh: calc((min(100vw, 1320px) - 104px) * 8 / 13 * .64); display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 8fr); gap: 56px; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
+.steps { padding: 0 0 22svh; }
 .step { min-height: 78svh; display: flex; flex-direction: column; justify-content: center; opacity: .55; transition: opacity .5s var(--ease); }
+.step:first-child { min-height: var(--fh); }
 .step.now { opacity: 1; }
 .step .k { font: 600 12.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--word); }
 .step h2 { font: 800 clamp(30px, 3.4vw, 48px)/1.04 var(--display); letter-spacing: -.04em; margin: 12px 0 0; }
-.step p { color: var(--ink2); font-size: 17.5px; line-height: 1.55; margin: 16px 0 0; max-width: 460px; }
-.step .src { font: 12px/1.5 var(--mono); color: var(--ink2); opacity: .8; margin-top: 18px; }
-.step .src::before { content: "↳ "; opacity: .6; }
-.pin { position: sticky; top: 0; height: 100svh; display: flex; align-items: center; align-self: start; }
-.frame { position: relative; width: 100%; aspect-ratio: 1600 / 1024; border-radius: 22px; overflow: hidden; background: #e9e9ee; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); }
+.step p { color: var(--ink2); font-size: 17.5px; line-height: 1.55; margin: 16px 0 0; max-width: 460px; text-wrap: pretty; }
+.pin { position: sticky; top: max(86px, calc((100svh - var(--fh)) / 2 + 32px)); align-self: start; margin-bottom: 12svh; }
+.frame { position: relative; width: 100%; aspect-ratio: 1600 / 1024; border-radius: 22px; overflow: hidden; background: #111216; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); }
 .face { position: absolute; inset: 0; margin: 0; opacity: 0; scale: .985; visibility: hidden;
   transition: opacity .26s var(--ease), scale .26s var(--ease), visibility 0s linear .26s; }
 .face.on { opacity: 1; scale: 1; visibility: visible; z-index: 1;
@@ -69,9 +68,10 @@
 @media (prefers-reduced-motion: reduce) { .face, .face.on, .step { transition: none; } .face { scale: 1; } }
 @media (max-width: 860px) {
   .film2 { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px; }
-  .pin { order: -1; top: 56px; height: auto; z-index: 3; padding: 10px 0 14px; background: linear-gradient(#000 85%, transparent); }
+  .pin { order: -1; top: 70px; margin-bottom: 0; z-index: 3; padding: 10px 0 14px; background: linear-gradient(#000 85%, transparent); }
   .steps { padding: 4svh 0 20svh; }
-  .step { min-height: 62svh; justify-content: flex-start; padding-top: 4svh; }
+  .step, .step:first-child { min-height: 62svh; justify-content: flex-start; padding-top: 4svh; }
+  .step:first-child { padding-top: 0; }
   .lanes, .devs { grid-template-columns: 1fr; } .nums { grid-template-columns: 1fr 1fr; }
   .devs .ph { display: none; }
 }
@@ -89,22 +89,21 @@
 <main>
 <section class="ohero">
   <div class="wrap">
-    <div class="eyebrow rise"><span>The third flagship · built on omxcode</span></div>
+    <div class="eyebrow rise"><span>Built on omxcode · native Mojo UI</span></div>
     <h1 class="rise" data-words data-step="0" data-d0="120">omxome</h1>
     <p class="lede rise"><span data-words data-step="45" data-d0="380">Ask it out loud.</span> <span class="two" data-words data-step="35" data-d0="560">It shows you.</span></p>
-    <p class="lede rise">A voice in a box can't show you anything. omxome is a kitchen-counter assistant with a screen you can glance at, talk to, be shown things on, and check, all in one place.</p>
-    <div class="modes rise"><span>Glance <i>· what's next</i></span><span>Talk <i>· back and forth</i></span><span>Show me <i>· see the answer</i></span><span>Check <i>· see what it did</i></span></div>
-    <p class="needs rise">Linux today · the Stage on the Mac · iPhone, iPad and Android soon · MIT licence</p>
+    <p class="lede sub rise">A voice in a box can't show you anything. omxome puts a quiet, glanceable screen on your counter&nbsp;— pinned on the left, live on the right, and a stage in the middle that builds visuals as it talks.</p>
+    <p class="needs rise">Linux today · Stage on Mac · iOS &amp; Android soon · MIT licence</p>
   </div>
 </section>
 
 <section id="film" style="padding:0">
   <div class="film2">
     <div class="steps">
-      <article class="step now" data-k="0"><div class="k">The Stage</div><h2>Your day on one screen.</h2><p>What you pinned on the left. What matters now in the middle. What's live on the right. And a chat bar at the bottom: just talk, or tap to type.</p><div class="src">the Stage with sample data</div></article>
-      <article class="step" data-k="1"><div class="k">Ask anything</div><h2>The chat takes the stage to explain it.</h2><p>Ask for a Saturday in Lisbon, how a heat pump works, what a word means. The chat bar grows over the stage like a TV and the model builds the card it needs: a real map, a diagram, a word card. A ring points at each part as it talks, then it all folds back to your tiles.</p><div class="src">the real app with a local model · thinking shown at 6×, two pauses cut (marked)</div></article>
-      <article class="step" data-k="2"><div class="k">Left · pinned</div><h2>Keep what you want at your side.</h2><p>Drag any tile onto Pinned and it stays on the left, out of the way but in sight. The stage closes the gap. Unpin it and it comes back.</p><div class="src">the Stage demo with sample data · drag marks drawn in</div></article>
-      <article class="step" data-k="3"><div class="k">Right · live</div><h2>What keeps changing, as it changes.</h2><p>A game's score, a flight landing, the pasta timer: small rows that keep up on their own, the score and the timer changing as you watch. When one needs you, it can move to the big tile in the middle, the way the flight does near the airport.</p><div class="src">the Stage demo with sample data: the score, the landing and the timer are made up, and tick on their own</div></article>
+      <article class="step now" data-k="0"><div class="k">The Stage</div><h2>Your day on one screen.</h2><p>What you pinned on the left. What matters now in the middle. What's live on the right. Talk or tap at the bottom.</p></article>
+      <article class="step" data-k="1"><div class="k">Ask anything</div><h2>The chat takes the stage.</h2><p>Ask for a Saturday in Lisbon, how a heat pump works, what a word means. The model builds the card it needs: a real map, a diagram, a word card. A ring points at each part as it talks, then it all folds back to your tiles.</p></article>
+      <article class="step" data-k="2"><div class="k">Left · pinned</div><h2>Keep what you want close.</h2><p>Drag any tile onto Pinned and it stays at your side while the stage closes the gap. Unpin it and it comes back.</p></article>
+      <article class="step" data-k="3"><div class="k">Right · live</div><h2>What keeps changing.</h2><p>The pasta timer, a game's score, a landing: small rows that keep up quietly on the right. When one needs you, it can step into the big tile in the middle.</p></article>
     </div>
     <div class="pin">
       <div class="frame" data-beat="0">
@@ -161,7 +160,7 @@
 
 <footer>
   <div class="wrap">
-    <p class="note">Measured on one Linux machine with NVIDIA RTX 3090s, by scripts in the repository. Mac pictures are from an M4.</p>
+    <p class="note">Every picture and clip is the app itself, its day (and its clock) sample data, the pointer's dot drawn in: the Stage, Pinned and Live from the Stage demo, “Ask anything” from omx with a local model, its thinking at 6× and pauses cut, both marked. Measured on one Linux machine with NVIDIA RTX 3090s, by scripts in the repository; Mac pictures are from an M4.</p>
     <div class="fine"><span>omxome · built on omxcode · MIT licence · Mojo is a trademark of Modular Inc.; Claude is a trademark of Anthropic. omxome is an independent project, not affiliated with or endorsed by either</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
   </div>
 </footer>

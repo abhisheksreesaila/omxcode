@@ -25,6 +25,9 @@
 # (the tiles as drawn once they rest: mojoui.livetiles' record on one line).
 # STAGE_SHOT=/path.png@ms: the TV canvas's own pixels saved once, that far into the next open (a mid-morph picture: a
 # GTK test step settles for up to a second after a tap, longer than the morph).
+# STAGE_CLEAN=1: the stage as it would stand on a counter, for pictures and recordings: no demo controls (the top bar keeps the
+# people and Settings; no Try a day). STAGE_CLOCK=7:45: what the clock reads (the demo's clock stands still; default 10:59).
+# STAGE_DARK=1: the night look whatever the system says.
 
 from mojoui.app import App, Event
 from mojoui.view import View, Node, VStack, HStack, Canvas, Spacer, Text, CENTER, START, SPACE_S, SPACE_M, PRESS
@@ -107,6 +110,8 @@ struct Main(App):
     var said_charms: String  # what EV CHARMS / EV TILES / EV ZONES last said (each logged when it changes)
     var said_tiles: String
     var said_zones: String
+    var clean: Bool  # STAGE_CLEAN: no demo controls
+    var clock: String  # STAGE_CLOCK: what the clock reads
     var charms_on: Bool  # the top bar's Charms pill turns the occasions' charms off and on (a prototype's control)
 
     def __init__(out self):
@@ -152,6 +157,8 @@ struct Main(App):
         self.said_charms = ""
         self.said_tiles = ""
         self.said_zones = ""
+        self.clean = environment("STAGE_CLEAN") == "1"
+        self.clock = environment("STAGE_CLOCK", "10:59")
         self.charms_on = True
         self.log("START")
         self.refeed()
@@ -255,7 +262,7 @@ struct Main(App):
         self.log("OPEN " + (self.tv.next_card if self.tv.leave_t0 >= 0 else self.tv.card) + " " + question)
 
     def appearance(mut self, dark: Bool):
-        self.dark = dark
+        self.dark = dark or environment("STAGE_DARK") == "1"
         self.tiles.version += 1  # (the same tiles in the night's palette: their tints are names; nothing moves)
         self.tv.version += 1  # (the TV's box in the night's colours)
 
@@ -347,10 +354,12 @@ struct Main(App):
     def view(self) -> View:
         var compact = stage_compact(self.width)
         var wide = stage_layout(self.width).right
-        var top = HStack(StageAvatar("All", 0, PERSON), StageAvatar("A", 2, PERSON + 1), StageAvatar("S", 3, PERSON + 2),
-                         StageAvatar("M", 5, PERSON + 3), StagePill("settings", "Settings", SETTINGS, compact),
-                         StagePill("sparkles", "Charms", CHARMS, compact), spacing=SPACE_S).align(CENTER)
-        if not compact:  # (the TV's sample questions, short so the bar fits 900 wide; a phone types them in the chat bar)
+        var bar: List[View] = [StageAvatar("All", 0, PERSON), StageAvatar("A", 2, PERSON + 1), StageAvatar("S", 3, PERSON + 2),
+                               StageAvatar("M", 5, PERSON + 3), StagePill("settings", "Settings", SETTINGS, compact)]
+        if not self.clean:
+            bar.append(StagePill("sparkles", "Charms", CHARMS, compact))
+        var top = HStack(bar^, spacing=SPACE_S).align(CENTER)
+        if not compact and not self.clean:  # (the TV's sample questions, short so the bar fits 900 wide; a phone types them in the chat bar)
             top = HStack(top^, StagePill("book-open", ASK_WORD_LABEL, ASK_WORD), StagePill("box", ASK_ISO_LABEL, ASK_ISO),
                          StagePill("comment", "Chat", CHAT), Spacer(), spacing=SPACE_S).align(CENTER)
         else:
@@ -374,11 +383,11 @@ struct Main(App):
             "stage-drop" if self.tiles.hover_zone == "pinned" else "stage-pins"), spacing=0).fill().tag("stage.pins")  # (a tile dragged
         # over it: it lights up; the dotted tag is one every host reports a rect for, mojoui.geometry.rect_of: the drop zone)
         var left_items = List[View]()
-        left_items.append(StageClock("10:59", "Wednesday, November 18", wline, compact))
+        left_items.append(StageClock(self.clock, "Wednesday, November 18", wline, compact))
         left_items.append(StageLabel("calendar", "Today"))
         left_items.append(VStack(StageList(today), spacing=0).fill().tag("stage-today"))
         left_items.append(pinned^)
-        if not wide and not compact:
+        if not wide and not compact and not self.clean:
             left_items.append(self.days())
         var left = VStack(left_items^, spacing=SPACE_M).align(START)
         # right: Live (rows that keep ticking), then the sample days
@@ -390,7 +399,7 @@ struct Main(App):
         var right_items = List[View]()
         right_items.append(StageLabel("zap", "Live"))
         right_items.append(VStack(StageList(live), spacing=0).fill().tag("stage-live"))
-        if wide or compact:
+        if (wide or compact) and not self.clean:
             right_items.append(self.days())
         var right = VStack(right_items^, spacing=SPACE_M).align(START)
         var chat = StageChat(OrbView(ORB_CANVAS, self.orb.version(), big=False, side=52), self.text, "Ask omx, or just say “omx”",

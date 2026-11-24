@@ -1363,7 +1363,7 @@ struct GenUi[H: Hub = NoData](Movable):
             if self.json.get(n, "area") >= 0 and self.str(n, "area") != "":
                 head.append(Text(self.str(n, "area"), style=CAPTION))
             head.append(Spacer())
-            head.append(Chip("web", 0))  # (tiles and the geocoder come from the web: the card says so)
+            head.append(Chip("online map", 0))  # (tiles and the geocoder come from the web: the card says so; "web" alone read as a web view, D-7899)
             var body = VStack(HStack(head^, spacing=SPACE_S).align(CENTER).fill(),
                               Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 320))).tag(self.map_tag(k)),
                               spacing=SPACE_XS).align(START).fill()
