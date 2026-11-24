@@ -811,7 +811,10 @@ struct Main(App):
                     self.version += 1
                 return
             if m == GESTURE and event.number == TAP:
-                if self.web[0].tap(event.x, event.y):
+                if self.web[0].tap(event.x, event.y, Int(event.dx)):
+                    self.version += 1
+            elif m == GESTURE and event.number == DOUBLE:
+                if self.web[0].double(event.x, event.y):
                     self.version += 1
             elif m == GESTURE and event.number == PRESS:
                 if self.web[0].press(event.x, event.y):
@@ -931,7 +934,10 @@ struct Main(App):
 
     def view(self) -> View:
         if len(self.web) > 0:
-            return Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
+            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
+            if self.web[0].page.ed.clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
+                return HStack(desk^, Clipboard(self.web[0].page.ed.clip, self.web[0].page.ed.clip_version), spacing=0).grow().fill()
+            return desk^
         var side = List[View]()
         side.append(SidebarHead("Notes", String(len(self.rows))))
         side.append(TextField(self.query, "Search notes", on_change=SEARCH).fill().tag("search"))

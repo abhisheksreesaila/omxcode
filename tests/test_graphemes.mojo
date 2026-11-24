@@ -57,10 +57,10 @@ def main() raises:
         p.insert(g)
     for q in range(len(ends) - 1, -1, -1):
         p.caret_left()
-        assert_equal(p.caret_col, ends[q - 1] if q > 0 else 0)
+        assert_equal(p.ed.caret.byte, ends[q - 1] if q > 0 else 0)
     for e in ends:
         p.caret_right()
-        assert_equal(p.caret_col, e)
+        assert_equal(p.ed.caret.byte, e)
     for q in range(len(ends) - 1, -1, -1):
         p.backspace()
         assert_equal(p.markdown(), String(all[byte=0:ends[q - 1] if q > 0 else 0]))

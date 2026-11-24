@@ -17,6 +17,7 @@ from mojoui.pagesheet import PageSheet
 from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, word_match, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
+from mojoui.textedit import now_ms
 from mojoui.files import write_setting
 from mojoui.islandcard import IslandCard, CardTile
 from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
@@ -285,6 +286,7 @@ struct WebShell(Movable):
     var kept: KeptDocs[ObjectLayer]  # canvases already parsed, by (note, revision) (D-7934)
     var kept_pages: Dict[Int, Int]  # a kept canvas's page grid (columns × 1000 + rows), by note
     var cold_opens: Bool  # (the race's cold-open row: nothing kept is reused)
+    var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
 
     def __init__(out self, db_path: String, skin: String):
@@ -369,6 +371,7 @@ struct WebShell(Movable):
         self.kept_pages = Dict[Int, Int]()
         self.cold_opens = False
         self.bench_note = -1
+        self.doubled_us = -1_000_000
         try:
             self.dbs.append(Database(db_path))
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
@@ -1200,38 +1203,10 @@ struct WebShell(Movable):
                     self.page.draw_mode = False
                     return True
                 return False
-            if name == "End" and (mods & 2) != 0:
-                self.page.caret_end()
-                return True
-            if name == "Home":
-                self.page.caret_home()
-                return True
-            if name == "End":
-                self.page.caret_line_end()
-                return True
-            if name == "ArrowLeft":
-                self.page.caret_left()
-                return True
-            if name == "ArrowRight":
-                self.page.caret_right()
-                return True
-            if name == "Delete":
-                self.page.delete_forward()
+            var r = self.page.key(name, mods, now_ms())
+            if r == 2:
                 self.save_page()
-                return True
-            if name == "Return" or name == "Enter":
-                self.page.newline()
-                self.save_page()
-                return True
-            if name == "BackSpace" or name == "Backspace":
-                self.page.backspace()
-                self.save_page()
-                return True
-            if (mods & 2) == 0 and typed_text(name):
-                self.page.insert(name)
-                self.save_page()
-                return True
-            return False
+            return r != 0
         if self.card_open and self.card.editing:
             var r = self.card.title_key(name, mods)
             if r == 2:
@@ -1379,6 +1354,10 @@ struct WebShell(Movable):
     def wheel(mut self, x: Float64, y: Float64, dx: Float64, dy: Float64) -> Bool:
         """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
         if not self.on_canvas():
+            var i = self.note_index(self.current)
+            if i >= 0 and self.notes[i].kind == "page" and not self.notes[i].secure and not self.searching and not self.card_open and not self.settings_open and (
+                    not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
+                return self.page.wheel(dy)
             return False
         self.view = self.tools.scroll(self.view, dx, dy, self.win_w, self.win_h, self.cols, self.rows)
         return True
@@ -1409,7 +1388,22 @@ struct WebShell(Movable):
             if self.boxes.hit_any(x, y, [".page-paper"]) != "" and self.boxes.hit_any(x, y, ["[Page tools]", ".page-draw-hint"]) == "":
                 self.page.mark_press(x, y)
                 return True
+        elif self.writing() and self.boxes.hit_any(x, y, [".page-tool:", "#sidebar", "#island", "#toggle-sidebar", "#search-button"]) == "":
+            return self.page.press(x, y, False)
         return False
+
+    def writing(self) -> Bool:
+        """The open note is a page, readable, in Write mode, nothing over it."""
+        var i = self.note_index(self.current)
+        return (i >= 0 and self.notes[i].kind == "page" and not self.notes[i].secure and self.doc.may_edit() and not self.page.draw_mode
+                and not self.searching and not self.card_open and not self.settings_open)
+
+    def double(mut self, x: Float64, y: Float64) -> Bool:
+        """A double click: on a page's words, the word; a click more soon after, the line."""
+        if not self.writing() or self.boxes.hit_any(x, y, [".page-tool:", "#sidebar", "#island", "#toggle-sidebar", "#search-button"]) != "":
+            return False
+        self.doubled_us = clock_us()
+        return self.page.select_word(x, y)
 
     def pan(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
@@ -1422,7 +1416,7 @@ struct WebShell(Movable):
         if len(self.page.wet) > 0:
             self.page.mark_move(x, y)
             return True
-        return False
+        return self.page.drag(x, y)
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
         if self.on_canvas():
@@ -1436,7 +1430,7 @@ struct WebShell(Movable):
             if self.page.mark_release():
                 self.save_page()
             return True
-        return False
+        return self.page.release()
 
     def dock_name(self) -> String:
         var t = self.tools.tool
@@ -1539,7 +1533,7 @@ struct WebShell(Movable):
         self.py = y
         return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button"]) != before
 
-    def tap(mut self, x: Float64, y: Float64) -> Bool:
+    def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
         self.title_focus = False
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry"])
@@ -1608,8 +1602,14 @@ struct WebShell(Movable):
             if tool == ".page-tool:Write":
                 self.page.draw_mode = False
                 return True
-            if tool == "" and not self.page.draw_mode and self.page.tap(x, y):
-                return True
+            if tool == "" and not self.page.draw_mode and (not self.sidebar or self.boxes.hit_any(x, y, ["#sidebar"]) == ""):
+                if (mods & 1) != 0:
+                    if self.page.extend_tap(x, y):
+                        return True
+                elif clock_us() - self.doubled_us < 400_000 and self.page.select_para(x, y):
+                    return True
+                elif self.page.tap(x, y):
+                    return True
         if hit == "[Crayon skin]":
             self.set_skin("crayon")
             return True

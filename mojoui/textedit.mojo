@@ -563,6 +563,24 @@ struct TextEdit(Movable):
     def key(mut self, name: String, mods: Int, now_ms: Int, font: Font, styler: Some[Styler]) -> Bool:
         """A key press: a typed character, or a web key name. True when the editor used it."""
         var shift = (mods & SHIFT) != 0
+        if (mods & (CTRL | ALT)) == 0:
+            if name == "ArrowUp" or name == "ArrowDown":
+                self.vertical(1 if name == "ArrowDown" else -1, shift, font, styler)
+                return True
+            if name == "PageUp" or name == "PageDown":
+                var lines = max(Int(self.height / 22) - 1, 1)
+                for _ in range(lines):
+                    self.vertical(1 if name == "PageDown" else -1, shift, font, styler)
+                return True
+            if name == "Home" or name == "End":
+                self.line_edge(name == "End", shift, font, styler)
+                return True
+        return self.edit_key(name, mods, now_ms)
+
+    def edit_key(mut self, name: String, mods: Int, now_ms: Int) -> Bool:
+        """The keys that need no layout (everything but up, down, page up and down, and a line's edges): for an editor
+        that lays its text out itself (mojoui.pagesheet). True when it was used."""
+        var shift = (mods & SHIFT) != 0
         var ctrl = (mods & CTRL) != 0
         var alt = (mods & ALT) != 0
         if alt and not ctrl:  # (Option on a Mac: by words)
@@ -621,6 +639,11 @@ struct TextEdit(Movable):
                     self.anchor = self.prev_word(self.caret)
                 self.replace(self.sel_start(), self.sel_end(), "", EDIT_OTHER, now_ms)
                 return True
+            if name == "Delete":
+                if not self.has_selection():
+                    self.anchor = self.next_word(self.caret)
+                self.replace(self.sel_start(), self.sel_end(), "", EDIT_OTHER, now_ms)
+                return True
             return False
         if name == "ArrowLeft":
             if self.has_selection() and not shift:
@@ -633,17 +656,6 @@ struct TextEdit(Movable):
                 self.move_to(self.sel_end(), False)
             else:
                 self.move_to(self.next_char(self.caret), shift)
-            return True
-        if name == "ArrowUp" or name == "ArrowDown":
-            self.vertical(1 if name == "ArrowDown" else -1, shift, font, styler)
-            return True
-        if name == "PageUp" or name == "PageDown":
-            var lines = max(Int(self.height / 22) - 1, 1)
-            for _ in range(lines):
-                self.vertical(1 if name == "PageDown" else -1, shift, font, styler)
-            return True
-        if name == "Home" or name == "End":
-            self.line_edge(name == "End", shift, font, styler)
             return True
         if name == "Backspace":
             if self.has_selection():
