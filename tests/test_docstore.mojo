@@ -2,7 +2,8 @@
 # (nothing written, the follow-ups not run), the debounce's timing. Not tied to any app: a made-up "docs" table.
 #   pixi run mojo run -I . tests/test_docstore.mojo        → "docstore: ok"
 from mojoui.sqlite import Database
-from mojoui.docstore import KeptDocs, let_go, SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
+from mojoui.docstore import KeptDocs, SaveTimer, RowSave, save_row, row_revision, text_arg, int_arg, SAVED, CONFLICT
+from mojoui.letgo import let_go
 from std.os import remove
 from std.time import sleep
 from std.memory import Pointer
@@ -41,8 +42,8 @@ def test_let_go() raises:
     let_go(Counted(cell))
     var kept = KeptDocs[Counted](2)
     for i in range(6):
-        kept.keep(i, 1, Counted(cell + 8 * (1 + i)))  # (four evicted)
-    kept.keep(5, 2, Counted(cell + 56))  # (the same id again: the one kept before goes)
+        let_go(kept.keep_out(i, 1, Counted(cell + 8 * (1 + i))))  # (four evicted)
+    let_go(kept.keep_out(5, 2, Counted(cell + 56)))  # (the same id again: the one kept before goes)
     for _ in range(2000):
         if ended(cell, 8) >= 6:
             break

@@ -36,7 +36,9 @@ from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
-from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_ahead
+from mojoui.viewsnap import snap_dir_ready, expect_snapshots
+from mojoui.snapahead import snap_ahead
+from mojoui.letgo import let_go
 from std.os import listdir
 from mojoui.framebudget import FrameBudget
 from mojoui.pagedesk import board_rect
@@ -400,7 +402,7 @@ struct WebShell(Movable):
         var out_i = self.note_index(self.current)
         if out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.board.edit().unsaved() == False:
             var moving = self.board.take()  # (the outgoing canvas, whole, kept parsed)
-            self.kept.keep(self.notes[out_i].id, self.notes[out_i].revision, moving^)  # (the canvas just left, kept parsed)
+            let_go(self.kept.keep_out(self.notes[out_i].id, self.notes[out_i].revision, moving^))  # (the canvas just left, kept parsed)
             self.kept_pages[self.notes[out_i].id] = self.cols * 1000 + self.rows
         i = self.note_index(id)
         if trace:

@@ -14,7 +14,8 @@ from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
 from std.os import getenv
 from std.time import perf_counter_ns
-from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, ViewSnap, SnapWriter, snap_read, snap_ahead, snap_take, snap_dir_ready, build_id
+from mojoui.snapahead import snap_ahead
+from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, ViewSnap, SnapWriter, snap_read, snap_take, snap_dir_ready, build_id
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
