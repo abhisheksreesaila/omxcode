@@ -23,6 +23,69 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 20 (2026-11-24, 00:03 on; autopilot overnight): review round 3 fixed, the owner's ruling, the everyday gaps
+
+**M6 has no numbers for HEAD.** See "D" below for what ran. Everything in `docs/goals/79/race.md` and `race-mac.md` that isn't
+labelled with a commit of this round is older: Linux 51a26d08, Mac 51a26d08. Continuation 19's changes (below) and this
+round's have **not been judged by M6 or M7**.
+
+### Review 3, each finding
+
+| Finding | State | The proof | Commit |
+|---|---|---|---|
+| MUST 1 canvas A's picture and words in canvas B (F5, F5b, F7) | fixed | test_twodocs, test_twodocs_gl (GL, run once at 00:1x when the GPUs were free), test_pnshell `switches` | cf8daea7, e5230fde, ef73eb3b |
+| MUST 2 a stale `empty` mark hid promoted tiles (F3) | fixed | test_tileempty; each of 4 mutants fails | b97f7866 |
+| MUST 3 a failed read opened as an empty editable note (F1) | fixed | test_opendoc, test_canvasload, test_pnshell `broken` | e3a0934f, ddabcd7c |
+| MUST 4 kept view without a notes file's identity; the grid saved from it (F2) | fixed | test_pnshell `kept views`; the choice is D-8030 | ddabcd7c |
+| MUST 5 unsupported nodes, edges' labels, unknown keys lost on save (F8) | fixed | test_canvasround (35 documents), test_jsonpatch, test_noteround | 97418fab, 9d3e4b19, 12ad33be |
+| MUST 6 é and Backspace (F9) | fixed | test_graphemes; corrected in 72501a4e (D-8036: an old proof, test_webpieces, had begun to fail) | 6f41f0ce, 72501a4e |
+| MUST 7 kept pictures: never removed, 0644, shared .tmp, no cap (F4) | fixed | test_privatefiles, test_viewsnap, test_pnshell `kept pictures` | e3a0934f, ddabcd7c |
+| SHOULD 1 the race's reopen wasn't the app's open (F7) | fixed | bench:reopen calls open() and forgets nothing | d666de27 |
+| SHOULD 2 D-7958 changed a judged row and wasn't listed | settled by the owner's ruling: the first open ever is a judged row now (D-8025, D-8026); listed for the reviewer | judge_test.py | bbf8c644 |
+| SHOULD 3 the report had nothing for HEAD | fixed: this section and continuation 19's | | this file |
+| SHOULD 4 the Mac's web runs weren't voided under load | fixed (mac_web: quiet before each, void and again 3×) | read; **not run on the Mac** | bbf8c644 |
+| SHOULD 5 switch and omnibar: different spans | fixed: both to the frame after; the one difference left is said in race.md | **not run on a GPU** | bbf8c644 |
+| SHOULD 6 kept views written before the notes at close | fixed (D-8034) | read in both hosts; test_pnshell | d666de27 |
+| SHOULD 7 failing and conflicting saves | fixed: held through switches and restarts, Retry; a conflict offers "Save a copy" | test_pnshell `held saves`, test_pnnotes `another app` | ddabcd7c, 99bda11e |
+| SHOULD 8 rect_corner on the Mac | off until it has run there | `corner_quads`; **test_rectcorner not run on the Mac** | d666de27 |
+| SHOULD 9 everyday gaps | listed (79-gaps.md: 63), S and most M built | test_pageedit, test_pageink, test_pnnotes, test_pnstore, test_boardedit, test_mapedit | b22bcfb4 … 64d09fb3 |
+| SHOULD 10 component rows | fixed | scripts/components.py | ed498794, 801d1b7f |
+| SHOULD 11 waits | bounded: 50 ms for a view, 5 s for an adoption | test_viewsnap, test_canvasload | d666de27 |
+| NIT webswitch.mjs's header | fixed | | bbf8c644 |
+
+**Speed cost of the fixes: not measured** (no GPU run this round).
+
+### The owner's ruling (2026-11-24)
+"yandong have a bar,  it sjust need better than web (sind its antive) if tis very close its ok". The reading (the main
+session's): native better than the web on every row, or within 3 %; no absolute bar. GOAL.md M6 is amended under its row, which
+is left as written. The check's judge compares the same span on both sides and prints the old marks on every row (D-8025,
+D-8026); a GPU-free test holds it (docs/goals/79/judge_test.py: fails on one worse row, one missing number, one CPU frame, more
+missed frames; passes a row over the old marks that beats the web). The Mac's frame rows say "work only, not like-for-like" and
+are not passed: its AppKit host has no paced run, and its screen is locked.
+
+### C: the gaps
+[79-gaps.md](79-gaps.md). What was drawn before is drawn the same: on the fixture's ten screens the app's 86,180 lines of draw
+operations (kinds, colours, words, numbers) are identical to c761a99f's, checked after each batch. The new pieces' look is ours
+from the web's CSS; **nobody has seen them on a screen**.
+
+### For the reviewer, this round
+- **The M6 judge changed, by the owner's ruling only** (D-8025): what fails that passed before: a row slower than the web over the same span, more missed frames than the web, the first open ever, the un-warmed rows. What passes that failed: rows over 8.3/16.7 ms of work that beat the web.
+- **D-7958**: changed what D-7951 judged (the process's first open) and wasn't listed. It is judged again.
+- **tests/test_canvasload** (ddabcd7c): its broken documents now expect an error and a read-only board where they expected an empty one; exports compared with objects_json_canvas.
+- **tests/test_pagedesk, test_graphemes** read renamed fields (line_top → tops, lines → ed.paras, caret_col → ed.caret.byte, edit_words → words.text()); the assertions are the same. test_graphemes' नि row moved to the sign-at-a-time case (D-8036).
+- **tests/test_privatefiles** uses a folder of its own per process (a second run failed on what the first left).
+- **A page's marks saved by this app before today counted bytes** where the web counts UTF-16 units, and stayed behind edits (D-8040). No migration: such a file is the reference copies' only.
+- **scripts/gpu-free** was narrowed once (51d18dc6: a `.lock` path in a command isn't a job).
+
+## Continuation 19 (2026-11-23, evening; Linux only; not judged by M6 or M7)
+D-8019…D-8024, b3cb79c6…933bc1f5. Aimed at the old bar's last Linux rows; kept because they are correct and tested, not judged
+since. Measured in the race's own sequence on the desktop before the third power-off: stress zoom's worst frame 18–21 → ~7 ms,
+undo p95 8.6–8.9 → 7.4–7.6 (3 runs each). Built: zooming out finds its edges rastered (D-8019), a fallback must cover what it
+stands for (D-8020: a blank-block bug since D-7940), a sticky's body without stencils (D-8021; off on the Mac), a raster builds
+only its part (D-8022), first-time work counted out of the first open (D-8024), and probes for the Mac's first frame, written
+and **not run** (D-8023). Tests: test_zoomreach, test_rectcorner, test_tilecull. Linux M0–M5 at c761a99f printed PASS (Linux
+halves, 22:23–22:33); M6 was stopped by the power-off at 22:55 and gave no numbers.
+
 ## Continuations 14–17 (2026-11-22 to 11-23, autopilot)
 Decisions D-7976–D-8002; journal "continuation 14" to "continuation 17"; EXPERIMENTS likewise. In short:
 - **Mac:** NSTextInputClient (M5 PASS), the Mac's own Chrome as reference and the race on the Mac's GPU, AppKit bench steps, PingFang and kern-round rules, the tracking table (`trak`), Menlo fallback; raster tiles and kept views on Metal (D-7993, D-7994); the launcher's lower bound (D-7996).

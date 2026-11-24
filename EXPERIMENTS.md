@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-24: goal 79, continuation 20 (review 3, the owner's ruling, the everyday gaps)
+- **Setup.** Overnight, unattended, after three unlogged power-offs: no GPU program while another project's job runs (scripts/gpu-free), one CPU build or test at a time, 4 cores, niced.
+- **Worked.** The seven data-loss bugs of review 3, each with a test. A page note's editor on TextEdit with the browser's line breaks (19 of 20 test lines the same as Chromium's, drawn in software). Personal Note's own Python opens the notes file this app makes and reads its canvases. Comparing draw operations with the last judged commit (86,180 lines, identical) stood in for pictures while no GPU could run.
+- **Broke / fixed.** A grapheme-wide Backspace broke a Hindi proof that nobody reran: run the wide set after a change to a shared piece. A page's marks were left behind by edits and counted bytes for UTF-16 units. A failed read used to open as an empty editable note.
+- **Means.** "Looks identical" hid that a person couldn't select text, make a note or delete one: walk the rival's keys and menus before calling a rebuild done.
+- **Next.** M0–M6 on a free machine, the Mac half, eyes on the new pieces.
+
 ## 2026-11-23: goal 79, continuation 18 (Mac stress rows, idle warming, kept views)
 Mac stress zoom p95 8.4 → 4.1–5.5, note switch 22–25 → 6–9 ms, omnibar 17–19 → 6–9, first open 12–14 → 9.4–11. A kept view is now always kept (a product bug), and a closing window keeps it too. Found: after 8 ms idle the M4 runs the same paint 7× slower, and no thread policy changes it (probe_coldpaint). Still over the bar: Mac first opens and stress press, Linux stress undo (GPU at idle clocks) and zoom max. Report: docs/goals/79-report.md, continuation 18.
 
