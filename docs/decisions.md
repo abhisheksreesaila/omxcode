@@ -1994,4 +1994,4 @@ The paced run times frames as they are shown, on a timer that runs the app's own
 Markdown: one file a note, a folder a notebook, words only (no pictures), locked notes left out. Backup: SQLite's VACUUM INTO, a whole consistent copy. Both go to OMX_EXPORTS or ~/Downloads and the app says where. The web's are JSON and zips with assets. Obsidian, Print, Picture and Link note still say "Not in the native app yet": passing plain Markdown off as an Obsidian vault would be wrong.
 
 ## D-8059: the Mac's menu bar has New, Quick note, exports, zoom and skins (ours; continuation 21)
-macOS only; Edit, Window and the app menu stay the host's. ⌘N, ⌘=, ⌘−, ⌘0 act through the menu. The Mac's screen is locked, so nobody has clicked it yet.
+macOS only; Edit, Window and the app menu stay the host's. The first Mac run of it drew nothing (the bar's empty view took the whole column): AppKit now hides that view in a vertical stack, a fault no Linux test can see. ⌘N, ⌘=, ⌘−, ⌘0 act through the menu. The Mac's screen is locked, so nobody has clicked it yet.

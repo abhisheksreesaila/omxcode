@@ -1554,6 +1554,8 @@ struct AppKitHost[A: App](Movable):
                     var given = node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)
                     var words = cn.kind == TEXT or cn.kind == PARAGRAPH
                     hug(child, Float32(251 if (not vertical and words and not given) else 1), vertical)
+                elif cn.kind == MENUBAR and vertical:  # (it lives in the system menu bar: its empty view took the column's whole height)
+                    _ = msg(child, "setHidden:", 1)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)
                     hug(child, Float32(2 if grows else 1), vertical)
                     if first_spacer != 0:  # spacers share the free space equally, as GTK's expanding ones (a toolbar's
