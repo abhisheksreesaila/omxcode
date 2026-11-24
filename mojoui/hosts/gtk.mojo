@@ -46,6 +46,8 @@ from mojoui.hosts.gtk_webview import (
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtktree import tree_words
+from mojoui.hosts.hangwatch import hang_watch, loop_wakes, loop_waits
+from mojoui.hangmarks import begin as mark_begin, end as mark_end, MARK_BUILD, MARK_PART, MARK_PATCH
 from mojoui.hosts.gtk_held import (
     Held, hold, same_view, HELD_MESSAGE, HELD_SEND, HELD_OPTION, HELD_FIELD, HELD_GESTURE, HELD_KEY, HELD_WORDS, HELD_CANCEL, HELD_CLICK, HELD_BOARD, HELD_LINK, HELD_SHORTCUT,
 )
@@ -3005,7 +3007,9 @@ struct GtkHost[A: App](Movable):
             for p in d.patches:
                 self.pending.patches.append(p.copy())
             return
+        mark_begin(self.rt.marks, MARK_PATCH, len(d.patches))
         self.apply_patches(d.patches, self_addr)
+        mark_end(self.rt.marks)
 
     def apply_patches(mut self, patches: List[Patch], self_addr: Int, fresh: List[Bool] = List[Bool]()):
         """The patches onto the widgets; then every long list's rows again (fresh: nodes just built, which skip that)."""
@@ -5186,16 +5190,30 @@ def on_effects[A: App](host_addr: Int) abi("C") -> c_int:
 comptime REBUILD_PRIORITY = -100  # (G_PRIORITY_HIGH: before the next input event and the next frame, so little is ever held)
 
 
+def on_loop_poll(fds: Int, n: c_uint, timeout: c_int) abi("C") -> c_int:
+    """The main loop's wait (GLib's poll function): what's outside it is a turn (the hang monitor, goal 81 M5)."""
+    var marks = app_data("mojoui-marks")
+    loop_waits(marks)
+    var r = external_call["g_poll", c_int](fds, n, timeout)
+    loop_wakes(marks)
+    return r
+
+
 def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].has_pending:  # (a full rebuild may have come first)
+        mark_begin(host[].rt.marks, MARK_PART, len(host[].rt.shown.nodes))
         host[].update_part(host_addr)  # update_part() clears the busy flag (apply_patches)
+        mark_end(host[].rt.marks)
     host[].drain_held(host_addr)
     return 0
 
 
 def on_idle_rebuild[A: App](host_addr: Int) abi("C") -> c_int:
+    var marks = host_at[A](host_addr)[].rt.marks
+    mark_begin(marks, MARK_BUILD, len(host_at[A](host_addr)[].rt.shown.nodes))
     host_at[A](host_addr)[].show(host_addr)  # show() clears the busy flag
+    mark_end(marks)
     host_at[A](host_addr)[].drain_held(host_addr)
     return 0  # G_SOURCE_REMOVE: run once
 
@@ -9461,6 +9479,10 @@ def run[A: App]() -> Int:
     startup_mark("host made")
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
+    host[].rt.marks = hang_watch()
+    if host[].rt.marks != 0:
+        set_app_data("mojoui-marks", host[].rt.marks)
+        external_call["g_main_context_set_poll_func", NoneType](Int(0), on_loop_poll)
     if getenv("MOJOUI_PRESENT_STATS") == "1":
         var key = String("mojoui-host")
         external_call["g_object_set_data", NoneType](gapp, key.as_c_string_span(), Int(host))

@@ -12,6 +12,7 @@ from mojoui.webcomponent import Command, is_event_name, is_widget_tag
 from mojoui.json import Json, json_string
 from mojoui.embed import is_web_url
 from mojoui.clock import now_ns
+from mojoui.hangmarks import begin, end, MARK_UPDATE, MARK_VIEW, MARK_DRAW
 from std.os import getenv
 
 
@@ -294,6 +295,7 @@ struct Runtime[A: App](Movable):
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
     var closed: Bool  # App.closing was told
+    var marks: Int  # the hang monitor's marks (mojoui.hangmarks; 0: no monitor)
     var changes: Int  # the app's state changed this many times (every update, resize, appearance): a host that drew a
     # frame ahead of time shows it only if this hasn't moved since (D-7560)
 
@@ -313,6 +315,7 @@ struct Runtime[A: App](Movable):
         self.budget_ns = 0
         self.armed_at = 0
         self.closed = False
+        self.marks = 0
         self.changes = 0
         self.take_effects()  # (what the starting state asks for)
 
@@ -340,7 +343,9 @@ struct Runtime[A: App](Movable):
         """update(), timed by the watchdog."""
         var t0 = self._t0()
         self.changes += 1
+        begin(self.marks, MARK_UPDATE, event.message)
         self.app.update(event)
+        end(self.marks)
         self._slow("update", "msg=" + String(event.message) + ("" if event.name == "" else "/" + event.name), t0)
 
     def take_effects(mut self):
@@ -587,8 +592,10 @@ struct Runtime[A: App](Movable):
     def _refresh(mut self, cause: String) -> Diff:
         """view() and its diff against the screen shown, timed by the watchdog (named by its cause)."""
         var t0 = self._t0()
+        begin(self.marks, MARK_VIEW)
         var next = self.view()
         var d = diff(self.shown, next)
+        end(self.marks)
         swap(self.shown, next)
         self.before = next^
         self._slow("view", cause, t0)
@@ -611,7 +618,9 @@ struct Runtime[A: App](Movable):
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return (False, Diff(False, []))
         var t0 = self._t0()
+        begin(self.marks, MARK_DRAW, self.shown.nodes[node].style)
         var drew = self.app.draw_scene(self.shown.nodes[node].style, scene)
+        end(self.marks)
         self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         if not drew:
             return (False, Diff(False, []))
@@ -622,7 +631,9 @@ struct Runtime[A: App](Movable):
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return Diff(False, [])
         var t0 = self._t0()
+        begin(self.marks, MARK_DRAW, self.shown.nodes[node].style)
         self.app.draw(self.shown.nodes[node].style, surface)
+        end(self.marks)
         self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         return self.refresh()
 
