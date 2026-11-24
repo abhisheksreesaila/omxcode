@@ -4562,6 +4562,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             var press_frames = 0
             var done_by = Int(now_ns()) + 5_000_000_000
             var tick_seen = last
+            var done_shown = -1  # (the app said it's complete: the picture drawn after that, handed over, ends the open)
+            var done_frames = 0
             while Int(now_ns()) < done_by:
                 pump_run_loop(0.0005)
                 node = canvas_node_at(host[], tag)
@@ -4584,7 +4586,12 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
                 if press_ns > 0 and host[].g2d_frames != press_frames and len(host[].g2d_shown_ms) > press_shown:
                     press_lats.append(Float64(Int(now_ns()) - press_ns) / 1e6)
                     press_ns = 0
-                if host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5 and host[].idle() and len(host[].g2d_pk) == 0:
+                if done_shown < 0 and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
+                    done_shown = len(host[].g2d_shown_ms) + len(host[].g2d_pk)
+                    done_frames = host[].g2d_frames
+                    if len(gaps) == 0 and len(host[].g2d_pk) == 0:
+                        break  # (complete in the open's own frame)
+                if done_shown >= 0 and press_ns == 0 and ((host[].g2d_frames > done_frames and len(host[].g2d_shown_ms) > done_shown) or (host[].idle() and len(host[].g2d_pk) == 0)):
                     break
             completes.append(Float64(Int(now_ns()) - t0) / 1e6)
             bench_settle[A](host_addr, 300_000_000)
