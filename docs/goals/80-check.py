@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +41,7 @@ HELD = ["whiteboard", "canvas", "mindmap", "document", "table"]
 # ---- the bars, from GOAL.md ----
 SPEEDUP_MIN = 4.0     # M5: median threaded speed-up over the race scenes
 TIE_MAX = 1.03        # M6, M7: a race cell vs the rival's (the owner, 2026-11-23: "3% is good enough", D-8025; was 1.0)
-HELD_MAX = 1.05       # M6: each held-out scene's frame CPU and GPU medians vs its baseline
+HELD_MAX = 1.05       # M6: each held-out scene's frame CPU and GPU medians vs the base's, alternated in one session (D-8029)
 RIVAL_WORDS = r"nanoui|hillclimb|boxes|dashboard"  # M6: may not appear more often in mojoui/ than at BASE_REV
 
 
@@ -75,6 +76,21 @@ def best_of(runs):
     """(D-8012) Per scene, each metric's lowest over the runs: unchanged code read 3.4x apart on the GPU between runs
     (its clocks move between P8 and P0 under this light load), so one run proves nothing either way. Both sides alike."""
     return {s: {k: (v if k == "scene" else min(r[s][k] for r in runs)) for k, v in runs[0][s].items()} for s in runs[0]}
+
+
+class awake:
+    """(D-8030) Holds the GPU at its working clock while something is timed, by asking nvidia-smi for it every 50 ms (no
+    setting is changed); .spread is the lowest and highest graphics clock read."""
+    def __enter__(self):
+        self.p = subprocess.Popen(["nvidia-smi", "-i", "0", "--query-gpu=clocks.gr", "--format=csv,noheader,nounits", "-lms", "50"], stdout=subprocess.PIPE, text=True)
+        time.sleep(1.5)
+        return self
+
+    def __exit__(self, *a):
+        self.p.terminate()
+        v = sorted(int(x) for x in self.p.stdout.read().split() if x.isdigit())
+        self.spread = (v[0], v[-1]) if v else (0, 0)
+        return False
 
 
 # ---------- builds (once per checker run) ----------
@@ -124,9 +140,9 @@ def build_omx():
     return _cache["omx"]
 
 
-def _nanoui_gl():
+def _nanoui_gl(scenes):
     exe = str(NANOUI / "hillclimb" / "zig-out" / "bin" / "hillclimb")
-    g = run([exe, "--only", "nanoui", "--no-history", "--scene", ",".join(RACE)], 3600, env={"HC_GL": "1", "HC_SHOT": str(OUT / "shots")})
+    g = run([exe, "--only", "nanoui", "--no-history", "--scene", ",".join(scenes)], 3600, env={"HC_GL": "1", "HC_SHOT": str(OUT / "shots")})
     # (it repeats each scene 3 times itself and keeps the lowest median; glrun.zig prints all three: the lowest is kept)
     out = {}
     for line in (g.stdout + g.stderr).splitlines():
@@ -138,8 +154,8 @@ def _nanoui_gl():
     return out, tail(g.stdout + g.stderr, 600)
 
 
-def _omx_run():
-    r = run(["pixi", "run", str(OMX)] + RACE + HELD, 7200, env={"HC_SHOT": str(OUT / "shots")})
+def _omx_run(scenes):
+    r = run(["pixi", "run", str(OMX)] + scenes, 7200, env={"HC_SHOT": str(OUT / "shots")})
     return results(r.stdout), tail(r.stdout + r.stderr, 600)
 
 
@@ -152,12 +168,26 @@ def races():
         _cache["races"] = (None, None, err)
         return _cache["races"]
     (OUT / "shots").mkdir(parents=True, exist_ok=True)
-    ns, os_ = [], []
+    ns, os_, clocks = [], [], []
     for _ in range(RUNS):
-        n, said = _nanoui_gl()
-        if len(n) != len(RACE):
-            _cache["races"] = (None, None, "nanoui GL run: " + said)
-            return _cache["races"]
+        n, o, mhz = {}, {}, {}
+        for sc in RACE:  # (D-8030: a scene a process, both sides alike, each with the card held awake)
+            with awake() as an:
+                d, said = _nanoui_gl([sc])
+            if sc not in d:
+                _cache["races"] = (None, None, f"nanoui GL run, {sc}: " + said)
+                return _cache["races"]
+            n[sc] = d[sc]
+            with awake() as ao:
+                d, said = _omx_run([sc])
+            if sc not in d:
+                _cache["races"] = (None, None, f"omx run, {sc}: " + said)
+                return _cache["races"]
+            o[sc] = d[sc]
+            mhz[sc] = {"nanoui": an.spread[1], "omx": ao.spread[1]}
+        d, said = _omx_run(HELD)  # (race.md's held-out table and M0; M6 compares them by held_ab)
+        o.update(d)
+        clocks.append(mhz)
         c = run([str(NANOUI / "hillclimb" / "zig-out" / "bin" / "hillclimb"), "--only", "nanoui", "--no-history", "--scene", ",".join(RACE)], 3600)
         scene = None
         for line in re.sub(r"\x1b\[[0-9;]*[mK]", "", c.stdout + c.stderr).splitlines():
@@ -170,12 +200,12 @@ def races():
         if any("raster_med" not in n[s] for s in RACE):
             _cache["races"] = (None, None, "nanoui CPU run: " + tail(c.stdout + c.stderr, 600))
             return _cache["races"]
-        o, said = _omx_run()
         if len(o) != len(RACE) + len(HELD):
             _cache["races"] = (None, None, "omx run: " + said)
             return _cache["races"]
         ns.append(n)
         os_.append(o)
+        (DOCS / "race-awake.json").write_text(json.dumps({"peak clock MHz": clocks, "nanoui": ns, "omx": os_}, indent=1) + "\n")
     _cache["races"] = (best_of(ns), best_of(os_), None)
     return _cache["races"]
 
@@ -188,6 +218,42 @@ def race_nanoui():
 def race_omx():
     _, o, err = races()
     return o, err
+
+
+HELD_REV = "184973be"  # (D-8029) the bench program the recorded baseline used: its held-out scenes are today's
+HELD_ROUNDS = 8        # (D-8029) alternating rounds, the order swapped each round; set before the first run under this rule
+
+
+def held_ab():
+    """(D-8029, the owner's OK 2026-11-23) The held-out scenes, base mojoui/ and today's alternated in one session:
+    ({scene: base}, {scene: now}, error), each metric's lowest of HELD_ROUNDS, as the race. Every round is kept."""
+    err = build_omx()
+    if err:
+        return None, None, err
+    src = OUT / "basesrc"
+    exe = OUT / "omx_heldbase"
+    src.mkdir(parents=True, exist_ok=True)
+    r = run(["bash", "-c", f"git archive {BASE_REV} | tar x -C {src} && mkdir -p {src}/bench/nanoui && git show {HELD_REV}:bench/nanoui/scenes.mojo > {src}/bench/nanoui/scenes.mojo"], 300)
+    if r.returncode != 0:
+        return None, None, "base source: " + tail(r.stderr)
+    r = run(["pixi", "run", "mojo", "build", "-O3", "-I", str(src), str(src / "bench/nanoui/scenes.mojo"), "-o", str(exe)], 1800)
+    if r.returncode != 0:
+        return None, None, "base build: " + tail(r.stdout + r.stderr, 600)
+    sides = {"base": exe, "now": OMX}
+    got = {"base": [{} for _ in range(HELD_ROUNDS)], "now": [{} for _ in range(HELD_ROUNDS)]}
+    clocks = {}
+    for k in range(HELD_ROUNDS):
+        for sc in HELD:  # (a scene a process: the base's long CPU raster between scenes lets the card doze off)
+            for side in (("base", "now") if k % 2 == 0 else ("now", "base")):
+                with awake() as aw:
+                    r = run(["pixi", "run", str(sides[side]), sc], 3600)
+                d = results(r.stdout)
+                if sc not in d:
+                    return None, None, f"held-out {side} {sc} run: " + tail(r.stdout + r.stderr, 600)
+                got[side][k][sc] = d[sc]
+                clocks.setdefault(sc, {}).setdefault(side, []).append(aw.spread[1])
+        (DOCS / "held-ab.json").write_text(json.dumps({"base": BASE_REV, "bench": HELD_REV, "peak clock MHz": clocks, "rounds": got}, indent=1) + "\n")
+    return best_of(got["base"]), best_of(got["now"]), None
 
 
 def write_race(n, o):
@@ -348,11 +414,13 @@ def m6():
         for k in ("frame_med", "frame_p95", "gpu_med", "gpu_p95", "raster_med"):
             if o[s][k] > n[s][k] * TIE_MAX:
                 lost.append(f"{s} {k} {o[s][k]} > {TIE_MAX}× {n[s][k]}")
-    base = json.loads((DOCS / "baseline.json").read_text())["scenes"]
+    base, now, err = held_ab()  # (D-8029: was today's race run against baseline.json's recorded numbers)
+    if err:
+        return "FAIL", err
     for s in HELD:
         for k in ("frame_med", "gpu_med"):
-            if o[s][k] > base[s][k] * HELD_MAX:
-                lost.append(f"held-out {s} {k} {o[s][k]} > {HELD_MAX}× {base[s][k]}")
+            if now[s][k] > base[s][k] * HELD_MAX:
+                lost.append(f"held-out {s} {k} {now[s][k]} > {HELD_MAX}× {base[s][k]}")
     def count(rev):
         cmd = ["git", "grep", "-ciE", RIVAL_WORDS] + ([rev] if rev else []) + ["--", "mojoui/"]
         return sum(int(l.rsplit(":", 1)[1]) for l in run(cmd, 120).stdout.splitlines() if l.strip())
