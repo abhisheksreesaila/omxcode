@@ -31,7 +31,8 @@ def busy():
             continue
         # (the program and its script, not every word of its arguments: a browser tab's title isn't a job)
         # (a lock file's name isn't a job either: `flock ~/.cache/omx-mac.lock …` waits for the Mac, not for a GPU here)
-        head = " ".join(a for a in args[:4] if not a.endswith(".lock"))
+        # (the desktop's own usage readers, omarchy-agent-usage-<name>, only read counters: the main session's ruling, 11-24)
+        head = " ".join(a for a in args[:4] if not a.endswith(".lock") and not a.rsplit("/", 1)[-1].startswith("omarchy-agent-usage-"))
         m = JOBS.search(head)
         if m and "chrom" not in args[0] and "claude" not in args[0]:
             return f"process {pid} is another project's job: {head[:100]}"
