@@ -409,6 +409,7 @@ struct NotesPanel(Movable):
     var skin_name: String
     var cfg: PanelConfig
     var open_books: List[Int]  # the notebooks opened to their notes, by id
+    var selected: Int  # the notebook marked (the open note's, or one just chosen or made), by id; 0: none (the web's selectedNotebookId)
     var scroll: Float64  # the list, scrolled (layout px); how far it can go, and where it shows, at the last draw
     var scroll_max: Float64
     var list_y0: Float64
@@ -435,6 +436,7 @@ struct NotesPanel(Movable):
         self.skin_name = cfg.skins[0].name if len(cfg.skins) > 0 else String("")
         self.cfg = cfg.copy()
         self.open_books = List[Int]()
+        self.selected = 0
         self.scroll = 0
         self.scroll_max = 0
         self.list_y0 = 0
@@ -545,6 +547,12 @@ struct NotesPanel(Movable):
         for ref n in self.notes:
             if n.id == id and n.notebook != 0:
                 self.reveal_book(n.notebook)
+
+    def select_book(mut self, id: Int):
+        """Marks a notebook (0: none); one newly marked opens to its notes."""
+        if id != 0 and id != self.selected and id not in self.open_books:
+            self.open_books.append(id)
+        self.selected = id
 
     def reveal_book(mut self, id: Int):
         for ref nb in self.notebooks:
@@ -824,6 +832,9 @@ struct NotesPanel(Movable):
         bx.add("panel.row:" + n.emoji + " " + n.title, x, y, w, 34)
 
     def _notebook_row[P: Painter](self, mut p: P, mut bx: Boxes, k: Float64, sk: Skin, x: Float64, y: Float64, w: Float64, nb: PanelNotebook):
+        var marked = nb.id == self.selected and nb.id != 0
+        if marked:
+            p.rect(x, y, w, 30, sk.accent_soft, 9)
         if nb.icon == "":
             p.rect(x + 6, y + 6, 18, 18, nb.color, 6)
             var lst = TextStyle(UI, 600, False, 11)
@@ -832,13 +843,14 @@ struct NotesPanel(Movable):
         else:
             draw_icon(p, nb.icon, x + 7, y + 7, 16, k, nb.color)
         bx.add("panel.group-icon:" + nb.name, x, y, 30, 30)
-        var st = TextStyle(UI, 400, False, 13)
-        text_normal(p, st, fitted(st, nb.name, w - 33 - 8 - 14 - 9 - 24), x + 33, y + 6.5, sk.ink_soft)
+        var st = TextStyle(UI, 500 if marked else 400, False, 13)
+        var fg = sk.ink if marked else sk.ink_soft
+        text_normal(p, st, fitted(st, nb.name, w - 33 - 8 - 14 - 9 - 24), x + 33, y + 6.5, fg)
         var cst = TextStyle(MONO, 400, False, 11)
         var cnt = String(nb.count)
         var tw = measure(cst, cnt)
         text_at(p, cst, cnt, x + w - 8 - 14 - 9 - tw, y + 9.5, 11, sk.ui_muted)
-        draw_icon(p, "chevron-down" if nb.id in self.open_books else "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(sk.ink_soft, 0.7))
+        draw_icon(p, "chevron-down" if nb.id in self.open_books else "chevron-right", x + w - 8 - 14, y + 8, 14, k, with_alpha(fg, 0.7))
         bx.add("panel.group-row:" + nb.name + " " + cnt + (" " + String(nb.name[byte=0:1]).upper() if nb.icon == "" else ""), x, y, w, 30)
 
 

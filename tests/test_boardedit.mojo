@@ -11,7 +11,7 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.ink import Stroke
 from mojoui.wordsedit import WordsEdit
-from mojoui.fonttext import TextStyle
+from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in
 from mojoui.textedit import Pos
 from mojoui.scene import Scene
 
@@ -293,7 +293,32 @@ def handles() raises:
     assert_true(b.l.objs[q].w == 100 and not b.t.changed, "nothing")
 
 
+def families() raises:
+    """A text the web made names its faces as CSS does, its weight in words."""
+    var mono = measure(TextStyle("Geist Mono", 400, False, 24), "Words on the board")
+    assert_equal(measure(TextStyle('"Geist Mono", monospace', 400, False, 24), "Words on the board"), mono)
+    assert_equal(measure(TextStyle("Nobody's Face, 'Geist Mono'", 400, False, 24), "Words on the board"), mono)
+    assert_equal(measure(TextStyle("monospace", 400, False, 24), "Words on the board"), mono)
+    assert_true(measure(TextStyle("Geist", 400, False, 24), "Words on the board") != mono, "another face")
+    assert_equal(measure(TextStyle("sans-serif", 400, False, 24), "Words"), measure(TextStyle("Geist", 400, False, 24), "Words"))
+    # an emoji sits in the middle of its line (a bitmap face's metrics are its strike's: 0 drew every note's emoji 8 px high
+    # on Linux, in every compare picture since M2, under the checker's bars)
+    var e = TextStyle("emoji", 400, False, 38)
+    var m = line_metrics(e)
+    assert_true(m.ascent > 25 and m.descent > 3, "its own metrics")
+    var base = baseline_in(0, 38, e)
+    assert_true(base > 28 and base < 36, "in the middle: " + String(base))
+    var doc = String('{"nodes":[{"id":"t","type":"text","x":0,"y":0,"width":300,"height":60,"text":"Hi","pn":{"type":"text","geometry":{"x":0,"y":0,"width":300,"height":60},"style":{"fontWeight":"bold","fontFamily":"\\"Geist Mono\\", monospace","fontSize":24,"lineHeight":1.45,"padding":8,"color":"#20201e"},"mode":"box","format":"markdown"}}],"edges":[]}')
+    var l = import_json_canvas(doc)
+    assert_true(l.objs[0].weight == 700 and l.objs[0].family == '"Geist Mono", monospace', "read")
+    l.select_all()
+    l.move_by(10, 0)
+    var out = export_json_canvas(l, 1, 1)
+    assert_true(out.find('"fontWeight":"bold","fontFamily":"\\"Geist Mono\\", monospace"') >= 0, "written as it was: " + out)
+
+
 def main() raises:
+    families()
     handles()
     selection()
     making()

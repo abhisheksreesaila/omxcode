@@ -2302,7 +2302,7 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
         o.line_width = 0
         o.family = j.text(j.get(style, "fontFamily"))
         o.line_height = j.real(j.get(style, "lineHeight"), 0)
-        o.weight = Int(j.real(j.get(style, "fontWeight"), 400))
+        o.weight = 700 if j.text(j.get(style, "fontWeight")) == "bold" else Int(j.real(j.get(style, "fontWeight"), 400))  # ("normal", "bold", or a number)
         o.markdown = j.text(j.get(pn, "format")) == "markdown"
         made = True
     elif kind == "file" and j.text(j.get(pn, "type")) == "ink" and j.text(j.get(pn, "kind"), "stroke") == "stroke":

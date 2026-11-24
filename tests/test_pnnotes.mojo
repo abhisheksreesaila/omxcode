@@ -504,6 +504,37 @@ def notebooks() raises:
     print("   a new notebook; folds remembered")
 
 
+def selected() raises:
+    """The notebook of the open note is marked (the web's selectedNotebookId): opening, filing, choosing and making one mark it."""
+    var s = WebShell(DB, "paper")
+    s.sidebar = True
+    s.open(s.notes[0].id)
+    paint(s)
+    s.move_note(0)
+    assert_equal(s.panel.selected, 0, "the Inbox: none")
+    s.move_note(1)
+    assert_equal(s.panel.selected, 1, "filed")
+    s.create("page")
+    assert_equal(s.panel.selected, 0, "a new page is in the Inbox")
+    var filed = 0
+    for ref n in s.notes:
+        if n.notebook == 1:
+            filed = n.id
+    s.open(filed)
+    assert_equal(s.panel.selected, 1, "opened")
+    s.act("new-note")
+    assert_equal(s.notes[s.note_index(s.current)].notebook, 1, "New note goes in the marked notebook")
+    s.act("quick-note")
+    assert_equal(s.notes[s.note_index(s.current)].notebook, 0, "Quick note in the Inbox")
+    s.panel.naming = 0
+    s.panel.naming_text = "Marked"
+    s.name_notebook()
+    var b = s.panel.notebooks[0].id
+    assert_true(s.panel.selected == b and b in s.panel.open_books, "a notebook just made")
+    s.delete_book(b)
+    assert_equal(s.panel.selected, 0, "and deleted")
+
+
 def place(s: WebShell, kind: Int, id: Int) raises -> Tuple[Float64, Float64]:
     for k in range(0, len(s.panel.hits), 6):
         if Int(s.panel.hits[k]) == kind and Int(s.panel.hits[k + 1]) == id:
@@ -603,4 +634,5 @@ def main() raises:
     another_app()
     notebooks()
     dragging_and_notebooks()
+    selected()
     print("pnnotes: ok")

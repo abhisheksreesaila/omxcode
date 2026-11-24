@@ -605,6 +605,7 @@ struct WebShell(Movable):
         self.current = id
         self.panel.active = id
         self.panel.reveal(id)  # (its row where it can be seen: the web's revealNotebook)
+        self.panel.select_book(self.notes[i].notebook if i >= 0 else 0)
         self.save_state = ""
         self.save_detail = ""
         self.look.keep_path = ""  # (D-7956: the note's own file below, a canvas only)
@@ -1285,13 +1286,16 @@ struct WebShell(Movable):
         elif kind == 1:  # (a notebook: shown in the panel, opened)
             self.set_sidebar(True)
             self.panel.reveal_book(id)
+            self.panel.select_book(id)
         elif kind == 3:
-            self.create("canvas", String(self.omni.query.strip()))
+            self.create("canvas", String(self.omni.query.strip()), self.panel.selected)
         else:
             self.act(pn_actions()[id].id)
 
     def act(mut self, id: String):
-        if id == "new-note" or id == "quick-note":
+        if id == "new-note":  # (in the notebook marked, as the web's)
+            self.create("canvas", "", self.panel.selected)
+        elif id == "quick-note":
             self.create("canvas")
         elif id == "new-page":
             self.create("page")
@@ -1543,6 +1547,7 @@ struct WebShell(Movable):
             self.say("Couldn’t make it: " + made.message)
             return
         self.panel.notebooks.insert(0, PanelNotebook(made.id, name, hexc("#B86B4B"), shelf, notebook_icon(name), 0))
+        self.panel.select_book(made.id)
 
     def move_note(mut self, notebook: Int):
         """The open note filed into a notebook (0: the Inbox)."""
@@ -1567,7 +1572,7 @@ struct WebShell(Movable):
         var rec = self.notes.pop(i)
         self.notes.insert(0, rec^)
         self.list_notes()
-        self.panel.reveal(self.current)
+        self.panel.select_book(notebook)
 
     def file_at(mut self, id: Int, notebook: Int):
         """A note dragged onto a notebook (0: the Inbox)."""
@@ -1593,7 +1598,6 @@ struct WebShell(Movable):
         var rec = self.notes.pop(i)
         self.notes.insert(0, rec^)
         self.list_notes()
-        self.panel.reveal(id)
 
     def book_index(self, id: Int) -> Int:
         for k in range(len(self.panel.notebooks)):
@@ -1632,6 +1636,7 @@ struct WebShell(Movable):
                 self.notes[i].revision += 1
                 if self.notes[i].id == self.current:
                     self.doc.saved(self.notes[i].revision)
+        self.panel.select_book(0)
         self.list_notes()
         self.say("Notebook deleted. Its notes are in the Inbox.")
 

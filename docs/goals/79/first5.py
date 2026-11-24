@@ -280,8 +280,34 @@ def again():
     check(a.close() == 0, "closes")
 
 
+def back():
+    """The copy the web edited (first5web.mjs), opened again."""
+    for d in ["data2", "cfg2"]:
+        shutil.rmtree(W / d, ignore_errors=True)
+        (W / d).mkdir(parents=True)
+    for x in ["", "-wal"]:
+        if Path(str(W / "web.db") + x).exists():
+            shutil.copy(str(W / "web.db") + x, str(W / "data2/notes.db") + x)
+    e = dict(env(), OMX_DATA=str(W / "data2"), OMX_CONFIG=str(W / "cfg2"))
+    a = App(e, W / "log3.txt")
+    shot(a, "50-back")
+    for q, name in [("web was here", "51-back-page"), ("typed in the web", "52-back-canvas")]:
+        a.key("k", "Ctrl", wait=0.4)
+        a.type(q)
+        shot(a, name + "-search")
+        a.key("Enter", wait=1.2)
+        shot(a, name)
+    a.type("native again")
+    a.key("Escape", wait=1.2)
+    c = sqlite3.connect(f"file:{W / 'data2/notes.db'}?mode=ro", uri=True)
+    r = [x[0] for x in c.execute("SELECT content FROM notes")]
+    check(any("The web was here" in x for x in r) and any("typed in the web" in x and "sticky words" in x for x in r), "both apps' words are there")
+    check(any("native again" in x and "typed in the web" in x for x in r), "and native goes on from the web's")
+    check(a.close() == 0, "closes")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     for part in sys.argv[1:] or ["fresh", "again"]:
-        {"fresh": fresh, "again": again}[part]()
+        {"fresh": fresh, "again": again, "back": back}[part]()
     print("first5:", "ok" if not bad else f"{len(bad)} BAD: " + "; ".join(bad))

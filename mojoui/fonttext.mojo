@@ -538,6 +538,20 @@ struct FontEngine(Movable):
         "emoji" is the system's colour emoji face (fontconfig's choice: Noto Color Emoji here, as Chromium's)."""
         if family == "emoji":
             return self.system_face(0x1F600, True)
+        if family.find(",") >= 0 or family.find('"') >= 0 or family.find("'") >= 0:  # (a CSS family list: '"Geist Mono", monospace')
+            for part in family.split(","):
+                var name = String(String(part).replace('"', "").replace("'", "").strip())
+                var at = self.pick(name, weight, italic) if name != "" else -1
+                if at >= 0:
+                    return at
+            return -1
+        # (the generic families, where no face of that name is registered: this engine's own of that kind)
+        if family == "monospace" or family == "ui-monospace":
+            return self.pick("Geist Mono", weight, italic)
+        if family == "serif" or family == "ui-serif":
+            return self.pick("Source Serif 4", weight, italic)
+        if family == "sans-serif" or family == "system-ui" or family == "ui-sans-serif":
+            return self.pick("Geist", weight, italic)
         var best = -1
         var best_d = 1 << 30
         for i in range(len(self.faces)):
@@ -1643,6 +1657,14 @@ def line_metrics(st: TextStyle) -> LineMetrics:
     var inst = e[].inst(fi, st.weight, st.size)
     e[]._use(inst)  # (FreeType applies MVAR's metric deltas for the instance: Literata's ascent moves with opsz)
     var ft = e[].faces[fi].ft
+    if e[].faces[fi].fixed:  # (a bitmap face, Noto Color Emoji: FreeType's outline metrics are 0 for it; its strike's, scaled, as Skia)
+        _ = _fn[def(Int, c_int) thin abi("C") -> c_int](e[].FT_Select_Size)(ft, c_int(0))
+        var sz = _peek(ft + 160)
+        var ppem = Float64(_peek_u16(sz + 24))
+        if ppem > 0:
+            var up = Float64(_peek(sz + 48)) / 64 * st.size / ppem
+            var down = -Float64(_peek(sz + 56)) / 64 * st.size / ppem
+            return LineMetrics(Int(up + 0.5), Int(down + 0.5), 0)
     var k = st.size / Float64(e[].faces[fi].upem)
     var asc = Float64(_peek_i16(ft + 138)) * k
     var desc = -Float64(_peek_i16(ft + 140)) * k
