@@ -274,8 +274,8 @@ struct Main(App):
             except e:
                 print("fonttext: FAIL " + String(e), flush=True)
         var pn_db = environment("PNOTE_DB", "")
-        if pn_db == "" and environment("PNOTE_DIR", "") + environment("PNOTE_SCENE", "") + environment("PNOTE_IMPORT", "") + environment("PNOTE_PAGE_CHARS", "") == "":
-            pn_db = default_notes_file()  # (a person starting the app: this look, notes of its own)
+        if pn_db == "" and environment("PNOTE_DIR", "") + environment("PNOTE_SCENE", "") + environment("PNOTE_IMPORT", "") + environment("PNOTE_PAGE_CHARS", "") + environment("MOJOUI_TEST", "") + environment("PNOTE_FONTCHECK", "") == "":
+            pn_db = default_notes_file()  # (a person starting the app: this look, notes of its own; a test run never touches them)
         if pn_db != "":
             # (D-7907) the web look runs on a Personal Note database; goal 74/75's contract (PNOTE_DIR, its own store, the
             # judged scenes) keeps goal 74's look so their checks still prove the editors and the GPU path
