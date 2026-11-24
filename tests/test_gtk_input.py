@@ -21,6 +21,7 @@ from test_gtk_random import OUT, build
 EXE = OUT / "input" / "input"
 FIELD, AREA, TOGGLE, CHOICE, LEVEL, PART, DOT, SUBMIT, ROW, CANVAS, SET, FIND, BACK = 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 39
 PRESS, KEY, WHEEL = 4, 7, 9
+CARD = 22
 
 
 class Model:
@@ -51,7 +52,7 @@ def make(rng, model, words):
     now.here, now.v = list(model.here), dict(model.v)
     dropped = set()
     for _ in range(rng.randint(2, 7)):
-        k = rng.randrange(17)
+        k = rng.randrange(18)
         item = exp = None
         if k == 0:
             item, exp = "a", (1, None, None)
@@ -100,6 +101,9 @@ def make(rng, model, words):
         elif k == 15:
             n = rng.randint(1, 3)
             item, exp = f"canvas=w{n}", (CANVAS, n, WHEEL)
+        elif k == 17:
+            c = rng.randrange(3)
+            item, exp = f"card{c}=drop", (CARD, f"card{c}", None)
         elif k == 16:
             item, exp = rng.choice([("^Ctrl+F", (FIND, None, None)), ("canvas=p", (CANVAS, None, PRESS)), ("field=!", (SUBMIT, None, None))])
         if item is None:
@@ -123,7 +127,7 @@ def judge(got, want):
             else:
                 out.append(r)
         return out
-    h = add([(g[0], -g[4] // 40, WHEEL) if g[0] == CANVAS and g[2] == WHEEL else (g[0], g[1] if g[0] in (FIELD, AREA) or (g[0] == CANVAS and g[2] == KEY) else None,
+    h = add([(g[0], -g[4] // 40, WHEEL) if g[0] == CANVAS and g[2] == WHEEL else (g[0], g[1] if g[0] in (FIELD, AREA, CARD) or (g[0] == CANVAS and g[2] == KEY) else None,
              g[2] if g[0] in (CHOICE, LEVEL, PART, DOT, ROW, CANVAS) else None) for g in heard])
     w = add(want)
     slim = []

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = "2571778d"
 TESTS = ["test_gpu2d", "test_gpu2d_gl", "test_gpu2d_waste", "test_gpu2d_clear", "test_gpu2d_shadow", "test_gpu2d_cull", "test_gpu2d_tiles", "test_cpu_reference", "test_cpu_threads",
          "test_keptpatch", "test_keptops", "test_scene", "test_objectlayer", "test_textfast", "test_diff_keep", "test_diff_random", "test_diff_long", "test_gpu2d_image", "test_hangmarks", "test_mojoui"]
-PYTESTS = ["test_gtk_random", "test_gtk_lists", "test_gtk_input", "test_field_queue"]
+PYTESTS = ["test_gtk_random", "test_gtk_lists", "test_gtk_input", "test_hang", "test_field_queue", "test_gaps_stall", "test_step_verbs", "test_agent_secret", "test_agent_widgets", "test_pnote_store"]
 LINUX = ["pnote", "omxplorer", "keeper", "kitchen", "gallery", "expenses"]
 MAC = ["kitchen", "gallery", "expenses"]
 

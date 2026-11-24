@@ -12,7 +12,7 @@
 
 from std.collections import Dict
 from mojoui.canvas import Surface
-from mojoui.bitmap import Bitmap, Sampler, make_bitmap
+from mojoui.bitmap import Bitmap, Sampler, make_bitmap, ready
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.shadow import draw_shadow, shadow_reach
 from mojoui.text import Font, REGULAR, LEFT
@@ -228,6 +228,7 @@ def draw_bitmap(mut s: Surface, b: Bitmap, x: Float64, y: Float64, w: Float64, h
     """A picture scaled into a rect of the surface (straight alpha over what's there: icons, glyph-like pictures; goal 79)."""
     if w <= 0 or h <= 0 or b[].w <= 0 or b[].h <= 0:
         return
+    ready(b, w, h, smooth)
     var at = Sampler(b, w, h, smooth)
     var x0 = Int(x)
     var y0 = Int(y)
@@ -414,8 +415,6 @@ struct Scene(Painter, Movable, Copyable):
     var layer_starts: List[Int]  # the first op of each layer
     var layer_versions: List[Int]  # each layer's version (-1: compare its items)
     var images: List[Bitmap]  # OP_IMAGE's pictures (num 4 = which, num 5 = its width, negative: not smooth)
-    var px_copied: Int  # (always on) pixels image() has copied and hashed into this scene, since it was made
-    var px_hashed: Int
     var path: List[Float32]  # OP_POLY's points, x, y interleaved (num 0 = the first point's index, num 1 = how many)
     var layer_tx: List[Float64]  # each layer's transform (layer_transform; not part of its picture: same_layer ignores it)
     var layer_ty: List[Float64]
@@ -450,8 +449,6 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_keys = List[String]()
         self.layer_starts = List[Int]()
         self.layer_versions = List[Int]()
-        self.px_copied = 0
-        self.px_hashed = 0
         self.images = List[Bitmap]()
         self.path = List[Float32](capacity=4096)
         self.layer_tx = List[Float64]()
@@ -774,8 +771,6 @@ struct Scene(Painter, Movable, Copyable):
     def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
         if pw <= 0 or ph <= 0 or len(pixels) < pw * ph:
             return
-        self.px_copied += pw * ph
-        self.px_hashed += pw * ph
         self.bitmap(make_bitmap(pixels.copy(), pw, ph), x, y, w, h, smooth)
 
     def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):

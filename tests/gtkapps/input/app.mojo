@@ -38,10 +38,20 @@ struct Main(App):
     def row(self, list_id: Int, index: Int) -> String:
         return "row " + String(index)
 
+    def cards(self) -> List[Int]:
+        """The board's cards in their order now (it turns as the screen's shape does)."""
+        var out = List[Int]()
+        for k in range(3):
+            out.append((k + self.n // 2) % 3)
+        return out^
+
     def update(mut self, event: Event):
+        var text = event.text
+        if event.message == 22 and 0 <= event.number < 3:  # (which card it was, as the app sees its board now)
+            text = "card" + String(self.cards()[event.number])
         try:
             var f = open(getenv("G81_LOG"), "a")
-            f.write(String(event.message) + "\t" + event.text + "\t" + String(event.number) + "\t" + String(Int(event.dx)) + "\t" + String(Int(event.dy)) + "\n")
+            f.write(String(event.message) + "\t" + text + "\t" + String(event.number) + "\t" + String(Int(event.dx)) + "\t" + String(Int(event.dy)) + "\n")
             f.close()
         except:
             print("no log")
@@ -92,6 +102,10 @@ struct Main(App):
         parts.append(HStack(Segmented(["L", "M", "R"], self.part, 15).tag("seg"), Radio(["x", "y", "z"], self.dot, 16).tag("radio")))
         parts.append(LazyList(500, 1, on_tap=18, height=100, row_height=30).tag("list"))
         parts.append(Canvas(1, self.n, on_gesture=19, keys=True, scroll_pans=True).width(200).height(80).tag("canvas"))
+        var board = List[View]()
+        for c in self.cards():
+            board.append(Text("card " + String(c)).at(120 * c, 4).width(100).height(50).tag("card" + String(c)))
+        parts.append(Board(board, 400, 60, on_move=22).tag("board"))
         parts.append(MenuBar([Menu("Edit", [Item("Find", 21, shortcut="Ctrl+F")])]))
         # the shape: notes between the parts, and the parts turned round
         var out = List[View]()

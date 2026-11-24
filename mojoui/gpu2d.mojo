@@ -86,7 +86,7 @@ from std.atomic import Atomic
 from std.sys.info import num_logical_cores
 from mojoui import libc
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE, OP_SHADOW
-from mojoui.bitmap import Bitmap, Sampler, make_bitmap, unscaled, lod_of, levels_for
+from mojoui.bitmap import Bitmap, Sampler, make_bitmap, ready
 
 comptime PIPE_QUAD = 0
 comptime PIPE_GLYPH = 1
@@ -1054,8 +1054,7 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 if not pic[].opaque:  # (a picture with see-through pixels is blended over: icons, D-7910)
                     mode = BLEND_OVER
                 var pw = pic[].w
-                if smooth and not unscaled(pw, pic[].h, c * tk, d * tk):  # (the half sizes it's read from)
-                    pic[].need(levels_for(lod_of(pw, pic[].h, c * tk, d * tk)))
+                ready(pic, c * tk, d * tk, smooth)  # (the half sizes it's read from)
                 f.images.append(Float32(a))
                 f.images.append(Float32(b))
                 f.images.append(Float32(c))

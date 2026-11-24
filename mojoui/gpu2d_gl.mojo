@@ -2955,7 +2955,7 @@ struct GPU2D(Movable):
                 var has_images = len(self.frames[i].images) > 0
                 var near = scene.layer_tk[i] >= self.built_k[i] * 0.25
                 var zoom_ok = not zoom_bound or scene.layer_tk[i] == self.built_k[i]
-                if same_place or (fixed and near and zoom_ok and not has_images):  # (goal 81: a layer with pictures is kept too where it is)
+                if (same_place or (fixed and near and zoom_ok)) and not has_images:
                     self.frames[i].layers[0].dx = scene.layer_tx[i]
                     self.frames[i].layers[0].dy = scene.layer_ty[i]
                     self.frames[i].layers[0].k = scene.layer_tk[i]

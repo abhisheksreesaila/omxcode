@@ -120,6 +120,12 @@ def say(line: String):
             f.close()
         except:
             pass
+        var new = stamp() + " " + line + "\n"
+        if len(lines) < LOG_LINES:  # (appended: another copy of the app may be writing too)
+            var f = open(path, "a")
+            f.write(new)
+            f.close()
+            return
         lines.append(stamp() + " " + line)
         var out = String("")
         for k in range(max(len(lines) - LOG_LINES, 0), len(lines)):

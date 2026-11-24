@@ -67,6 +67,13 @@ struct BitmapData(Movable, Equatable):
 comptime Bitmap = ArcPointer[BitmapData]
 
 
+def ready(b: Bitmap, w: Float64, h: Float64, smooth: Bool):
+    """Makes the half sizes a picture drawn w × h device pixels is read from (one thread, before it's sampled)."""
+    if smooth and not unscaled(b[].w, b[].h, w, h):
+        var pic = b.copy()
+        pic[].need(levels_for(lod_of(b[].w, b[].h, w, h)))
+
+
 def make_bitmap(var pixels: List[UInt32], w: Int, h: Int) -> Bitmap:
     """w × h pixels as a Bitmap (more are dropped, missing ones are clear)."""
     var n = max(w, 0) * max(h, 0)
@@ -158,10 +165,9 @@ struct Sampler(Movable):
     var f: Float64
 
     def __init__(out self, b: Bitmap, w: Float64, h: Float64, smooth: Bool):
-        self.b = b.copy()
+        self.b = b.copy()  # (read only: the CPU executor's bands sample one picture on several threads; need() comes before, on one)
         self.plain = not smooth or unscaled(b[].w, b[].h, w, h)
         var lod = 0.0 if self.plain else lod_of(b[].w, b[].h, w, h)
-        self.b[].need(levels_for(lod))
         var last = len(self.b[].levels) - 1
         self.l0 = min(Int(floor(lod)), last)
         self.l1 = min(self.l0 + 1, last)

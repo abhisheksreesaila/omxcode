@@ -45,6 +45,7 @@ from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
+from mojoui.bitmap import Bitmap
 from mojoui.hosts.gtktree import tree_words
 from mojoui.hosts.hangwatch import hang_watch, loop_wakes, loop_waits
 from mojoui.hangmarks import begin as mark_begin, end as mark_end, MARK_BUILD, MARK_PART, MARK_PATCH
@@ -781,6 +782,7 @@ struct GtkHost[A: App](Movable):
     var key_draws: Int  # draws of canvases that take keys (the grid), across rebuilds: GLIDE counts them
     var key_draw_ms: Float64
     var clip_text: String  # (tests print it: the clipboard itself is asynchronous)
+    var paste_node: Int  # the canvas a paste was pressed in, while the clipboard is read (the widgets' numbering)
     var reveal_pending: Int  # a Board node waiting for its layout to scroll a child into view, or -1
     var window: Int
     var widgets: List[Int]  # the GTK widget drawn for each node of rt.shown
@@ -810,6 +812,10 @@ struct GtkHost[A: App](Movable):
     var key_slant: Float64
     var layout_nodes: List[Int]  # each one's text as a render node, built once (its colour is part of the key)
     var pango: Int  # the PangoContext text is laid out in
+    var pic_hash: List[UInt64]  # pictures drawn by GTK's own renderer, as textures (picture_texture)
+    var pic_tex: List[Int]
+    var pic_used: List[Int]
+    var pic_turn: Int
     var scratch: List[Float32]  # GdkRGBA, graphene rects and points, GskRoundedRect handed to GTK by address
     var nodes_built: Int  # layers built into render nodes, and layers reused untouched (bench reports them)
     var nodes_reused: Int
@@ -948,6 +954,10 @@ struct GtkHost[A: App](Movable):
         self.key_color = 0
         self.key_slant = 0
         self.pango = 0
+        self.pic_hash = List[UInt64]()
+        self.pic_tex = List[Int]()
+        self.pic_used = List[Int]()
+        self.pic_turn = 0
         self.scratch = List[Float32](length=32, fill=0)
         self.nodes_built = 0
         self.nodes_reused = 0
@@ -978,6 +988,7 @@ struct GtkHost[A: App](Movable):
         self.step_no = 0
         self.first_hand_age_ms = -1
         self.revealed = 0
+        self.paste_node = -1
         self.reveal_pending = -1
         self.clip_version = 0
         self.embed_version = 0
@@ -2420,7 +2431,7 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_unparent", NoneType](pop)
         self.popovers = List[Int]()
         self.popups = List[Int]()
-        if len(held_input()[]) > 0:
+        if len(held_input()[]) > 0 or self.paste_node >= 0:
             var map = List[Int]()
             if len(self.built.nodes) > 0:  # (a rebuild waited: what its widgets showed, against what comes)
                 var d = diff(self.built, self.rt.shown)
@@ -2432,6 +2443,8 @@ struct GtkHost[A: App](Movable):
                     for j in range(len(map)):
                         map[j] = j
             self.name_held(map)
+            if self.paste_node >= 0 and len(self.built.nodes) > 0:
+                self.paste_node = map[self.paste_node] if self.paste_node < len(map) and map[self.paste_node] >= 0 else same_view(self.built, self.rt.shown, self.paste_node)
         self.has_pending = False  # (a full rebuild covers any partial one waiting)
         self.full_waits = False
         self.built = View([])
@@ -2673,6 +2686,7 @@ struct GtkHost[A: App](Movable):
         self.picker_node = new_of_old[self.picker_node] if 0 <= self.picker_node < old_n else -1
         self.reveal_pending = new_of_old[self.reveal_pending] if 0 <= self.reveal_pending < old_n else -1
         self.echo_node = new_of_old[self.echo_node] if 0 <= self.echo_node < old_n else -1
+        self.paste_node = new_of_old[self.paste_node] if 0 <= self.paste_node < old_n else -1
         # The stacks whose children changed: build the new children, drop the old, put them in order.
         var moving = List[Int]()  # kept popovers whose anchor is being built again: held, then moved to the new one
         for j in range(n):
@@ -3372,15 +3386,19 @@ struct GtkHost[A: App](Movable):
         var d = self.rt.cancel(node, text)
         self.apply(d, self_addr)
 
-    def board_send(mut self, board: Int, kind: Int, index: Int, dx: Float64, dy: Float64, self_addr: Int):
-        """A Board's object was moved (PAN) or resized (ZOOM)."""
+    def board_send(mut self, child: Int, kind: Int, dx: Float64, dy: Float64, self_addr: Int):
+        """A Board's object (its node) was moved (PAN) or resized (ZOOM): its Board hears its place among the objects now
+        (held by the object, not its place: the rebuild may put another there)."""
         if writing():
             return
         if busy():
-            hold(held_input()[], Held(HELD_BOARD, self.id_of(board), kind=kind, number=index, dx=dx, dy=dy))
+            hold(held_input()[], Held(HELD_BOARD, self.id_of(child), kind=kind, dx=dx, dy=dy))
             return
-        var d = self.rt.gesture(board, kind, Float64(index), 0, dx, dy, 1)
-        self.apply(d, self_addr)
+        for k in range(len(self.boards)):
+            if self.boards[k].node == child:
+                var d = self.rt.gesture(self.boards[k].board, kind, Float64(self.boards[k].index), 0, dx, dy, 1)
+                self.apply(d, self_addr)
+                return
 
     def canvas_at(self, node: Int) -> Int:
         for k in range(len(self.canvases)):
@@ -4288,6 +4306,29 @@ struct GtkHost[A: App](Movable):
         var r = sc.layer_range(i)
         return self.build_ops(sc, r[0], r[1])
 
+    def picture_texture(mut self, b: Bitmap) -> Int:
+        """A picture as a GdkTexture, made once (its pixels copied into it) and kept while it's drawn: by its hash."""
+        self.pic_turn += 1
+        for k in range(len(self.pic_hash)):
+            if self.pic_hash[k] == b[].hash:
+                self.pic_used[k] = self.pic_turn
+                return self.pic_tex[k]
+        var k = 0
+        while k < len(self.pic_hash) and len(self.pic_hash) >= 32:  # (the one drawn longest ago goes)
+            var oldest = 0
+            for j in range(len(self.pic_used)):
+                if self.pic_used[j] < self.pic_used[oldest]:
+                    oldest = j
+            external_call["g_object_unref", NoneType](self.pic_tex[oldest])
+            _ = self.pic_hash.pop(oldest)
+            _ = self.pic_tex.pop(oldest)
+            _ = self.pic_used.pop(oldest)
+        var tex = texture(b[].levels[0], b[].w, b[].h)
+        self.pic_hash.append(b[].hash)
+        self.pic_tex.append(tex)
+        self.pic_used.append(self.pic_turn)
+        return tex
+
     def build_ops(mut self, sc: Scene, first: Int, end: Int) -> Int:
         """The scene's ops [first, end) as one render node (0 when they draw nothing)."""
         var snap = external_call["gtk_snapshot_new", Int]()
@@ -4354,11 +4395,9 @@ struct GtkHost[A: App](Movable):
             elif kind == OP_UNCLIP:
                 external_call["gtk_snapshot_pop", NoneType](snap)
             elif kind == OP_IMAGE:  # (pixels made elsewhere: a texture, scaled by the renderer)
-                var pic = sc.images[Int(sc.num(op, 4))].copy()
-                var tex = texture(pic[].levels[0], pic[].w, pic[].h)
+                var tex = self.picture_texture(sc.images[Int(sc.num(op, 4))])
                 self.put_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3))
-                external_call["gtk_snapshot_append_texture", NoneType](snap, tex, self.at(4))
-                external_call["g_object_unref", NoneType](tex)
+                external_call["gtk_snapshot_append_scaled_texture", NoneType](snap, tex, c_int(2 if sc.num(op, 5) > 0 else 1), self.at(4))  # GSK_SCALING_FILTER_TRILINEAR, NEAREST
             elif kind == OP_TEXT:
                 self.snap_text(snap, sc.text_at(op), sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), c, Int(sc.num(op, 4)), Int(sc.num(op, 5)), sc.num(op, 3))
         return external_call["gtk_snapshot_free_to_node", Int](snap)
@@ -4863,7 +4902,7 @@ struct GtkHost[A: App](Movable):
             elif h.what == HELD_CLICK:
                 button_clicked[Self.A](self_addr, node)
             elif h.what == HELD_BOARD:
-                self.board_send(node, h.kind, h.number, h.dx, h.dy, self_addr)
+                self.board_send(node, h.kind, h.dx, h.dy, self_addr)
             elif h.what == HELD_LINK:
                 link_clicked[Self.A](self_addr, node, h.number)
 
@@ -6410,7 +6449,8 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     host[].canvas_key(ci, name, mods, host_addr)
     if (mods & CTRL) != 0 and (name == "v" or name == "V"):  # (goal 79) a paste: the system clipboard's text, read for the canvas
         var display = external_call["gdk_display_get_default", Int]()
-        external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], (host_addr << 10) | ci)
+        external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], host_addr)
+        host[].paste_node = host[].canvases[ci].node
     if not busy():
         im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
@@ -6456,17 +6496,16 @@ def on_im_preedit[A: App](im: Int, host_addr: Int) abi("C"):
     host[].canvas_words(ci, IME_PREEDIT, text, host_addr, Float64(c.im_x), Float64(c.im_y), Float64(c.im_w), Float64(c.im_h), Float64(cursor))
 
 
-def on_paste_read[A: App](clipboard: Int, result: Int, data: Int) abi("C"):
-    """The system clipboard's text, read for a paste: PASTE to the canvas (data: host address · 1024 + canvas)."""
-    var host_addr = data >> 10
-    var ci = data & 1023
+def on_paste_read[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
+    """The system clipboard's text, read for a paste: PASTE to the canvas it was pressed in, wherever the screen has it
+    now (paste_node follows rebuilds)."""
     var host = host_at[A](host_addr)
     var t = external_call["gdk_clipboard_read_text_finish", Int](clipboard, result, 0)
-    if t == 0 or ci < 0 or ci >= len(host[].canvases):
+    if t == 0:
         return
     var text = c_str(t)
     external_call["g_free", NoneType](t)
-    host[].canvas_words(ci, PASTE, text, host_addr)
+    host[].canvas_words(host[].canvas_at(host[].paste_node), PASTE, text, host_addr)
 
 
 def im_place[A: App](host_addr: Int, ci: Int):
@@ -6832,7 +6871,7 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
         return
     host[].boards[bi].active = False
     var b = host[].boards[bi].copy()
-    host[].board_send(b.board, ZOOM if b.resizing else PAN, b.index, off_x, off_y, host_addr)
+    host[].board_send(b.node, ZOOM if b.resizing else PAN, off_x, off_y, host_addr)
     if busy():  # (held, or its screen waits to be built: which puts each card where its node says)
         return
     # a clipping Board (Board(clips=True)): the app decides where the card ends, back to its node's place and size also
@@ -7449,7 +7488,7 @@ def show_test_window(window: Int):
 
 def burst[A: App](host_addr: Int, line: String):
     """The burst: step. A canvas's value: kX = the key X, wN = the wheel N points down, p = a press; ^Ctrl+F (no tag): the
-    window's shortcut; a field's value "!" = Return."""
+    window's shortcut; a field's value "!" = Return; a Board's card's "drop" = dragged and let go."""
     var host = host_at[A](host_addr)
     var what = List[Tuple[Int, Int, String]]()  # (kind, widget, value), found before any of them goes
     for item in line.split("~"):
@@ -7466,6 +7505,9 @@ def burst[A: App](host_addr: Int, line: String):
             continue
         var w = host[].widgets[found]
         var kind = host[].rt.shown.nodes[found].kind
+        if kv[1] == "drop":  # (a Board's card, dragged and let go)
+            kind = BOARD
+            w = host[].outers[found]
         if kind == CANVAS:
             var ci = host[].canvas_at(found)
             w = host[].canvases[ci].keys if kv[1].startswith("k") else (host[].canvases[ci].scroll if kv[1].startswith("w") else host[].canvases[ci].drag)
@@ -7480,6 +7522,14 @@ def burst[A: App](host_addr: Int, line: String):
         elif kind == BUTTON:
             var sig = String("clicked")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span())
+        elif kind == BOARD:
+            for k in range(len(host[].boards)):
+                if host[].boards[k].widget == w:
+                    host[].boards[k].active = True
+                    host[].boards[k].resizing = False
+                    var sig = String("drag-end")
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].boards[k].drag, sig.as_c_string_span(), Float64(12), Float64(7))
+                    break
         elif kind == FIELD and value == "!":
             var sig = String("activate")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span())

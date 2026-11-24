@@ -90,5 +90,6 @@ def main() raises:
                 assert_true(False, names[i] + " (threads " + String(threads) + ") is not the base commit's picture")
             else:
                 print("  ", names[i], "differs (system fonts differ from the owner's machine?)")
+    assert_true(hash_of(scenes[9], atlas, font, 1) != want["case9"], "case9's picture, drawn at 2x, is filtered unless told not to (else this test isn't looking at it)")
     print("REFERENCE", same, "of", 2 * len(names), "pictures are the base commit's")
     print("cpu reference: ok")

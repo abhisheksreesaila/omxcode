@@ -3111,6 +3111,7 @@ struct AppKitHost[A: App](Movable):
         _ = msg(self.link, "invalidate")
         if self.link_is_screen:
             _ = msg(self.link, "release")
+            _ = msg(cls("NSObject"), "cancelPreviousPerformRequestsWithTarget:selector:object:", self.target, sel("frameCheck:"), msg(self.window, "identifier"))  # (one chain of looks at a time)
         self.link = 0
         if self.clock_log:
             print("FRAMES: stopped at " + String(self.ticks) + " ticks", flush=True)
@@ -3168,6 +3169,7 @@ struct AppKitHost[A: App](Movable):
         if self.ticks != self.link_mark:
             self.link_mark = self.ticks
             self.link_late = 0
+            self.link_misses = 0
             self.check_frames()
             return
         self.link_late += 1

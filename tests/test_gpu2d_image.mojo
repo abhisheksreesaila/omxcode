@@ -7,6 +7,7 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.scene import Scene
 from mojoui.bitmap import Bitmap, make_bitmap, halved
+from mojoui.clock import now_ns
 from mojoui.gpu2d import GlyphAtlas, Frame2D, build_batches, execute_cpu
 from mojoui.gpu2d_gl import GL2D, headless_gl33
 from tests.image_cases import CASES, W, H, BACK, Case, pictures, photo
@@ -92,23 +93,56 @@ def main() raises:
     var big = make_bitmap(photo(1920, 1080, False), 1920, 1080)
     var sent0 = 0
     var copied = 0
-    var hashed = 0
-    for n in range(4):
+    var times = List[List[Int]]()
+    var small = make_bitmap(photo(2, 2, False), 2, 2)
+    var home = Int(big[].levels[0].unsafe_ptr())
+    for which in range(2):  # (the big picture, then a 2 × 2 one the same way: what a copy or a hash would cost shows in the time)
+        ref b = big if which == 0 else small
+        times.append(List[Int]())
+        for n in range(41):
+            var t0 = now_ns()
+            var s = Scene(W, H, 1.0)
+            s.begin_layer("a")
+            s.fill(BACK)
+            s.bitmap(b, 10, 10, 480, 270)
+            s.rect(Float64(20 + n * 8), 300, 40, 40, 0xFF2040A0, 0)  # (the frame changes, the picture doesn't)
+            var f = build_batches(s, atlas, font)
+            assert_true(gl.render(f, tex, W, H), gl.why)
+            times[which].append(now_ns() - t0)
+            if which == 0:
+                for ref pic in s.images:  # (the pixels the scene and the batches hold are the picture's own)
+                    if Int(pic[].levels[0].unsafe_ptr()) != home:
+                        copied += len(pic[].levels[0])
+                for ref pic in f.pics:
+                    if Int(pic[].levels[0].unsafe_ptr()) != home:
+                        copied += len(pic[].levels[0])
+                if n == 0:
+                    sent0 = gl.tex_uploads
+                    assert_true(sent0 > 0, "sent once")
+                    times[which].clear()
+                elif n == 40:
+                    print("FACT uploads", gl.tex_uploads - sent0)
+        sort(times[which])
+    var extra = Float64(times[0][len(times[0]) // 2] - times[1][len(times[1]) // 2]) / 1e6
+    print("  a frame with the 1920 × 1080 picture costs", round(extra, 3), "ms more than with a 2 × 2 one")
+    print("FACT copied", copied)
+    print("FACT hashed", 0 if extra < 0.3 else 1920 * 1080)  # (its hash is a field made with the pixels; working on them anywhere in the frame, a copy of 8 MB or a hash, takes 0.5 ms and more:)
+    var again = List[Int]()
+    for n in range(11):
+        var t0 = now_ns()
         var s = Scene(W, H, 1.0)
         s.begin_layer("a")
         s.fill(BACK)
-        s.bitmap(big, 10, 10, 480, 270)
-        s.rect(Float64(20 + n * 30), 300, 40, 40, 0xFF2040A0, 0)  # (the frame changes, the picture doesn't)
+        s.image(big[].levels[0], 1920, 1080, 10, 10, 480, 270)
         var f = build_batches(s, atlas, font)
         assert_true(gl.render(f, tex, W, H), gl.why)
-        copied += s.px_copied
-        hashed += s.px_hashed
-        if n == 0:
-            sent0 = gl.tex_uploads
-            assert_true(sent0 > 0, "sent once")
-    print("FACT uploads", gl.tex_uploads - sent0)
-    print("FACT copied", copied)
-    print("FACT hashed", hashed)
+        assert_true(Int(s.images[0][].levels[0].unsafe_ptr()) != home, "image() copies: the address test sees it")
+        again.append(now_ns() - t0)
+    sort(again)
+    var worked = Float64(again[5] - times[1][len(times[1]) // 2]) / 1e6
+    print("  the same through image(), which copies and hashes:", round(worked, 3), "ms more")
+    assert_true(worked > 0.5, "copying and hashing it shows in the time (" + String(worked) + " ms): the bar above can fail")
+    assert_true(extra < 0.3, "an unchanged picture is worked on every frame (" + String(extra) + " ms)")
     # a video's frames: one texture between them
     var before = len(gl.pictures)
     for n in range(6):
