@@ -4052,6 +4052,9 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
         while len(host[].g2d_done) > done0:
             gms += host[].g2d_done.pop()
         times.append(ev + dm + gms)
+        if env("MOJOUI_TRACE_FRAMES") == "1":  # (as GTK's: where a step's time goes)
+            print("TRACE: " + label + " step: event " + one_decimal(ev) + " draw " + one_decimal(dm) + " gpu " + one_decimal(gms) + " scene " + one_decimal(host[].g2d_parts[0])
+                  + " batch " + one_decimal(host[].g2d_parts[1]) + " rest " + one_decimal(host[].g2d_parts[2]), flush=True)
         bench_settle[A](host_addr, 300_000_000)
     print(label + ": n=" + String(len(times)) + " p50=" + one_decimal(pct(times, 0.5)) + " p95=" + one_decimal(pct(times, 0.95))
           + " max=" + one_decimal(pct(times, 1.0)), flush=True)
