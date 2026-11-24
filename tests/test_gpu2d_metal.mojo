@@ -22,11 +22,13 @@ from mojoui.hosts.apple_canvas import io_surface, cfunc
 from mojoui.objectlayer import import_fabric
 from mojoui.mindmap import MapView
 from mojoui.ink import Stroke
+from mojoui.notesshell import draw_lifted
+from mojoui.skin import Shadow
 from tests.test_gpu2d import text_scene, paint_case, case_name, gradient, whiteboard, mindmap_of, diff, counts
 from tests.test_objectlayer import seeded_note
 
 
-def gpu_vs_cpu(name: String, mut mtl: Metal2D, sc: Scene, atlas: GlyphAtlas, font: Font) raises:
+def gpu_vs_cpu(name: String, mut mtl: Metal2D, sc: Scene, atlas: GlyphAtlas, font: Font, differ_most: Int = -1) raises:
     var w = sc.w
     var h = sc.h
     var frame = build_batches(sc, atlas, font)
@@ -56,6 +58,8 @@ def gpu_vs_cpu(name: String, mut mtl: Metal2D, sc: Scene, atlas: GlyphAtlas, fon
           "pixels differ at all;", inked, "inked; render", round(best, 3), "ms (GPU", round(mtl.gpu_ms, 3), "ms)")
     assert_true(inked > 200, name + ": the reference picture is (nearly) empty")
     assert_true(d.mean <= 1.5 and d.far <= 0.5, name + ": Metal differs from the CPU executor")
+    if differ_most >= 0:
+        assert_true(len(want) - same <= differ_most, name + ": " + String(len(want) - same) + " pixels differ, at most " + String(differ_most))
 
 
 def main() raises:
@@ -101,6 +105,8 @@ def main() raises:
         gpu_vs_cpu("canvas (" + ("bench note" if have else "seeded note") + ", k " + String(k) + ")", mtl, c, atlas, font)
         print("     ", counts(c, atlas, font))
 
+    for zoom in [1.0, 2.5]:  # (D-8009) what a clip throws away is cut in the vertex shader: nothing it keeps may change
+        gpu_vs_cpu("clips, holes and lifted surfaces (zoom " + String(zoom) + ")", mtl, clip_scene(zoom), atlas, font, 40)
     var m = mindmap_of(100)
     var ms = Scene(1400, 900, 1.0)
     ms.is_still = True
@@ -112,6 +118,36 @@ def main() raises:
     glyph_holes(font, atlas)
     ink_in_flight(font, atlas)
     print("gpu2d metal: ok")
+
+
+def clip_scene(zoom: Float64) -> Scene:
+    """Boxes, round boxes, glyphs, images and lifted surfaces (shadows with a hole: four boxes, each clipped to a band),
+    clipped to rects that cut through them, inside a moved and scaled layer too."""
+    var sc = Scene(Int(700 * zoom), Int(520 * zoom), 1.0)
+    sc.begin_layer("a")
+    sc.layer_transform(20, 10, zoom)
+    sc.fill(rgba(235, 238, 243))
+    var img = gradient(40, 30)
+    var shadows = List[Shadow]()
+    shadows.append(Shadow(0, 14, 38, 0, rgba(0, 0, 0, 90)))
+    shadows.append(Shadow(0, 2, 6, 0, rgba(10, 12, 20, 61)))
+    draw_lifted(sc, 30, 20, 260, 160, 20, shadows, rgba(255, 255, 255))
+    draw_lifted(sc, 330, 30, 44, 44, 22, shadows, rgba(250, 246, 240))
+    draw_lifted(sc, 420, 40, 104, 48, 24, shadows, rgba(200, 220, 240))
+    for q in range(7):
+        sc.push_clip(20 + Float64(q) * 90, 190 + Float64(q % 3) * 12, 40 + Float64(q) * 9, 60 + Float64(q) * 5)
+        sc.rect(0, 180, 660, 180, rgba(40 + 20 * q, 120, 200 - 15 * q, 200), Float64(q) * 6)
+        sc.rect_hole(10, 200, 640, 120, rgba(160, 60, 120, 120), 14, 22)
+        sc.image(img, 40, 30, 20 + Float64(q) * 88, 200, 120, 90)
+        sc.run(TextStyle("Geist", 600, False, 22), "Clipped words that run past", 25 + Float64(q) * 88, 250, rgba(31, 27, 22), 0)
+        sc.pop_clip()
+    sc.push_clip(-5000, 320, 9000, 60)
+    draw_lifted(sc, 60, 300, 520, 180, 24, shadows, rgba(255, 250, 245))
+    sc.pop_clip()
+    sc.push_clip(400, 380, 220, 0.4)  # (thinner than a pixel)
+    sc.rect(380, 360, 260, 80, rgba(0, 0, 0, 255), 0)
+    sc.pop_clip()
+    return sc^
 
 
 def map_pan(font: Font, atlas: GlyphAtlas) raises:

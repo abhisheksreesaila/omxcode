@@ -88,6 +88,16 @@ inline bool clipped(float2 pc, float c0, float c1, float c2, float c3, constant 
     return false;
 }
 
+// (D-8009) a corner of an axis-aligned box moved in to its clip (a pixel beyond it; the fragment test decides the edge):
+// what a clip throws away isn't rasterized. A rect with a hole is four boxes of the whole size, each clipped to a band
+inline float2 cut(float2 p, float c0, float c1, float c2, float c3, constant U& u) {
+    if (c0 > -NO_CLIP_HALF) p.x = max(p.x, c0 * u.k + u.t.x - 1.0);
+    if (c1 > -NO_CLIP_HALF) p.y = max(p.y, c1 * u.k + u.t.y - 1.0);
+    if (c2 < NO_CLIP_HALF) p.x = min(p.x, c2 * u.k + u.t.x + 1.0);
+    if (c3 < NO_CLIP_HALF) p.y = min(p.y, c3 * u.k + u.t.y + 1.0);
+    return p;
+}
+
 // ---- QUAD: rounded boxes and capsules (gpu2d: QUAD_FLOATS = 16) ----
 
 vertex VOut quad_v(uint vid [[vertex_id]], uint iid [[instance_id]], device const float* q [[buffer(0)]], constant U& u [[buffer(1)]]) {
@@ -97,7 +107,7 @@ vertex VOut quad_v(uint vid [[vertex_id]], uint iid [[instance_id]], device cons
     if (d[5] < 0.5) {
         float2 o = xf(float2(d[0], d[1]), u);
         float2 s = max(float2(d[2], d[3]) * u.k, float2(0.0));
-        p = o - 2.0 + c * (s + 4.0);
+        p = cut(o - 2.0 + c * (s + 4.0), d[12], d[13], d[14], d[15], u);
     } else {
         float2 a = xf(float2(d[0], d[1]), u);
         float2 b = xf(float2(d[2], d[3]), u);
@@ -171,7 +181,7 @@ vertex VOut glyph_v(uint vid [[vertex_id]], uint iid [[instance_id]], device con
     float y0 = top - 2.0, y1 = top + gh * sc + 2.0;
     float2 c = corner(vid);
     VOut o;
-    o.pos = ndc(float2(mix(x0, x1, c.x), mix(y0, y1, c.y)), u);
+    o.pos = ndc(cut(float2(mix(x0, x1, c.x), mix(y0, y1, c.y)), d[16], d[17], d[18], d[19], u), u);
     o.iid = iid;
     return o;
 }
@@ -222,7 +232,7 @@ vertex VOut image_v(uint vid [[vertex_id]], uint iid [[instance_id]], device con
     float2 o = xf(float2(d[0], d[1]), u);
     float2 s = max(float2(d[2], d[3]) * u.k, float2(0.0));
     VOut v;
-    v.pos = ndc(o - 2.0 + corner(vid) * (s + 4.0), u);
+    v.pos = ndc(cut(o - 2.0 + corner(vid) * (s + 4.0), d[8], d[9], d[10], d[11], u), u);
     v.iid = iid;
     return v;
 }
@@ -1831,6 +1841,9 @@ struct MetalCanvas2D(Movable):
                         if qw * qh > 0.02 * Float64(w) * Float64(h):
                             big += 1
                         area += qw * qh
+                        if qw * qh > 0.02 * Float64(w) * Float64(h) and self.layer_trace and getenv("MOJOUI_LAYER_QUADS") == "1":
+                            print("BIGQUAD: " + sc.layer_keys[i] + " " + String(Int(qw)) + "x" + String(Int(qh)) + " r " + String(L.frame.quads[16 * qq + 4]) + " alpha "
+                                  + String(L.frame.quads[16 * qq + 11]) + " hole " + String(L.frame.quads[16 * qq + 6]) + " clip " + String(L.frame.quads[16 * qq + 12]), flush=True)
                     print("LAYERAREA: " + sc.layer_keys[i] + " quads " + String(nq) + " (lines " + String(caps) + ", over 2 % of the window " + String(big) + ") area " + String(area / (Float64(w) * Float64(h))) + " windows, glyphs " + String(len(L.frame.glyphs) // 26), flush=True)
                     print("LAYER: built " + sc.layer_keys[i] + " ops " + String(span[1] - span[0]) + " known " + String(known) + " in " + String(Float64(Int(now_ns()) - lt0) / 1e6) + " ms; glyphs rastered "
                           + String(fe[].img_n - im0) + " in " + String(Float64(fe[].img_ns - ims0) / 1e6) + " ms, runs shaped " + String(fe[].shape_n - sh0) + " in " + String(Float64(fe[].shape_ns - shs0) / 1e6) + " ms", flush=True)
