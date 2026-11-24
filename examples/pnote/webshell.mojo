@@ -27,7 +27,7 @@ from mojoui.notesshell import draw_tool_dock, draw_zoom_island, draw_hint
 from mojoui.canvas import rgba
 from mojoui.skin import hexc
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE
-from mojoui.pagedesk import BoardTools, T_BOX
+from mojoui.pagedesk import BoardTools, T_BOX, writing_view, give_way
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
@@ -327,6 +327,7 @@ struct WebShell(Movable):
     var gone_at: Int
     var props_open: Bool
     var props: PropsCard
+    var owed: Float64  # how far the board gave way to the tool island when the panel opened
     var flyout: Bool  # the canvas dock's more tools, or its colours and widths, are open
     var ink_options: Bool
     var dropped_us: Int  # when a row's drag last ended (the tap that may follow it opens nothing)
@@ -423,6 +424,7 @@ struct WebShell(Movable):
         self.bench_note = -1
         self.doubled_us = -1_000_000
         self.known_seq = -1
+        self.owed = 0
         self.dropped_us = -1_000_000
         self.book_card = -1
         self.flyout = False
@@ -556,7 +558,7 @@ struct WebShell(Movable):
         if cols != self.cols or rows != self.rows:  # (its grid is the document's own)
             self.cols = cols
             self.rows = rows
-            self.view = opening_view(self.win_w, self.win_h, Float64(cols) * PAGE_W, Float64(rows) * PAGE_H)
+            self.view = self.opening(cols, rows)
         self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
         self.doc.ready(self.doc.id, self.notes[i].revision)
 
@@ -588,6 +590,7 @@ struct WebShell(Movable):
         var t_open = clock_us()
         var trace = getenv("MOJOUI_LOAD_TRACE") == "1"
         self.settle_open()
+        self.end_writing()
         self.flush()  # (the outgoing note's pending edits land first, as the web's settleOutgoingNote; one that can't be written is held: SaveOutbox)
         var out_i = self.note_index(self.current)
         if (out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.doc.may_keep(self.current) and self.outbox.find(self.current) < 0
@@ -601,6 +604,7 @@ struct WebShell(Movable):
         self.doc.begin(id)
         self.current = id
         self.panel.active = id
+        self.panel.reveal(id)  # (its row where it can be seen: the web's revealNotebook)
         self.save_state = ""
         self.save_detail = ""
         self.look.keep_path = ""  # (D-7956: the note's own file below, a canvas only)
@@ -635,6 +639,7 @@ struct WebShell(Movable):
             self.tools = BoardTools()
             self.sticky_look()
             self.doc.ready(id, self.notes[i].revision)
+            self.begin_writing(self.notes[i].bytes, True)
             return
         if self.notes[i].kind == "canvas" and self.snap_dir != "" and held < 0:
             var path = self.snap_path(id)
@@ -643,7 +648,7 @@ struct WebShell(Movable):
             var note = self.look.head_note(head, tag)
             var grid = parse_grid(note)
             if grid[0] > 0:  # (its last view is kept: the page grid from it, the view laid out, the key asked)
-                var view = opening_view(self.win_w, self.win_h, Float64(grid[0]) * PAGE_W, Float64(grid[1]) * PAGE_H)
+                var view = self.opening(grid[0], grid[1])
                 if self.win_k > 0 and self.look.head_shows(head, tag, view, self.win_w, self.win_h, self.win_k):
                     snap_ahead(path)  # (read while this frame is laid out: D-8015)
                     # the deferred open: the kept view shows this frame, the row is read, skimmed and the view's nodes
@@ -686,6 +691,8 @@ struct WebShell(Movable):
         if trace:
             print("OPEN: rows read " + String(clock_us() - t_open) + " us", flush=True)
         var kind = self.notes[i].kind
+        var canvas_bytes = content.byte_length()
+        var canvas_words = kind == "canvas" and canvas_bytes <= 2_000_000 and content.find('"markdown"') >= 0
         try:
             if kind == "page":
                 var words = page_markdown(content)
@@ -707,6 +714,10 @@ struct WebShell(Movable):
         if trace:
             print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
         self.doc.ready(id, revision)
+        if kind == "canvas":
+            self.begin_writing(canvas_bytes, canvas_words)
+        elif kind == "page":
+            self.page.follow = True  # (the caret's line in view: the web's editor has the keyboard as it opens)
 
     def open_canvas(mut self, i: Int, var text: String, held: Bool) raises:
         """A canvas note from its text: (D-7944) progressively: the document skimmed, the page grid read, the nodes the
@@ -721,7 +732,7 @@ struct WebShell(Movable):
         self.rows = grid[1]
         self.tools = BoardTools()
         self.sticky_look()
-        self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+        self.view = self.opening(self.cols, self.rows)
         self.view_set = True
         self.content_hash = text_hash(text)
         var r = self.view_rect()
@@ -830,7 +841,7 @@ struct WebShell(Movable):
         if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed():
             # the board under every island: the page frame (screen px), the objects (a layer in page px), then the chrome
             if not self.view_set:
-                self.view = opening_view(w, h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+                self.view = self.opening(self.cols, self.rows)
                 self.view_set = True
             draw_page_chrome(p, self.boxes, self.view, w, h, self.cols, self.rows, PAGE_W, PAGE_H, k, self.sk, self.frame)
             var r = self.view_rect()
@@ -905,7 +916,11 @@ struct WebShell(Movable):
                     draw_ink_options(p, self.boxes, w - 72 - 18, dock_y + 150, "Colors" if len(widths) == 0 else "Colors and widths", ink_colors(), self.tools.pen_color, widths,
                                      self.tools.pen_width if pen else self.tools.marker_width, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
-                draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
+                # (writing at 100 %: the zoom island is out of sight until the pointer is on it, the web's writing-quiet)
+                var t_ = self.tools.tool
+                var quiet = abs(self.view.scale - 1) < 0.01 and t_ != "pen" and t_ != "highlight" and t_ != "eraser" and t_ != "shape" and t_ != "sticky" and t_ != "connect"
+                var over = self.px >= w - 16 - 185 and self.px < w - 16 and self.py >= h - 64 and self.py < h - 16
+                draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk, quiet and not over)
             if n.kind == "page" and not n.secure and not self.doc.is_failed():
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
         if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
@@ -1268,7 +1283,7 @@ struct WebShell(Movable):
         if kind == 0:
             self.open(id)
         elif kind == 1:  # (a notebook: shown in the panel, opened)
-            self.sidebar = True
+            self.set_sidebar(True)
             self.panel.reveal_book(id)
         elif kind == 3:
             self.create("canvas", String(self.omni.query.strip()))
@@ -1710,7 +1725,20 @@ struct WebShell(Movable):
     def close(mut self):
         """The app closing: the held delete and the pending save are made."""
         self.commit_delete()
+        self.end_writing()
         self.flush()
+
+    def end_writing(mut self):
+        """What is being written (a canvas's words, an idea) is kept: another note opens, the app closes."""
+        var i = self.note_index(self.current)
+        if i < 0 or not self.doc.may_edit():
+            return
+        if self.notes[i].kind == "canvas" and self.tools.editing != -1:
+            self.tools.finish(self.board.edit())
+            self.save_canvas()
+        elif self.notes[i].kind == "mindmap" and self.map.editing >= 0:
+            if self.map.edit_key("Enter", 0) == 2:
+                self.save_map()
 
     def flush(mut self):
         """Writes the pending save now (a due timer, another note opening, the app closing)."""
@@ -1848,7 +1876,9 @@ struct WebShell(Movable):
             self.save_page()
             return True
         if self.notes[i].kind == "canvas" and self.tools.editing != -1:
-            _ = self.tools.text_in(text, self.board.edit())
+            if self.tools.text_in(text, self.board.edit()) and self.tools.editing >= 0:  # (words of an object: saved as they are typed)
+                self.tools.changed = True
+                self.save_canvas()
             return True
         if self.notes[i].kind == "mindmap" and self.map.editing >= 0:
             if self.map.edit_all:
@@ -1947,7 +1977,7 @@ struct WebShell(Movable):
             if r == 2:
                 self.save_page()
             if r == 0 and name == "Escape" and self.sidebar:
-                self.sidebar = False
+                self.set_sidebar(False)
                 return True
             return r != 0
         if self.card_open and self.card.editing:
@@ -1964,7 +1994,7 @@ struct WebShell(Movable):
             return True
         if not self.searching:
             if name == "Escape" and self.sidebar:
-                self.sidebar = False
+                self.set_sidebar(False)
                 return True
             return False
         if name == "Enter":
@@ -1987,6 +2017,59 @@ struct WebShell(Movable):
         """Words copied here: for the system's clipboard (the app shows mojoui.overlays.Clipboard(clip, clip_version))."""
         self.clip = words
         self.clip_version += 1
+
+    def opening(self, cols: Int, rows: Int) -> DeskView:
+        """The view a board of pages opens at, in the room the notes panel leaves."""
+        var left = 296.0 if self.sidebar else 0.0
+        var v = opening_view(self.win_w - left, self.win_h, Float64(cols) * PAGE_W, Float64(rows) * PAGE_H)
+        return DeskView(v.x + left, v.y, v.scale)
+
+    def set_sidebar(mut self, on: Bool):
+        """The notes panel opened or closed: a canvas keeps what was in the middle of its room in the middle (the web's
+        moveWithCentre), giving way to the tool island while the panel narrows it."""
+        if on == self.sidebar:
+            return
+        self.sidebar = on
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "canvas" or not self.view_set:
+            return
+        if on:
+            var x = self.view.x + 148
+            self.owed = give_way(x - 296, self.view.scale, self.win_w - 296)
+            self.view = DeskView(x - self.owed, self.view.y, self.view.scale)
+        else:
+            self.view = DeskView(self.view.x - 148 + self.owed, self.view.y, self.view.scale)
+            self.owed = 0
+
+    def begin_writing(mut self, text_bytes: Int, markdown: Bool):
+        """A canvas of writing opens like a document (main.js openCanvasView, startWriting): at 100 % at its topmost
+        Markdown text, the caret at that text's end; an empty one at the page's top with a new text begun. A board of
+        drawings opens as it did; so does one too big to read whole before it shows (2 MB: the web waits for it)."""
+        if self.tools.tool != "text" or not self.doc.may_edit() or not markdown and text_bytes > 600 or text_bytes > 2_000_000:
+            return
+        ref layer = self.board.edit()
+        var top = -1
+        for k in range(len(layer.objs)):
+            if layer.objs[k].kind == TEXT and layer.objs[k].markdown and not layer.objs[k].locked:
+                if top < 0 or layer.objs[k].y < layer.objs[top].y or (layer.objs[k].y == layer.objs[top].y and layer.objs[k].x < layer.objs[top].x):
+                    top = k
+        if top < 0 and len(layer.objs) > 0:
+            return
+        var left = 296.0 if self.sidebar else 0.0
+        var v = DeskView(0, 0, 1)
+        if top >= 0:
+            ref o = layer.objs[top]
+            v = writing_view(self.win_w - left, self.win_h, max(0.0, floor((o.x + 1) / PAGE_W)) * PAGE_W, max(0.0, floor((o.y + 1) / PAGE_H)) * PAGE_H, o.y, o.h)
+        else:
+            v = writing_view(self.win_w - left, self.win_h, 0, 0, 0, -1)
+        self.owed = give_way(v.x, v.scale, self.win_w - left)
+        self.view = DeskView(v.x + left - self.owed, v.y, v.scale)
+        self.view_set = True
+        if top >= 0:
+            var id = layer.objs[top].id
+            self.tools.begin_words(layer, id)
+        else:
+            self.tools.begin_text(80, 80)
 
     def open_search(mut self):
         self.searching = True
@@ -2383,7 +2466,7 @@ struct WebShell(Movable):
         elif hit == "#zoom-in" or hit == "#zoom-out":
             self.view = self.tools.zoom_step(self.view, 1 if hit == "#zoom-in" else -1, self.win_w, self.win_h, self.cols, self.rows)
         elif hit == "#zoom-fit":
-            self.view = opening_view(self.win_w, self.win_h, Float64(self.cols) * PAGE_W, Float64(self.rows) * PAGE_H)
+            self.view = self.opening(self.cols, self.rows)
         elif hit == "":
             if not self.editable():
                 return False
@@ -2435,12 +2518,12 @@ struct WebShell(Movable):
 
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
-        var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button", ".sec-head"])
+        var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"])
         self.px = x
         self.py = y
         self.panel.px = x
         self.panel.py = y
-        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", ".sec-head"]) != before
+        return self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"]) != before
 
     def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
@@ -2568,7 +2651,7 @@ struct WebShell(Movable):
             self.create("canvas")
             return True
         if hit == "#toggle-sidebar":
-            self.sidebar = not self.sidebar
+            self.set_sidebar(not self.sidebar)
             return True
         if hit.startswith("row:"):
             var id = self.panel.hit(x, y, 0)

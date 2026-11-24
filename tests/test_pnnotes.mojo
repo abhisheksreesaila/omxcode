@@ -85,6 +85,9 @@ def fresh_file() raises:
     assert_equal(len(s.notes), 1)
     assert_true(s.notes[0].kind == "canvas" and s.notes[0].title == "Untitled note" and s.notes[0].notebook == 0, "a canvas in the Inbox")
     assert_true(s.current == s.notes[0].id and s.doc.may_edit(), "opened")
+    assert_true(s.tools.editing == -2 and s.view.scale == 1, "an empty canvas opens for writing, at 100 % (the web's startWriting)")
+    assert_true(not s.key("n", 4) and len(s.notes) == 1, "Alt+N waits while words are typed, as the web's")
+    _ = s.key("Escape", 0)
     assert_true(s.key("n", 4), "Alt+N")
     assert_equal(len(s.notes), 2)
     assert_equal(count("SELECT COUNT(*) FROM note_search"), 2)
@@ -289,6 +292,50 @@ def clearing() raises:
     s.close()
     assert_equal(count("SELECT content LIKE '%words%' FROM notes WHERE id = " + String(s.current)), 1)
     print("   clear all")
+
+
+def opens_for_writing() raises:
+    """main.js openCanvasView, startWriting, moveWithCentre: a canvas of writing opens at 100 % at its topmost text with the
+    caret at its end; looking isn't an edit; the panel keeps the middle in the middle."""
+    var s = WebShell(DB, "paper")
+    s.create("canvas", "Writing")
+    paint(s)
+    for w in ["A", " ", "b"]:
+        _ = s.text_in("ime", String(w))
+    _ = s.key("Escape", 0)
+    _ = s.tap(700, 700)
+    for w in ["l", "o", "w"]:
+        _ = s.text_in("ime", String(w))
+    _ = s.key("Escape", 0)
+    s.flush()
+    var id = s.current
+    var rev = count("SELECT revision FROM notes WHERE id = " + String(id))
+    s.create("page", "Between")
+    for again in range(2):  # (kept parsed, then read anew)
+        if again == 1:
+            s = WebShell(DB, "paper")
+            paint(s)
+        s.open(id)
+        paint(s)
+        assert_true(s.view.scale == 1 and s.tools.editing >= 0 and s.tools.words.text() == "A b", "the topmost text: " + s.tools.words.text())
+        var at = s.tools.words_caret(s.board.layer, s.view)
+        assert_true(at[1] > 100 and at[1] < 140, "32 px under the islands: " + String(at[1]))
+        s.open(s.notes[1].id if s.notes[0].id == id else s.notes[0].id)  # (looked at, left)
+        assert_equal(count("SELECT revision FROM notes WHERE id = " + String(id)), rev)
+    s.open(id)
+    for w in ["!", "?"]:
+        _ = s.text_in("ime", String(w))
+    s.create("page", "Elsewhere")
+    assert_equal(count("SELECT content LIKE '%A b!?%' FROM notes WHERE id = " + String(id)), 1)  # (typed at once, saved on leaving)
+    s.open(id)
+    paint(s)
+    var x = s.view.x
+    s.set_sidebar(True)
+    assert_true(s.view.x > x and s.view.x < x + 149, "moves with its room's middle, clear of the tools")
+    s.set_sidebar(False)
+    assert_true(abs(s.view.x - x) < 1e-6, "and back")
+    s.close()
+    print("   a canvas opens for writing")
 
 
 def input_method() raises:
@@ -550,6 +597,7 @@ def main() raises:
     filing()
     long_list()
     clearing()
+    opens_for_writing()
     input_method()
     over_the_board()
     another_app()

@@ -6083,7 +6083,7 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
     # the places the pointer was since the last frame, which GDK puts into one event (a web page's getCoalescedEvents):
     # a pen's stroke keeps its shape when frames are slow
     var ev = external_call["gtk_event_controller_get_current_event", Int](drag)
-    if ev != 0 and host[].canvases[ci].moved:
+    if ev != 0:
         var n = List[c_uint](length=1, fill=0)
         var coords = external_call["gdk_event_get_history", Int](ev, Int(n.unsafe_ptr()))
         if coords != 0:
@@ -6102,6 +6102,8 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
                         continue
                     host[].canvases[ci].drag_x = hx
                     host[].canvases[ci].drag_y = hy
+                    if abs(hx) + abs(hy) > 3:
+                        host[].canvases[ci].moved = True
                     host[].canvas_send(ci, PAN, host[].canvases[ci].start_x + hx, host[].canvases[ci].start_y + hy, hx - px, hy - py, 1, host_addr)
                     if busy() or ci >= len(host[].canvases):
                         external_call["g_free", NoneType](coords)

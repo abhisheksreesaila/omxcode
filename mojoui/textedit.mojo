@@ -680,7 +680,7 @@ struct TextEdit(Movable):
         if name == "Tab":
             self.insert("    ", now_ms)
             return True
-        if typed_text(name):  # (a character, of however many code points)
+        if typed_text(name) and not alt:  # (a character, of however many code points; Alt+letter is a shortcut)
             self.insert(name, now_ms)
             return True
         return False

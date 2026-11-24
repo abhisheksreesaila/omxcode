@@ -895,8 +895,12 @@ struct PageSheet(Movable):
     def code_segments(self, line: String) -> List[Seg]:
         """A line of a fenced block: its fence in the markup colour, its code in the mono face."""
         var mono = TextStyle(MONO_FACE, 400, False, BODY * 0.9)
-        if String(line.strip()).startswith("```"):
-            return [Seg(line, TextStyle(TEXT_FACE, 400, False, BODY), PAGE_MARKUP, BODY * 1.65)]
+        if String(line.strip()).startswith("```"):  # (its ticks quiet, the language after them plain)
+            var e = line.find("```")
+            while e < line.byte_length() and line.as_bytes()[e] == 96:
+                e += 1
+            var body = TextStyle(TEXT_FACE, 400, False, BODY)
+            return [Seg(String(line[byte=0:e]), body, PAGE_MARKUP, BODY * 1.65), Seg(String(line[byte=e:]), body, PAGE_INK, BODY * 1.65)]
         return [Seg(line, mono, PAGE_INK, BODY * 1.65)]
 
     def segments(self, line: String) -> List[Seg]:
@@ -1028,8 +1032,8 @@ struct PageSheet(Movable):
             self.follow = False
             var at = self._caret_at()
             var cy = sheet_at + 96 + at[0]
-            if cy + at[1] + 24 > self.scroll + dh:
-                self.scroll = cy + at[1] + 24 - dh
+            if cy + at[1] + 5 > self.scroll + dh:  # (CodeMirror's margin)
+                self.scroll = cy + at[1] + 5 - dh
             elif cy - 72 < self.scroll:
                 self.scroll = cy - 72
         self.scroll = min(max(self.scroll, 0), max(self.content_h - dh, 0))

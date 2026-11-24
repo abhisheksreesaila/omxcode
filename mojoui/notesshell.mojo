@@ -1088,21 +1088,27 @@ def draw_history_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Floa
     bx.add("history.redo", x + 53, y + 2, 44, 44)
 
 
-def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, percent: Int, k: Float64, sk: Skin):
+def draw_page_zoom[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, percent: Int, k: Float64, sk: Skin, hidden: Bool = False):
     """The canvas's zoom island ending at `right` (the web's .zoom-control): minus, the zoom (a press resets it), plus, a
-    divider, fit all pages."""
+    divider, fit all pages. hidden: not painted (its buttons are there for a press).""" 
     var x = right - 185
-    draw_lifted(p, x, y, 185, 48, 24, sk.shadow2, sk.panel)
+    if not hidden:
+        draw_lifted(p, x, y, 185, 48, 24, sk.shadow2, sk.panel)
     bx.add("pagezoom", x, y, 185, 48)
-    draw_icon(p, "minus", x + 7 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    if not hidden:
+        draw_icon(p, "minus", x + 7 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
     bx.add("pagezoom.out", x + 7, y + 6, 36, 36)
     var st = TextStyle(MONO, 400, False, 11.5)
-    text_at(p, st, String(percent) + "%", x + 45 + 24, y + 8, 32, sk.ink_soft, ALIGN_CENTER)
+    if not hidden:
+        text_at(p, st, String(percent) + "%", x + 45 + 24, y + 8, 32, sk.ink_soft, ALIGN_CENTER)
     bx.add("pagezoom.value", x + 45, y + 8, 48, 32)
-    draw_icon(p, "plus", x + 95 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    if not hidden:
+        draw_icon(p, "plus", x + 95 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
     bx.add("pagezoom.in", x + 95, y + 6, 36, 36)
-    p.rect(x + 136, y + 15, 1, 18, sk.line, 0)
-    draw_icon(p, "maximize-2", x + 142 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
+    if not hidden:
+        p.rect(x + 136, y + 15, 1, 18, sk.line, 0)
+    if not hidden:
+        draw_icon(p, "maximize-2", x + 142 + 10.5, y + 6 + 10.5, 15, k, sk.ink_soft)
     bx.add("pagezoom.fit", x + 142, y + 6, 36, 36)
 
 

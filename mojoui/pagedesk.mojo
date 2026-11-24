@@ -91,6 +91,25 @@ def opening_view(view_w: Float64, view_h: Float64, content_w: Float64, content_h
     return fit_view(view_w, view_h, content_w, content_h, 72, 72, m[2], m[3] + 10, lo, hi)
 
 
+def writing_view(view_w: Float64, view_h: Float64, page_left: Float64, page_top: Float64, text_top: Float64, text_h: Float64) -> DeskView:
+    """The view a note of writing opens at: 100 %, the page centred, its writing (text_h ≥ 0) 32 px under the islands, or its
+    end at 60 % of the window when it is longer than that; no writing (text_h < 0): the page's top (navigation.js
+    writingView)."""
+    var m = view_margins(view_w)
+    var x = view_w / 2 - (page_left + PAGE_W / 2)
+    if text_h < 0:
+        return DeskView(x, m[2] - page_top, 1.0)
+    if text_h <= view_h - m[2] - m[3]:
+        return DeskView(x, m[2] - (text_top - 32), 1.0)
+    return DeskView(x, view_h * 0.6 - (text_top + text_h), 1.0)
+
+
+def give_way(x: Float64, scale: Float64, area_w: Float64, right: Float64 = PAGE_W, clear: Float64 = 80) -> Float64:
+    """How far a page gives way to the tool island when the area is narrow (viewport.js giveWayToIsland)."""
+    var over = x + right * scale - (area_w - clear)
+    return max(0.0, min(over, x - 16)) if over > 0 else 0.0
+
+
 def _normal_cdf(z: Float64) -> Float64:
     var t = 1 / (1 + 0.3275911 * abs(z) / 1.4142135623730951)
     var poly = ((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592
@@ -1035,6 +1054,19 @@ struct BoardTools(Movable):
         var b = self.words_box(layer)
         return px >= b[0] - 4 and px <= b[0] + b[2] and py >= b[1] and py <= b[1] + b[3] * Float64(max(len(self.words.lines), 1))
 
+    def begin_text(mut self, x_in: Float64, y: Float64):
+        """A new Markdown text begun at a page point, wrapping at its page's right margin (text-ops.js writingBox); it is made
+        when it has words."""
+        var right = Float64(max(0, Int(floor(x_in / PAGE_W))) + 1) * PAGE_W - 56
+        var x = min(x_in, right - 200)
+        self.editing = -2
+        self.edit_x = x
+        self.edit_y = y
+        self.edit_w = Float64(Int(right - x + 0.5))
+        var st = TextStyle(self.text_family, 400, False, self.text_size)
+        st.exact = True
+        self.words.begin("", st, self.edit_w)
+
     def begin_words(mut self, mut layer: ObjectLayer, id: Int, select_all: Bool = False):
         """Writing on an object's words begins (an undo step that ends with finish)."""
         var q = layer.index(id)
@@ -1104,7 +1136,8 @@ struct BoardTools(Movable):
                 var row = self.words_box(layer)[3]
                 layer.set_height(self.editing, row * Float64(max(len(self.words.lines), 1)) + 2 * pad)
             layer.end_gesture()
-            self.changed = True
+            if self.words.ed.history.can_undo():  # (a caret that came and went changed nothing)
+                self.changed = True
         self.editing = -1
         self.words.preedit = ""
 
@@ -1126,16 +1159,7 @@ struct BoardTools(Movable):
         if self.tool == "text":
             self.finish(layer)
             # a new Markdown text, wrapping at its page's right margin (text-ops.js writingBox: margin 56, at least 200 wide)
-            var col = max(0, Int(floor(pt[0] / PAGE_W)))
-            var right = Float64(col + 1) * PAGE_W - 56
-            var x = min(pt[0], right - 200)
-            self.editing = -2
-            self.edit_x = x
-            self.edit_y = pt[1]
-            self.edit_w = Float64(Int(right - x + 0.5))
-            var nst = TextStyle(self.text_family, 400, False, self.text_size)
-            nst.exact = True
-            self.words.begin("", nst, self.edit_w)
+            self.begin_text(pt[0], pt[1])
             # writing comes back to 100 % (about the page frame's origin), the line kept 16 px above the window's bottom
             if view.scale < 0.99:
                 view = DeskView(view.x, view.y, 1.0)
@@ -1331,6 +1355,7 @@ struct BoardTools(Movable):
             var r = self.words.key(name, mods, now_ms())
             if r == 2 and self.editing >= 0:
                 layer.set_words(self.editing, self.words.text())
+                self.changed = True
             return r != 0
         if (mods & 2) != 0 and (name == "y" or name == "Y"):
             layer.select_on_undo = True
@@ -1507,6 +1532,8 @@ struct BoardTools(Movable):
                     color = layer.objs[q].ink if layer.objs[q].kind == STICKY else layer.objs[q].color
             self.words.width = b[2]
             self.words.paint(p, tl[0], tl[1], b[3], b[4], v.scale, color, self.editing == -2)
+            if self.editing == -2 or layer.index(self.editing) >= 0 and layer.objs[layer.index(self.editing)].kind == TEXT:  # (a faint line where the words wrap)
+                p.rect(tl[0] + b[2] * v.scale, tl[1] - 3, 1, (b[3] * Float64(max(len(self.words.lines), 1))) * v.scale + 6, with_alpha(color, 0.22), 0)
         if self.drag == T_BOX:
             var a = v.to_screen(min(self.box_x0, self.last_x), min(self.box_y0, self.last_y))
             var w = abs(self.last_x - self.box_x0) * v.scale

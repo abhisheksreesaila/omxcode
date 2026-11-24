@@ -695,7 +695,7 @@ def draw_minimap[P: Painter](m: BuzanMap, mut p: P, mut bx: Boxes, x: Float64, y
     var teal = hexc("#247c73")
     var past = ox + vx * vs < x or oy + vy * vs < y or ox + (vx + vw) * vs > x + 170 or oy + (vy + vh) * vs > y + 102  # (a small map in a big window)
     if past:
-        p.push_clip(x, y, 170, 102)
+        p.push_clip(x + 6, y + 6, 158, 90)  # (the drawing's own box)
     p.rect(ox + vx * vs, oy + vy * vs, vw * vs, vh * vs, teal, 0)
     var sw = 1.5 * vs
     p.rect(ox + vx * vs + sw / 2, oy + vy * vs + sw / 2, vw * vs - sw, vh * vs - sw, hexc("#fffffc"), 0)
