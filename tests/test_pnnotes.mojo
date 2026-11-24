@@ -621,6 +621,41 @@ def double_tap() raises:
     s.close()
 
 
+def icons() raises:
+    """A note's icon chosen: searched, picked, tinted, guessed, taken away; kept in the file, its place in the list too."""
+    var s = WebShell(DB, "paper")
+    s.create("page", "Lemon tart")
+    paint(s)
+    var id = s.current
+    var order = s.notes[1].id
+    tap(s, "[Change icon]")
+    assert_true(s.emoji.open, "opens")
+    assert_true(s.text_in("ime", "rock") and s.emoji.found()[0] == "🚀", "found by its words")
+    paint(s)
+    tap(s, "emoji.pick:0")
+    assert_true(not s.emoji.open and s.notes[s.note_index(id)].emoji == "🚀" and s.notes[s.note_index(id)].icon_set, "picked")
+    assert_equal(count("SELECT icon = '🚀' AND icon_tint BETWEEN 1 AND 5 FROM notes WHERE id = " + String(id)), 1)
+    assert_equal(s.emoji.recent[0], "🚀")
+    tap(s, "[Change icon]")
+    paint(s)
+    tap(s, "emoji.tint:3")
+    assert_equal(count("SELECT icon_tint FROM notes WHERE id = " + String(id)), 3)
+    assert_true(s.emoji.open, "a tint keeps it open")
+    tap(s, "emoji.remove")
+    assert_equal(count("SELECT icon = '' AND icon_tint = 0 FROM notes WHERE id = " + String(id)), 1)
+    assert_true(not s.notes[s.note_index(id)].icon_set and s.notes[1].id == order, "the guess; its place kept")
+    _ = s.key("End", 2)
+    typed(s, "goes on")
+    s.flush()
+    assert_equal(s.save_state, "")
+    tap(s, "[Change icon]")
+    _ = s.text_in("paste", "🦊")
+    assert_equal(len(s.emoji.found()), 1)
+    _ = s.key("Escape", 0)
+    assert_true(not s.emoji.open, "Escape")
+    s.close()
+
+
 def dragging_and_notebooks() raises:
     var s = WebShell(DB, "paper")
     s.open(s.notes[0].id)
@@ -723,4 +758,5 @@ def main() raises:
     selected()
     pointing()
     double_tap()
+    icons()
     print("pnnotes: ok")

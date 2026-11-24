@@ -9,7 +9,7 @@ from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
-from pnlook import pn_faces, pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
+from pnlook import pn_faces, pn_emoji, pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
@@ -32,9 +32,10 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.rowsaver import RowSaver
+from mojoui.emojipicker import EmojiPicker
 from mojoui.doubletap import DoubleTap, KEY_UP, tap_key
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT
-from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
+from pnstore import set_note_icon, make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
@@ -326,6 +327,7 @@ struct WebShell(Movable):
     var dbs: List[Database]  # the open connection (one, kept)
     var writer: RowSaver  # a save on its thread, and what it is of (none or one)
     var written: List[Written]  # the saves on their way, the first on its thread
+    var emoji: EmojiPicker  # the open note's icon being chosen
     var taps: DoubleTap
     var pen_tool: String  # the pen used last (the double tap's)
     var caret_note: Int  # where the caret was when the pen was taken: the note (-1: nowhere), the object, the place
@@ -441,6 +443,10 @@ struct WebShell(Movable):
         pn_faces()
         self.writer = RowSaver()
         self.written = List[Written]()
+        self.emoji = pn_emoji()
+        for e in read_setting("pnote", "recent-icons", "").split(" "):
+            if String(e) != "":
+                self.emoji.recent.append(String(e))
         self.taps = DoubleTap()
         self.pen_tool = "pen"
         self.caret_note = -1
@@ -913,7 +919,7 @@ struct WebShell(Movable):
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
             draw_locked_cover(p, self.boxes, left, 0, w - left, h, self.notes[i].title, "Locked note", "Secure note · not in the native app yet", k, self.sk)
         if self.sidebar:
-            self.panel.quiet = self.searching or self.settings_open or self.card_open or self.props_open or self.book_card >= 0
+            self.panel.quiet = self.emoji.open or self.searching or self.settings_open or self.card_open or self.props_open or self.book_card >= 0
             self.panel.draw(p, self.boxes, k, self.sk, h)
         draw_round_button(p, self.boxes, "#toggle-sidebar", 16, 16, "panel-left", k, self.sk, self.sk.toggle_on if self.sidebar else self.sk.panel,
                           44, not self.sidebar and not self.searching and not self.settings_open and _in(self.px, self.py, 16, 16, 44))
@@ -979,7 +985,7 @@ struct WebShell(Movable):
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
-        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0) or self.book_card >= 0:  # (a layer of their own: opening one leaves the shell's batches as they are)
+        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0) or self.book_card >= 0 or self.emoji.open:  # (a layer of their own: opening one leaves the shell's batches as they are)
             p.begin_layer("overlay")
             p.layer_transform(0, 0, k)
         if self.card_open and i >= 0:
@@ -1031,6 +1037,8 @@ struct WebShell(Movable):
             pc.facts = [PropsRow("Page" if self.notes[i].kind == "page" else ("Canvas" if self.notes[i].kind == "canvas" else "Mind map"), "Expands automatically"), PropsRow("Storage", "On this device")]
             pc.danger_label = "Delete note"
             pc.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) / 2 + w / 2, 72, k, self.sk)
+        if self.emoji.open:
+            self.emoji.draw(p, self.boxes, w, h, k, self.sk)
         if self.toast != "":
             _ = draw_toast(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.sk)
         if self.searching:
@@ -2118,6 +2126,72 @@ struct WebShell(Movable):
         s.then("INSERT INTO workspace_changes (sequence, resource_kind, resource_id, revision, change_type) SELECT (SELECT sequence FROM workspace_state WHERE id = 1), 'note', resource_id, revision, 'updated' FROM notes WHERE id = ?",
                [int_arg(id)])
 
+    def choose_icon(mut self, box: String):
+        """The icon picker, opened at a button."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].secure or not self.doc.may_edit():
+            return
+        var k = self.boxes.find(box)
+        var x = self.boxes.r[4 * k] if k >= 0 else 400.0
+        var y = self.boxes.r[4 * k + 1] if k >= 0 else 100.0
+        var hh = self.boxes.r[4 * k + 3] if k >= 0 else 40.0
+        self.emoji.tints = [self.sk.c1, self.sk.c2, self.sk.c3, self.sk.c4, self.sk.c5]
+        self.emoji.chosen = self.notes[i].emoji if self.notes[i].icon_set else String("")
+        self.emoji.tint = self.notes[i].tint
+        self.card_open = False
+        self.emoji.show(x, y, y + hh)
+
+    def set_icon(mut self, emoji: String, tint: Int):
+        """The open note's icon ("": back to the guess), saved as the web saves one."""
+        self.flush()
+        var i = self.note_index(self.current)
+        if i < 0 or len(self.dbs) == 0 or self.outbox.find(self.current) >= 0:
+            self.say("Couldn’t change the icon. Try again.")
+            return
+        var t = tint if tint > 0 else tint_of(emoji)
+        var r = set_note_icon(self.dbs[0], self.current, self.notes[i].revision, emoji, t)
+        if r.status != SAVED:
+            self.say("Couldn’t change the icon. Try again.")
+            return
+        self.doc.saved(r.revision)
+        self.notes[i].revision = r.revision
+        self.notes[i].icon_set = emoji != ""
+        self.notes[i].emoji = emoji if emoji != "" else guess_emoji(self.notes[i].title, self.notes[i].kind)
+        self.notes[i].tint = t if emoji != "" else tint_of(self.notes[i].emoji)
+        self.emoji.chosen = emoji
+        self.emoji.tint = self.notes[i].tint
+        self.list_notes()
+
+    def tap_emoji(mut self, x: Float64, y: Float64):
+        """A tap while the picker is open: on one of its buttons, or it closes."""
+        var hit = self.boxes.hit_any(x, y, ["emoji.pick:", "emoji.tint:", "emoji.guess", "emoji.remove", "emoji"])
+        var i = self.note_index(self.current)
+        try:
+            if hit.startswith("emoji.pick:") and i >= 0:
+                var e = self.emoji.shown[Int(String(hit[byte=11:]))]
+                var keep = self.notes[i].tint if self.notes[i].icon_set else 0
+                var recent: List[String] = [e]
+                for o in self.emoji.recent:
+                    if o != e and len(recent) < 8:
+                        recent.append(o)
+                self.emoji.recent = recent^
+                write_setting("pnote", "recent-icons", String(" ".join(self.emoji.recent)))
+                self.emoji.open = False
+                self.set_icon(e, keep)
+            elif hit.startswith("emoji.tint:") and i >= 0:
+                self.set_icon(String(self.notes[i].emoji), Int(String(hit[byte=11:])))
+            elif hit == "emoji.guess" and i >= 0:
+                self.emoji.open = False
+                self.set_icon(guess_emoji(self.notes[i].title, self.notes[i].kind), 0)
+            elif hit == "emoji.remove" and i >= 0:
+                self.emoji.open = False
+                if self.notes[i].icon_set:
+                    self.set_icon("", 0)
+            elif hit == "":
+                self.emoji.open = False
+        except:
+            pass
+
     def writing_or_pen(mut self) -> Bool:
         """The modifier tapped twice: from writing to the pen used last, and back to writing where the caret was (main.js
         toggleWritingAndPen)."""
@@ -2158,6 +2232,9 @@ struct WebShell(Movable):
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
         self.taps.interrupt()
+        if self.emoji.open:
+            self.emoji.insert(text)
+            return True
         var i = self.note_index(self.current)
         if self.panel.naming >= 0 and self.sidebar:
             self.panel.naming_text += one_line(text)
@@ -2211,6 +2288,8 @@ struct WebShell(Movable):
             return self.writing_or_pen()
         if name.startswith(KEY_UP) or tap_key(name):  # (a modifier by itself)
             return False
+        if self.emoji.open:
+            return self.emoji.key(name, mods)
         if self.panel.naming >= 0 and self.sidebar:
             var r = self.panel.name_key(name, mods)
             if r == 2:
@@ -2547,6 +2626,10 @@ struct WebShell(Movable):
         self.taps.interrupt()
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
+        if self.emoji.open:
+            return False
+        if self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"]) != "" and not self.searching and not self.card_open and not self.settings_open:
+            return False  # (the icon's button: a tap)
         if self.sidebar and not self.searching and not self.settings_open and not self.props_open and not self.card_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
             _ = self.panel.press(x, y)
             return False
@@ -2857,6 +2940,14 @@ struct WebShell(Movable):
             if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
                 self.run_toast()
             return True
+        if self.emoji.open:
+            self.tap_emoji(x, y)
+            return True
+        if not self.searching and not self.card_open and not self.settings_open and not self.props_open and self.book_card < 0:
+            var ih = self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"])
+            if ih != "":
+                self.choose_icon(ih)
+                return True
         if self.searching:
             var sh = self.boxes.hit_any(x, y, ["#omni-row-", ".omni-chip:", "#search-close", "[Search or jump to]"])
             if sh.startswith("#omni-row-"):
@@ -2950,6 +3041,8 @@ struct WebShell(Movable):
                 self.props.menu_open = False
             elif ch == "#clear-note":
                 self.clear_all()
+            elif ch == "#share-icon":
+                self.choose_icon("#island")
             elif ch.startswith("#share-"):
                 self.say("Not in the native app yet")
             return True

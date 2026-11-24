@@ -4,6 +4,7 @@
 # gives its own (tests/test_notesshell builds one).
 
 from mojoui.canvas import rgba
+from mojoui.emojipicker import EmojiPicker, EmojiWords
 from mojoui.skin import Skin, Shadow, hexc
 from mojoui.notesshell import Boxes, PanelConfig, Shelf, SkinChoice, DockItem, DOCK_TOOL, DOCK_DIVIDER, DOCK_DOT, DOCK_ACCENT
 from mojoui.keycaps import keycap
@@ -343,6 +344,19 @@ def night_skin() -> Skin:
     s.locked_line = rgba(195, 168, 255, 82)
     s.derive()
     return s^
+
+
+def pn_emoji() -> EmojiPicker:
+    """A note's icon, chosen (note-icon-picker.js's common ones and the words its search knows)."""
+    var e = EmojiPicker()
+    e.common = ["📝", "📌", "✅", "💭", "🔖", "🧾", "📎", "🗂️", "🎨", "🎵", "🎬", "📷", "🏠", "🌱", "🍳", "🏃", "💰", "📈", "🧪", "🛠️", "🌍", "❤️", "⭐", "🔥"]
+    var more = "💡 idea light bulb|🚀 rocket launch startup|📚 books reading library|🗓️ calendar week plan|✈️ travel plane trip|🛒 shopping groceries cart|🧠 brain mind think|📄 page document file|🍋 lemon fruit|🍎 apple fruit|☕ coffee tea cafe|🍕 pizza food|🎯 target goal|🏆 trophy win|💼 work briefcase job|💻 computer laptop code|📱 phone mobile|🔒 lock secure private|🔑 key password|📊 chart stats data|🗺️ map plan route|🧳 luggage suitcase trip|🚗 car drive|🚲 bike cycle|🌳 tree nature|🌊 wave sea water|☀️ sun day|🌙 moon night sleep|🐶 dog pet|🐱 cat pet|🎓 school study learn|🏥 health doctor|💊 medicine pill|🧘 calm yoga mind|🎮 game play|📖 book story|✏️ pencil write|🖊️ pen write|🧩 puzzle piece|⚙️ settings gear|🔧 tool fix|💬 chat talk message|📣 announce news|🎁 gift present|🎉 party celebrate|👪 family|👶 baby child|🧹 clean chores|🛏️ bed sleep|🍷 wine drink|🥗 salad healthy food|🍰 cake dessert|🔔 bell reminder|⏰ alarm time|📅 date schedule|🧭 compass direction|🪴 plant home|💎 gem value|🏦 bank money|💳 card pay|🧮 math numbers|🔬 science research|🌐 web internet|📧 email mail|🔗 link|🖼️ picture image|🎤 mic voice|🎧 headphones listen|📺 tv watch|🧵 thread sew|🔥 fire hot|⚡ lightning fast|❄️ snow cold|🌈 rainbow"
+    for item in more.split("|"):
+        var at = String(item).find(" ")
+        e.more.append(EmojiWords(String(item[byte=0:at]), String(item[byte=at + 1:item.byte_length()])))
+    e.common_label = "Notes"
+    e.guess_label = "Guess from title"
+    return e^
 
 
 def pn_faces():

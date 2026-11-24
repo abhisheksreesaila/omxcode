@@ -226,6 +226,17 @@ def drop_note(mut db: Database, id: Int) -> String:
     return drop_row(db, "notes", "id", id, before)
 
 
+def set_note_icon(mut db: Database, id: Int, revision: Int, emoji: String, tint: Int) -> SaveResult:
+    """A note's icon and tint ("" and 0: back to the guess from its title; services.set_note_icon), on the revision the caller has.
+    The note keeps its place in the list."""
+    var s = RowSave("notes", "id", id, "revision", revision)
+    s.set("icon", text_arg(emoji))
+    s.set("icon_tint", int_arg(tint if emoji != "" else 0))
+    for f in changed("note", id, "updated"):
+        s.after.append(f.copy())
+    return save_row(db, s)
+
+
 def make_notebook(mut db: Database, name: String, category: String) -> NewResult:
     """A new notebook on a shelf (services.create_notebook)."""
     try:
