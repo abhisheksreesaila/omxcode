@@ -316,6 +316,8 @@ struct FontEngine(Movable):
     var fallback: Dict[Int, Int]  # codepoint → face (-1: none has it)
     var emoji_face: Int
     var images: List[GlyphImage]
+    var widths: Dict[String, Float64]  # (D-8007) measure()'s: widths by (style, text)
+    var shapings: Int  # runs shaped so far (the caches answering keeps it still)
     var runs: Dict[String, Run]  # shaped runs by (style, text): text redrawn each frame is shaped once (D-7916)
     var image_of: Dict[Int, Int]
     var hint: Int  # FreeType load flags for hinting (D-7904)
@@ -387,6 +389,8 @@ struct FontEngine(Movable):
         self.fallback = Dict[Int, Int]()
         self.emoji_face = -2
         self.images = List[GlyphImage]()
+        self.widths = Dict[String, Float64]()
+        self.shapings = 0
         self.runs = Dict[String, Run]()
         self.image_of = Dict[Int, Int]()
         var h = getenv("FONTTEXT_HINT", "light")
@@ -730,6 +734,7 @@ struct FontEngine(Movable):
     # ------------------------------------------------ shaping
 
     def shape(mut self, st: TextStyle, text: String) -> Run:
+        self.shapings += 1
         var run = Run()
         run.size = st.size
         var primary = self.pick(st.family, st.weight, st.italic)
@@ -1496,11 +1501,15 @@ def engine() -> Pointer[FontEngine, MutUntrackedOrigin]:
     return e
 
 
+def _run_key(st: TextStyle, text: String) -> String:
+    return st.family + "|" + String(st.weight) + ("i" if st.italic else "") + "|" + String(st.size) + "|" + String(st.letter_spacing) + ("x" if st.exact else "") + "|" + text
+
+
 def shape(st: TextStyle, text: String) -> Run:
     """The shaped run, from the process's cache when this style and text were shaped before (bounded: cleared at 8,192
     entries)."""
     var e = engine()
-    var key = st.family + "|" + String(st.weight) + ("i" if st.italic else "") + "|" + String(st.size) + "|" + String(st.letter_spacing) + ("x" if st.exact else "") + "|" + text
+    var key = _run_key(st, text)
     var hit = e[].runs.get(key)
     if hit:
         return hit.value().copy()
@@ -1515,8 +1524,24 @@ def shape(st: TextStyle, text: String) -> Run:
 
 
 def measure(st: TextStyle, text: String) -> Float64:
-    """The width of `text` in layout px."""
-    return engine()[].shape(st, text).width
+    """The width of `text` in layout px: from the run cache when it was shaped, else from a cache of widths (D-8007: a
+    panel measures its labels every time it is drawn, and shaping one is 10 µs to 1 ms); bounded, cleared at 32,768
+    widths. A width is only kept, not the run: a wrap tries thousands of texts it never draws."""
+    var e = engine()
+    var key = _run_key(st, text)
+    var w = e[].widths.get(key, -1.0)
+    if w >= 0:
+        return w
+    try:
+        if key in e[].runs:
+            return e[].runs[key].width
+    except:
+        pass
+    w = e[].shape(st, text).width
+    if len(e[].widths) >= 32768:
+        e[].widths = Dict[String, Float64]()
+    e[].widths[key] = w
+    return w
 
 
 def _blend_cov(d: UInt32, color: UInt32, cov: Int) -> UInt32:
