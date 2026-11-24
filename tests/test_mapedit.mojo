@@ -1,9 +1,12 @@
 # A mind map edited as a person does it (goal 79, docs/goals/79-gaps.md 42–44): clicks, moves, deleting with what is under,
 # undo and redo, zoom about the pointer, panning, Fit. No display.
-#   pixi run mojo run -I . tests/test_mapedit.mojo
+#   pixi run mojo run -I . -I examples/pnote tests/test_mapedit.mojo
 
 from std.testing import assert_equal, assert_true
-from mojoui.buzanmap import BuzanMap
+from mojoui.buzanmap import BuzanMap, wrap_text
+from mojoui.notesshell import Boxes
+from mojoui.scene import Scene
+from pnlook import skin_named
 
 comptime W: Float64 = 1000
 comptime H: Float64 = 700
@@ -29,6 +32,72 @@ def names(m: BuzanMap) -> String:
     for i in range(len(m.topics)):
         out += m.topics[i].text + ("<" + m.topics[m.topics[i].parent].text if m.topics[i].parent >= 0 else String("")) + " "
     return out
+
+
+def words_as_the_web() raises:
+    """layout.js and model.js: the words in their own size (20 when a document gives none, the root's too), wrapped past 28
+    letters, an emoji before them, "clean" in IBM Plex Sans."""
+    var m = BuzanMap()
+    _ = m.add(-1, "Week plan for the move to the new apartment", 0, 0, 0xFF0000FF, "root", 28, True, "hand")
+    _ = m.add(0, "Call the bank", 300, 0, 0xFF0000FF, "a", 19, False, "clean", '"emoji":"🏦","due":"2026-11-24"')
+    _ = m.add(0, "Old", -300, 0, 0xFF0000FF, "b")
+    var l = wrap_text(m.topics[0].words())
+    assert_equal(len(l), 2)
+    assert_equal(l[0], "Week plan for the move to")
+    assert_equal(l[1], "the new apartment")
+    assert_equal(m.card_size(0)[1], 76 + 34)
+    assert_equal(m.topics[1].words(), "🏦 Call the bank")
+    assert_equal(m.label_style(1).family, "IBM Plex Sans")
+    assert_equal(m.card_size(1)[1], 39)
+    assert_equal(m.idea_size(2), 20)
+    assert_equal(m.label_style(0).size, 28)
+    assert_equal(m.label_style(0).family, "Source Serif 4")
+    var long = wrap_text("abcdefghijklmnopqrstuvwxyzabcdefgh ij")
+    assert_equal(len(long), 2)
+    assert_equal(long[0], "abcdefghijklmnopqrstuvwxyzab")
+    assert_equal(long[1], "cdefgh ij")
+    # what is drawn: the root's words at 28 in both lines; the selection ring's dashes reach round its corners
+    var sc = Scene(1000, 700, 1)
+    var bx = Boxes()
+    m.freeze()
+    m.draw(sc, bx, 0, 0, W, H, 1.0, skin_named("paper"), "x")
+    var drawn = String("|".join(sc.texts))
+    assert_true("Week plan for the move to|" in drawn and "the new apartment" in drawn and "🏦 Call the bank" in drawn, drawn)
+
+
+def writing() raises:
+    """An idea's words written in the web's box: a caret, the arrows, words, copy, undo, the pointer; the root's too."""
+    var m = made()
+    m.begin_edit(0)
+    assert_true(m.edit_all, "all selected")
+    for c in ["B", "i", "g"]:
+        assert_equal(m.edit_key(String(c), 0), 1)
+    assert_equal(m.edit_text, "Big")
+    _ = m.edit_key("Home", 0)
+    _ = m.edit_key("A", 0)
+    _ = m.edit_key(" ", 0)
+    assert_equal(m.edit_text, "A Big")
+    _ = m.edit_key("z", 2)
+    assert_true(m.edit_text != "A Big", "its own undo")
+    _ = m.edit_key("z", 3)
+    assert_equal(m.edit_text, "A Big")
+    m.edit_insert(" é")
+    assert_equal(m.edit_text, "A  éBig")
+    var sc = Scene(1000, 700, 1)
+    var bx = Boxes()
+    m.draw(sc, bx, 0, 0, W, H, 0, skin_named("paper"), "x")
+    var at = bx.find("map.editor")
+    assert_true(at >= 0 and m.edit_caret[0] > bx.r[at * 4] and m.edit_caret[0] < bx.r[at * 4] + bx.r[at * 4 + 2], "a caret in the box")
+    assert_true("A  éBig" in String("|".join(sc.texts)) and bx.find("map.add-branch:top") < 0, "what is written shows; no handles meanwhile")
+    var by = bx.r[at * 4 + 1] + bx.r[at * 4 + 3] / 2
+    assert_true(m.edit_press(bx.r[at * 4] + 4, by, W, H, False, False), "a click in the box")
+    assert_true(m.pen.ed.caret.byte == 0 and m.editing == 0, "puts the caret there")
+    assert_true(m.edit_drag(bx.r[at * 4] + bx.r[at * 4 + 2] - 4, by, W, H) and m.edit_all, "a drag selects")
+    m.pen.release()
+    assert_true(not m.edit_press(5, 5, W, H, False, False), "a click elsewhere isn't its")
+    assert_equal(m.edit_key("Enter", 0), 2)
+    assert_equal(m.topics[0].text, "A éBig")
+    assert_true(m.undo() and m.topics[0].text == "Book", "one step of the map")
 
 
 def main() raises:
@@ -93,4 +162,6 @@ def main() raises:
     _ = m.release()
     assert_equal(m.selected, -1)  # (a click on the sheet)
     assert_true(m.add_idea(False) == -1 and not m.delete_selected(), "nothing selected: nothing to do")
+    words_as_the_web()
+    writing()
     print("mapedit: ok")

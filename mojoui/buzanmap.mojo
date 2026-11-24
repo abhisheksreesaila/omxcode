@@ -7,17 +7,19 @@
 #   var m = BuzanMap(); m.add(-1, "The book", 0, 0, color); m.add(0, "Characters", 280, -130, color2) …
 #   m.draw(p, bx, x0, y0, w, h, zoom, sk)        # the view centred on the map's origin
 
-from std.math import sqrt, tanh, pow
-from mojoui.graphemes import without_last, typed_text
-from mojoui.scene import Painter
+from std.math import sqrt, tanh, pow, sin, cos
+from mojoui.scene import Painter, stroke_outline
+from mojoui.graphemes import next_grapheme
 from mojoui.skin import Skin, Shadow, with_alpha, hexc
-from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
+from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
 from mojoui.history import History, Snapshot
 from mojoui.shared import new_key
 from mojoui.jsonpatch import Change, patched, members, elements, find_member, part
 from mojoui.json import Json, json_string
+from mojoui.textedit import now_ms
+from mojoui.wordsedit import WordsEdit
 
 comptime SERIF = "Source Serif 4"
 comptime SHEET: UInt32 = 0xFFEFF6F8  # #f8f6ef
@@ -38,6 +40,22 @@ struct Topic(Copyable, Movable):
     var bold: Bool
     var font: String  # "hand" (Source Serif 4) | "clean" (IBM Plex Sans), "" none given
     var extra: String  # the document's other members of this idea ("due":…,"done":…), written back as they came (D-7927)
+
+    def member(self, name: String) -> String:
+        """One of the members kept in `extra`, as text ("true" for a flag; "" for none)."""
+        if self.extra.find(json_string(name)) < 0:
+            return ""
+        try:
+            var j = Json.parse("{" + self.extra + "}")
+            var at = j.get(0, name)
+            return j.text(at, "") if j.text(at, "") != "" else ("true" if j.flag(at) else "")
+        except:
+            return ""
+
+    def words(self) -> String:
+        """What the idea says: its emoji, then its words (model.js displayText)."""
+        var e = self.member("emoji")
+        return e + " " + self.text if e != "" else String(self.text)
 
 
 @fieldwise_init
@@ -62,8 +80,10 @@ struct BuzanMap(Movable):
     var topics: List[Topic]
     var selected: Int
     var editing: Int  # the idea whose words are being written (-1: none)
-    var edit_text: String
+    var pen: WordsEdit  # its words, in the box over it (the web's .mindmap-node-editor)
+    var edit_text: String  # what it says now
     var edit_all: Bool  # its words are all selected (typing replaces them), as the web's editor opens
+    var edit_caret: Tuple[Float64, Float64, Float64, Float64]  # where its caret was drawn (an input method's window), x -1: nowhere
     var made: Int  # ideas made here (for their ids)
     var frozen: Bool  # the view's bounds are the ones the map opened with (adding ideas never re-fits it)
     var bounds: Tuple[Float64, Float64, Float64, Float64]
@@ -82,8 +102,10 @@ struct BuzanMap(Movable):
         self.topics = List[Topic]()
         self.selected = 0
         self.editing = -1
+        self.pen = WordsEdit()
         self.edit_text = ""
         self.edit_all = False
+        self.edit_caret = (-1.0, 0.0, 0.0, 0.0)
         self.made = 0
         self.frozen = False
         self.bounds = (0.0, 0.0, 0.0, 0.0)
@@ -279,46 +301,103 @@ struct BuzanMap(Movable):
         return i
 
     def begin_edit(mut self, i: Int):
+        """Opens an idea's words for writing, all of them selected, in the lines its box shows."""
         if i < 0 or i >= len(self.topics):
             return
         self.before = self.state()
         self.editing = i
-        self.edit_text = self.topics[i].text
-        self.edit_all = True
+        var lines = wrap_text(self.topics[i].words())
+        var shown = String(" ".join(lines))
+        var own = String("\n".join(lines)) if shown == self.topics[i].text else String(self.topics[i].text)
+        var b = self.edit_box(i)
+        self.pen.centered = True
+        self.pen.wrap = False
+        self.pen.begin(own, self.edit_style(i), b[2] - 20)
+        self.pen.ed.select_all()
+        self._edited()
+
+    def _edited(mut self):
+        self.edit_text = self.pen.text()
+        var a = self.pen.ed.sel_start()
+        var b = self.pen.ed.sel_end()
+        var last = len(self.pen.ed.paras) - 1
+        self.edit_all = self.edit_text != "" and a.para == 0 and a.byte == 0 and b.para == last and b.byte == self.pen.ed.paras[last].byte_length()
 
     def edit_key(mut self, name: String, mods: Int) -> Int:
-        """A key while an idea is being written: 0 not its key, 1 the words changed, 2 Enter (kept), 3 Escape (dropped)."""
+        """A key while an idea is being written: 0 not its key, 1 used, 2 Enter (kept), 3 Escape (dropped)."""
         if self.editing < 0:
             return 0
-        if name == "Enter":
-            var t = String(" ".join(self.edit_text.split()))
+        if name == "Enter" or name == "Return":
+            var t = String(" ".join(self.pen.text().split()))
             if t != "" and t != self.topics[self.editing].text:
                 self.topics[self.editing].text = t
                 self.record()
-            self.editing = -1
+            self._edit_over()
             return 2
         if name == "Escape":
-            self.editing = -1
+            self._edit_over()
             return 3
-        if (mods & 2) != 0:
-            if name == "a" or name == "A":
-                self.edit_all = True
-                return 1
-            return 0
-        if name == "Backspace":
-            if self.edit_all:
-                self.edit_text = ""
-            else:
-                self.edit_text = without_last(self.edit_text)
-            self.edit_all = False
-            return 1
-        if typed_text(name):
-            if self.edit_all:
-                self.edit_text = ""
-                self.edit_all = False
-            self.edit_text += name
-            return 1
-        return 0
+        var r = self.pen.key(name, mods, now_ms())
+        self._edited()
+        return 1 if r != 0 else 0
+
+    def _edit_over(mut self):
+        self.editing = -1
+        self.pen.preedit = ""
+        self.pen.release()
+        self.edit_caret = (-1.0, 0.0, 0.0, 0.0)
+
+    def edit_insert(mut self, words: String):
+        """Words from an input method or a paste into the idea being written."""
+        self.pen.preedit = ""
+        self.pen.insert(words, now_ms())
+        self._edited()
+
+    def edit_style(self, i: Int) -> TextStyle:
+        ref t = self.topics[i]
+        var st = TextStyle("IBM Plex Sans" if t.font == "clean" else SERIF, 700 if t.bold else 500, t.member("italic") != "", self.idea_size(i))
+        st.exact = True
+        return st
+
+    def edit_box(self, i: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """The writing box of idea i in map units: left, top, width, height (over its card, at least 100 × 38 on screen at 100 %)."""
+        var s = self.card_size(i)
+        return (self.topics[i].x - s[0] / 2, self.topics[i].y - s[1] / 2, s[0], s[1])
+
+    def edit_at(mut self, x: Float64, y: Float64, w: Float64, h: Float64) -> Tuple[Float64, Float64, Bool]:
+        """(x, y) of the map's box in the writing box's words, and whether it is in the box."""
+        var v = self.view(w, h)
+        var b = self.edit_box(self.editing)
+        var bw = max(100.0, b[2] * v[0])
+        var bh = max(38.0, b[3] * v[0])
+        var px = x - (v[1] + b[0] * v[0])
+        var py = y - (v[2] + b[1] * v[0])
+        self.pen.lay()
+        var step = self.line_step(self.editing)
+        return ((px - 10) / v[0], (py - 2 - (bh - Float64(len(self.pen.lines)) * step * v[0]) / 2) / v[0], px >= 0 and py >= 0 and px <= bw and py <= bh)
+
+    def edit_press(mut self, x: Float64, y: Float64, w: Float64, h: Float64, extend: Bool, word: Bool) -> Bool:
+        """Down in the box of the idea being written: the caret there, or the word (a double click). False: not in it."""
+        if self.editing < 0:
+            return False
+        var e = self.edit_at(x, y, w, h)
+        if not e[2]:
+            return False
+        if word:
+            self.pen.select_word(e[0], e[1], self.line_step(self.editing))
+        else:
+            self.pen.press(e[0], e[1], self.line_step(self.editing), extend)
+        self._edited()
+        return True
+
+    def edit_drag(mut self, x: Float64, y: Float64, w: Float64, h: Float64) -> Bool:
+        """The selection drawn out to (x, y)."""
+        if self.editing < 0 or not self.pen.ed.dragging:
+            return False
+        var e = self.edit_at(x, y, w, h)
+        self.pen.drag(e[0], e[1], self.line_step(self.editing))
+        self._edited()
+        return True
 
     def freeze(mut self):
         """Keeps the bounds the map has now as the ones its view fits (the web fits a map once, as it opens)."""
@@ -346,18 +425,31 @@ struct BuzanMap(Movable):
         return d
 
     def card_size(self, i: Int) -> Tuple[Float64, Float64]:
-        """layout.js: the root max(180, words + 50) × 76; an idea max(58, words) + 26 × (20 + 20)."""
+        """layout.js layoutNode: the words wrapped past 28 letters, measured; the root max(180, words + 50) × 76, an idea
+        max(58, words) + 26 × (its size + 20), and a line's step for each line more."""
+        var st = self.label_style(i)
+        var lines = wrap_text(self.topics[i].words())
+        var wide = 0.0
+        for l in lines:
+            wide = max(wide, measure(st, l))
+        var more = Float64(len(lines) - 1) * self.line_step(i)
         if self.topics[i].parent < 0:
-            var st = TextStyle(SERIF, 700, False, 28)
-            st.exact = True
-            return (max(180.0, measure(st, self.topics[i].text) + 50), 76.0)
-        var size = self.idea_size(i)
-        var st = TextStyle(SERIF, 600, False, size)
+            return (max(180.0, wide + 50), 76.0 + more)
+        return (max(58.0, wide) + 26, st.size + 20 + more)
+
+    def label_style(self, i: Int) -> TextStyle:
+        """The type an idea's words are drawn (and measured) in."""
+        ref t = self.topics[i]
+        var clean = t.font == "clean" and t.parent >= 0  # (the root is always in the serif: style.css .map-root-label)
+        var st = TextStyle("IBM Plex Sans" if clean else SERIF, 700 if t.parent < 0 else (500 if clean else 600), t.member("italic") != "", self.idea_size(i))
         st.exact = True
-        return (max(58.0, measure(st, self.topics[i].text)) + 26, size + 20)
+        return st
+
+    def line_step(self, i: Int) -> Float64:
+        return Float64(Int(self.idea_size(i) * 1.2 + 0.5))
 
     def idea_size(self, i: Int) -> Float64:
-        """An idea's words: its own size (makeNode's by depth for a new one), else 20 (layout.js: node.fontSize || 20;
+        """An idea's words: its own size, else 20 (model.js normalizeDocument: Number(node.fontSize) || 20, the root's too;
         the weight stays 600: style.css's .map-node-label beats the SVG attribute, D-7943)."""
         return self.topics[i].font_size if self.topics[i].font_size > 0 else 20.0
 
@@ -387,7 +479,7 @@ struct BuzanMap(Movable):
         var sc = min(1.35, max(0.45, min((w - padding * 2) / (maxx - minx), (h - padding * 2) / (maxy - miny))))
         return (sc, w / 2 - (minx + maxx) / 2 * sc, h / 2 - (miny + maxy) / 2 * sc)
 
-    def draw[P: Painter](self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, w: Float64, h: Float64, zoom_in: Float64, sk: Skin, label: String):
+    def draw[P: Painter](mut self, mut p: P, mut bx: Boxes, x0: Float64, y0: Float64, w: Float64, h: Float64, zoom_in: Float64, sk: Skin, label: String):
         draw_shadows(p, x0, y0, w, h, sk.radius, sk.shadow1, 0.3 * sk.radius + 1)
         draw_radial_steps(p, x0, y0, w, h, 0.48, 0.44, CARD, SHEET, 0.74, sk.radius)  # (.mindmap-stage's background)
         bx.add("map.host", x0, y0, w, h)
@@ -470,17 +562,27 @@ struct BuzanMap(Movable):
             var h2 = s[1] * zoom
             var lx = cx + t.x * zoom - w2 / 2
             var ly = cy + t.y * zoom - h2 / 2
+            var st = self.label_style(i)
+            st.size *= zoom
+            var lines = wrap_text(t.words())
+            var step = self.line_step(i)
+            var ex = 0.5 * 0.52 if st.family == "IBM Plex Sans" else 0.5 * 0.475  # (dominant-baseline: middle: half an x-height)
+            var first = t.y + 1 - Float64(len(lines) - 1) * step / 2 + ex * self.idea_size(i)
+            if i == self.editing:
+                if t.parent < 0:
+                    var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
+                    var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
+                    bx.add("map.idea:" + t.text, cx + t.x * zoom - reach_x, cy + t.y * zoom - reach_y, 2 * reach_x, 2 * reach_y)
+                else:
+                    bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)
+                continue  # (the box it is written in goes over all of them, below)
             if t.parent < 0:
-                var sh = List[Shadow]()
-                sh.append(Shadow(0, 4, 10, 0, rgba(57, 48, 37, 30)))
-                draw_shadows(p, lx, ly, w2, h2, 20 * zoom, sh)
+                # (filter url(#mindmap-node-shadow): 0 5 and σ 7, #382f28 at .15, inside the filter's region: 30 % past the card)
+                _drop(p, lx, ly, w2, h2, 20 * zoom, 5 * zoom, 14 * zoom, 0.3 * w2, 0.3 * h2)
                 p.rect(lx, ly, w2, h2, t.color, 20 * zoom)
                 _smile(p, cx + t.x * zoom, cy + t.y * zoom, s[0], s[1], zoom)
-                # (Chromium draws the root's words at 20 px though layout.js sizes the card from a 28 px measure:
-                # measured from the reference, 88 px wide at 102 %; D-7912)
-                var st = TextStyle(SERIF, 700, False, 20 * zoom)
-                st.exact = True
-                p.run(st, t.text, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(20) * zoom, rgba(255, 255, 255), ALIGN_CENTER)
+                for l in range(len(lines)):
+                    p.run(st, lines[l], cx + t.x * zoom, cy + (first + Float64(l) * step) * zoom, rgba(255, 255, 255), ALIGN_CENTER)
                 # the group's box reaches the add handles: 18 beyond the card plus a handle's 17 hit circle
                 var reach_x = (s[0] / 2 + 18 + 17.33) * zoom
                 var reach_y = (s[1] / 2 + 18 + 17.33) * zoom
@@ -490,17 +592,11 @@ struct BuzanMap(Movable):
                 sh.append(Shadow(0, 3, 7, 0, rgba(57, 48, 37, 20)))
                 draw_shadows(p, lx, ly, w2, h2, 6 * zoom, sh)
                 draw_bordered(p, lx - 1, ly - 1, w2 + 2, h2 + 2, 6 * zoom + 1, CARD, t.color, 2)
-                var size = self.idea_size(i)
-                var st = TextStyle(SERIF, 600, False, size * zoom)
-                st.exact = True
-                var words = self.edit_text if i == self.editing else t.text
-                if i == self.editing and self.edit_all:
-                    var ww = measure(st, words)
-                    p.rect(cx + t.x * zoom - ww / 2, cy + (t.y - 11 * size / 20) * zoom, ww, 22 * size / 20 * zoom, with_alpha(hexc("#3d8fe8"), 0.25), 0)
-                p.run(st, words, cx + t.x * zoom, cy + (t.y + 1) * zoom + _mid(size) * zoom, LABEL, ALIGN_CENTER)
+                for l in range(len(lines)):
+                    p.run(st, lines[l], cx + t.x * zoom, cy + (first + Float64(l) * step) * zoom, LABEL, ALIGN_CENTER)
                 bx.add("map.idea:" + t.text, lx - 5 * zoom, ly - 5 * zoom, w2 + 10 * zoom, h2 + 10 * zoom)  # (the group holds its hidden selection rect)
-        # the selection: dashed ring and four add handles
-        if self.selected >= 0 and self.selected < len(self.topics):
+        # the selection: dashed ring and four add handles (gone while the idea is written: .map-node.editing)
+        if self.selected >= 0 and self.selected < len(self.topics) and self.selected != self.editing:
             ref t = self.topics[self.selected]
             var s = self.card_size(self.selected)
             var root = t.parent < 0
@@ -513,17 +609,100 @@ struct BuzanMap(Movable):
             for k in range(4):
                 var ax = cx + (t.x + hx[k]) * zoom
                 var ay = cy + (t.y + hy[k]) * zoom
+                _drop(p, ax - 8.25 * zoom, ay - 8.25 * zoom, 16.5 * zoom, 16.5 * zoom, 8.25 * zoom, 5 * zoom, 14 * zoom, 2.95 * zoom, 2.95 * zoom)
                 p.circle(ax, ay, 8.25 * zoom, CARD)  # (r 7, stroked 2.5 in the card colour)
                 p.circle(ax, ay, 5.75 * zoom, t.color)
                 p.circle(ax, ay, 2 * zoom, CARD)
                 bx.add("map.add-branch:" + names[k], ax - 17 * zoom, ay - 17 * zoom, 34 * zoom, 34 * zoom)
+        if self.editing >= 0 and self.editing < len(self.topics):
+            # the box the idea is written in (.mindmap-node-editor), over its card
+            var i = self.editing
+            var b = self.edit_box(i)
+            var ex0 = cx + b[0] * zoom
+            var ey0 = cy + b[1] * zoom
+            var ew = max(100.0, b[2] * zoom)
+            var eh = max(38.0, b[3] * zoom)
+            var sh = List[Shadow]()
+            sh.append(Shadow(0, 5, 16, 0, rgba(57, 48, 37, 38)))
+            draw_shadows(p, ex0, ey0, ew, eh, 6, sh)
+            draw_bordered(p, ex0, ey0, ew, eh, 6, CARD, self.topics[i].color, 2)
+            bx.add("map.editor", ex0, ey0, ew, eh)
+            self.pen.style = self.edit_style(i)
+            self.pen.width = (ew - 20) / zoom
+            self.pen.lay()
+            var step = self.line_step(i)
+            var top = ey0 + 2 + (eh - Float64(len(self.pen.lines)) * step * zoom) / 2
+            var m = line_metrics(self.pen.style)
+            p.push_clip(ex0 + 2, ey0 + 2, ew - 4, eh - 4)
+            self.pen.paint(p, ex0 + 10, top, step, (step - Float64(m.ascent + m.descent)) / 2 + Float64(m.ascent), zoom, LABEL, True)
+            p.pop_clip()
+            var c = self.pen.caret_at(step)
+            self.edit_caret = (ex0 + 10 + c[0] * zoom, top + c[1] * zoom, 1.5, step * zoom)
         p.pop_clip()
 
 
-def _mid(size: Float64) -> Float64:
-    """dominant-baseline: middle puts the middle of the x-height on y: the baseline sits half an x-height below
-    (Source Serif 4's x-height is .475 em)."""
-    return 0.475 * size / 2
+def _drop[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, r: Float64, dy: Float64, blur: Float64, past_x: Float64, past_y: Float64):
+    """An SVG drop shadow (#382f28 at .15) cut where its filter's region ends, past_x and past_y outside the box."""
+    var sh = List[Shadow]()
+    sh.append(Shadow(0, dy, blur, 0, rgba(56, 47, 40, 38)))
+    p.push_clip(x - past_x, y - past_y, w + 2 * past_x, h + 2 * past_y)
+    draw_shadows(p, x, y, w, h, r, sh)
+    p.pop_clip()
+
+
+def wrap_text(text: String, limit: Int = 28) -> List[String]:
+    """layout.js wrapText: broken at word ends past `limit` letters (UTF-16 units, as JavaScript counts), a longer word cut."""
+    var lines = List[String]()
+    var line = String("")
+    var line_n = 0
+    for wd in text.split():
+        var word = String(wd)
+        var n = utf16_len(word)
+        while n > limit:
+            if line != "":
+                lines.append(line)
+                line = ""
+                line_n = 0
+            var cut = 0
+            var units = 0
+            while cut < word.byte_length():
+                var next = next_grapheme(word, cut)  # (whole characters; JavaScript would cut one in two)
+                var u = utf16_len(String(word[byte=cut:next]))
+                if units + u > limit and cut > 0:
+                    break
+                units += u
+                cut = next
+            lines.append(String(word[byte=0:cut]))
+            var rest = String(word[byte=cut:word.byte_length()])
+            word = rest
+            n = utf16_len(word)
+            if n == 0:
+                break
+        if n == 0:
+            continue
+        if line != "" and line_n + 1 + n > limit:
+            lines.append(line)
+            line = word
+            line_n = n
+        elif line != "":
+            line += " " + word
+            line_n += 1 + n
+        else:
+            line = word
+            line_n = n
+    if line != "":
+        lines.append(line)
+    if len(lines) == 0:
+        lines.append("")
+    return lines^
+
+
+def utf16_len(s: String) -> Int:
+    var n = 0
+    for b in s.as_bytes():
+        if (b & 0xC0) != 0x80:
+            n += 2 if b >= 0xF0 else 1
+    return n
 
 
 def _smile[P: Painter](mut p: P, cx: Float64, cy: Float64, w: Float64, h: Float64, z: Float64):
@@ -536,46 +715,71 @@ def _smile[P: Painter](mut p: P, cx: Float64, cy: Float64, w: Float64, h: Float6
     var y1 = h / 2 - 18
     var pts = List[Float64]()
     comptime N = 24
-    var left = List[Float64]()
-    var right = List[Float64]()
     for i in range(N + 1):
         var t = Float64(i) / N
         var u = 1 - t
-        var x = u * u * x0 + 2 * u * t * qx + t * t * x1
-        var y = u * u * y0 + 2 * u * t * qy + t * t * y1
-        var dx = 2 * u * (qx - x0) + 2 * t * (x1 - qx)
-        var dy = 2 * u * (qy - y0) + 2 * t * (y1 - qy)
-        var l = sqrt(dx * dx + dy * dy)
-        left.append(cx + (x - dy / l * 2.5) * z)
-        left.append(cy + (y + dx / l * 2.5) * z)
-        right.append(cx + (x + dy / l * 2.5) * z)
-        right.append(cy + (y - dx / l * 2.5) * z)
-    for i in range(N + 1):
-        pts.append(left[2 * i])
-        pts.append(left[2 * i + 1])
-    for i in range(N, -1, -1):
-        pts.append(right[2 * i])
-        pts.append(right[2 * i + 1])
-    p.polygon(pts, rgba(255, 255, 255, 59))
-    p.circle(cx + x0 * z, cy + y0 * z, 2.5 * z, rgba(255, 255, 255, 59))
-    p.circle(cx + x1 * z, cy + y1 * z, 2.5 * z, rgba(255, 255, 255, 59))
+        pts.append(cx + (u * u * x0 + 2 * u * t * qx + t * t * x1) * z)
+        pts.append(cy + (u * u * y0 + 2 * u * t * qy + t * t * y1) * z)
+    p.polygon(stroke_outline(pts, 5 * z), rgba(255, 255, 255, 59))
 
 
 def _dashed_rect[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, r: Float64, sw: Float64, dash: Float64):
-    """A rounded rect's outline in dashes (dash on, dash off), straight sides only (the corners' arcs left open)."""
-    var segs = List[Float64]()
-    # top, bottom, left, right sides between the corner arcs
-    var sides: List[List[Float64]] = [[x + r, y, x + w - r, y], [x + r, y + h, x + w - r, y + h], [x, y + r, x, y + h - r], [x + w, y + r, x + w, y + h - r]]
-    for s in sides:
-        var dx = s[2] - s[0]
-        var dy = s[3] - s[1]
-        var l = sqrt(dx * dx + dy * dy)
-        var t = 0.0
-        while t < l:
-            var t1 = min(l, t + dash)
-            p.line(s[0] + dx * t / l, s[1] + dy * t / l, s[0] + dx * t1 / l, s[1] + dy * t1 / l, sw, RING)
-            t += 2 * dash
-    _ = segs
+    """A rounded rect's outline in dashes (dash on, dash off), as SVG draws it: from the top side's left end, clockwise
+    through the corners' arcs."""
+    var arc = r * 1.5707963267948966
+    var runs: List[Float64] = [w - 2 * r, arc, h - 2 * r, arc, w - 2 * r, arc, h - 2 * r, arc]
+    var total = 0.0
+    for v in runs:
+        total += v
+    var t = 0.0
+    while t < total:
+        var t1 = min(t + dash, total)
+        # (each dash one polygon with square ends, as a CSS dash; bent in pieces round a corner)
+        var pieces = 1 if r == 0 else max(1, Int((t1 - t) / 2 + 0.999))
+        var out = List[Float64]()
+        var back = List[Float64]()
+        for k in range(pieces + 1):
+            var u = t + (t1 - t) * Float64(k) / Float64(pieces)
+            var c = _round_at(x, y, w, h, r, runs, u)
+            var a = _round_at(x, y, w, h, r, runs, max(u - 0.5, 0.0))
+            var b = _round_at(x, y, w, h, r, runs, min(u + 0.5, total))
+            var l = sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]))
+            var nx = -(b[1] - a[1]) / l * sw / 2
+            var ny = (b[0] - a[0]) / l * sw / 2
+            out.append(c[0] + nx)
+            out.append(c[1] + ny)
+            back.append(c[0] - nx)
+            back.append(c[1] - ny)
+        for k in range(pieces, -1, -1):
+            out.append(back[2 * k])
+            out.append(back[2 * k + 1])
+        p.polygon(out, RING)
+        t += 2 * dash
+
+
+def _round_at(x: Float64, y: Float64, w: Float64, h: Float64, r: Float64, runs: List[Float64], at: Float64) -> Tuple[Float64, Float64]:
+    """The point `at` px along a rounded rect's outline (runs: its eight pieces' lengths)."""
+    var t = at
+    var k = 0
+    while k < 7 and t > runs[k]:
+        t -= runs[k]
+        k += 1
+    if k == 0:
+        return (x + r + t, y)
+    if k == 2:
+        return (x + w, y + r + t)
+    if k == 4:
+        return (x + w - r - t, y + h)
+    if k == 6:
+        return (x, y + h - r - t)
+    var a = t / r if r > 0 else 0.0
+    if k == 1:
+        return (x + w - r + r * sin(a), y + r - r * cos(a))
+    if k == 3:
+        return (x + w - r + r * cos(a), y + h - r + r * sin(a))
+    if k == 5:
+        return (x + r - r * sin(a), y + h - r + r * cos(a))
+    return (x + r - r * cos(a), y + r - r * sin(a))
 
 
 @fieldwise_init

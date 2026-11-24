@@ -336,6 +336,7 @@ struct WebShell(Movable):
     var clip: String  # what was copied last, and how many times something was
     var clip_version: Int
     var words_clips: Int
+    var map_clips: Int
     var words_at: Tuple[Float64, Float64, Float64, Float64]  # the caret of the canvas words being written, on screen
     var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
@@ -432,6 +433,7 @@ struct WebShell(Movable):
         self.clip = ""
         self.clip_version = 0
         self.words_clips = 0
+        self.map_clips = 0
         self.words_at = (-1.0, 0.0, 0.0, 0.0)
         self.omni_kind = List[Int]()
         self.omni_id = List[Int]()
@@ -1886,10 +1888,7 @@ struct WebShell(Movable):
                 self.save_canvas()
             return True
         if self.notes[i].kind == "mindmap" and self.map.editing >= 0:
-            if self.map.edit_all:
-                self.map.edit_text = ""
-                self.map.edit_all = False
-            self.map.edit_text += one_line(text)
+            self.map.edit_insert(one_line(text))
             return True
         return False
 
@@ -1897,6 +1896,9 @@ struct WebShell(Movable):
         var i = self.note_index(self.current)
         if self.on_canvas() and self.tools.editing != -1:
             self.tools.words.preedit = text
+            return True
+        if i >= 0 and self.notes[i].kind == "mindmap" and self.map.editing >= 0:
+            self.map.pen.preedit = one_line(text)
             return True
         if i < 0 or self.notes[i].kind != "page" or self.notes[i].secure or not self.doc.may_edit():
             return False
@@ -1937,6 +1939,9 @@ struct WebShell(Movable):
                 var r = self.map.edit_key(name, mods)
                 if r == 2:
                     self.save_map()
+                elif self.map.pen.ed.clip_version != self.map_clips:
+                    self.map_clips = self.map.pen.ed.clip_version
+                    self.copied(String(self.map.pen.ed.clip))
                 return r != 0
             if name == "Tab" or name == "Enter":
                 if self.map.add_idea(name == "Enter") >= 0:
@@ -2092,6 +2097,8 @@ struct WebShell(Movable):
         var i = self.note_index(self.current)
         if i >= 0 and self.notes[i].kind == "canvas" and self.tools.editing != -1:
             return self.words_at
+        if self.map.editing >= 0 and i >= 0 and self.notes[i].kind == "mindmap":
+            return self.map.edit_caret
         if i < 0 or self.notes[i].kind != "page":
             return (-1.0, 0.0, 0.0, 0.0)
         return self.page.caret_rect
@@ -2254,10 +2261,12 @@ struct WebShell(Movable):
         if self.on_map():
             if self.boxes.hit_any(x, y, ["#sidebar", "#island", "#toggle-sidebar", "#search-button", "[Zoom controls]", "#mindmap-rail-actions", "[Map overview]", "[Add branch from "]) != "":
                 return False
-            if self.map.editing >= 0:  # (a click elsewhere keeps the words)
-                _ = self.map.edit_key("Enter", 0)
-                self.save_map()
             var b = self.map_box()
+            if self.map.editing >= 0:
+                if self.map.edit_press(x - b[0], y - b[1], b[2], b[3], False, False):
+                    return True
+                _ = self.map.edit_key("Enter", 0)  # (a click elsewhere keeps the words)
+                self.save_map()
             self.map.press(x - b[0], y - b[1], b[2], b[3])
             return True
         var ni = self.note_index(self.current)
@@ -2319,6 +2328,8 @@ struct WebShell(Movable):
             return r
         if self.on_map() and self.boxes.hit_any(x, y, ["#sidebar", "#island", "#toggle-sidebar", "#search-button", "[Zoom controls]", "#mindmap-rail-actions"]) == "":
             var b = self.map_box()
+            if self.map.edit_press(x - b[0], y - b[1], b[2], b[3], False, True):
+                return True
             var t = self.map.hit(x - b[0], y - b[1], b[2], b[3])
             if t < 0:
                 return False
@@ -2342,6 +2353,8 @@ struct WebShell(Movable):
             return self.tools.pan(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
         if self.on_map():
             var b = self.map_box()
+            if self.map.edit_drag(x - b[0], y - b[1], b[2], b[3]):
+                return True
             return self.map.drag_to(x - b[0], y - b[1], b[2], b[3])
         if self.page.marking():
             self.page.mark_move(x, y)
@@ -2367,6 +2380,7 @@ struct WebShell(Movable):
             var r = self.tools.release(x, y, self.board.layer, self.view) if self.tools.tool == "hand" else self.tools.release(x, y, self.board.near(vr[0], vr[1], vr[2], vr[3]), self.view)
             self.save_canvas()
             return r
+        self.map.pen.release()
         if self.map.drag != -1:
             if self.map.release():
                 self.save_map()

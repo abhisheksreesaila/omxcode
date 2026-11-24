@@ -33,6 +33,8 @@ struct WordsEdit(Movable):
     var preedit: String
     var goal_x: Float64
     var at_end: Bool
+    var centered: Bool  # each line in the middle of the width
+    var wrap: Bool  # lines broken at the width (False: a paragraph is a line however long)
 
     def __init__(out self):
         self.ed = TextEdit()
@@ -43,6 +45,8 @@ struct WordsEdit(Movable):
         self.preedit = ""
         self.goal_x = -1
         self.at_end = False
+        self.centered = False
+        self.wrap = True
 
     def begin(mut self, words: String, style: TextStyle, width: Float64):
         """Starts editing: the caret at the end, nothing to undo."""
@@ -79,7 +83,7 @@ struct WordsEdit(Movable):
             for wd in t.split(" "):
                 var n = String(wd).byte_length()
                 var end = pos + n
-                if not first and measure(self.style, String(t[byte=start:end])) > self.width + 0.01:
+                if self.wrap and not first and measure(self.style, String(t[byte=start:end])) > self.width + 0.01:
                     self.lines.append(WordsLine(para, start, at))
                     start = pos
                 at = end
@@ -98,12 +102,20 @@ struct WordsEdit(Movable):
                 found = k
         return found
 
+    def indent(self, k: Int) -> Float64:
+        """How far in line k starts."""
+        if not self.centered:
+            return 0
+        var l = self.lines[k]
+        return (self.width - measure(self.style, String(self.ed.paras[l.para][byte=l.start:l.end]))) / 2
+
     def x_of(mut self, p: Pos, k: Int) -> Float64:
         var l = self.lines[k]
-        return measure(self.style, String(self.ed.paras[l.para][byte=l.start:max(min(p.byte, l.end), l.start)]))
+        return self.indent(k) + measure(self.style, String(self.ed.paras[l.para][byte=l.start:max(min(p.byte, l.end), l.start)]))
 
-    def byte_at(mut self, k: Int, x: Float64) -> Int:
+    def byte_at(mut self, k: Int, x_in: Float64) -> Int:
         var l = self.lines[k]
+        var x = x_in - self.indent(k)
         var best = l.start
         var best_d = abs(x)
         var i = l.start
@@ -219,12 +231,14 @@ struct WordsEdit(Movable):
                     continue
                 var x0 = measure(self.style, String(self.ed.paras[l.para][byte=l.start:s])) if s > l.start else 0.0
                 var x1 = measure(self.style, String(self.ed.paras[l.para][byte=l.start:e])) if e > l.start else 0.0
+                x0 += self.indent(k)
+                x1 += self.indent(k)
                 p.rect(x + x0 * scale, top + Float64(k) * row * scale, max((x1 - x0) * scale, 3), row * scale, SELECTION, 0)
         if words:
             for k in range(len(self.lines)):
                 var l = self.lines[k]
                 if l.end > l.start:
-                    p.run(on, String(self.ed.paras[l.para][byte=l.start:l.end]), x, top + (base + Float64(k) * row) * scale, color, 0)
+                    p.run(on, String(self.ed.paras[l.para][byte=l.start:l.end]), x + self.indent(k) * scale, top + (base + Float64(k) * row) * scale, color, 0)
         var c = self.caret_at(row)
         var cx = x + c[0] * scale
         if self.preedit != "":  # (an input method's composition at the caret, underlined)
