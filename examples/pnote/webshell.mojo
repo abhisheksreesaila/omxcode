@@ -2560,6 +2560,7 @@ struct WebShell(Movable):
         return True
 
     def key(mut self, name: String, mods: Int) -> Bool:
+        self.budget.input()
         if self.taps.key(name, clock_us() // 1000):
             return self.writing_or_pen()
         if name.startswith(KEY_UP) or tap_key(name):  # (a modifier by itself)
@@ -2909,6 +2910,7 @@ struct WebShell(Movable):
 
     def press(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer went down (a drag may follow)."""
+        self.budget.input()
         self.taps.interrupt()
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
@@ -3264,6 +3266,7 @@ struct WebShell(Movable):
 
     def tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap at (x, y) layout px; True when it changed something."""
+        self.budget.input()
         self.title_focus = False
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#save-copy", "#rail-new-note", ".nav-row:"])
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":

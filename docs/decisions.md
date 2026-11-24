@@ -2026,3 +2026,6 @@ mojoui.pagegrow is pages.js's rules, held to its own test cases. A page added on
 
 ## D-8069: the race's CPU rule and its new row (ours; review 4 S12, MUST 5)
 Linux: no measured run, web or native, starts while 3 or more cores' worth of work runs; a race with one that did is BLOCKED, not judged. race.md said "void and run again" though nothing reran. New row, judged: typing in the middle of a page's 20,000-character paragraph, 80 keys each side (webtype.mjs). The judge is unchanged.
+
+## D-8070: the two frames that answer an input load as little as they may (ours; continuation 22)
+D-8061's bigger slices put a press during the stress note's open at 19.8 ms (web 14.3). FrameBudget.input(): after a press, a tap or a key the next two frames take the least slice (0.25 ms). Press 14.5–16.9 in ten of ten runs, opens as complete as before (50 and 105 ms).

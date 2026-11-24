@@ -24,6 +24,17 @@ def main() raises:
     assert_true(fb.other_us >= 2900 and fb.other_us < 3600, "the slice isn't other work: " + String(fb.other_us))
     var s = fb.slice_us(250, 1500)
     assert_true(s >= 400 and s <= 1100, "target − other: " + String(s))
+    # the frames that answer an input take the least; then as before
+    fb.input()
+    for _ in range(2):
+        fb.begin()
+        assert_equal(fb.slice_us(250, 1500), 250, "answering an input")
+        busy(3000)
+        fb.end()
+    fb.begin()
+    assert_true(fb.slice_us(250, 1500) > 250, "and on it goes")
+    busy(3000)
+    fb.end()
     fb.begin()
     busy(5000)
     fb.end()
