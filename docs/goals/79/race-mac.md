@@ -2,11 +2,11 @@
 
 Web renderer on the Mac: 158.0.8127.88 renderer ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version).
 
-**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory, note switch, opens and the fresh-Chrome cold start by webmem, webswitch, webopen and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. **The Mac's frames shown aren't measured (its screen was locked or the app not in front): its frame rows say "work only, not like-for-like" and are not judged.** PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower bound of its first paint, process start to its own server sending the page (D-7992).
+**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory, note switch, opens and the fresh-Chrome cold start by webmem, webswitch, webopen and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. **Frames shown: measured (MOJOUI_BENCH_PACED on AppKit: the app's own 60 Hz tick, the screen unlocked, the app active and its window key at every step), judged as Linux's.** PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower bound of its first paint, process start to its own server sending the page (D-7992).
 
 Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at 2.0×. Web: benchmark-f034.mjs --gpu (Chromium with the GPU), webopen.mjs, webswitch.mjs. Native: pnote's web look (PNOTE_DB), the same steps through test mode.
 
-**How it is judged** (the owner, 2026-11-24: "yandong have a bar,  it sjust need better than web (sind its antive) if tis very close its ok"; the main session's reading, not the owner's words: no absolute ms bar decides; a row passes when native is better than the web on the same machine, and *very close* is within 3 %). A frame that both show in one refresh at 60 Hz is "a tie at the display's refresh" and passes. Still required: no canvas frame drawn on the CPU; tests/test_canvasload (a pan and an edit during an open): passes. The silky marks (p95 ≤ 8.3 ms, max ≤ 16.7 ms of work) are printed on every row, as information.
+**How it is judged** (the owner, 2026-11-24: "yandong have a bar,  it sjust need better than web (sind its antive) if tis very close its ok"; the main session's reading, not the owner's words: no absolute ms bar decides; a row passes when native is better than the web on the same machine, and *very close* is within 3 %). A frame that both show in one refresh at 60 Hz is "a tie at the display's refresh" and passes. Still required: no canvas frame drawn on the CPU; tests/test_canvasload (a pan and an edit during an open): **FAILS.** The silky marks (p95 ≤ 8.3 ms, max ≤ 16.7 ms of work) are printed on every row, as information.
 
 **What is compared:**
 - *Frames* (pan, zoom, drags, pen, typing, the frames of an open): the gap from one frame to the next. Web: requestAnimationFrame gaps (every refresh, whether or not the picture changed). Native: from one frame's paint to the next one's, every frame showing a new picture, the next gesture given once the last is painted, nothing measured inside the frames (MOJOUI_BENCH_PACED). p95, max and missed frames (gaps over 20 ms, benchmark-f034's own "slow"), over the same number of gestures. Neither side has the compositor's presentation time: the hidden screen reports none ("shown: not measured" in every earlier race), and a page can't read it.
@@ -17,125 +17,151 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 
 | note | row | web p95 / max (missed) | native p95 / max (missed) | verdict | native work p95 / max | silky marks (information) |
 |---|---|---|---|---|---|---|
-| 600 | the first open ever (nothing kept: parsed): its first frame | 202.7 / 202.7 | — | work only, not like-for-like | 37.9 / 37.9 | over: p95 > 8.3, max > 16.7 |
-| 600 | the first open ever (nothing kept: parsed): complete | 202.7 / 202.7 | — | work only, not like-for-like | — |  |
-| 600 | a new process's first open, from the view the last one kept: its first frame | 202.7 / 202.7 | — | work only, not like-for-like | 9.3 / 9.3 | over: p95 > 8.3 |
-| 600 | a new process's first open, from the view the last one kept: complete | 202.7 / 202.7 | — | work only, not like-for-like | — |  |
-| 600 | open again (cold: the row read each time): its first frame | 202.2 / 202.2 | — | work only, not like-for-like | 8.8 / 8.8 | over: p95 > 8.3 |
-| 600 | open again: complete | 202.2 / 202.2 | — | work only, not like-for-like | — |  |
-| 600 | open again: the frames while it comes in (gaps) | 16.8 / 33.4 | — | work only, not like-for-like | 4.3 / 8.8 | ≤ 8.3 and ≤ 16.7 |
-| 600 | a press during an open | 14.9 / 14.9 | — | work only, not like-for-like | 7.8 / 7.8 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 30% (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 2.5 / 4.9 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 30%, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
-| 600 | zoom from 30% (frames) | 16.8 / 33.3 | — | work only, not like-for-like | 3.4 / 4.6 | ≤ 8.3 and ≤ 16.7 |
-| 600 | zoom from 30%, not warmed (frames) | 16.8 / 33.3 | — | work only, not like-for-like | — |  |
-| 600 | pan 100% (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 2.7 / 3.0 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 100%, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
-| 600 | drag one (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 2.2 / 3.8 | ≤ 8.3 and ≤ 16.7 |
-| 600 | drag one, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
-| 600 | drag 40 (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.5 / 6.5 | ≤ 8.3 and ≤ 16.7 |
-| 600 | drag 40, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
-| 600 | undo (latency) | 19.1 / 24.3 | — | work only, not like-for-like | 3.9 / 5.5 | ≤ 8.3 and ≤ 16.7 |
-| 600 | undo, not warmed (latency) | 19.1 / 24.3 | — | work only, not like-for-like | — |  |
-| 600 | redo (latency) | 19.0 / 22.4 | — | work only, not like-for-like | 4.3 / 5.0 | ≤ 8.3 and ≤ 16.7 |
-| 600 | redo, not warmed (latency) | 19.0 / 22.4 | — | work only, not like-for-like | — |  |
-| 600 | pen (frames) | 16.7 / 33.3 | — | work only, not like-for-like | 1.7 / 3.0 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pen, not warmed (frames) | 16.7 / 33.3 | — | work only, not like-for-like | — |  |
-| 600 | typing (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 3.2 / 5.9 | ≤ 8.3 and ≤ 16.7 |
-| 600 | typing, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
-| stress | the first open ever (nothing kept: parsed): its first frame | 600.4 / 600.4 | — | work only, not like-for-like | 96.8 / 96.8 | over: p95 > 8.3, max > 16.7 |
-| stress | the first open ever (nothing kept: parsed): complete | 600.4 / 600.4 | — | work only, not like-for-like | — |  |
-| stress | a new process's first open, from the view the last one kept: its first frame | 600.4 / 600.4 | — | work only, not like-for-like | 9.8 / 9.8 | over: p95 > 8.3 |
-| stress | a new process's first open, from the view the last one kept: complete | 600.4 / 600.4 | — | work only, not like-for-like | — |  |
-| stress | open again (cold: the row read each time): its first frame | 585.7 / 585.7 | — | work only, not like-for-like | 9.1 / 9.1 | over: p95 > 8.3 |
-| stress | open again: complete | 585.7 / 585.7 | — | work only, not like-for-like | — |  |
-| stress | open again: the frames while it comes in (gaps) | 33.4 / 233.3 | — | work only, not like-for-like | 3.8 / 6.4 | ≤ 8.3 and ≤ 16.7 |
-| stress | a press during an open | 14.9 / 14.9 | — | work only, not like-for-like | 7.8 / 7.8 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 30% (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.6 / 5.0 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 30%, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
-| stress | zoom from 30% (frames) | 16.7 / 33.4 | — | work only, not like-for-like | 5.0 / 7.2 | ≤ 8.3 and ≤ 16.7 |
-| stress | zoom from 30%, not warmed (frames) | 16.7 / 33.4 | — | work only, not like-for-like | — |  |
-| stress | pan 100% (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 3.1 / 4.2 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 100%, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
-| stress | drag one (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 4.2 / 11.0 | ≤ 8.3 and ≤ 16.7 |
-| stress | drag one, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
-| stress | drag 40 (frames) | 16.8 / 33.3 | — | work only, not like-for-like | 3.0 / 12.7 | ≤ 8.3 and ≤ 16.7 |
-| stress | drag 40, not warmed (frames) | 16.8 / 33.3 | — | work only, not like-for-like | — |  |
-| stress | undo (latency) | 20.7 / 22.5 | — | work only, not like-for-like | 5.4 / 6.9 | ≤ 8.3 and ≤ 16.7 |
-| stress | undo, not warmed (latency) | 20.7 / 22.5 | — | work only, not like-for-like | — |  |
-| stress | redo (latency) | 21.9 / 23.0 | — | work only, not like-for-like | 6.0 / 11.6 | ≤ 8.3 and ≤ 16.7 |
-| stress | redo, not warmed (latency) | 21.9 / 23.0 | — | work only, not like-for-like | — |  |
-| stress | pen (frames) | 16.8 / 116.6 | — | work only, not like-for-like | 2.4 / 4.5 | ≤ 8.3 and ≤ 16.7 |
-| stress | pen, not warmed (frames) | 16.8 / 116.6 | — | work only, not like-for-like | — |  |
-| stress | typing (frames) | 16.8 / 33.2 | — | work only, not like-for-like | 3.8 / 6.8 | ≤ 8.3 and ≤ 16.7 |
-| stress | typing, not warmed (frames) | 16.8 / 33.2 | — | work only, not like-for-like | — |  |
+| 600 | the first open ever (nothing kept: parsed): its first frame | 199.8 / 199.8 | 68.4 / 68.4 | ✓ better | 37.9 / 37.9 | over: p95 > 8.3, max > 16.7 |
+| 600 | the first open ever (nothing kept: parsed): complete | 199.8 / 199.8 | 428.9 / 428.9 | ✗ worse than the web | — |  |
+| 600 | a new process's first open, from the view the last one kept: its first frame | 199.8 / 199.8 | 31.2 / 31.2 | ✓ better | 7.9 / 7.9 | ≤ 8.3 and ≤ 16.7 |
+| 600 | a new process's first open, from the view the last one kept: complete | 199.8 / 199.8 | 939.5 / 939.5 | ✗ worse than the web | — |  |
+| 600 | open again (cold: the row read each time): its first frame | 199.1 / 199.1 | 73.4 / 73.4 | ✗ tests/test_canvasload fails | 7.0 / 7.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | open again: complete | 199.1 / 199.1 | 940.7 / 940.7 | ✗ worse than the web | — |  |
+| 600 | open again: the frames while it comes in (gaps) | 16.8 / 33.4 | 22.1 / 67.8 | ✗ worse than the web | 4.2 / 6.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | a press during an open | 13.8 / 13.8 | 21.1 / 21.1 | ✗ worse than the web | 9.0 / 9.0 | over: p95 > 8.3 |
+| 600 | pan 30% (frames) | 16.7 / 16.8 (0) | 69.4 / 74.1 (119) | ✗ worse than the web | 3.2 / 4.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 67.5 / 73.3 (119) | ✗ worse than the web | — |  |
+| 600 | zoom from 30% (frames) | 16.7 / 33.3 (1) | 21.4 / 60.4 (20) | ✗ worse than the web | 3.9 / 4.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | zoom from 30%, not warmed (frames) | 16.7 / 33.3 (1) | 22.0 / 65.5 (19) | ✗ worse than the web | — |  |
+| 600 | pan 100% (frames) | 16.7 / 16.8 (0) | 65.4 / 76.2 (119) | ✗ worse than the web | 3.0 / 4.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 100%, not warmed (frames) | 16.7 / 16.8 (0) | 68.6 / 81.1 (119) | ✗ worse than the web | — |  |
+| 600 | drag one (frames) | 16.7 / 16.8 (0) | 70.2 / 78.2 (91) | ✗ worse than the web | 4.0 / 5.9 | ≤ 8.3 and ≤ 16.7 |
+| 600 | drag one, not warmed (frames) | 16.7 / 16.8 (0) | 65.8 / 73.8 (91) | ✗ worse than the web | — |  |
+| 600 | drag 40 (frames) | 16.8 / 16.8 (0) | 58.4 / 76.0 (60) | ✗ worse than the web | 4.7 / 6.3 | ≤ 8.3 and ≤ 16.7 |
+| 600 | drag 40, not warmed (frames) | 16.8 / 16.8 (0) | 57.9 / 76.7 (60) | ✗ worse than the web | — |  |
+| 600 | undo (latency) | 19.6 / 19.8 | 31.9 / 58.6 | ✗ worse than the web | 5.4 / 6.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | undo, not warmed (latency) | 19.6 / 19.8 | 31.8 / 52.8 | ✗ worse than the web | — |  |
+| 600 | redo (latency) | 18.2 / 20.4 | 31.8 / 51.9 | ✗ worse than the web | 5.4 / 8.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | redo, not warmed (latency) | 18.2 / 20.4 | 29.4 / 57.9 | ✗ worse than the web | — |  |
+| 600 | pen (frames) | 16.7 / 16.8 (0) | 64.5 / 77.3 (233) | ✗ worse than the web | 2.3 / 5.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pen, not warmed (frames) | 16.7 / 16.8 (0) | 69.1 / 78.5 (233) | ✗ worse than the web | — |  |
+| 600 | typing (frames) | 16.8 / 16.8 (0) | 56.6 / 72.0 (57) | ✗ worse than the web | 3.6 / 8.9 | ≤ 8.3 and ≤ 16.7 |
+| 600 | typing, not warmed (frames) | 16.8 / 16.8 (0) | 50.9 / 82.2 (55) | ✗ worse than the web | — |  |
+| stress | the first open ever (nothing kept: parsed): its first frame | 602.6 / 602.6 | 127.1 / 127.1 | ✓ better | 108.2 / 108.2 | over: p95 > 8.3, max > 16.7 |
+| stress | the first open ever (nothing kept: parsed): complete | 602.6 / 602.6 | 1017.4 / 1017.4 | ✗ worse than the web | — |  |
+| stress | a new process's first open, from the view the last one kept: its first frame | 602.6 / 602.6 | 35.6 / 35.6 | ✓ better | 13.8 / 13.8 | over: p95 > 8.3 |
+| stress | a new process's first open, from the view the last one kept: complete | 602.6 / 602.6 | 2905.0 / 2905.0 | ✗ worse than the web | — |  |
+| stress | open again (cold: the row read each time): its first frame | 581.9 / 581.9 | 89.7 / 89.7 | ✗ tests/test_canvasload fails | 12.8 / 12.8 | over: p95 > 8.3 |
+| stress | open again: complete | 581.9 / 581.9 | 2990.7 / 2990.7 | ✗ worse than the web | — |  |
+| stress | open again: the frames while it comes in (gaps) | 33.4 / 233.4 | 23.3 / 109.9 | ✓ better | 3.9 / 8.9 | ≤ 8.3 and ≤ 16.7 |
+| stress | a press during an open | 14.9 / 14.9 | 21.5 / 21.5 | ✗ worse than the web | 8.1 / 8.1 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30% (frames) | 16.7 / 16.8 (0) | 83.8 / 96.2 (119) | ✗ worse than the web | 3.4 / 4.6 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 93.2 / 104.7 (119) | ✗ worse than the web | — |  |
+| stress | zoom from 30% (frames) | 16.7 / 33.3 (3) | 34.5 / 83.5 (26) | ✗ worse than the web | 5.7 / 7.1 | ≤ 8.3 and ≤ 16.7 |
+| stress | zoom from 30%, not warmed (frames) | 16.7 / 33.3 (3) | 24.2 / 96.5 (21) | ✗ worse than the web | — |  |
+| stress | pan 100% (frames) | 16.8 / 16.8 (0) | 80.5 / 95.5 (119) | ✗ worse than the web | 3.4 / 4.0 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 100%, not warmed (frames) | 16.8 / 16.8 (0) | 95.1 / 105.0 (118) | ✗ worse than the web | — |  |
+| stress | drag one (frames) | 16.7 / 16.8 (0) | 84.1 / 97.2 (91) | ✗ worse than the web | 3.8 / 11.7 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag one, not warmed (frames) | 16.7 / 16.8 (0) | 95.7 / 101.8 (91) | ✗ worse than the web | — |  |
+| stress | drag 40 (frames) | 16.7 / 33.3 (1) | 94.5 / 97.4 (60) | ✗ worse than the web | 5.0 / 16.7 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag 40, not warmed (frames) | 16.7 / 33.3 (1) | 94.7 / 108.0 (60) | ✗ worse than the web | — |  |
+| stress | undo (latency) | 19.4 / 19.7 | 94.8 / 99.1 | ✗ worse than the web | 6.0 / 6.2 | ≤ 8.3 and ≤ 16.7 |
+| stress | undo, not warmed (latency) | 19.4 / 19.7 | 37.0 / 77.2 | ✗ worse than the web | — |  |
+| stress | redo (latency) | 18.3 / 19.8 | 36.0 / 77.0 | ✗ worse than the web | 9.0 / 12.6 | over: p95 > 8.3 |
+| stress | redo, not warmed (latency) | 18.3 / 19.8 | 35.9 / 79.4 | ✗ worse than the web | — |  |
+| stress | pen (frames) | 16.8 / 100.0 (3) | 80.9 / 99.0 (232) | ✗ worse than the web | 1.9 / 3.8 | ≤ 8.3 and ≤ 16.7 |
+| stress | pen, not warmed (frames) | 16.8 / 100.0 (3) | 78.1 / 106.6 (231) | ✗ worse than the web | — |  |
+| stress | typing (frames) | 16.8 / 16.8 (0) | 77.2 / 98.9 (55) | ✗ worse than the web | 4.0 / 7.4 | ≤ 8.3 and ≤ 16.7 |
+| stress | typing, not warmed (frames) | 16.8 / 16.8 (0) | 77.0 / 98.6 (56) | ✗ worse than the web | — |  |
 
 **Beside, not judged:**
 
 | note | what | web | native |
 |---|---|---|---|
-| 600 | benchmark-f034's open (a page load in a new context) | 370.0 | |
-| 600 | pen: input to frame p95 / max | 21.4 / 37.8 | — |
-| 600 | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 24.0 / 776.0 | — |
+| 600 | benchmark-f034's open (a page load in a new context) | 374.0 | |
+| 600 | pen: input to frame p95 / max | 18.9 / 43.0 | 63.2 / 76.9 |
+| 600 | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 16.0 / 24.0 | 55.2 / 70.7 |
 | 600 | cold opens that showed the kept view | | 30 of 30 |
-| 600 | work: the first open ever, first frame · frames during p95 / max · complete | | 37.9 · 5.3 / 5.3 · 69.6 |
-| 600 | work: a new process's first open from the kept view | | 9.3 · 6.9 / 8.6 · 140.8 |
-| 600 | work: open again, kept parsed | | 2.5 / 2.5 |
-| stress | benchmark-f034's open (a page load in a new context) | 599.0 | |
-| stress | pen: input to frame p95 / max | 23.0 / 59.4 | — |
-| stress | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 616.0 / 664.0 | — |
+| 600 | work: the first open ever, first frame · frames during p95 / max · complete | | 37.9 · 5.1 / 5.1 · 62.9 |
+| 600 | work: a new process's first open from the kept view | | 7.9 · 7.2 / 10.9 · 128.0 |
+| 600 | work: open again, kept parsed | | 4.7 / 4.7 |
+| stress | benchmark-f034's open (a page load in a new context) | 604.0 | |
+| stress | pen: input to frame p95 / max | 21.3 / 56.6 | 85.6 / 105.5 |
+| stress | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 616.0 / 664.0 | 76.2 / 97.1 |
 | stress | cold opens that showed the kept view | | 30 of 30 |
-| stress | work: the first open ever, first frame · frames during p95 / max · complete | | 96.8 · 4.3 / 4.3 · 152.0 |
-| stress | work: a new process's first open from the kept view | | 9.8 · 4.5 / 15.1 · 414.1 |
-| stress | work: open again, kept parsed | | 5.1 / 5.1 |
+| stress | work: the first open ever, first frame · frames during p95 / max · complete | | 108.2 · 3.6 / 4.5 · 165.4 |
+| stress | work: a new process's first open from the kept view | | 13.8 · 5.1 / 14.9 · 345.8 |
+| stress | work: open again, kept parsed | | 5.2 / 5.2 |
 
 | | web | native | verdict |
 |---|---|---|---|
-| cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its own server sending the page (D-7992); its window on screen at 390.6 ms | 459.5 ms | 152.6 ms | better (work only: the screen is locked; not judged) |
-| cold start: a fresh Chromium process on the built app | 662.2 ms | 152.6 ms | better (work only: the screen is locked; not judged) |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | — ms | 152.6 ms | |
-| RSS after opening all three kinds | 853.5 MB | 175.1 MB | ✓ better |
-| note switch p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 66.3 / 72.3 ms | not measured | not measured (work only: the screen is locked; not judged) |
-| note switch p95 / max, the second start (the first one's glyphs readied, D-8002) | 66.3 / 72.3 ms | not measured | not measured (work only: the screen is locked; not judged) |
-| note switch: native work p95 / max (first start · second), beside | | 8.5 / 9.1 · 8.7 / 8.7 ms | over: p95 > 8.3 |
-| omnibar open p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 34.8 / 38.3 ms | not measured | not measured (work only: the screen is locked; not judged) |
-| omnibar open p95 / max, the second start (the first one's glyphs readied, D-8002) | 34.8 / 38.3 ms | not measured | not measured (work only: the screen is locked; not judged) |
-| omnibar open: native work p95 / max (first start · second), beside | | 7.9 / 8.7 · 6.3 / 6.3 ms | ≤ 8.3 and ≤ 16.7 |
+| cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its own server sending the page (D-7992); its window on screen at 407.6 ms | 483.1 ms | 176.7 ms | ✓ better |
+| cold start: a fresh Chromium process on the built app | 698.5 ms | 176.7 ms | ✓ better |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | — ms | 176.7 ms | |
+| RSS after opening all three kinds | 853.7 MB | 178.1 MB | ✓ better |
+| note switch p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 65.1 / 66.2 ms | 32.8 / 33.6 ms | ✓ better |
+| note switch p95 / max, the second start (the first one's glyphs readied, D-8002) | 65.1 / 66.2 ms | 34.0 / 34.0 ms | ✓ better |
+| note switch: native work p95 / max (first start · second), beside | | 11.0 / 11.9 · 10.9 / 10.9 ms | over: p95 > 8.3 |
+| omnibar open p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 36.4 / 42.7 ms | 32.4 / 34.8 ms | ✓ better |
+| omnibar open p95 / max, the second start (the first one's glyphs readied, D-8002) | 36.4 / 42.7 ms | 29.6 / 29.6 ms | ✓ better |
+| omnibar open: native work p95 / max (first start · second), beside | | 7.3 / 8.2 · 7.8 / 7.8 ms | ≤ 8.3 and ≤ 16.7 |
 
 Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. Each side's 'quiet' rule: no run starts while scripts/gpu-free says another job has the machine (Linux), or while the Mac's load is 3 or more; a run that did is void and run again.
 
 The Mac while measured (load, busiest processes at each measured run's start; void ones named):
-- web race: load 1.18 10:08  up 4 days, 22 hrs, 1 user, load averages: 1.18 1.19 1.35 14.4 sshd-session:; 8.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents
-- web memory: load 1.19 10:11  up 4 days, 22:02, 1 user, load averages: 1.19 1.18 1.32 12.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
-- web switch: load 1.53 10:11  up 4 days, 22:03, 1 user, load averages: 1.53 1.26 1.35 15.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
-- web cold desktop: load 1.18 10:12  up 4 days, 22:04, 1 user, load averages: 1.18 1.20 1.32 15.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
-- web cold chromium: load 1.29 10:12  up 4 days, 22:04, 1 user, load averages: 1.29 1.23 1.32 9.4 sshd-session:; 3.4 /usr/libexec/opendirectoryd; 1.8 /Applications/Tailscale.app/Contents/Plug
-- web open 600: load 2.02 10:13  up 4 days, 22:05, 1 user, load averages: 2.02 1.39 1.38 41.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- web open stress: load 1.68 10:14  up 4 days, 22:06, 1 user, load averages: 1.68 1.38 1.37 83.1 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- build: 10:16  up 4 days, 22:08, 1 user, load averages: 1.95 1.54 1.43 | top: 1.7 /System/Library/PrivateFrameworks/TCC.framework/Support/tccd; 1.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 0.9 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/contextstored; 
-- first-600-A: load 1.8 10:16  up 4 days, 22:08, 1 user, load averages: 1.80 1.52 1.42 14.8 sshd-session:; 12.0 /usr/libexec/nsurlsessiond; 7.3 /usr/libexec/trustd;
-- first-600-A: 10:16  up 4 days, 22:08, 1 user, load averages: 1.80 1.52 1.42 | top: 57.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 25.1 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 15.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- first-600-B: load 2.88 10:17  up 4 days, 22:09, 1 user, load averages: 2.88 1.79 1.52 16.1 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- first-600-B: 10:17  up 4 days, 22:09, 1 user, load averages: 2.65 1.76 1.51 | top: 59.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 26.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 18.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- race-600: load 2.54 10:17  up 4 days, 22:09, 1 user, load averages: 2.54 1.76 1.52 16.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- race-600: 10:17  up 4 days, 22:09, 1 user, load averages: 2.98 1.87 1.55 | top: 57.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 23.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 19.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- first-stress-A: load 2.32 10:17  up 4 days, 22:09, 1 user, load averages: 2.32 1.82 1.55 24.8 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- first-stress-A: 10:18  up 4 days, 22:09, 1 user, load averages: 2.32 1.82 1.55 | top: 45.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 29.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 27.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- first-stress-B: load 2.41 10:18  up 4 days, 22:10, 1 user, load averages: 2.41 1.88 1.57 25.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- first-stress-B: 10:18  up 4 days, 22:10, 1 user, load averages: 2.41 1.88 1.57 | top: 63.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 59.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 30.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- race-stress: load 2.56 10:18  up 4 days, 22:10, 1 user, load averages: 2.56 1.93 1.60 27.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- race-stress: 10:18  up 4 days, 22:10, 1 user, load averages: 2.44 1.91 1.59 | top: 56.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 39.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 20.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- paced-600-A: load 2.82 10:19  up 4 days, 22:11, 1 user, load averages: 2.82 2.25 1.75 3.1 /usr/libexec/opendirectoryd; 1.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.ap
-- paced-600-A: 10:19  up 4 days, 22:11, 1 user, load averages: 2.92 2.29 1.77 | top: 0.2 /usr/libexec/locationd; 0.1 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd; 0.1 /usr/libexec/airportd; 
-- start-0: load 2.79 10:20  up 4 days, 22:12, 1 user, load averages: 2.79 2.37 1.82 15.2 sshd-session:; 1.2 /sbin/launchd; 1.1 /Applications/Tailscale.app/Contents/PlugIns/IPNExtens
-- start-0: 10:20  up 4 days, 22:12, 1 user, load averages: 2.88 2.40 1.84 | top: 0.1 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN; 0.1 /usr/libexec/configd; 0.0 bash; 
-- start-1: load 2.52 10:20  up 4 days, 22:12, 1 user, load averages: 2.52 2.34 1.83 11.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- start-1: 10:20  up 4 days, 22:12, 1 user, load averages: 2.48 2.34 1.83 | top: 56.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 55.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 27.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- start-2: load 2.32 10:21  up 4 days, 22:13, 1 user, load averages: 2.32 2.31 1.82 15.3 sshd-session:; 11.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents
-- start-2: 10:21  up 4 days, 22:13, 1 user, load averages: 2.30 2.30 1.82 | top: 51.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 21.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 13.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- start-3: load 2.1 10:21  up 4 days, 22:13, 1 user, load averages: 2.10 2.26 1.81 12.8 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- start-3: 10:21  up 4 days, 22:13, 1 user, load averages: 2.09 2.25 1.82 | top: 64.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 18.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 16.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- start-4: load 2.0 10:21  up 4 days, 22:13, 1 user, load averages: 2.00 2.23 1.81 14.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- start-4: 10:21  up 4 days, 22:13, 1 user, load averages: 1.92 2.21 1.81 | top: 19.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 16.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 13.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- start-5: load 2.27 10:21  up 4 days, 22:13, 1 user, load averages: 2.27 2.28 1.84 20.8 /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird; 17.8 ss
-- start-5: 10:21  up 4 days, 22:13, 1 user, load averages: 2.27 2.28 1.84 | top: 57.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 24.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 18.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- web race: load 2.32 10:39  up 4 days, 22:31, 1 user, load averages: 2.32 2.02 1.83 13.3 sshd-session:; 7.0 /usr/libexec/opendirectoryd; 6.6 /usr/libexec/modelmanagerd;
+- web memory: load 2.48 10:41  up 4 days, 22:33, 1 user, load averages: 2.48 2.05 1.86 10.8 sshd-session:; 9.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/F
+- web switch: load 2.25 10:41  up 4 days, 22:33, 1 user, load averages: 2.25 2.02 1.85 12.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
+- web cold desktop: load 1.54 10:43  up 4 days, 22:35, 1 user, load averages: 1.54 1.83 1.79 21.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
+- web cold chromium: load 1.73 10:43  up 4 days, 22:35, 1 user, load averages: 1.73 1.86 1.80 10.9 sshd-session:; 6.6 /sbin/launchd; 1.4 /usr/libexec/locationd;
+- web open 600: load 1.6 10:43  up 4 days, 22:35, 1 user, load averages: 1.60 1.82 1.78 45.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- web open stress: load 1.39 10:45  up 4 days, 22:37, 1 user, load averages: 1.39 1.71 1.74 61.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- build: 10:47  up 4 days, 22:39, 1 user, load averages: 2.96 2.11 1.89 | top: 1.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 0.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 0.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- first-600-A: load 2.97 10:47  up 4 days, 22:39, 1 user, load averages: 2.97 2.12 1.89 86.1 /usr/libexec/duetexpertd; 14.1 sshd-session:; 9.2 /System/Library/PrivateFrameworks/FileProv
+- first-600-A: 10:47  up 4 days, 22:39, 1 user, load averages: 2.97 2.14 1.90 | top: 34.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 33.8 /usr/libexec/duetexpertd; 27.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 
+- first-600-B: load 2.75 10:47  up 4 days, 22:39, 1 user, load averages: 2.75 2.18 1.92 16.9 sshd-session:; 3.2 /usr/libexec/opendirectoryd; 1.2 /Applications/Tailscale.app/Contents/Plu
+- first-600-B: 10:47  up 4 days, 22:39, 1 user, load averages: 2.69 2.18 1.92 | top: 47.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 27.1 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 20.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- race-600: load 2.35 10:48  up 4 days, 22:40, 1 user, load averages: 2.35 2.12 1.91 11.2 sshd-session:; 9.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/
+- race-600: 10:48  up 4 days, 22:40, 1 user, load averages: 2.35 2.12 1.91 | top: 40.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 40.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 28.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- first-stress-A: load 2.88 10:48  up 4 days, 22:40, 1 user, load averages: 2.88 2.29 1.98 13.7 sshd-session:; 10.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents
+- first-stress-A: 10:48  up 4 days, 22:40, 1 user, load averages: 2.88 2.29 1.98 | top: 31.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 23.6 /sbin/launchd; 18.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- first-stress-B: load 2.87 10:49  up 4 days, 22:41, 1 user, load averages: 2.87 2.38 2.02 15.4 sshd-session:; 1.4 /usr/libexec/locationd; 1.3 /sbin/launchd;
+- first-stress-B: 10:49  up 4 days, 22:41, 1 user, load averages: 2.87 2.38 2.02 | top: 43.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 28.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 20.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 
+- race-stress: load 2.76 10:49  up 4 days, 22:41, 1 user, load averages: 2.76 2.41 2.05 12.4 sshd-session:; 1.3 /sbin/launchd; 1.2 /System/Library/DriverExtensions/com.apple.DriverKit-A
+- race-stress: 10:49  up 4 days, 22:41, 1 user, load averages: 2.76 2.41 2.05 | top: 42.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 34.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 20.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 
+- paced-600-A: load 2.88 10:50  up 4 days, 22:42, 1 user, load averages: 2.88 2.62 2.16 1.4 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-Ap
+- paced-600-A: 10:50  up 4 days, 22:42, 1 user, load averages: 2.73 2.59 2.15 | top: 27.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 24.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 18.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- paced-600-B: load 2.78 10:51  up 4 days, 22:43, 1 user, load averages: 2.78 2.62 2.17 16.6 sshd-session:; 11.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents
+- paced-600-B: 10:51  up 4 days, 22:43, 1 user, load averages: 2.78 2.62 2.17 | top: 37.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 37.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 25.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- paced-600-warm: load 2.83 10:52  up 4 days, 22:44, 1 user, load averages: 2.83 2.77 2.27 15.4 sshd-session:; 1.2 /sbin/launchd; 1.1 /System/Library/DriverExtensions/com.apple.DriverKit-A
+- paced-600-warm: 10:52  up 4 days, 22:44, 1 user, load averages: 2.83 2.77 2.27 | top: 40.0 /System/Library/PrivateFrameworks/SafariSafeBrowsing.framework/com.apple.Safari.SafeBrowsing.Service; 21.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 16.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- paced-600-notwarm: load 2.22 10:54  up 4 days, 22:46, 1 user, load averages: 2.22 2.69 2.30 13.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- paced-600-notwarm: 10:54  up 4 days, 22:46, 1 user, load averages: 2.22 2.69 2.30 | top: 62.0 (mdworker_shared); 57.8 (mdworker_shared); 27.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- paced-stress-A: load 2.53 10:55  up 4 days, 22:47, 1 user, load averages: 2.53 2.76 2.37 12.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- paced-stress-A: 10:55  up 4 days, 22:47, 1 user, load averages: 2.73 2.79 2.38 | top: 37.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 15.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 7.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- paced-stress-B: load 2.44 10:56  up 4 days, 22:48, 1 user, load averages: 2.44 2.72 2.37 15.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- paced-stress-B: 10:56  up 4 days, 22:48, 1 user, load averages: 2.44 2.72 2.37 | top: 62.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 29.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 13.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- paced-stress-warm: load 2.74 10:56  up 4 days, 22:48, 1 user, load averages: 2.74 2.78 2.40 9.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- paced-stress-warm: 10:56  up 4 days, 22:48, 1 user, load averages: 2.68 2.77 2.39 | top: 59.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 19.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 18.9 /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird; 
+- paced-stress-notwarm: load 2.16 11:00  up 4 days, 22:52, 1 user, load averages: 2.16 2.57 2.40 14.8 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- paced-stress-notwarm: 11:00  up 4 days, 22:52, 1 user, load averages: 2.07 2.54 2.39 | top: 42.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 36.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 34.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- start-0: load 2.28 11:04  up 4 days, 22:56, 1 user, load averages: 2.28 2.54 2.43 16.0 sshd-session:; 7.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/
+- start-0: 11:04  up 4 days, 22:56, 1 user, load averages: 2.28 2.54 2.43 | top: 30.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 24.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores; 23.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- start-paced-0: load 2.4 11:04  up 4 days, 22:56, 1 user, load averages: 2.40 2.56 2.44 14.3 /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird; 10.7 ss
+- start-paced-0: 11:04  up 4 days, 22:56, 1 user, load averages: 2.40 2.56 2.44 | top: 60.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 24.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 12.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 
+- start-1: load 2.78 11:04  up 4 days, 22:56, 1 user, load averages: 2.78 2.66 2.48 17.8 sshd-session:; 2.6 /usr/libexec/opendirectoryd; 1.4 /Applications/Tailscale.app/Contents/Plu
+- start-1: 11:05  up 4 days, 22:57, 1 user, load averages: 2.86 2.69 2.49 | top: 1.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 0.5 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd; 0.3 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN; 
+- start-paced-1: load 2.73 11:05  up 4 days, 22:57, 1 user, load averages: 2.73 2.67 2.49 15.9 /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird; 14.0 ss
+- start-paced-1: 11:05  up 4 days, 22:57, 1 user, load averages: 2.59 2.64 2.48 | top: 53.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 43.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 25.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores; 
+- start-2: load 2.43 11:05  up 4 days, 22:57, 1 user, load averages: 2.43 2.60 2.47 17.7 /System/Library/PrivateFrameworks/FileProvider.framework/Support/fileproviderd; 9.2 sshd-ses
+- start-2: 11:05  up 4 days, 22:57, 1 user, load averages: 2.43 2.60 2.47 | top: 66.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 18.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 16.7 /System/Library/PrivateFrameworks/FileProvider.framework/Support/fileproviderd; 
+- start-paced-2: load 2.46 11:05  up 4 days, 22:57, 1 user, load averages: 2.46 2.61 2.47 14.5 /usr/libexec/corebrightnessd; 13.0 /System/Library/PrivateFrameworks/SkyLight.framework/Reso
+- start-paced-2: 11:05  up 4 days, 22:57, 1 user, load averages: 2.74 2.66 2.49 | top: 20.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 17.1 /usr/libexec/corebrightnessd; 14.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores; 
+- start-3: load 2.76 11:06  up 4 days, 22:58, 1 user, load averages: 2.76 2.67 2.49 42.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer; 19.9 /usr/libex
+- start-3: 11:06  up 4 days, 22:58, 1 user, load averages: 2.54 2.62 2.48 | top: 38.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer; 16.2 /usr/libexec/corebrightnessd; 6.7 /System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter; 
+- start-paced-3: load 2.95 11:06  up 4 days, 22:58, 1 user, load averages: 2.95 2.76 2.54 15.3 sshd-session:; 1.3 /sbin/launchd; 1.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtens
+- start-paced-3: 11:06  up 4 days, 22:58, 1 user, load averages: 2.95 2.76 2.54 | top: 60.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 57.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 31.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- start-4: load 2.5 11:07  up 4 days, 22:59, 1 user, load averages: 2.50 2.68 2.51 11.1 sshd-session:; 1.2 /sbin/launchd; 0.8 /System/Library/DriverExtensions/com.apple.DriverKit-A
+- start-4: 11:07  up 4 days, 22:59, 1 user, load averages: 2.50 2.68 2.51 | top: 75.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 16.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 6.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-paced-4: load 2.21 11:07  up 4 days, 22:59, 1 user, load averages: 2.21 2.61 2.49 15.2 sshd-session:; 7.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/
+- start-paced-4: 11:07  up 4 days, 22:59, 1 user, load averages: 2.52 2.67 2.51 | top: 74.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 17.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 7.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-5: load 2.52 11:07  up 4 days, 22:59, 1 user, load averages: 2.52 2.66 2.51 11.9 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd; 8.3 /System/Libra
+- start-5: 11:07  up 4 days, 22:59, 1 user, load averages: 2.52 2.66 2.51 | top: 11.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 9.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 8.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- start-paced-5: load 2.71 11:07  up 4 days, 22:59, 1 user, load averages: 2.71 2.69 2.52 16.1 sshd-session:; 8.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/
+- start-paced-5: 11:07  up 4 days, 22:59, 1 user, load averages: 2.71 2.69 2.52 | top: 31.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 17.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores; 13.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
