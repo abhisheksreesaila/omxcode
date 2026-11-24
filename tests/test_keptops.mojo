@@ -126,7 +126,9 @@ def main() raises:
     check("after an edit", look, layer, v, False, g)
     _ = scene_of(look, layer, v)  # (it holds: kept again)
     check("the edited board again", look, layer, v, True, g)
-    # a pan past the cull rect's tile, a zoom: walked
+    # a pan past the cull rect's tile, a zoom that shows more: not replayed whole (D-8010: patched, what came in painted)
+    # (D-8010) a zoom that stays inside the cull rect: the ops are in page px, so the kept ones are replayed
+    check("zoomed inside the cull rect", look, layer, DeskView(-300, -200, 1.02), True, g)
     check("panned 700 px", look, layer, DeskView(-1000, -200, 1.0), False, g)
     check("zoomed", look, layer, DeskView(-300, -200, 0.8), False, g)
     # a lift (a drag's objects drawn above the board): the board without them is walked

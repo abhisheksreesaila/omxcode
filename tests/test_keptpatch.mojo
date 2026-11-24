@@ -139,6 +139,39 @@ def main() raises:
     assert_true(look.patches >= 30, "most edits patched")
     print("   (D-7978) looks answered from the change log: " + String(look.fills))
     assert_true(look.fills >= 30, "edits' damage from the change log, not a compare over every object")
+    # (D-8010) the view moves between edits: pans past the tiles the kept ops cover and back, zooms in and out, each with
+    # an edit or two (a move, a new sticky, an undo) meanwhile; the paint equals a full walk's ops each time, frames
+    # pixel-identical every few, and it is a patch: objects that stay in view replay, only the new ones are painted
+    var pv = v
+    var p1 = look.patches
+    var moved = 0
+    for step in range(36):
+        var r = rnd(seed) % 5
+        if r == 0:
+            pv = pv.zoomed_at(pv.scale * (0.7 + 0.1 * Float64(rnd(seed) % 8)), 300 + Float64(rnd(seed) % 800), 200 + Float64(rnd(seed) % 500))
+            pv.scale = max(0.2, min(2.5, pv.scale))
+        elif r <= 2:
+            pv.x += Float64(rnd(seed) % 1400 - 700)
+            pv.y += Float64(rnd(seed) % 900 - 450)
+        if rnd(seed) % 3 == 0:
+            var vis = BoardTools().visible_objects(layer, pv, 1440, 900)
+            if len(vis) > 0:
+                layer.select(layer.objs[vis[rnd(seed) % len(vis)]].id, False)
+                layer.begin_gesture(CH_MOVE)
+                layer.move_by(Float64(rnd(seed) % 60 - 30), Float64(rnd(seed) % 40 - 20))
+                layer.end_gesture()
+        elif rnd(seed) % 6 == 0:
+            _ = layer.add_sticky(pv.to_page(300, 200)[0], pv.to_page(300, 200)[1], 120, "view " + String(step))
+        elif rnd(seed) % 7 == 0:
+            _ = layer.undo()
+        var a = scene_of(look, layer, pv)
+        var b = scene_of(walk, layer, pv)
+        same_ops(a, b, "view step " + String(step))
+        moved += 1
+        if step % 6 == 5:
+            assert_equal(differ(pixels(g1, a), pixels(g2, b)), 0, "view step " + String(step) + ": pixel-identical")
+    assert_true(look.patches - p1 >= 20, "views moved: most paints patched, not walked: " + String(look.patches - p1) + " of " + String(moved))
+    print("   (D-8010) " + String(moved) + " view moves with edits: " + String(look.patches - p1) + " patched, ops identical each time")
     # (D-8005) a drag: the press that lifts some objects (and the connectors that end at them), moves, the drop, a second
     # drag straight after, and an edit elsewhere during one: the patched paint equals a full walk with the same lift each
     # frame, its tiled frames pixel-identical; lifting and dropping are patches too, not full walks

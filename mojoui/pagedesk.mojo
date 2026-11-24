@@ -283,6 +283,7 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
+    var kept_gen: Int  # (D-8010) the look the kept ops were painted with
     var seg_at: Dict[Int, Int]  # (D-7974) the kept ops per object: id → its range [seg_a, seg_b)
     var seg_a: List[Int]
     var seg_b: List[Int]
@@ -333,6 +334,7 @@ struct BoardLook(Movable):
         self.fills = 0
         self.kept = KeptOps()
         self.kept_token = ""
+        self.kept_gen = -1
         self.seg_at = Dict[Int, Int]()
         self.seg_a = List[Int]()
         self.seg_b = List[Int]()
@@ -433,8 +435,13 @@ struct BoardLook(Movable):
                 self.dirty_known = False
             for id in self.snap.changed:
                 self.dirty_ids[id] = True
-        if inside_changed:
-            self.ops_clean = False  # (D-7969) something inside the cull rect may have changed since the ops were kept
+        # (D-7963) what the board's ops depend on besides the objects: the look (generation) and the cull rect. (D-7969: not
+        # the board's version: the ops stay good while every change since they were kept was objects adopted outside the
+        # cull rect. D-8005: not the lift: a patch leaves lifted objects out and paints dropped ones. D-8010: not the zoom
+        # or the host's scale: the ops are in page px, the layer's transform is what zooms them)
+        var token = String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1)
+        if self.board_version != ver0 and (inside_changed or token != self.kept_token):
+            self.ops_clean = False  # (D-7969) something inside the kept ops' cull rect may have changed since they were kept
         p.begin_layer("board")
         p.layer_version(self.board_version)
         p.layer_transform(v.x * k, v.y * k, v.scale * k)
@@ -447,12 +454,8 @@ struct BoardLook(Movable):
             p.layer_damage(self.since, self.dmg[4 * d], self.dmg[4 * d + 1], self.dmg[4 * d + 2], self.dmg[4 * d + 3])
         var any_lift = len(self.lift_ids) > 0
         var up = List[Int]()
-        # (D-7963) the same board, cull rect, lift, look and zoom as the last paint: its ops again, nothing walked
-        # (D-7969) the token leaves the board's version out: the ops stay good while every change since they were kept
-        # was objects adopted outside the cull rect (a progressive open filling in round the view: ops_clean)
-        # (D-8005: the lift isn't in it: objects lifted are left out of a patch, dropped ones painted again in it; ops kept
+        # (D-7963) the same board, cull rect, lift and look as the kept ops: those ops again, nothing walked (D-8005: ops kept
         # under one lift are replayed whole only under the same one)
-        var token = String(self.generation) + "|" + String(tx0) + "," + String(ty0) + "," + String(tx1) + "," + String(ty1) + "|" + String(k) + "|" + String(v.scale)
         if self.hold_skip and self.keep_hold and self.keep_path != "" and self.keep_tag != "":
             # (D-7969) holding: the renderer shows the kept view and rasters nothing from these ops; none are walked
             self.held_paints += 1
@@ -460,9 +463,9 @@ struct BoardLook(Movable):
             self.replays += 1
             p.layer_ops_version(self.kept_ver)  # (D-7969: the same ops as at kept_ver: a renderer keeps its bins)
         else:
-            # (D-7974) the same view as the kept ops and every change since known by id: a patch: changed (and new)
-            # objects painted again, every other object's kept ops replayed, the order the layer's own (z)
-            var patch = self.keep_ops and self.patch_on and token == self.kept_token and self.kept.ok and self.dirty_known and p.ops_mark() >= 0
+            # (D-7974) the same look as the kept ops and every change since known by id: a patch: changed objects, and ones
+            # that came into the view (D-8010), painted; every other object's kept ops replayed; the order the layer's (z)
+            var patch = self.keep_ops and self.patch_on and self.kept_gen == self.generation and self.kept.ok and self.dirty_known and p.ops_mark() >= 0
             var mark = p.ops_mark()
             var segs = List[Int]()  # per object painted: id, first op, end op (from mark)
             var run_a = -1  # kept ops waiting to be replayed: [run_a, run_b) (a patch only goes to a painter that can: it kept them)
@@ -499,6 +502,7 @@ struct BoardLook(Movable):
             if self.keep_ops and mark >= 0 and (keep_now or patch):  # (kept once it held two paints, or patched from kept)
                 self.kept = p.ops_capture(mark)
                 self.kept_token = token
+                self.kept_gen = self.generation
                 self.kept_ver = self.board_version
                 self.kept_lift = self.lift_key.copy()
                 self.ops_clean = True
