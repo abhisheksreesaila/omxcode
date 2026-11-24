@@ -2508,9 +2508,9 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
         return objects_json_canvas(layer, columns, rows, page_w, page_h)
     ref src = layer.src
     var count = len(src.ns)
-    var nodes = List[String]()
+    var nodes = List[DocPiece]()  # (the document's own text by where it is in it: a 12 MB board's save copies it once)
     var node_at = List[Int]()  # each item's place in the document (-1: made here)
-    var edges = List[String]()
+    var edges = List[DocPiece]()
     var edge_at = List[Int]()
     var used = List[Bool](length=count + len(src.es), fill=False)
     var same = True  # nothing differs
@@ -2522,33 +2522,39 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
         if o.kind == CONNECTOR:
             var e = o.src_at - count if mine else -1
             if e >= 0 and e < len(src.es) and not used[count + e]:
-                var raw = src.edge(e)
-                var out = raw
+                var piece = DocPiece("", src.es[e], src.ee[e])
                 if o.id in layer.touched:
-                    out = _edge_patched(layer, o, raw)
-                if out != raw or e < last_edge:
+                    var raw = src.edge(e)
+                    var out = _edge_patched(layer, o, raw)
+                    if out != raw:
+                        same = False
+                        piece = DocPiece(out, 0, -1)
+                if e < last_edge:
                     same = False
                 last_edge = max(last_edge, e)
                 used[count + e] = True
-                edges.append(out)
+                edges.append(piece^)
                 edge_at.append(e)
             else:
                 var made = _made_edge(layer, o, node_key(o))
                 if made != "":
                     same = False
-                    edges.append(made)
+                    edges.append(DocPiece(made, 0, -1))
                     edge_at.append(-1)
             continue
         if mine and o.src_at < count and not used[o.src_at] and o.id == o.src_at + 1:
-            var raw = src.node(o.src_at)
-            var out = raw
+            var piece = DocPiece("", src.ns[o.src_at], src.ne[o.src_at])
             if o.id in layer.touched:
-                out = _node_patched(o, raw)
-            if out != raw or o.src_at < last:
+                var raw = src.node(o.src_at)
+                var out = _node_patched(o, raw)
+                if out != raw:
+                    same = False
+                    piece = DocPiece(out, 0, -1)
+            if o.src_at < last:
                 same = False
             last = max(last, o.src_at)
             used[o.src_at] = True
-            nodes.append(out)
+            nodes.append(piece^)
             node_at.append(o.src_at)
             continue
         same = False
@@ -2558,12 +2564,12 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
                 out = patched(out, [Patch("id", json_string(node_key(o)))])
             except:
                 pass
-            nodes.append(out)
+            nodes.append(DocPiece(out, 0, -1))
             node_at.append(-1)
             continue
         var made = _made_node(o, node_key(o))
         if made != "":
-            nodes.append(made)
+            nodes.append(DocPiece(made, 0, -1))
             node_at.append(-1)
     # what made no object stays (its node isn't an object, an edge whose end isn't a node): deleted objects don't, nor
     # edges that end at one
@@ -2581,7 +2587,7 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
             except:
                 pass
             continue
-        _insert_at(nodes, node_at, raw, i)
+        _insert_at(nodes, node_at, DocPiece("", src.ns[i], src.ne[i]), i)
     for e in range(len(src.es)):
         if used[count + e]:
             continue
@@ -2597,26 +2603,71 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
                     continue
             except:
                 pass
-        _insert_at(edges, edge_at, raw, e)
+        _insert_at(edges, edge_at, DocPiece("", src.es[e], src.ee[e]), e)
     if same:
         return src.text
-    var all_nodes = "[" + ",".join(nodes) + "]"
-    var all_edges = "[" + ",".join(edges) + "]"
     var t = src.text.byte_length()
+    var out = String("")
+    out.reserve(t + 4096 + _pieces_size(nodes, src.text) + _pieces_size(edges, src.text) - (src.nodes_end - src.nodes_at))
+    var edges_kept = len(edges) == 0 and len(src.es) == 0
     if src.edges_at < 0:
-        if len(edges) == 0:
-            return String(src.text[byte=0:src.nodes_at]) + all_nodes + String(src.text[byte=src.nodes_end:t])
-        return String(src.text[byte=0:src.nodes_at]) + all_nodes + ',"edges":' + all_edges + String(src.text[byte=src.nodes_end:t])
-    if len(edges) == 0 and len(src.es) == 0:
-        all_edges = String(src.text[byte=src.edges_at:src.edges_end])
-    if src.nodes_at < src.edges_at:
-        return (String(src.text[byte=0:src.nodes_at]) + all_nodes + String(src.text[byte=src.nodes_end:src.edges_at]) + all_edges
-                + String(src.text[byte=src.edges_end:t]))
-    return (String(src.text[byte=0:src.edges_at]) + all_edges + String(src.text[byte=src.edges_end:src.nodes_at]) + all_nodes
-            + String(src.text[byte=src.nodes_end:t]))
+        out += src.text[byte=0:src.nodes_at]
+        _join_pieces(out, nodes, src.text)
+        if len(edges) > 0:
+            out += ',"edges":'
+            _join_pieces(out, edges, src.text)
+        out += src.text[byte=src.nodes_end:t]
+    elif src.nodes_at < src.edges_at:
+        out += src.text[byte=0:src.nodes_at]
+        _join_pieces(out, nodes, src.text)
+        out += src.text[byte=src.nodes_end:src.edges_at]
+        if edges_kept:
+            out += src.text[byte=src.edges_at:src.edges_end]
+        else:
+            _join_pieces(out, edges, src.text)
+        out += src.text[byte=src.edges_end:t]
+    else:
+        out += src.text[byte=0:src.edges_at]
+        if edges_kept:
+            out += src.text[byte=src.edges_at:src.edges_end]
+        else:
+            _join_pieces(out, edges, src.text)
+        out += src.text[byte=src.edges_end:src.nodes_at]
+        _join_pieces(out, nodes, src.text)
+        out += src.text[byte=src.nodes_end:t]
+    return out^
 
 
-def _insert_at(mut items: List[String], mut at: List[Int], raw: String, i: Int):
+@fieldwise_init
+struct DocPiece(Copyable, Movable):
+    """An item of a saved document: its own text, or where it is in the document it was read from (end ≥ 0)."""
+    var text: String
+    var start: Int
+    var end: Int
+
+
+def _pieces_size(items: List[DocPiece], src: String) -> Int:
+    var n = 2
+    for ref x in items:
+        n += 1 + (x.end - x.start if x.end >= 0 else x.text.byte_length())
+    return n
+
+
+def _join_pieces(mut out: String, items: List[DocPiece], src: String):
+    """The items as a JSON array, appended."""
+    out += "["
+    for k in range(len(items)):
+        ref x = items[k]
+        if k > 0:
+            out += ","
+        if x.end >= 0:
+            out += src[byte=x.start:x.end]
+        else:
+            out += x.text
+    out += "]"
+
+
+def _insert_at(mut items: List[DocPiece], mut at: List[Int], var raw: DocPiece, i: Int):
     """Document item i, which made no object, put back after the one that stood before it (or first)."""
     var best = -1
     var pos = 0
@@ -2624,7 +2675,7 @@ def _insert_at(mut items: List[String], mut at: List[Int], raw: String, i: Int):
         if at[q] >= 0 and at[q] < i and at[q] >= best:
             best = at[q]
             pos = q + 1
-    items.insert(pos, raw)
+    items.insert(pos, raw^)
     at.insert(pos, i)
 
 
@@ -2782,6 +2833,24 @@ def _edge_patched(layer: ObjectLayer, ref o: Obj, raw: String) -> String:
         return raw
 
 
+@fieldwise_init
+struct ReadAt(Copyable, Movable, Comparable):
+    """Where an object is in reading order."""
+    var y: Float64
+    var x: Float64
+    var at: Int
+
+    def __lt__(self, o: Self) -> Bool:
+        if self.y != o.y:
+            return self.y < o.y
+        if self.x != o.x:
+            return self.x < o.x
+        return self.at < o.at
+
+    def __eq__(self, o: Self) -> Bool:
+        return self.y == o.y and self.x == o.x and self.at == o.at
+
+
 def reading_text(layer: ObjectLayer) -> String:
     """What a search index should hold for a board: the words of its text boxes and stickies in reading order (top edge
     first, then left edge; ties keep stacking order), each stripped, blank-line separated (D-7927)."""
@@ -2790,14 +2859,12 @@ def reading_text(layer: ObjectLayer) -> String:
         ref o = layer.objs[i]
         if (o.kind == TEXT or o.kind == STICKY) and String(o.text.strip()) != "":
             idx.append(i)
-    # a stable insertion sort by (y, x): boards hold hundreds of words at most where this runs (a save)
-    for a in range(1, len(idx)):
-        var v = idx[a]
-        var b = a - 1
-        while b >= 0 and (layer.objs[idx[b]].y > layer.objs[v].y or (layer.objs[idx[b]].y == layer.objs[v].y and layer.objs[idx[b]].x > layer.objs[v].x)):
-            idx[b + 1] = idx[b]
-            b -= 1
-        idx[b + 1] = v
+    var order = List[ReadAt](capacity=len(idx))  # (by top, left, then stacking order)
+    for i in idx:
+        order.append(ReadAt(layer.objs[i].y, layer.objs[i].x, i))
+    sort(order)
+    for k in range(len(order)):
+        idx[k] = order[k].at
     var out = String("")
     for a in range(len(idx)):
         if a > 0:
