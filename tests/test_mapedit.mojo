@@ -2,8 +2,9 @@
 # undo and redo, zoom about the pointer, panning, Fit. No display.
 #   pixi run mojo run -I . -I examples/pnote tests/test_mapedit.mojo
 
+from std.math import exp
 from std.testing import assert_equal, assert_true
-from mojoui.buzanmap import BuzanMap, wrap_text
+from mojoui.buzanmap import BuzanMap, wrap_text, disc_shadow
 from mojoui.notesshell import Boxes
 from mojoui.scene import Scene
 from pnlook import skin_named
@@ -63,6 +64,12 @@ def words_as_the_web() raises:
     m.draw(sc, bx, 0, 0, W, H, 1.0, skin_named("paper"), "x")
     var drawn = String("|".join(sc.texts))
     assert_true("Week plan for the move to|" in drawn and "the new apartment" in drawn and "🏦 Call the bank" in drawn, drawn)
+
+
+def shadows() raises:
+    """A disc's blurred shadow against the closed form at its middle, and falling outwards."""
+    assert_true(abs(disc_shadow(8.25, 7, 0) - (1 - exp(-8.25 * 8.25 / 98))) < 0.002, "the middle")
+    assert_true(disc_shadow(8.25, 7, 5) < disc_shadow(8.25, 7, 0) and disc_shadow(8.25, 7, 25) < 0.02, "falls")
 
 
 def writing() raises:
@@ -174,4 +181,5 @@ def main() raises:
     assert_true(m.add_idea(False) == -1 and not m.delete_selected(), "nothing selected: nothing to do")
     words_as_the_web()
     writing()
+    shadows()
     print("mapedit: ok")

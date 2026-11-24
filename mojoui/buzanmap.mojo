@@ -7,7 +7,7 @@
 #   var m = BuzanMap(); m.add(-1, "The book", 0, 0, color); m.add(0, "Characters", 280, -130, color2) …
 #   m.draw(p, bx, x0, y0, w, h, zoom, sk)        # the view centred on the map's origin
 
-from std.math import sqrt, tanh, pow, sin, cos
+from std.math import sqrt, tanh, pow, sin, cos, exp
 from mojoui.scene import Painter, stroke_outline
 from mojoui.graphemes import next_grapheme
 from mojoui.skin import Skin, Shadow, with_alpha, hexc
@@ -551,9 +551,7 @@ struct BuzanMap(Movable):
                 var hx = cx + _axis(g.sx, g.ax, g.bx, g.ex, t, 0) * zoom
                 var hy = cy + _axis(g.sy, g.ay, g.by, g.ey, t, 0) * zoom
                 var r = 6 * zoom
-                var sh = List[Shadow]()
-                sh.append(Shadow(0, 5 * zoom, 14 * zoom, 0, rgba(56, 47, 40, 38)))
-                draw_shadows(p, hx - r - 1.25 * zoom, hy - r - 1.25 * zoom, 2 * r + 2.5 * zoom, 2 * r + 2.5 * zoom, r + 1.25 * zoom, sh)
+                _drop_disc(p, hx, hy, r + 1.25 * zoom, 5 * zoom, 7 * zoom, 1.6 * r)
                 p.circle(hx, hy, r + 1.25 * zoom, hexc("#fffefa"))
                 p.circle(hx, hy, r - 1.25 * zoom, self.topics[sel].color)
                 bx.add("map.anchor:" + self.topics[sel].text, hx - 18 * zoom, hy - 18 * zoom, 36 * zoom, 36 * zoom)
@@ -612,7 +610,7 @@ struct BuzanMap(Movable):
             for k in range(4):
                 var ax = cx + (t.x + hx[k]) * zoom
                 var ay = cy + (t.y + hy[k]) * zoom
-                _drop(p, ax - 8.25 * zoom, ay - 8.25 * zoom, 16.5 * zoom, 16.5 * zoom, 8.25 * zoom, 5 * zoom, 14 * zoom, 2.95 * zoom, 2.95 * zoom)
+                _drop_disc(p, ax, ay, 8.25 * zoom, 5 * zoom, 7 * zoom, 11.2 * zoom)
                 p.circle(ax, ay, 8.25 * zoom, CARD)  # (r 7, stroked 2.5 in the card colour)
                 p.circle(ax, ay, 5.75 * zoom, t.color)
                 p.circle(ax, ay, 2 * zoom, CARD)
@@ -652,6 +650,47 @@ def _drop[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: Float64, 
     sh.append(Shadow(0, dy, blur, 0, rgba(56, 47, 40, 38)))
     p.push_clip(x - past_x, y - past_y, w + 2 * past_x, h + 2 * past_y)
     draw_shadows(p, x, y, w, h, r, sh)
+    p.pop_clip()
+
+
+def disc_shadow(r: Float64, sigma: Float64, at: Float64) -> Float64:
+    """How dark a disc of radius r blurred by a Gaussian is, `at` from its middle (1: all of the shadow's colour). A shadow
+    as wide as its disc never gets there: 8 px blurred by 7 is 0.5 in the middle."""
+    var sum = 0.0
+    comptime N = 24
+    for i in range(N):  # (the disc in rings: a ring at u adds u/σ² · e^(−(u²+at²)/2σ²) · I0(u·at/σ²))
+        var u = r * (Float64(i) + 0.5) / N
+        var z = u * at / (sigma * sigma)
+        var term = 1.0
+        var bessel = 1.0
+        for k in range(1, 16):
+            term *= (z / 2) * (z / 2) / Float64(k * k)
+            bessel += term
+        sum += u / (sigma * sigma) * exp(-(u * u + at * at) / (2 * sigma * sigma)) * bessel * r / N
+    return sum
+
+
+def _drop_disc[P: Painter](mut p: P, x: Float64, y: Float64, r: Float64, dy: Float64, sigma: Float64, past: Float64):
+    """The same drop shadow under a disc, cut to a square `past` around its middle."""
+    p.push_clip(x - past, y - past, 2 * past, 2 * past)
+    var far = past * 1.4143 + dy
+    comptime N = 14
+    comptime SIDES = 40
+    # (rings that don't overlap, each at its own darkness: thin layers over each other round away on an 8-bit screen)
+    for j in range(N):
+        var r1 = far * Float64(j + 1) / N
+        var r0 = far * Float64(j) / N
+        var pts = List[Float64]()
+        for q in range(SIDES + 1):
+            var a = 6.283185307179586 * Float64(q) / SIDES
+            pts.append(x + r1 * cos(a))
+            pts.append(y + dy + r1 * sin(a))
+        if j > 0:
+            for q in range(SIDES, -1, -1):
+                var a = 6.283185307179586 * Float64(q) / SIDES
+                pts.append(x + r0 * cos(a))
+                pts.append(y + dy + r0 * sin(a))
+        p.polygon(pts, with_alpha(rgba(56, 47, 40), 0.15 * disc_shadow(r, sigma, (r0 + r1) / 2)))
     p.pop_clip()
 
 
