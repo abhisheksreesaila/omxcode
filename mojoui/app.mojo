@@ -288,6 +288,17 @@ def ms(ns: Int) -> String:
     return String(hundredths // 100) + "." + ("0" if frac < 10 else "") + String(frac)
 
 
+
+@fieldwise_init
+struct PanPoint(Copyable, Movable, ImplicitlyCopyable):
+    """A point a drag passed: where, how far from the one before, the pen's pressure (0: none)."""
+    var x: Float64
+    var y: Float64
+    var dx: Float64
+    var dy: Float64
+    var pressure: Float64
+
+
 struct Runtime[A: App](Movable):
     """Holds the app and the screen last shown. Hosts call dispatch() on every event."""
 
@@ -660,6 +671,18 @@ struct Runtime[A: App](Movable):
         if n.kind != CANVAS or n.msg == 0:
             return Diff(False, [])
         return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom, pressure=pressure))
+
+    def pans(mut self, node: Int, points: List[PanPoint]) -> Diff:
+        """Every point a drag passed since the last frame, in order, each its own PAN to the app; the screen once, after
+        them."""
+        if len(points) == 0 or node < 0 or node >= len(self.shown.nodes):
+            return Diff(False, [])
+        var last = len(points) - 1
+        if self.shown.nodes[node].kind == CANVAS and self.shown.nodes[node].msg != 0:
+            var msg = self.shown.nodes[node].msg
+            for i in range(last):
+                self._update(Event(msg, "", PAN, points[i].x, points[i].y, points[i].dx, points[i].dy, 1, pressure=points[i].pressure))
+        return self.gesture(node, PAN, points[last].x, points[last].y, points[last].dx, points[last].dy, 1, points[last].pressure)
 
     def key(mut self, node: Int, name: String, modifiers: Int) -> Diff:
         """A key pressed while canvas node `node` had focus: its gesture message with number = KEY,

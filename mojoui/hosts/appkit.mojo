@@ -34,7 +34,7 @@ from mojoui.icons_data import lucide_svg
 from mojoui.a11y import explicit_name
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
-from mojoui.app import App, Event, Runtime, budget_from_env
+from mojoui.app import App, Event, Runtime, budget_from_env, PanPoint
 from mojoui.clock import now_ns
 from std.math import sin
 from mojoui.canvas import Surface, MAC_GPU
@@ -327,6 +327,9 @@ struct AppKitHost[A: App](Movable):
     var common_modes: Int  # NSRunLoopCommonModes itself (Core Foundation knows it by address: a string that only reads the same is a mode of its own, never run)
     var activity: InputActivity
     var watch: FrameWatch
+    var pans: List[PanPoint]  # a drag's points since the last frame, for canvas node pan_node (queue_pan)
+    var pan_node: Int
+    var pan_addr: Int
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -434,6 +437,9 @@ struct AppKitHost[A: App](Movable):
         self.common_modes = 0
         self.activity = InputActivity()
         self.watch = FrameWatch(env("MOJOUI_FRAME_WATCH") == "1")
+        self.pans = List[PanPoint]()
+        self.pan_node = -1
+        self.pan_addr = 0
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -3020,9 +3026,30 @@ struct AppKitHost[A: App](Movable):
         if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
+        self.flush_pans(self_addr)
         self.gpu_input(node)
         self.input_activity(self_addr)
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
+        self.apply(d, self_addr)
+
+    def queue_pan(mut self, node: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, pressure: Float64):
+        """A drag's point (a mouse sends up to 1,000 a second): kept until the next frame, where the app gets every one of
+        them and the screen is worked out once (D-8063). Anything else that happens comes after them."""
+        if self.pan_node != node:
+            self.flush_pans(self.pan_addr)
+        self.pan_node = node
+        self.pans.append(PanPoint(x, y, dx, dy, pressure))
+        self.wake()
+
+    def flush_pans(mut self, self_addr: Int):
+        if len(self.pans) == 0:
+            return
+        var node = self.pan_node
+        var points = List[PanPoint]()
+        swap(points, self.pans)
+        self.gpu_input(node)
+        self.input_activity(self_addr)
+        var d = self.rt.pans(node, points)
         self.apply(d, self_addr)
 
     def ime_caret(self, node: Int) -> Tuple[Float64, Float64, Float64, Float64]:
@@ -3054,6 +3081,7 @@ struct AppKitHost[A: App](Movable):
 
     def canvas_key(mut self, node: Int, name: String, mods: Int, self_addr: Int):
         """A KEY on canvas node `node` (keyDown, and the test steps that stand for it)."""
+        self.flush_pans(self_addr)
         self.gpu_input(node)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
@@ -3080,6 +3108,7 @@ struct AppKitHost[A: App](Movable):
             self.report.note("frames: first tick")
         var micro = Int((seconds - self.last_frame) * 1e6) if self.last_frame > 0 and seconds - self.last_frame < 0.25 else 16667
         self.last_frame = seconds
+        self.flush_pans(self_addr)
         var k = 0
         self.g2d_defer = True  # (GPU frames are committed, not waited for: shown when they complete, D-7555)
         while k < len(self.canvases):
@@ -3983,7 +4012,8 @@ def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     host[].canvases[k].moved = True
     host[].canvases[k].last_x = at.x
     host[].canvases[k].last_y = at.y
-    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0], pen_pressure(event))
+    host[].pan_addr = t[0]
+    host[].queue_pan(t[1], at.x, at.y, dx, dy, pen_pressure(event))
 
 
 def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
