@@ -1,8 +1,8 @@
 # Goal 80: the CPU executor is the reference every GPU test is held to, so it must not drift. The hashes of its pictures of
 # goal 75's 19 scenes, made by the base commit's own code (3686e45b, bench/nanoui/refdump.mojo run there:
 # docs/goals/80/ref-base.txt), against this commit's, with one thread and with the default number. The two fonttext scenes
-# use the system's fonts for other scripts, so their hashes are the owner's Linux machine's: on another they are reported,
-# not judged (REF_STRICT=1 judges them).
+# use the system's fonts for other scripts, so their hashes are the owner's Linux machine's: on another machine REF_STRICT=0
+# reports them instead of judging them.
 #   pixi run mojo run -O3 -I . tests/test_cpu_reference.mojo
 from std.testing import assert_equal, assert_true
 from std.os import getenv
@@ -69,7 +69,7 @@ def main() raises:
         var big = 1 if z == 1.0 else 2
         names.append("text" + String(z))
         scenes.append(text_scene(480 * big, 240 * big, 1.6, z))
-    var strict = getenv("REF_STRICT") == "1"
+    var strict = getenv("REF_STRICT") != "0"
     var same = 0
     for i in range(len(names)):
         for threads in [1, 0]:

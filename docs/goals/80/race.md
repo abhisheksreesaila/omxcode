@@ -10,7 +10,7 @@ Medians and p95 in ms per frame, lower is better. Same machine, headless GL, nan
 | list | 0.0587 / 0.0429 | 0.064 / 0.0485 | 0.079 / 0.0583 | 0.0819 / 0.0638 | 2.507 / 0.5451 | 813 / 583 | 0.0133 / 0.0297 / 0.0041 |
 | dashboard | 0.0274 / 0.0242 | 0.0308 / 0.0263 | 0.1506 / 0.1164 | 0.1541 / 0.1209 | 33.256 / 4.4081 | 325 / 325 | 0.0123 / 0.0891 / 0.0041 |
 
-Held-out scenes (ours): omxcode now vs the base commit's baseline.
+Held-out scenes (ours): now vs the recorded baseline, for the record only: M6 judges them by alternating base and now in one session (held-ab.json, D-8029).
 
 | scene | frame CPU base / now | GPU base / now | CPU fallback base / now | instances base / now |
 |---|---|---|---|---|

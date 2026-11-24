@@ -268,7 +268,7 @@ def write_race(n, o):
         split = " / ".join(str(b.get(k, "—")) for k in ("gpu_upload", "gpu_draw", "gpu_resolve"))
         L.append(f"| {s} | {a['frame_med']} / {b['frame_med']} | {a['frame_p95']} / {b['frame_p95']} | {a['gpu_med']} / {b['gpu_med']} | "
                  f"{a['gpu_p95']} / {b['gpu_p95']} | {a['raster_med']} / {b['raster_med']} | {a['instances']} / {b['instances']} | {split} |")
-    L += ["", "Held-out scenes (ours): omxcode now vs the base commit's baseline.", "",
+    L += ["", "Held-out scenes (ours): now vs the recorded baseline, for the record only: M6 judges them by alternating base and now in one session (held-ab.json, D-8029).", "",
           "| scene | frame CPU base / now | GPU base / now | CPU fallback base / now | instances base / now |", "|---|---|---|---|---|"]
     for s in HELD:
         b = o[s]

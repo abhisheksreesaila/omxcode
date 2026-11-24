@@ -1,6 +1,6 @@
 # Goal 80 report: the best 2D renderer, by borrowing what the best do (2026-11-23)
 
-**State: waiting on the fresh review; M7's bar not fully met.** M6: every part passes when run (the parts were run one by
+**State: reviewed (fresh reviewer, 39bef8a3: PASS, three shoulds fixed); M7's bar not fully met.** M6: every part passes when run (the parts were run one by
 one, not through one `scripts/check M6`): the race 25 of 25 ahead, held-out 10 of 10 at or under 1.05× (all ahead), goal 75's
 M2–M6 PASS (real windows on the hidden test screen and on the M4), gpu2d tests pass, rival words 366 = base's 366. M7: run;
 5 of 20 cells more than 3 % behind (Metal GPU on text-only scenes; proposed to the owner to accept). M1–M5's tests pass on
