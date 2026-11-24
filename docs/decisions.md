@@ -1936,3 +1936,6 @@ With nothing said, the app uses its own file in the platform's data folder, neve
 
 ## D-8040: a page's ink follows its words (ours)
 Positions were written back unchanged after an edit above them, so the web would have shown marks on other words. `mojoui.pageink` maps them as CodeMirror's mapPos does (one changed stretch per edit), drops a mark with its word and brings it back with undo, converts bytes ↔ UTF-16, and patches only the positions that moved. A page whose ink was never loaded loses none of it. Con: the single-stretch diff can't tell a replaced word from an edited one when a paste repeats text around it.
+
+## D-8041: rect_corner on the Mac (goal 79, continuation 20; ours)
+tests/test_rectcorner_metal.mojo holds Metal to what test_rectcorner holds GL to: 60 cases pixel-exact on the M4 (01:53, 11-24); test_gpu2d_metal passes too. On by default there now (D-8021 had it off). Its effect on the Mac's frame times is not measured (screen locked).

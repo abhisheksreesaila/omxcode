@@ -12,7 +12,6 @@
 
 from std.collections import Dict
 from std.os import getenv
-from std.sys import CompilationTarget
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
 from mojoui.shared import serial
@@ -304,7 +303,7 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
-    var corner_quads: Bool  # (D-8021) stickies' bodies without stencils (MOJOUI_CORNER_QUADS=0: as polygons; on the Mac off until it has run there)
+    var corner_quads: Bool  # (D-8021) stickies' bodies without stencils (MOJOUI_CORNER_QUADS=0: as polygons; on the Mac since test_rectcorner_metal passed there, 11-24)
     var reach: Float64  # (D-8019) how far past the window (screen px) the ops are complete, so a zoom-out finds its edges rastered (an app sets 0 while the board is still loading)
     var kept_gen: Int  # (D-8010) the look the kept ops were painted with
     var seg_at: Dict[Int, Int]  # (D-7974) the kept ops per object: id → its range [seg_a, seg_b)
@@ -359,8 +358,6 @@ struct BoardLook(Movable):
         self.kept_gen = -1
         self.reach = BOARD_REACH
         self.corner_quads = getenv("MOJOUI_CORNER_QUADS") != "0"
-        comptime if CompilationTarget.is_macos():  # (not run there yet: off unless asked for)
-            self.corner_quads = getenv("MOJOUI_CORNER_QUADS") == "1"
         self.seg_at = Dict[Int, Int]()
         self.seg_a = List[Int]()
         self.seg_b = List[Int]()
