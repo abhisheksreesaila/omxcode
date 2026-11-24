@@ -101,6 +101,15 @@ def count_of(slot: Int) -> Int:
     return Int(Atomic[Scalar[DType.int64]].load(Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=count_at(slot))))
 
 
+comptime SLOT_SERIAL = 239  # (the process's serial numbers, serial())
+
+
+def serial() -> Int:
+    """A number never given before in this process (from 1 on, any thread): what names a document, a kept picture or a
+    version of one wherever something is cached by number, so no cache can take one's for another's."""
+    return count_add(SLOT_SERIAL, 1) + 1
+
+
 def make_dir(path: String):
     """Makes a folder (and its parents) if it isn't there: apps keep their settings with it (no std imports in apps)."""
     try:

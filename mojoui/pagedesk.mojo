@@ -14,6 +14,7 @@ from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
+from mojoui.shared import serial
 from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
@@ -226,9 +227,17 @@ def board_rect(v: DeskView, view_w: Float64, view_h: Float64, reach: Float64 = 0
 
 
 @fieldwise_init
-struct WrapKey(Copyable, Movable):
-    var rev: Int
+struct Wrapped(Copyable, Movable):
+    """An object's wrapped lines and everything they came from: good for any object of any document that has the same."""
+    var text: String
     var width: Float64
+    var family: String
+    var size: Float64
+    var weight: Int
+    var lines: List[String]
+
+    def of(self, ref o: Obj, width: Float64) -> Bool:
+        return self.width == width and self.size == o.size and self.weight == o.weight and self.family == o.family and self.text == o.text
 
 
 def _mix(h: UInt64, v: UInt64) -> UInt64:
@@ -269,9 +278,8 @@ struct BoardLook(Movable):
     have none, wrapped lines cached per object revision and width."""
     var family: String  # the face of a text with none of its own
     var line_height: Float64  # × size, for a text with none of its own
-    var wrap_rev: Dict[Int, Int]
-    var wrap_w: Dict[Int, Float64]
-    var wrap_lines: Dict[Int, List[String]]
+    var wraps: Dict[Int, Wrapped]  # by object id: what it was wrapped from is compared, never its revision (review 3: another document's object has the same id, revision and width)
+    var seen_layer: Int  # (review 3) the document last painted (ObjectLayer.doc): another one starts everything anew
     var generation: Int  # bump when the look itself changes (its defaults): part of the board layer's version
     # (D-7940) the board as raster tiles: its own version (bumped when what it draws changes), the snapshot that finds
     # what changed (damage), the document version and lift set last seen, the objects lifted out of it during a drag
@@ -336,9 +344,8 @@ struct BoardLook(Movable):
         self.kept_lift = List[Int]()
         self.snap_lift = List[Int]()
         self.snap_gen = 0
-        self.wrap_rev = Dict[Int, Int]()
-        self.wrap_w = Dict[Int, Float64]()
-        self.wrap_lines = Dict[Int, List[String]]()
+        self.wraps = Dict[Int, Wrapped]()
+        self.seen_layer = -1
         self.keep_path = ""
         self.keep_tag = ""
         self.keep_hold = False
@@ -407,12 +414,11 @@ struct BoardLook(Movable):
     def lines(mut self, ref o: Obj, width: Float64) -> List[String]:
         """The object's words broken into lines at `width` page px: its own line breaks, then at the last space that
         fits (a word wider than the box stays whole on its line)."""
-        var rev = self.wrap_rev.get(o.id, -1)
-        if rev == o.rev and self.wrap_w.get(o.id, -1.0) == width:
-            try:
-                return self.wrap_lines[o.id].copy()
-            except:
-                pass
+        try:
+            if o.id in self.wraps and self.wraps[o.id].of(o, width):
+                return self.wraps[o.id].lines.copy()
+        except:
+            pass
         var st = self.style_of(o)
         var out = List[String]()
         for para in o.text.split("\n"):
@@ -429,9 +435,7 @@ struct BoardLook(Movable):
                     line = trial
                 first = False
             out.append(line)
-        self.wrap_rev[o.id] = o.rev
-        self.wrap_w[o.id] = width
-        self.wrap_lines[o.id] = out.copy()
+        self.wraps[o.id] = Wrapped(o.text, width, o.family, o.size, o.weight, out.copy())
         return out^
 
     def paint[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, v: DeskView, view_w: Float64, view_h: Float64, k: Float64,
@@ -440,6 +444,8 @@ struct BoardLook(Movable):
         renderer as raster tiles (D-7940): a pan or a zoom composites what's kept, an edit rasters again only the tiles
         its damage meets. `lifted` (ids: what a drag is moving) is drawn in a layer of its own above the board, with the
         connectors that end at it, so the board's tiles stay as they are until the drag lets go."""
+        if layer.doc != self.seen_layer:
+            self._another_document(layer.doc)
         # culled to the window snapped out to whole tiles of page px (D-7929): the layer's extent, its ops complete there
         var cull = board_rect(v, view_w, view_h, self.reach)
         var tx0 = cull[0]
@@ -633,7 +639,7 @@ struct BoardLook(Movable):
                     print(t, flush=True)
                 if len(rects) > 0:
                     self.since = self.board_version
-                    self.board_version += 1
+                    self.board_version = serial()
                     self.dmg = rects^
                 return
         self.seen_doc = layer.version
@@ -656,13 +662,41 @@ struct BoardLook(Movable):
                   + " lift " + String(len(self.lift_ids)), flush=True)
         if self.snap.fresh or regen:
             self.since = -1
-            self.board_version += 1
+            self.board_version = serial()
             return
         if len(rects) == 0:
             return
         self.since = self.board_version
-        self.board_version += 1
+        self.board_version = serial()
         self.dmg = rects^
+
+    def _another_document(mut self, doc: Int):
+        """(review 3) The layer painted from here on is another document: nothing kept of the last one (its ops, the change
+        log's place, its damage snapshot, its lift, its wrapped lines) means anything, however alike their ids and
+        versions. The look itself is kept."""
+        self.seen_layer = doc
+        self.generation += 1
+        self.snap = DamageSnap()
+        self.seen_doc = -1
+        self.since = -1
+        self.dmg.clear()
+        self.lift_ids.clear()
+        self.lift_key.clear()
+        self.lift_set = Dict[Int, Bool]()
+        self.lift_was = Dict[Int, Bool]()
+        self.snap_lift.clear()
+        self.kept = KeptOps()
+        self.kept_token = ""
+        self.last_token = ""
+        self.kept_lift.clear()
+        self.seg_at = Dict[Int, Int]()
+        self.seg_a.clear()
+        self.seg_b.clear()
+        self.dirty_ids = Dict[Int, Bool]()
+        self.dirty_known = False
+        self.ops_clean = False
+        self.fill_outside = False
+        self.wraps = Dict[Int, Wrapped]()
 
     def forget(mut self):
         """The next paint is a new picture of the board (another document, or a cold open measured as one): no damage
@@ -686,11 +720,11 @@ struct BoardLook(Movable):
 
     def line_count(mut self, ref o: Obj, width: Float64) -> Int:
         """How many lines the object's words wrap into at `width` (from the wrap cache when it holds them)."""
-        if self.wrap_rev.get(o.id, -1) == o.rev and self.wrap_w.get(o.id, -1.0) == width:
-            try:
-                return len(self.wrap_lines[o.id])
-            except:
-                pass
+        try:
+            if o.id in self.wraps and self.wraps[o.id].of(o, width):
+                return len(self.wraps[o.id].lines)
+        except:
+            pass
         return len(self.lines(o, width))
 
     def paint_obj[P: Painter](mut self, mut p: P, mut layer: ObjectLayer, i: Int):

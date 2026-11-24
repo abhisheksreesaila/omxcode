@@ -16,6 +16,7 @@ from mojoui.canvas import Surface
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
+from mojoui.shared import serial
 from mojoui.fonttext import TextStyle, shape, draw_run, Clip, run_x
 
 comptime OP_RECT = 1  # x, y, w, h, radius, hole (D-7973: > 0 the middle, inside the box shrunk by it, may be left out)
@@ -466,7 +467,6 @@ struct KeptPaint(Movable):
     var versions: List[Int]
     var used: List[Int]
     var cap: Int
-    var next_version: Int
     var stamp: Int
     var at: Int  # the picture being drawn
     var mark: Int
@@ -481,7 +481,6 @@ struct KeptPaint(Movable):
         self.versions = List[Int]()
         self.used = List[Int]()
         self.cap = max(cap, 1)
-        self.next_version = 1
         self.stamp = 0
         self.at = -1
         self.mark = -1
@@ -516,8 +515,7 @@ struct KeptPaint(Movable):
                         self.at = i
                 self.kept[self.at] = KeptOps()
                 self.tokens[self.at] = token
-            self.versions[self.at] = self.next_version  # (never an old picture's number)
-            self.next_version += 1
+            self.versions[self.at] = serial()  # (never an old picture's number, nor another KeptPaint's)
         self.used[self.at] = self.stamp
         p.layer_version(self.versions[self.at])
         self.mark = p.ops_mark()
@@ -723,7 +721,7 @@ struct Scene(Painter, Movable, Copyable):
         k.ok = True
         if len(self.layer_keys) > 0:  # (D-7987) which version of the layer these ops belong to, and where in it they began
             var li = len(self.layer_keys) - 1
-            k.cap_id = Int(now_ns())
+            k.cap_id = serial()
             k.layer_off = from_op - self.layer_range(li)[0]
             if k.layer_off == 0:  # (the layer's whole op list so far is what is being kept: an index built from it names it)
                 self.layer_cap[li] = k.cap_id

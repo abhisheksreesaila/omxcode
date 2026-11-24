@@ -25,6 +25,7 @@
 
 from std.math import sqrt, cos, sin, floor, ceil
 
+from mojoui.shared import serial
 from mojoui.scene import Painter
 from mojoui.ink import Stroke
 from mojoui.history import History, Undoable
@@ -338,6 +339,7 @@ struct Change(Undoable):
 
 
 struct ObjectLayer(Movable):
+    var doc: Int  # which document this is (a process-wide serial, never shared): its versions and ids mean something only with it
     var objs: List[Obj]
     var pos_of: Dict[Int, Int]  # id → index in objs
     var next_id: Int
@@ -404,6 +406,7 @@ struct ObjectLayer(Movable):
     var saved_version: Int  # the version the document had when it was last loaded or saved (-1: never): unchanged since, no save is needed
 
     def __init__(out self):
+        self.doc = serial()
         self.objs = List[Obj]()
         self.pos_of = Dict[Int, Int]()
         self.next_id = 1
@@ -1819,7 +1822,7 @@ struct ObjectLayer(Movable):
             var ep = self.index(self.editing)
             if ep >= 0:
                 ev = self.editors[self._editor(ep)].view_version
-        var v = (self.version * 1000003 + Int(tx0 / TILE) * 7919 + Int(ty0 / TILE) * 104729 + Int(tx1 / TILE) * 31 + Int(ty1 / TILE) * 131 + ev * 17) & 0x3FFFFFFFFFFFFFFF
+        var v = (self.doc * 15485863 * 4099 + self.version * 1000003 + Int(tx0 / TILE) * 7919 + Int(ty0 / TILE) * 104729 + Int(tx1 / TILE) * 31 + Int(ty1 / TILE) * 131 + ev * 17) & 0x3FFFFFFFFFFFFFFF
         p.layer_version(v)
         p.layer_transform(-vx * k, -vy * k, k)
         for i in self.query(tx0, ty0, tx1, ty1):
