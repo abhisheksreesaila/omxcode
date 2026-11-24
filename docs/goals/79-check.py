@@ -1221,28 +1221,65 @@ def m6_mac(race):
         cold = out.split("APPBENCH: coldopens", 1)[-1].split("APPBENCH: keptopens", 1)[0]
         snapinfo[note]["cold"] = (cold.count("SNAP: restored"), cold.count("SNAP: restored") + cold.count("SNAP: none") + cold.count("SNAP: refused"))
         lock.__exit__()
+    # (continuation 21) the frames as they are shown: only with the screen unlocked and the app in front, at every step
+    paced, unwarm, opens, live = {}, {}, {}, True
+    for note in RACE_NOTES:
+        db = race / f"race-{note}.db"
+        other = subprocess.run(["sqlite3", str(db), "SELECT id FROM notes WHERE note_type = 'page' AND secure = 0 ORDER BY id LIMIT 1"], capture_output=True, text=True).stdout.strip()
+        for tag, extra, steps in (("A", {}, None), ("B", {}, None), ("warm", {}, PACED_RACE), ("notwarm", {"MOJOUI_SCENEWARM": "0", "MOJOUI_GLYPHWARM": "0"}, PACED_RACE)):
+            if not live:
+                break
+            lock = MacLock().__enter__()
+            env = dict({"PNOTE_DB": "{data}/" + db.name, "PNOTE_SNAPS": "{data}/snaps-paced-" + note + "-" + stamp, "OMX_CONFIG": "{data}/cfg-paced-" + note + "-" + stamp,
+                        "MOJOUI_SNAP_LOG": "1", "MOJOUI_BENCH_PACED": "1", "MOJOUI_BENCHSTATE": "1"}, **extra)
+            if steps is None:
+                env["PNOTE_FIRST"] = other
+                run_steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if tag == "A" else [])
+            else:
+                run_steps = ["wait:800", "window:1440x900"] + steps
+            out, e = mac_measured(f"paced-{note}-{tag}", run_steps, env, [db])
+            lock.__exit__()
+            if e:
+                return "FAIL", f"paced {tag} on {note}: {e}"
+            live = mac_live(out)
+            if steps is None:
+                opens.setdefault(note, {})[tag] = dict(native_race(out).get("open") or {}, snap="SNAP: restored" in out)
+            else:
+                (paced if tag == "warm" else unwarm)[note] = native_race(out)
+    if not live:
+        print("(the Mac's screen is locked or the app isn't in front: its frames shown aren't judged)", flush=True)
+        paced, unwarm, opens = {}, {}, {}
     lock = MacLock().__enter__()
-    starts = []
+    starts, walls = [], []
     for i in range(6):  # (D-8002: five first starts, each with a settings folder of its own, as on Linux; then a second start, printed)
         out, e = mac_measured(f"start-{i}", ["firstscreen:", "noteswitch:5", "omnibar:5", "openall:", "rss:"],
                          {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-start-" + stamp + f"-{min(i, 4)}"}, [REF_MAC / "pn.db"])
         if e:
             return "FAIL", f"start-up run {i}: {e}"
         starts.append(out)
+        if live:  # (the steps to their pictures handed over, in a run of their own)
+            out, e = mac_measured(f"start-paced-{i}", ["wait:800", "noteswitch:5", "omnibar:5"],
+                                  {"PNOTE_DB": "{data}/pn.db", "OMX_CONFIG": "{data}/cfg-startp-" + stamp + f"-{min(i, 4)}", "MOJOUI_BENCH_PACED": "1", "MOJOUI_BENCHSTATE": "1"}, [REF_MAC / "pn.db"])
+            if e:
+                return "FAIL", f"start-up paced run {i}: {e}"
+            live = mac_live(out)
+            walls.append(out)
     lock.__exit__()
+    if live:
+        starts = [a + "\n" + b for a, b in zip(starts, walls)]
     nstart = native_start(starts[:5])
     nstart["second"] = native_start(starts[5:])
     saved = dict(SNAPINFO)
     SNAPINFO.clear()
     SNAPINFO.update(snapinfo)
-    rows, ok = race_table(web, nat, nstart, {}, machine="mac")
+    rows, ok = race_table(web, nat, nstart, {}, machine="mac", paced=paced, unwarm=unwarm, opens=opens, live=live)
     SNAPINFO.clear()
     SNAPINFO.update(saved)
     rows = rows.replace("\n\n", f"\n\nWeb renderer on the Mac: {gpu.group(1) if gpu else 'not reported'}.\n\n", 1)
     rows += "\nThe Mac while measured (load, busiest processes at each measured run's start; void ones named):\n" + "\n".join("- " + l for l in MAC_LOAD) + "\n"
     (ROOT / "docs/goals/79/race-mac.md").write_text(rows)
     if not ok and "work only" in rows and "✗" not in rows:
-        return "BLOCKED", "the Mac's frames shown are not measured (screen locked, or the AppKit host's paced run not written): work only, not like-for-like; docs/goals/79/race-mac.md"
+        return "BLOCKED", "the Mac's frames shown are not measured (screen locked or the app not in front): work only, not like-for-like; docs/goals/79/race-mac.md"
     if not ok:
         return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if l.startswith("|") and l.rstrip().endswith("✗ |"))[:900]
     return "PASS", "docs/goals/79/race-mac.md"
@@ -1433,7 +1470,14 @@ def native_start(outs):
     return {k: (max(v) if v else None) if k.endswith("_max") else med(v) for k, v in vals.items()}
 
 
-def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=None, opens=None):
+def mac_live(out):
+    """True when macOS had the app active, its window key and the screen unlocked at every measured step (BENCHSTATE lines, at
+    least one): only then is a paced number like-for-like with the web's (continuation 21)."""
+    st = re.findall(r"^BENCHSTATE: .*active=(-?\d+) key=(-?\d+) locked=(-?\d+)", out, re.M)
+    return bool(st) and all(a == "1" and k == "1" and l == "0" for a, k, l in st)
+
+
+def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=None, opens=None, live=False):
     """(D-8025, D-8026: the owner's ruling of 2026-11-24) (race.md's text, every judged row passes). Judged: native against
     the web over the same span, nothing absolute; the 8.3 / 16.7 ms marks are still computed and printed on every row."""
     shown, paced, unwarm, opens = shown or {}, paced or {}, unwarm or {}, opens or {}
@@ -1444,9 +1488,11 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         lines += [f"**The Mac (M4), 1440×900 at {MAC_DPR}×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own "
                   "Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory, note switch, opens and the fresh-Chrome "
                   "cold start by webmem, webswitch, webopen and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on "
-                  "the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. **The Mac's frames "
-                  "shown aren't measured (its screen is locked, and the AppKit host has no paced run): its frame rows say \"work only, not "
-                  "like-for-like\" and are not judged.** PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower "
+                  "the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. "
+                  + ("**Frames shown: measured (MOJOUI_BENCH_PACED on AppKit: the app's own 60 Hz tick, the screen unlocked, the app active and its "
+                     "window key at every step), judged as Linux's.** " if live else
+                     "**The Mac's frames shown aren't measured (its screen was locked or the app not in front): its frame rows say \"work only, "
+                     "not like-for-like\" and are not judged.** ") + "PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower "
                   "bound of its first paint, process start to its own server sending the page (D-7992).", ""]
     lines += [
         f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR if not mac else MAC_DPR}×. "
@@ -1576,7 +1622,7 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
 
     def line(label, w, n, unit, judged=True):
         good, said = verdicts([(n, w)] if not isinstance(n, tuple) else list(zip(n, w or (None, None)))) if n is not None and w is not None else (False, "not measured")
-        if mac and unit == "ms":
+        if mac and unit == "ms" and not live:
             judged, said = False, said + " (work only: the screen is locked; not judged)"
             ok[0] = False
         if judged:

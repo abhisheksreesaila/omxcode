@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# The Mac's whole timing half in one command, for when its screen is unlocked (goal 79, continuation 21). About 35 minutes:
+# the web race there (8), pnote's work rows (6), the paced race as frames are shown (8: both notes, warm and not, first opens),
+# start-up (4), and the first frames after a pause (10, scripts/mac-firstframes). Refuses, changing nothing, when the screen is
+# locked or the app doesn't come to the front. Before: unlock the Mac, plug it in, leave it alone, nothing else running on it.
+#   MAC_SSH=user@host scripts/mac-unlocked [--probe]        → docs/goals/79/race-mac.md, build/g79/mac-firstframes-*.txt
+set -uo pipefail
+cd "$(dirname "$0")/.."
+: "${MAC_SSH:?set MAC_SSH=user@host}"
+export MAC_SSH
+printf '%s\n' wait:800 window:1440x900 framebench:desk=open,1 quit > build/mac-unlocked.steps
+MAC_ENV="PNOTE_DB={data}/pn.db,OMX_CONFIG={data}/cfg-probe-$(date +%s),MOJOUI_BENCH_PACED=1,MOJOUI_BENCHSTATE=1" scripts/mac-ssh pnote build/mac-unlocked.steps build/g79/ref-mac/pn.db > build/mac-unlocked.log 2>&1
+r=$(tail -1 build/mac-unlocked.log)
+state=$(grep -h "^BENCHSTATE" "$r/stdout.txt" 2>/dev/null | tail -1)
+echo "${state:-no BENCHSTATE: $(tail -1 build/mac-unlocked.log)}"
+case $state in
+  *"active=1 key=1 locked=0"*) echo "The Mac is unlocked and the app came to the front: measuring (about 35 minutes; leave it alone)." ;;
+  *) echo "REFUSED: the screen is locked, or the app isn't in front. Nothing was measured."; exit 2 ;;
+esac
+[ "${1:-}" = --probe ] && exit 0
+pixi run python -B - <<'P'
+import importlib.util
+sp = importlib.util.spec_from_file_location("c", "docs/goals/79-check.py"); c = importlib.util.module_from_spec(sp); sp.loader.exec_module(c)
+print("M6, the Mac's half:", *c.m6_mac(c.OUT / "race"))
+P
+scripts/mac-firstframes

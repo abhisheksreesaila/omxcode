@@ -40,11 +40,11 @@ def world():
     return web, nat, start, paced, unwarm, opens
 
 
-def judged(change=None, machine="linux"):
+def judged(change=None, machine="linux", live=False):
     web, nat, start, paced, unwarm, opens = world()
     if change:
         change(web, nat, start, paced, unwarm, opens)
-    return c.race_table(web, nat, start, {}, machine=machine, paced=paced, unwarm=unwarm, opens=opens)
+    return c.race_table(web, nat, start, {}, machine=machine, paced=paced, unwarm=unwarm, opens=opens, live=live)
 
 
 t, ok = judged()
@@ -72,4 +72,12 @@ assert ok and "over: p95 > 8.3, max > 16.7" in t
 # the Mac without frames shown: not judged, never ✓, the machine not passed
 t, ok = judged(lambda w, n, s, p, u, o: (p.clear(), u.clear(), o.clear()), machine="mac")
 assert not ok and "work only, not like-for-like" in t and "| ✓" not in "\n".join(l for l in t.splitlines() if "(frames)" in l)
+# the Mac with its frames shown (unlocked, in front: live): judged as Linux's, and fails as Linux's
+t, ok = judged(machine="mac", live=True)
+assert ok and "work only" not in t and "| ✓" in t, [l for l in t.splitlines() if "✗" in l]
+t, ok = judged(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_max=40), machine="mac", live=True)
+assert not ok and any("undo" in l and "✗" in l for l in t.splitlines())
+for out, good in [("BENCHSTATE: undo active=1 key=1 locked=0 activity=0 not held", True), ("BENCHSTATE: a active=1 key=1 locked=1", False), ("BENCHSTATE: a active=0 key=1 locked=0", False),
+                  ("BENCHSTATE: a active=1 key=1 locked=-1", False), ("", False), ("BENCHSTATE: a active=1 key=1 locked=0\nBENCHSTATE: b active=1 key=0 locked=0", False)]:
+    assert c.mac_live(out) is good, out
 print("judge: ok")

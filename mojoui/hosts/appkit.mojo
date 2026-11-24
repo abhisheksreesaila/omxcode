@@ -323,6 +323,7 @@ struct AppKitHost[A: App](Movable):
     var pan_frame: CGRect  # its frame when the drag began
     var asked_w: Int  # a size the host itself set (a test's resize:, a window too big for its screen): asked once more after
     var asked_h: Int  # the app lays out to what it got, when the old screen's minimum stopped it short (0: none)
+    var drew_tick_ns: Int  # when the last tick that drew a canvas began (the paced bench's gaps)
     var ticks: Int  # ticks so far (the Mac report logs the first)
     var last_frame: Float64  # the link's last timestamp (seconds)
     var theme_key: String  # the app's theme (Theme.key); its palette's colours and Inter when it paints native controls (a skin, D-149, D-260)
@@ -423,6 +424,7 @@ struct AppKitHost[A: App](Movable):
         self.pan_frame = CGRect(0, 0, 0, 0)
         self.last_frame = 0
         self.ticks = 0
+        self.drew_tick_ns = -1
         var theme = self.rt.app.theme()
         self.theme_key = theme.key()
         self.pal = theme.palette.copy()
@@ -3051,6 +3053,8 @@ struct AppKitHost[A: App](Movable):
     def tick(mut self, seconds: Float64, self_addr: Int):
         """Every display frame: frame events for canvases that asked, then redraws."""
         self.ticks += 1
+        var began = Int(now_ns())
+        var frames0 = self.g2d_frames
         if self.ticks == 1:
             self.report.note("frames: first tick")
         var micro = Int((seconds - self.last_frame) * 1e6) if self.last_frame > 0 and seconds - self.last_frame < 0.25 else 16667
@@ -3066,9 +3070,14 @@ struct AppKitHost[A: App](Movable):
                     self.g2d_defer = False
                     self.finish_frame()
                     return
+            var was = self.canvases[k].drawn
             self.draw_canvas(k, self_addr)
+            if k < len(self.canvases) and self.canvases[k].drawn != was:
+                self.drew_tick_ns = began
             k += 1
         self.g2d_defer = False
+        if self.g2d_frames != frames0:
+            self.drew_tick_ns = began
         self.finish_frame()
         if self.link != 0 and self.idle():  # nothing to animate or redraw: stop waking up
             self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
@@ -4108,6 +4117,27 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     if env("MOJOUI_BENCHSTATE") == "1":
         print_bench_state[A](host_addr, label)
     bench_settle[A](host_addr, 500_000_000)
+    if env("MOJOUI_BENCH_PACED") == "1":  # (the step to its picture handed over, drawn by the app's own tick: as GTK's wall_*)
+        print_bench_state[A](host_addr, label)
+        var walls = List[Float64]()
+        for _ in range(n):
+            var shown0 = len(host[].g2d_shown_ms) + len(host[].g2d_pk)
+            var frames0 = host[].g2d_frames
+            var t0 = Int(now_ns())
+            host[].input_activity(host_addr)
+            _ = host[].rt.app.bench(host[].rt.shown.nodes[host[].canvases[0].node].style, "bench:" + what)
+            var d = host[].rt.refresh()
+            host[].apply(d, host_addr)
+            host[].wake()
+            var by = t0 + 3_000_000_000
+            while Int(now_ns()) < by:
+                pump_run_loop(0.0005)
+                if host[].g2d_frames != frames0 and len(host[].g2d_shown_ms) > shown0:
+                    walls.append(Float64(Int(now_ns()) - t0) / 1e6)
+                    break
+            bench_settle[A](host_addr, 300_000_000)
+        print(label + ": n=" + String(len(walls)) + " wall_p95=" + one_decimal(pct(walls, 0.95)) + " wall_max=" + one_decimal(pct(walls, 1.0)), flush=True)
+        return
     var times = List[Float64]()
     for _ in range(n):
         var node = host[].canvases[0].node
@@ -4377,6 +4407,204 @@ def pump_run_loop(seconds: Float64):
             msg(cls("NSDate"), "dateWithTimeIntervalSinceNow:", seconds))
 
 
+def bench_gesture[A: App](host_addr: Int, node: Int, k: Int, what: String, i: Int, count: Int, mut x: Float64, mut y: Float64, drag_x0: Float64, drag_y0: Float64,
+                          w: Float64, h: Float64, grow_keys: List[String]):
+    """framebench's gesture i of a step (GTK's recipes), as the window server's events would arrive."""
+    var host = host_at[A](host_addr)
+    if what == "pan":
+        var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
+        host[].canvas_send(node, PAN, x, y, 7 * back, 4 * back, 1, host_addr)
+    elif what == "zoom":
+        host[].canvas_send(node, ZOOM, w / 2, h / 2, 0, 0, 1.01 if i < count // 2 else 1.0 / 1.01, host_addr)
+    elif what == "finish":  # (short strokes: press, three moves, release; each release adds a stroke to the page)
+        var step = i % 5
+        if step == 0:
+            x = w * (0.15 + 0.6 * Float64((i // 5) % 10) / 10.0)
+            y = h * (0.2 + 0.6 * Float64((i // 50) % 4) / 4.0)
+            host[].canvases[k].moved = False
+            host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.3)
+        elif step < 4:
+            x += 9.0
+            y += 3.0 * Float64(step)
+            host[].canvases[k].moved = True
+            host[].canvas_send(node, PAN, x, y, 9, 3, 1, host_addr, 0.3 + 0.2 * Float64(step))
+        else:
+            host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.5)
+    elif what == "dragone" or what == "drag40":  # (benchmark-f034's dragPath, as GTK's: to +160,+90 (40: +120,+70), a sine of 40 across it)
+        if i == 0:
+            host[].canvases[k].moved = False
+            host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
+        elif i == count - 1:
+            host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr)
+        else:
+            host[].canvases[k].moved = True
+            var t = Float64(i) / Float64(count - 2)
+            var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
+            var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
+            host[].canvas_send(node, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
+            x = tx
+            y = ty
+    elif what == "undo" or what == "redo" or what == "undoredo":  # (⌘Z / ⇧⌘Z: one step back or forth each frame; undoredo alternates)
+        host[].canvas_key(node, "z", 2 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 3, host_addr)
+    elif what == "open" or what == "openpress":  # (the app reopens the note, cold: its first frame is this frame's)
+        host[].input_activity(host_addr)  # (the click the open stands for)
+        _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
+        var dro = host[].rt.refresh()
+        host[].apply(dro, host_addr)
+    elif what == "type" or what == "grow":
+        var typed = String("native mojo is fast ")
+        var ch = String(typed[byte = i % 20 : i % 20 + 1])
+        if what == "grow":
+            ch = grow_keys[i]
+        host[].canvas_key(node, ch, 0, host_addr)
+    else:  # draw: a wandering line across the page
+        x += 3.0 + Float64(i % 5) * 0.4
+        y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
+        host[].canvas_send(node, PAN, x, y, 3, 2, 1, host_addr, 0.3 + 0.6 * Float64(i % 50) / 50.0)
+
+
+def frame_bench_paced[A: App](host_addr: Int, rest: String):
+    """framebench with MOJOUI_BENCH_PACED=1 (GTK's, D-8026): the app's own 60 Hz tick draws every frame, nothing is measured inside
+    one, and the next gesture is given once a tick has drawn the last. Printed: gap_* (from one drawing tick to the next, as a
+    page's requestAnimationFrame gaps) and lat_* (the gesture to its picture handed to Core Animation); open: the open to its
+    first picture, the gaps of the frames it comes in, complete_*; openpress: press_lat_*. Like-for-like only with the screen
+    unlocked and the app in front (BENCHSTATE, printed before each step)."""
+    var host = host_at[A](host_addr)
+    var kv = split_at(rest, "=")
+    var spec = split_at(kv[1], ",")
+    var what = spec[0] if spec[0] != "typing" else String("type")
+    var count = max(to_int(spec[1]), 1)
+    var tag = kv[0]
+    bench_settle[A](host_addr, 3_000_000_000)
+    var node = canvas_node_at(host[], tag)
+    var k = host[].canvas_at(node) if node >= 0 else -1
+    if k < 0:
+        print("TEST: no canvas", tag, flush=True)
+        return
+    print_bench_state[A](host_addr, what)
+    var b = msg[CGRect](host[].canvases[k].view, "bounds")
+    var w = b.width
+    var h = b.height
+    var x = w * 0.3
+    var y = h * 0.3
+    var drag_x0 = x
+    var drag_y0 = y
+    var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + (String("open") if what == "openpress" else what))
+    var d0 = host[].rt.refresh()
+    host[].apply(d0, host_addr)
+    bench_settle[A](host_addr, 500_000_000)
+    if what == "dragone" or what == "drag40":
+        if sp[0] < 0:
+            print("FRAMEBENCH: " + tag + "=" + what + " the app gave no spot", flush=True)
+            return
+        x = sp[0]
+        y = sp[1]
+        drag_x0 = x
+        drag_y0 = y
+        count += 2
+    if what == "draw" or what == "pan":
+        host[].canvases[k].moved = False
+        host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
+        host[].canvases[k].moved = True
+        bench_settle[A](host_addr, 300_000_000)
+    var opens = what == "open" or what == "openpress"
+    var gaps = List[Float64]()
+    var lats = List[Float64]()
+    var press_lats = List[Float64]()
+    var completes = List[Float64]()
+    var missed = 0
+    var on_gpu = 0
+    var on_cpu = 0
+    var last = -1
+    var keys = List[String]()
+    for i in range(count):
+        node = canvas_node_at(host[], tag)
+        k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            missed += 1
+            continue
+        var frames0 = host[].g2d_frames
+        var shown0 = len(host[].g2d_shown_ms) + len(host[].g2d_pk)  # (the pictures still on their way are earlier gestures')
+        var drawn0 = host[].canvases[k].drawn
+        var t0 = Int(now_ns())
+        bench_gesture[A](host_addr, node, k, what, i, count, x, y, drag_x0, drag_y0, w, h, keys)
+        host[].wake()
+        var by = t0 + 2_000_000_000
+        var drew = False
+        var seen = False
+        while Int(now_ns()) < by:  # (the tick that draws it; then its picture handed over, which the next tick may do)
+            pump_run_loop(0.0005)
+            node = canvas_node_at(host[], tag)
+            k = host[].canvas_at(node) if node >= 0 else -1
+            if not drew and (host[].g2d_frames != frames0 or (k >= 0 and host[].canvases[k].drawn != drawn0)):
+                drew = True
+                if host[].g2d_frames != frames0:
+                    on_gpu += 1
+                else:
+                    on_cpu += 1
+                if last >= 0 and not opens:
+                    gaps.append(Float64(host[].drew_tick_ns - last) / 1e6)
+                last = host[].drew_tick_ns
+            if drew and (len(host[].g2d_shown_ms) > shown0 or host[].g2d_frames == frames0):
+                seen = True
+                break
+            if drew and not opens and (what == "pan" or what == "zoom" or what == "draw" or what == "dragone" or what == "drag40" or what == "type") and i < count - 1:
+                break  # (a stream: the next gesture meets the next tick; the pictures keep coming a frame behind)
+        if not drew:
+            missed += 1
+            continue
+        if seen:
+            lats.append(Float64(Int(now_ns()) - t0) / 1e6)
+        if opens:
+            var pressed = False
+            var press_ns = 0
+            var press_shown = 0
+            var press_frames = 0
+            var done_by = Int(now_ns()) + 5_000_000_000
+            var tick_seen = last
+            while Int(now_ns()) < done_by:
+                pump_run_loop(0.0005)
+                node = canvas_node_at(host[], tag)
+                k = host[].canvas_at(node) if node >= 0 else -1
+                if k < 0:
+                    break
+                if host[].drew_tick_ns != tick_seen:
+                    gaps.append(Float64(host[].drew_tick_ns - tick_seen) / 1e6)
+                    tick_seen = host[].drew_tick_ns
+                if what == "openpress" and not pressed:
+                    var at = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:openspot")
+                    if at[0] >= 0:
+                        pressed = True
+                        press_ns = Int(now_ns())
+                        press_shown = len(host[].g2d_shown_ms) + len(host[].g2d_pk)  # (the pictures still on their way are the frames before it)
+                        press_frames = host[].g2d_frames
+                        host[].canvas_send(node, PRESS, at[0], at[1], 0, 0, 1, host_addr)
+                        host[].canvas_send(node, RELEASE, at[0], at[1], 0, 0, 1, host_addr)
+                        host[].wake()
+                if press_ns > 0 and host[].g2d_frames != press_frames and len(host[].g2d_shown_ms) > press_shown:
+                    press_lats.append(Float64(Int(now_ns()) - press_ns) / 1e6)
+                    press_ns = 0
+                if host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5 and host[].idle() and len(host[].g2d_pk) == 0:
+                    break
+            completes.append(Float64(Int(now_ns()) - t0) / 1e6)
+            bench_settle[A](host_addr, 300_000_000)
+            last = -1
+    node = canvas_node_at(host[], tag)
+    if node >= 0 and (what == "pan" or what == "draw"):
+        host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.6 if what == "draw" else 0.0)
+    bench_settle[A](host_addr, 1_000_000_000)
+    var over = 0
+    for g in gaps:
+        if g > 20.0:
+            over += 1
+    var n = on_gpu + on_cpu
+    print("FRAMEBENCH: " + what + " n=" + String(n) + " missed=" + String(missed) + " unchanged=0 renderer=" + ("gpu2d-Metal" if on_cpu == 0 else "mixed") + " p95=0.0 max=0.0 gpu_frames=" + String(on_gpu)
+          + " cpu_frames=" + String(on_cpu) + " gap_n=" + String(len(gaps)) + " gap_p50=" + one_decimal(pct(gaps, 0.5)) + " gap_p95=" + one_decimal(pct(gaps, 0.95)) + " gap_max=" + one_decimal(pct(gaps, 1.0))
+          + " gap_over20=" + String(over) + " lat_p95=" + one_decimal(pct(lats, 0.95)) + " lat_max=" + one_decimal(pct(lats, 1.0)) + " press_lat_n=" + String(len(press_lats))
+          + " press_lat_p95=" + one_decimal(pct(press_lats, 0.95)) + " press_lat_max=" + one_decimal(pct(press_lats, 1.0))
+          + ((" during_n=" + String(len(gaps)) + " complete_p95=" + one_decimal(pct(completes, 0.95)) + " complete_p50=" + one_decimal(pct(completes, 0.5)) + " complete_max=" + one_decimal(pct(completes, 1.0))) if opens else String("")), flush=True)
+
+
 def frame_bench[A: App](host_addr: Int, rest: String):
     """framebench:K=pan|zoom|draw|finish|type|grow,N (goal 75, GTK's recipes): N gestures on canvas K, one at a time
     (PAN by 7,4 points, to and fro every 20; ZOOM by 1.01× around the middle, in then out; draw: one pen stroke of N
@@ -4389,6 +4617,9 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     server's compositing after the commit isn't in it. The 60 Hz timer is stopped while it runs (its tick would draw
     outside the timing). Prints GTK's FRAMEBENCH line; renderer= AppKit-IOSurface (every frame on the GPU's
     IOSurface), AppKit-CPU (every frame a CGImage of the CPU's pixels) or AppKit-mixed."""
+    if env("MOJOUI_BENCH_PACED") == "1":
+        frame_bench_paced[A](host_addr, rest)
+        return
     var host = host_at[A](host_addr)
     var kv = split_at(rest, "=")
     var spec = split_at(kv[1], ",")
@@ -4493,56 +4724,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         var c0 = thread_cpu_ns()
         var ru0 = usage()
         var t0 = Int(now_ns())
-        if what == "pan":
-            var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
-            host[].canvas_send(node, PAN, x, y, 7 * back, 4 * back, 1, host_addr)
-        elif what == "zoom":
-            host[].canvas_send(node, ZOOM, w / 2, h / 2, 0, 0, 1.01 if i < count // 2 else 1.0 / 1.01, host_addr)
-        elif what == "finish":  # (short strokes: press, three moves, release; each release adds a stroke to the page)
-            var step = i % 5
-            if step == 0:
-                x = w * (0.15 + 0.6 * Float64((i // 5) % 10) / 10.0)
-                y = h * (0.2 + 0.6 * Float64((i // 50) % 4) / 4.0)
-                host[].canvases[k].moved = False
-                host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr, 0.3)
-            elif step < 4:
-                x += 9.0
-                y += 3.0 * Float64(step)
-                host[].canvases[k].moved = True
-                host[].canvas_send(node, PAN, x, y, 9, 3, 1, host_addr, 0.3 + 0.2 * Float64(step))
-            else:
-                host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr, 0.5)
-        elif what == "dragone" or what == "drag40":  # (benchmark-f034's dragPath, as GTK's: to +160,+90 (40: +120,+70), a sine of 40 across it)
-            if i == 0:
-                host[].canvases[k].moved = False
-                host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
-            elif i == count - 1:
-                host[].canvas_send(node, RELEASE, x, y, 0, 0, 1, host_addr)
-            else:
-                host[].canvases[k].moved = True
-                var t = Float64(i) / Float64(count - 2)
-                var tx = drag_x0 + (160.0 if what == "dragone" else 120.0) * t
-                var ty = drag_y0 + (90.0 if what == "dragone" else 70.0) * t + sin(t * 6.283185307) * 40
-                host[].canvas_send(node, PAN, tx, ty, tx - x, ty - y, 1, host_addr)
-                x = tx
-                y = ty
-        elif what == "undo" or what == "redo" or what == "undoredo":  # (⌘Z / ⇧⌘Z: one step back or forth each frame; undoredo alternates)
-            host[].canvas_key(node, "z", 2 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 3, host_addr)
-        elif what == "open" or what == "openpress":  # (the app reopens the note, cold: its first frame is this frame's)
-            host[].input_activity(host_addr)  # (the click the open stands for)
-            _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
-            var dro = host[].rt.refresh()
-            host[].apply(dro, host_addr)
-        elif what == "type" or what == "grow":
-            var typed = String("native mojo is fast ")
-            var ch = String(typed[byte = i % 20 : i % 20 + 1])
-            if what == "grow":
-                ch = grow_keys[i]
-            host[].canvas_key(node, ch, 0, host_addr)
-        else:  # draw: a wandering line across the page
-            x += 3.0 + Float64(i % 5) * 0.4
-            y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
-            host[].canvas_send(node, PAN, x, y, 3, 2, 1, host_addr, 0.3 + 0.6 * Float64(i % 50) / 50.0)
+        bench_gesture[A](host_addr, node, k, what, i, count, x, y, drag_x0, drag_y0, w, h, grow_keys)
         node = canvas_node_at(host[], tag)
         k = host[].canvas_at(node) if node >= 0 else -1
         if k >= 0 and host[].rt.shown.nodes[node].msg2 != 0:  # (the frame event the tick would send first)
@@ -5774,7 +5956,7 @@ def on_window_should_close[A: App](target: Int, cmd: Int, window: Int) abi("C") 
     if host[].rt.closed or host[].rt.app.may_close():
         return 1
     var d = host[].rt.refresh()
-    host[].apply(d)
+    host[].apply(d, msg(id, "longLongValue"))
     print("WINDOW: kept open", flush=True)
     return 0
 
