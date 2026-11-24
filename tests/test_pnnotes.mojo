@@ -653,6 +653,28 @@ def icons() raises:
     assert_equal(len(s.emoji.found()), 1)
     _ = s.key("Escape", 0)
     assert_true(not s.emoji.open, "Escape")
+    # scrolled up under the tools, or under the pen, it isn't there to press
+    for l in range(60):
+        typed(s, "line " + String(l))
+        _ = s.key("Return", 0)
+    paint(s)
+    for _ in range(200):
+        _ = s.wheel(700, 500, 0, -60)
+    paint(s)
+    tap(s, "[Change icon]")
+    assert_true(s.emoji.open, "at the top it is")
+    _ = s.key("Escape", 0)
+    var covered = 0
+    for _ in range(40):
+        _ = s.wheel(700, 500, 0, 4)
+        paint(s)
+        var t = at(s, ".page-tool:Write")
+        var i = s.boxes.find("[Change icon]")
+        if i >= 0 and t[0] >= s.boxes.r[i * 4] and t[0] < s.boxes.r[i * 4] + s.boxes.r[i * 4 + 2] and t[1] >= s.boxes.r[i * 4 + 1] and t[1] < s.boxes.r[i * 4 + 1] + s.boxes.r[i * 4 + 3]:
+            covered += 1
+            tap(s, ".page-tool:Write")
+            assert_true(not s.emoji.open, "the tool takes the press")
+    assert_true(covered > 0, "the icon passed under the tool")
     s.close()
 
 

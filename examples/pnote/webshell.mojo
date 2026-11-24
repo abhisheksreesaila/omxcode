@@ -2770,7 +2770,7 @@ struct WebShell(Movable):
         self.pressed_us = clock_us()
         if self.emoji.open or self.new_menu:
             return False
-        if self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"]) != "" and not self.searching and not self.card_open and not self.settings_open:
+        if not self.searching and not self.card_open and not self.settings_open and self.icon_under(x, y) != "":
             return False  # (the icon's button: a tap)
         if self.sidebar and not self.searching and not self.settings_open and not self.props_open and not self.card_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
             _ = self.panel.press(x, y)
@@ -2840,6 +2840,14 @@ struct WebShell(Movable):
         else:
             self.say("Not in the native app yet")
         return True
+
+    def icon_under(self, x: Float64, y: Float64) -> String:
+        """The note's icon a press at (x, y) is on, "" for none: a page's scrolls under the tools and the islands, and is under
+        the pen while drawing."""
+        var ih = self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"])
+        if ih == "[Change icon]" and (self.page.draw_mode or self.boxes.hit_any(x, y, ["[Page tools]", ".page-tool:", "#sidebar", "#island", "#toggle-sidebar", "#search-button"]) != ""):
+            return ""
+        return ih
 
     def writing(self) -> Bool:
         """The open note is a page, readable, in Write mode, nothing over it."""
@@ -3092,7 +3100,7 @@ struct WebShell(Movable):
                 self.create("canvas" if mh.endswith(":0") else ("page" if mh.endswith(":1") else "mindmap"))
             return True
         if not self.searching and not self.card_open and not self.settings_open and not self.props_open and self.book_card < 0:
-            var ih = self.boxes.hit_any(x, y, ["[Change icon]", "#island-icon"])
+            var ih = self.icon_under(x, y)
             if ih != "":
                 self.choose_icon(ih)
                 return True

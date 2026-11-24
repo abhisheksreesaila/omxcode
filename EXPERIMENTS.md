@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-24: goal 79, continuation 21 (the save thread attacked, proofs sharpened, the last everyday gaps)
+- **Setup.** The machine free for GPU work; the Mac reachable, its screen locked, kept awake with caffeinate.
+- **Worked.** Undo's worst frame 18.9 → 16.8–17.0 ms by drawing a key's frame right after it, not at the refresh. The save thread survived kill -9 at four stages and at 100 random moments, a 30 s lock, a full disk and edits during a save. A web map keeps its icons, dates, marks and folded branches. Emoji picker, line keys, double tap of Ctrl, Quick note's menu, Markdown and backup exports, the Mac's menu bar.
+- **Broke / fixed.** Attacking the saves found four ways to lose edits (a save given up but maybe landed; a note deleted elsewhere; a full disk at close; a locked file at close). A walk passed on a stale app. A menu bar in a column blanked the Mac's window.
+- **Means.** Attack a new thread before trusting it; check the binary is the one you think; run the Mac even for "just a menu".
+- **Next.** One unlocked hour on the Mac: `scripts/mac-unlocked`.
+
 ## 2026-11-24: goal 79, continuation 20 (review 3, the owner's ruling, the everyday gaps)
 - **Setup.** Overnight, unattended, after three unlogged power-offs: no GPU program while another project's job runs (scripts/gpu-free), one CPU build or test at a time, 4 cores, niced.
 - **Worked.** The seven data-loss bugs of review 3, each with a test. A page note's editor on TextEdit with the browser's line breaks (19 of 20 test lines the same as Chromium's, drawn in software). Personal Note's own Python opens the notes file this app makes and reads its canvases. Comparing draw operations with the last judged commit (86,180 lines, identical) stood in for pictures while no GPU could run.

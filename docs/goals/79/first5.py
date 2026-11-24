@@ -332,11 +332,36 @@ def back():
     r = [x[0] for x in c.execute("SELECT content FROM notes")]
     check(any("The web was here" in x for x in r) and any("typed in the web" in x and "sticky words" in x for x in r), "both apps' words are there")
     check(any("native again" in x and "typed in the web" in x for x in r), "and native goes on from the web's")
+    # Quick note: what kind, by the other button and by a hold (the web's note-create menu)
+    count = lambda: sqlite3.connect(f"file:{W / 'data2/notes.db'}?mode=ro", uri=True).execute("SELECT COUNT(*) FROM notes").fetchone()[0]
+    if "#rail-new-note" not in a.boxes():
+        a.tap("#toggle-sidebar", wait=0.8)
+    x, y, w, h = a.boxes()["#rail-new-note"]
+    n0 = count()
+    a.move(x + w / 2, y + h / 2)
+    a.button(3, True)
+    a.button(3, False)
+    time.sleep(0.5)
+    shot(a, "48-new-menu")
+    check("menu.item:2" in a.boxes(), "the other button asks what kind of note")
+    a.key("Escape", wait=0.4)
+    a.move(x + w / 2, y + h / 2)
+    a.button(1, True)
+    time.sleep(0.6)
+    a.button(1, False)
+    time.sleep(0.4)
+    check("menu.item:2" in a.boxes() and count() == n0, "held, it asks too and makes nothing yet")
+    a.tap("menu.item:2", wait=0.9)
+    check(sqlite3.connect(f"file:{W / 'data2/notes.db'}?mode=ro", uri=True).execute("SELECT note_type FROM notes ORDER BY id DESC LIMIT 1").fetchone()[0] == "mindmap" and count() == n0 + 1, "a mind map is made")
     check(a.close() == 0, "closes")
 
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
+    app = ROOT / "build/pnote/linux/pnote"
+    newer = [str(f) for d in ["examples/pnote", "mojoui", "hosts"] for f in (ROOT / d).rglob("*.mojo") if not app.exists() or f.stat().st_mtime > app.stat().st_mtime]
+    if newer:  # (a walk of yesterday's app says nothing)
+        sys.exit(f"first5: REFUSED: build first (scripts/build.sh pnote linux); newer than the app: {newer[:4]}")
     for part in sys.argv[1:] or ["fresh", "again"]:
         {"fresh": fresh, "again": again, "back": back}[part]()
     print("first5:", "ok" if not bad else f"{len(bad)} BAD: " + "; ".join(bad))
