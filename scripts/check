@@ -2,4 +2,5 @@
 # Rebuild everything and print PASS/FAIL/BLOCKED for each milestone in GOAL.md (scripts/check M2 M3: only those).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+scripts/gpu-free || exit 75  # (never beside another project's GPU job: three power-offs; no waiting, no "anyway")
 exec pixi run python docs/goals/79-check.py "$@"

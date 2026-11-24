@@ -16,6 +16,8 @@
 set -u
 [ $# -ge 1 ] || { echo "usage: scripts/testscreen <command> [args...]" >&2; exit 2; }
 
+"$(dirname "$0")/gpu-free" >/dev/null || exit 75  # (a window drawn on the GPU never starts beside another project's GPU job)
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
   HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr/" 2>/dev/null | head -1)
