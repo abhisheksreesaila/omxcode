@@ -14,7 +14,7 @@
 from std.os import getenv
 from mojoui.clock import now_ns
 from mojoui.fonttext import engine, TextStyle
-from mojoui.libc import rename
+from mojoui.files import private_write
 
 comptime WARM_TICK_MS = 30
 comptime WARM_QUIET_NS = 300_000_000
@@ -130,12 +130,7 @@ struct GlyphWarm(Movable):
             t += "S\t" + s + "\n"
         for l in lines:
             t += l + "\n"
-        try:
-            with open(self.path + ".new", "w") as f:
-                f.write(t)
-            if rename(self.path + ".new", self.path) != 0:
-                return False
-        except:
+        if not private_write(self.path, t):
             return False
         self.kept = len(e[].image_of)
         return True

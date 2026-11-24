@@ -14,6 +14,10 @@
 #   var r = save_row(db, s)        # r.status: SAVED | CONFLICT | FAILED, r.revision = 13, r.value = the stamp read back
 
 from mojoui.sqlite import Database, Statement
+from mojoui.json import Json, json_string
+from mojoui.files import private_write
+from mojoui.libc import unlink
+from std.os import listdir
 from std.time import perf_counter_ns
 
 comptime SAVED = 0
@@ -200,6 +204,158 @@ def row_revision(mut db: Database, table: String, key: String, id: Int, rev: Str
     except:
         pass
     return -1
+
+
+comptime DOC_NONE = 0  # nothing open
+comptime DOC_LOADING = 1  # still being read: not to be saved
+comptime DOC_READY = 2  # read whole: may be edited and saved
+comptime DOC_FAILED = 3  # couldn't be read: shown as such, never edited, never saved, never kept
+
+
+struct OpenDoc(Copyable, Movable):
+    """(review 3, MUST 3) Which document is open and whether it was read: the one gate between a screen and its row. An app
+    begins an open, says ready or failed, and asks may_save before every write and may_keep before keeping a parse: a
+    document that couldn't be read shows its problem and a Retry, and nothing of the empty screen ever reaches its row.
+
+        doc.begin(id); … doc.ready(id, revision) or doc.failed(id, why)
+        if not doc.may_edit(): … show doc.problem and a Retry button …
+        if doc.may_save(id, revision): save_row(…); doc.saved(new_revision)"""
+
+    var id: Int
+    var state: Int
+    var revision: Int  # the row's revision the screen was read at (or last saved)
+    var problem: String
+
+    def __init__(out self):
+        self.id = -1
+        self.state = DOC_NONE
+        self.revision = -1
+        self.problem = ""
+
+    def begin(mut self, id: Int):
+        self.id = id
+        self.state = DOC_LOADING
+        self.revision = -1
+        self.problem = ""
+
+    def ready(mut self, id: Int, revision: Int):
+        """Read whole, at this revision (an answer for another document, or after a failure, changes nothing)."""
+        if id == self.id and self.state == DOC_LOADING:
+            self.state = DOC_READY
+            self.revision = revision
+
+    def failed(mut self, id: Int, why: String):
+        if id == self.id:
+            self.state = DOC_FAILED
+            self.problem = why if why != "" else String("It couldn't be read.")
+
+    def saved(mut self, revision: Int):
+        if self.state == DOC_READY:
+            self.revision = revision
+
+    def loading(self) -> Bool:
+        return self.state == DOC_LOADING
+
+    def is_failed(self) -> Bool:
+        return self.state == DOC_FAILED
+
+    def may_edit(self) -> Bool:
+        return self.state == DOC_READY
+
+    def may_save(self, id: Int, revision: Int) -> Bool:
+        """The screen is this row's document, read whole, at the revision the save will build on."""
+        return self.state == DOC_READY and id == self.id and revision == self.revision
+
+    def may_keep(self, id: Int) -> Bool:
+        return self.state == DOC_READY and id == self.id
+
+
+struct Unsaved(Copyable, Movable):
+    """Edits that couldn't be written: the document as it was to be saved, at the revision it was read at, and why."""
+
+    var id: Int
+    var kind: String
+    var revision: Int
+    var content: String
+    var body: String
+    var why: String
+    var conflict: Bool
+
+    def __init__(out self, id: Int, kind: String, revision: Int, content: String, body: String, why: String, conflict: Bool):
+        self.id = id
+        self.kind = kind
+        self.revision = revision
+        self.content = content
+        self.body = body
+        self.why = why
+        self.conflict = conflict
+
+
+struct SaveOutbox(Movable):
+    """(review 3, SHOULD 7) Saves that failed or met a conflict, held until they land or the person drops them: in memory,
+    and as files (0600, in a 0700 folder of the app's) written at once, so a switch, a quit or a crash loses nothing. One
+    per document: a later failed save of it takes the place of the earlier. `space` names the store the ids belong to (two
+    databases share no file)."""
+
+    var dir: String
+    var space: String
+    var items: List[Unsaved]
+
+    def __init__(out self, dir: String = "", space: String = ""):
+        self.dir = dir
+        self.space = space
+        self.items = List[Unsaved]()
+
+    def path(self, id: Int) -> String:
+        return self.dir + "/unsaved-" + self.space + "-" + String(id) + ".json"
+
+    def find(self, id: Int) -> Int:
+        for i in range(len(self.items)):
+            if self.items[i].id == id:
+                return i
+        return -1
+
+    def put(mut self, var u: Unsaved) -> Bool:
+        """Held; True when it is on disk too."""
+        var i = self.find(u.id)
+        var text = ('{"id":' + String(u.id) + ',"kind":' + json_string(u.kind) + ',"revision":' + String(u.revision) + ',"conflict":' + ("true" if u.conflict else "false")
+                    + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"content":' + json_string(u.content) + "}")
+        var id = u.id
+        if i >= 0:
+            self.items[i] = u^
+        else:
+            self.items.append(u^)
+        if self.dir == "":
+            return False
+        return private_write(self.path(id), text)
+
+    def drop(mut self, id: Int):
+        """It landed (or the person gave it up)."""
+        var i = self.find(id)
+        if i >= 0:
+            _ = self.items.pop(i)
+        if self.dir != "":
+            _ = unlink(self.path(id))
+
+    def load(mut self):
+        """What an earlier session left."""
+        if self.dir == "":
+            return
+        try:
+            for name in listdir(self.dir):
+                var n = String(name)
+                if not n.startswith("unsaved-" + self.space + "-") or not n.endswith(".json"):
+                    continue
+                var t: String
+                with open(self.dir + "/" + n, "r") as f:
+                    t = f.read()
+                var j = Json.parse(t)
+                var u = Unsaved(j.number(j.get(0, "id"), -1), j.text(j.get(0, "kind")), j.number(j.get(0, "revision"), -1), j.text(j.get(0, "content")),
+                                j.text(j.get(0, "body")), j.text(j.get(0, "why")), j.flag(j.get(0, "conflict")))
+                if u.id >= 0 and u.content != "" and self.find(u.id) < 0:
+                    self.items.append(u^)
+        except e:
+            print("SaveOutbox: " + self.dir + ": " + String(e), flush=True)
 
 
 struct KeptDocs[T: Movable & Deinitable](Movable):

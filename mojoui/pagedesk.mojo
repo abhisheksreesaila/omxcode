@@ -954,6 +954,8 @@ struct BoardTools(Movable):
         self.edit_words = ""
 
     def tap(mut self, sx: Float64, sy: Float64, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64) -> Bool:
+        if layer.read_only:
+            return False
         # (a tap comes after its press: a drag the press began never happened)
         if self.drag == T_MOVE:
             layer.end_gesture()
@@ -1005,6 +1007,8 @@ struct BoardTools(Movable):
             self.last_x = sx
             self.last_y = sy
             return True
+        if layer.read_only:  # (a document that couldn't be read: only the view moves)
+            return False
         if self.tool == "select":
             var id = layer.hit_test(pt[0], pt[1], 2)
             if id >= 0:
@@ -1076,6 +1080,8 @@ struct BoardTools(Movable):
     def key(mut self, name: String, mods: Int, mut layer: ObjectLayer, mut view: DeskView, view_w: Float64, view_h: Float64, columns: Int,
             rows: Int) -> Bool:
         """mods: SHIFT 1, CTRL 2, ALT 4."""
+        if layer.read_only:
+            return False
         if self.editing != -1:
             if name == "Escape":
                 self.finish(layer)

@@ -346,6 +346,7 @@ struct Change(Undoable):
 
 struct ObjectLayer(Movable):
     var doc: Int  # which document this is (a process-wide serial, never shared): its versions and ids mean something only with it
+    var read_only: Bool  # (review 3) a document that couldn't be read: editing tools refuse it
     var src: CanvasSource  # (review 3) the document's own text, when it was read from one: what wasn't edited is saved as it was
     var adopted: Dict[Int, Bool]  # ids of its document that became objects (or joined a delete made while it was opening)
     var touched: Dict[Int, Bool]  # objects that may differ from their source (edited, undone, re-routed: compared at a save)
@@ -416,6 +417,7 @@ struct ObjectLayer(Movable):
 
     def __init__(out self):
         self.doc = serial()
+        self.read_only = False
         self.src = CanvasSource()
         self.touched = Dict[Int, Bool]()
         self.adopted = Dict[Int, Bool]()
@@ -2354,6 +2356,8 @@ def import_json_canvas_doc(j: Json, text: String = "") raises -> ObjectLayer:
     if text != "":
         ol.src = CanvasSource.of(text)
     var nodes = j.get(0, "nodes")
+    if j.kind(nodes) != J_ARRAY:  # (another app's format, or nothing: an empty board here would be saved over it)
+        raise Error("not a JSON Canvas document (it has no nodes)")
     var count = j.size(nodes)
     ol.reserve_ids(count + j.size(j.get(0, "edges")))
     var ids = Dict[String, Int]()

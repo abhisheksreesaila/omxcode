@@ -30,6 +30,7 @@ from mojoui.json import Json, c_locale, c_float, pow5_table
 from mojoui.objectlayer import ObjectLayer, Obj, canvas_node_obj, canvas_edge_obj, CONNECTOR
 from mojoui.docstore import clock_us
 from mojoui.canvassource import CanvasSource
+from mojoui.jsonpatch import member_text
 from mojoui.shared import serial
 from mojoui.objectlayer import import_json_canvas_doc
 from mojoui.sqlite import Database
@@ -720,6 +721,27 @@ struct CanvasLoad(Movable):
                 layer.mark_saved()
 
 
+def text_hash(text: String) -> Int:
+    """A fingerprint of a document's text (eight bytes at a step; 12 MB in ~3 ms): whether a picture kept of it is of this
+    very text. 0 is no text's."""
+    var n = text.byte_length()
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(text.unsafe_ptr()))
+    var h = UInt64(0xCBF29CE484222325) ^ UInt64(n)
+    var i = 0
+    while i + 8 <= n:
+        var v = UInt64(0)
+        for k in range(8):
+            v |= UInt64(p.unsafe_offset(i + k)[]) << UInt64(8 * k)
+        h = (h ^ v) * 0x9E3779B97F4A7C15
+        h ^= h >> 32
+        i += 8
+    while i < n:
+        h = (h ^ UInt64(p.unsafe_offset(i)[])) * 0x100000001B3
+        i += 1
+    _ = text.byte_length()
+    return Int(h >> 2) | 1
+
+
 trait TextSource(Movable, Deinitable):
     """(D-7956) Where a document's text comes from, read on a job thread (so it opens its own handles there)."""
 
@@ -758,6 +780,7 @@ struct OpenedCanvas(Movable):
     var layer: ObjectLayer
     var back: String
     var problem: String
+    var hash: Int  # text_hash of what was read
     var read_us: Int
     var skim_us: Int
     var take_us: Int
@@ -767,6 +790,7 @@ struct OpenedCanvas(Movable):
         self.layer = ObjectLayer()
         self.back = ""
         self.problem = ""
+        self.hash = 0
         self.read_us = 0
         self.skim_us = 0
         self.take_us = 0
@@ -800,6 +824,10 @@ struct CanvasOpenJob[S: TextSource](JobBody):
         except e:
             out.problem = String(e)
             return out^
+        if text == "":  # (not a canvas, whatever else: never an empty board)
+            out.problem = "the document is empty"
+            return out^
+        out.hash = text_hash(text)
         var t1 = clock_us()
         out.read_us = t1 - t0
         var ld = CanvasLoad(text^)
@@ -831,6 +859,8 @@ struct OpenBoard(Movable):
     var fresh: Bool  # the open's own frame: it shows what open() took, no slice in it
     var job: Optional[Job[OpenedCanvas]]  # (D-7956) an open_later() still reading on its job thread
     var gap: Float64
+    var broken: Bool  # (review 3) the last open failed: the board is empty and read-only until another document is opened
+    var text_hash: Int  # a fingerprint of the text an open_later() read (0: none yet)
     var problem: String  # why the last open_later() found nothing ("" when it didn't fail)
     var times: String  # the last open_later()'s read / skim / take on its thread, µs (MOJOUI_LOAD_TRACE prints it)
 
@@ -840,8 +870,28 @@ struct OpenBoard(Movable):
         self.fresh = False
         self.job = None
         self.gap = -1
+        self.broken = False
+        self.text_hash = 0
         self.problem = ""
         self.times = ""
+
+    def _fail(mut self, why: String):
+        """The document couldn't be read: an empty board that nothing may edit, and why."""
+        self.problem = why if why != "" else String("It couldn't be read.")
+        self.broken = True
+        self.load.clear()
+        self.layer = ObjectLayer()
+        self.layer.read_only = True
+        self.layer.mark_saved()
+
+    def fail(mut self, why: String):
+        """The app couldn't read the document: the same (nothing to edit, nothing to keep, nothing to save)."""
+        self.job = None
+        self._fail(why)
+
+    def keepable(self) -> Bool:
+        """The board is a document read whole: worth keeping parsed, safe to save (never a failed open's empty one)."""
+        return not self.broken and not self.loading()
 
     def set(mut self, var layer: ObjectLayer):
         """A board made whole elsewhere (a kept parse, a whole import, an empty one): any open in progress is dropped
@@ -849,6 +899,8 @@ struct OpenBoard(Movable):
         self.load.clear()
         self.fresh = False
         self.job = None
+        self.broken = False
+        self.problem = ""
         self.layer = layer^
 
     def open_later[S: TextSource](mut self, var src: S, x0: Float64, y0: Float64, x1: Float64, y1: Float64, connector_gap: Float64 = -1,
@@ -863,6 +915,8 @@ struct OpenBoard(Movable):
         self.load.clear()
         self.fresh = False
         self.problem = ""
+        self.broken = False
+        self.text_hash = 0
         self.gap = connector_gap
         self.layer = ObjectLayer()
         if connector_gap >= 0:
@@ -894,9 +948,10 @@ struct OpenBoard(Movable):
             got = job.result()
         except e:
             got.problem = String(e)
+        self.text_hash = got.hash
         self.times = "read " + String(got.read_us) + " skim " + String(got.skim_us) + " take " + String(got.take_us)
         if got.problem != "":
-            self.problem = got.problem
+            self._fail(got.problem)
             return True
         if got.back != "":  # (not something the skim opens: the whole import, which raises the why)
             try:
@@ -906,7 +961,7 @@ struct OpenBoard(Movable):
                     self.layer.set_connector_gap(self.gap)
                 self.layer.mark_saved()
             except e:
-                self.problem = String(e)
+                self._fail(String(e))
             return True
         if len(got.load) > 0:
             self.load.append(got.load.pop())
@@ -920,6 +975,9 @@ struct OpenBoard(Movable):
         "" when it opened, else the text back (not a document the skim can open: the caller imports it whole and gets
         the reader's error)."""
         var ld = CanvasLoad(text^)
+        self.job = None  # (an earlier open_later() still reading: what it reads is thrown away)
+        self.broken = False
+        self.problem = ""
         if not ld.ok:
             var back = String("")
             swap(back, ld.text)
@@ -940,6 +998,13 @@ struct OpenBoard(Movable):
         _ = self._adopt(True)
         if len(self.load) > 0:
             return self.load[0].member(key)
+        if self.layer.src.ok:  # (all in: its own text)
+            try:
+                var t = member_text(self.layer.src.text, key)
+                if t != "":
+                    return Json.parse(t)
+            except:
+                pass
         try:
             return Json.parse("{}")
         except:

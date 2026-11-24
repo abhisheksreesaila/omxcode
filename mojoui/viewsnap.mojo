@@ -18,11 +18,12 @@
 # pixel; else that many literal pixels follow.
 
 from std.ffi import external_call
-from std.os import getenv, stat, makedirs
+from std.os import getenv, stat, listdir
 from std.memory import Pointer, bitcast
 from std.sys import argv
 from mojoui.shared import get_shared, put_shared
-from mojoui.libc import rename, unlink
+from mojoui.libc import unlink
+from mojoui.files import private_dir, private_write_parts, clean_temps, keep_under
 from mojoui import libc
 from mojoui.clock import now_ns
 from std.memory.alloc import alloc, Layout
@@ -32,6 +33,7 @@ comptime SLOT_SNAP_RENDERER = 235  # mojoui.shared slot: the GPU 2D renderer's i
 comptime SLOT_SNAP_EXPECT = 236  # mojoui.shared slot: an app expects to restore snapshots (the renderer prewarms)
 comptime SLOT_SNAP_AHEAD = 237  # mojoui.shared slot: the snapshot being read ahead (_Ahead)
 comptime SNAP_AHEAD_NS = 250_000_000  # (a read ahead older than this is not used: the file may have changed)
+comptime SNAP_FOLDER_BYTES = 256 << 20  # kept pictures together, at most: the ones kept longest ago go first
 comptime SNAP_MAGIC = "MOJOSNP1"
 
 
@@ -382,30 +384,37 @@ struct SnapWriter(Movable):
         _put32(out, head.byte_length())
         for c in head.as_bytes():
             out.append(c)
-        var tmp = self.path + ".tmp"
-        try:
-            var f = open(tmp, "w")
-            f.write_bytes(Span(out))
-            f.write_bytes(Span(self.body))
-            f.close()
-        except:
-            return False
-        return rename(tmp, self.path) == 0
+        # (in place in one step, under a name of this process's own, readable by this user alone; the folder kept under its size)
+        var ok = private_write_parts(self.path, [(Int(out.unsafe_ptr()), len(out)), (Int(self.body.unsafe_ptr()), len(self.body))])
+        _ = len(out)
+        if ok:
+            var cut = self.path.rfind("/")
+            if cut > 0:
+                _ = keep_under(String(self.path[byte=0:cut]), ".snap", SNAP_FOLDER_BYTES)
+        return ok
 
 
 def snap_dir_ready(dir: String) -> Bool:
-    """The folder snapshots go in, made if missing."""
-    try:
-        makedirs(dir, exist_ok=True)
-    except:
+    """The folder snapshots go in: made if missing, readable by this user alone (they are pictures of the user's
+    documents), what a process that ended left half-written cleaned out, the whole held to SNAP_FOLDER_BYTES."""
+    if not private_dir(dir):
         return False
+    _ = clean_temps(dir)
+    _ = keep_under(dir, ".snap", SNAP_FOLDER_BYTES)
+    return True
+
+
+def snap_forget(dir: String, keep: List[String]) -> Int:
+    """Every snapshot in `dir` whose file name isn't in `keep` removed (documents deleted or locked since); how many."""
+    var n = 0
     try:
-        var f = open(dir + "/.probe", "w")
-        f.close()
-        _ = unlink(dir + "/.probe")
-        return True
+        for f in listdir(dir):
+            var name = String(f)
+            if name.endswith(".snap") and name not in keep and unlink(dir + "/" + name) == 0:
+                n += 1
     except:
-        return False
+        pass
+    return n
 
 
 # ------------------------------------------------ read ahead (D-8015: mojoui.snapahead reads on a job thread; here the hand-over)

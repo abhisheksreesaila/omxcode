@@ -3,7 +3,9 @@
 # <config>/settings.txt).
 
 from std.os.path import getsize, isfile
-from mojoui.shared import environment, make_dir, arguments
+from std.os import listdir, stat
+from mojoui.shared import environment, make_dir, arguments, serial
+from mojoui.libc import chmod, unlink, rename, open_append, write_fd, close, getpid, clock_gettime
 
 
 def file_name(path: String) -> String:
@@ -216,3 +218,129 @@ def media_path_ok(path: String, own: List[String]) -> Bool:
         if f != "" and p.startswith(String(f.rstrip("/")) + "/"):
             return True
     return False
+
+
+# ------------------------------------------------ private files (review 3, MUST 7): what an app keeps of its user's documents
+
+def private_dir(dir: String) -> Bool:
+    """The folder, made if missing (its parents too), readable by this user alone (0700, also when it was there). False
+    when it can't be made or written."""
+    if dir == "":
+        return False
+    make_dir(dir)
+    _ = chmod(dir, 0o700)
+    var probe = dir + "/.probe-" + String(getpid()) + "-" + String(serial())
+    if not _write_new(probe, 0, 0):
+        _ = unlink(probe)
+        return False
+    _ = unlink(probe)
+    return True
+
+
+def _write_new(path: String, addr: Int, n: Int) -> Bool:
+    var fd = open_append(path)  # (made 0600)
+    if fd < 0:
+        return False
+    var done = 0
+    while done < n:
+        var w = write_fd(fd, addr + done, n - done)
+        if w <= 0:
+            _ = close(fd)
+            return False
+        done += w
+    return close(fd) == 0
+
+
+def private_write_parts(path: String, parts: List[Tuple[Int, Int]]) -> Bool:
+    """A file made of byte runs (address, count), readable by this user alone, in place in one step or not at all: written
+    under a name of its own (no two processes share one), then renamed over the old; nothing is left behind when the disk
+    is full. False when it couldn't be written (the old file stays)."""
+    var tmp = path + ".tmp-" + String(getpid()) + "-" + String(serial())
+    _ = unlink(tmp)
+    var ok = True
+    for p in parts:
+        if not _write_new(tmp, p[0], p[1]):
+            ok = False
+            break
+    if len(parts) == 0:
+        ok = _write_new(tmp, 0, 0)
+    if ok:
+        _ = chmod(tmp, 0o600)
+        ok = rename(tmp, path) == 0
+    if not ok:
+        _ = unlink(tmp)
+    return ok
+
+
+def private_write(path: String, text: String) -> Bool:
+    """private_write_parts of a text."""
+    var ok = private_write_parts(path, [(Int(text.unsafe_ptr()), text.byte_length())])
+    _ = text.byte_length()
+    return ok
+
+
+def clean_temps(dir: String, older_s: Int = 60) -> Int:
+    """Temporary files an ended process left in `dir` (private_write's, and the old fixed ".tmp"): removed when older than
+    older_s; how many."""
+    var n = 0
+    try:
+        for name in listdir(dir):
+            var f = String(name)
+            if f.find(".tmp-") < 0 and not f.endswith(".tmp") and not f.startswith(".probe-"):
+                continue
+            var path = dir + "/" + f
+            if age_s(path) >= older_s and unlink(path) == 0:
+                n += 1
+    except:
+        pass
+    return n
+
+
+def _wall_ns() -> Int:
+    var ts = List[Int](length=2, fill=0)  # struct timespec { seconds; nanoseconds }
+    _ = clock_gettime(0, Int(ts.unsafe_ptr()))  # CLOCK_REALTIME (the real one: MOJOUI_NOW freezes what an app shows, not files)
+    var ns = ts[0] * 1_000_000_000 + ts[1]
+    _ = len(ts)
+    return ns
+
+
+def age_s(path: String) -> Int:
+    """Seconds since the file last changed (-1: no such file)."""
+    try:
+        return (_wall_ns() - Int(stat(path).st_mtimespec.as_nanoseconds())) // 1_000_000_000
+    except:
+        return -1
+
+
+def keep_under(dir: String, suffix: String, most_bytes: Int) -> Int:
+    """A cache folder's files ending in `suffix` held to most_bytes together: the ones changed longest ago go first. How
+    many went."""
+    var paths = List[String]()
+    var sizes = List[Int]()
+    var ages = List[Int]()
+    var total = 0
+    try:
+        for name in listdir(dir):
+            var f = String(name)
+            if not f.endswith(suffix):
+                continue
+            var st = stat(dir + "/" + f)
+            paths.append(dir + "/" + f)
+            sizes.append(Int(st.st_size))
+            ages.append(Int(st.st_mtimespec.as_nanoseconds()))
+            total += Int(st.st_size)
+    except:
+        pass
+    var gone = 0
+    while total > most_bytes and len(paths) > 0:
+        var at = 0
+        for i in range(1, len(ages)):
+            if ages[i] < ages[at]:
+                at = i
+        if unlink(paths[at]) == 0:
+            gone += 1
+        total -= sizes[at]
+        _ = paths.pop(at)
+        _ = sizes.pop(at)
+        _ = ages.pop(at)
+    return gone
