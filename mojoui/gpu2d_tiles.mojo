@@ -665,6 +665,7 @@ struct Tiles(Movable):
         the document the snapshot was kept of, and each tile is what a raster at this zoom draws there (test_viewsnap:
         identical), good for the part it holds. Nothing is rastered again to replace it; a pan extends a tile by strips
         (_extend), an edit marks its part stale, as for any tile."""
+        self.sets[s].empty = Dict[Int, Bool]()  # (the tiles of the picture before: the restored ones hold what they hold)
         swap(self.sets[s].tiles, self.sets[s].fb)
         self.sets[s].k = self.sets[s].fb_k
         self.sets[s].fb_k = 0
@@ -773,6 +774,7 @@ struct Tiles(Movable):
         for e in self.sets[s].tiles.items():
             self.free.append(e.value)
         self.sets[s].tiles = Dict[Int, Int]()
+        self.sets[s].empty = Dict[Int, Bool]()
         self.sets[s].good = Dict[Int, Int]()
         self.sets[s].good_r = List[Float64]()
         self.sets[s].dirty = Dict[Int, Int]()
@@ -846,6 +848,7 @@ struct Tiles(Movable):
                             self.free.append(self.sets[s].tiles.pop(e.key))
                         except:
                             pass
+                    self.sets[s].empty = Dict[Int, Bool]()
                     swap(self.sets[s].fb, self.sets[s].tiles)
                     swap(self.sets[s].fb_good, self.sets[s].good)
                     swap(self.sets[s].fb_good_r, self.sets[s].good_r)
@@ -1016,6 +1019,8 @@ struct Tiles(Movable):
             for key in far:
                 try:
                     self.free.append(self.sets[s].tiles.pop(key))
+                    if key in self.sets[s].empty:
+                        _ = self.sets[s].empty.pop(key)
                     _ = self.sets[s].good.pop(key)
                     if key in self.sets[s].dirty:
                         _ = self.sets[s].dirty.pop(key)
