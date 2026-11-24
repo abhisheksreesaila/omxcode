@@ -9128,6 +9128,11 @@ def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
             host[].rt.app.window_shown(False)
             return 1  # TRUE: GTK doesn't destroy it
         print("mojoui: no tray to come back from (no StatusNotifierWatcher took the item): closing ends the app", flush=True)
+    if not host[].rt.closed and not host[].rt.app.may_close():  # (something would be lost: the app says what)
+        var d = host[].rt.refresh()
+        host[].apply(d, host_addr)
+        print("WINDOW: kept open", flush=True)
+        return 1  # TRUE: GTK doesn't destroy it
     host[].rt.closing()  # (what must not be lost first; its pictures after)
     if host[].rt.app.draws_after_closing():
         host[].keep_views(host_addr)

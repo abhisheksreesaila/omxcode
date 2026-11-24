@@ -547,6 +547,9 @@ struct Main(App):
     def draws_after_closing(self) -> Bool:
         return len(self.web) > 0
 
+    def may_close(mut self) -> Bool:
+        return self.web[0].may_close() if len(self.web) > 0 else True
+
     def closing(mut self):
         if len(self.web) > 0:
             self.web[0].close()

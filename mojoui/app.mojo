@@ -172,6 +172,12 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def may_close(mut self) -> Bool:
+        """The person asked to close the window (or to quit): False keeps it open, for something that would be lost
+        (edits that can't be written anywhere); say why on the screen, and answer True when they ask again. Never asked
+        when the system ends the app. The default is True."""
+        return True
+
     def closing(mut self):
         """The app is about to close: the person closed its window (or chose Quit), the system is quitting it, a web page's
         session ended, or a test's `quit` step closed the window as a window manager does. Finish what must not be lost

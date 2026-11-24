@@ -16,8 +16,8 @@
 from mojoui.sqlite import Database, Statement
 from mojoui.json import Json, json_string
 from mojoui.files import private_write
-from mojoui.libc import unlink
-from std.os import listdir
+from mojoui.libc import unlink, usleep
+from std.os import listdir, getenv
 from std.time import perf_counter_ns
 
 comptime SAVED = 0
@@ -164,6 +164,7 @@ def save_row(mut db: Database, s: RowSave) -> SaveResult:
     except e:
         return SaveResult(FAILED, s.expected, "", String(e))
     try:
+        _stage("begun")
         var up = db.prepare(s.sql())
         var at = 1
         for ref v in s.vals:
@@ -173,6 +174,7 @@ def save_row(mut db: Database, s: RowSave) -> SaveResult:
         up.bind(at + 1, s.id)
         up.bind(at + 2, s.expected)
         _ = up.step()
+        _stage("written")
         if db.changes() == 0:
             _undo(db)
             return SaveResult(CONFLICT, s.expected, "", "Resource revision does not match")
@@ -187,7 +189,9 @@ def save_row(mut db: Database, s: RowSave) -> SaveResult:
             q.bind(1, s.id)
             if q.step():
                 value = q.text(0)
+        _stage("before commit")
         db.commit()
+        _stage("committed")
         return SaveResult(SAVED, s.expected + 1, value, "")
     except e:
         _undo(db)
@@ -377,6 +381,19 @@ struct Unsaved(Copyable, Movable):
         self.conflict = conflict
 
 
+def unsaved_text(u: Unsaved) -> String:
+    """A held save as its file has it (SaveOutbox.put, RowSaver while a locked file keeps it waiting)."""
+    return ('{"id":' + String(u.id) + ',"kind":' + json_string(u.kind) + ',"revision":' + String(u.revision) + ',"conflict":' + ("true" if u.conflict else "false")
+            + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"content":' + json_string(u.content) + "}")
+
+
+def _stage(name: String):
+    """(tests: MOJOUI_SAVE_STAGE) The process stops here for a while, for something to be done to it at this very moment."""
+    if getenv("MOJOUI_SAVE_STAGE") == name:
+        print("STAGE: " + name, flush=True)
+        _ = usleep(20_000_000)
+
+
 struct SaveOutbox(Movable):
     """(review 3, SHOULD 7) Saves that failed or met a conflict, held until they land or the person drops them: in memory,
     and as files (0600, in a 0700 folder of the app's) written at once, so a switch, a quit or a crash loses nothing. One
@@ -404,8 +421,7 @@ struct SaveOutbox(Movable):
     def put(mut self, var u: Unsaved) -> Bool:
         """Held; True when it is on disk too."""
         var i = self.find(u.id)
-        var text = ('{"id":' + String(u.id) + ',"kind":' + json_string(u.kind) + ',"revision":' + String(u.revision) + ',"conflict":' + ("true" if u.conflict else "false")
-                    + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"content":' + json_string(u.content) + "}")
+        var text = unsaved_text(u)
         var id = u.id
         if i >= 0:
             self.items[i] = u^

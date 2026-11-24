@@ -5736,6 +5736,30 @@ def on_will_terminate[A: App](target: Int, cmd: Int, note: Int) abi("C"):
             host_at[A](addr)[].keep_views(addr)
 
 
+def on_window_should_close[A: App](target: Int, cmd: Int, window: Int) abi("C") -> c_int:
+    """The close button, Cmd+W: NO when the app would lose something (App.may_close); it says what."""
+    var id = msg(window, "identifier")
+    if id == 0:
+        return 1
+    var host = host_at[A](msg(id, "longLongValue"))
+    if host[].rt.closed or host[].rt.app.may_close():
+        return 1
+    var d = host[].rt.refresh()
+    host[].apply(d)
+    print("WINDOW: kept open", flush=True)
+    return 0
+
+
+def on_should_terminate[A: App](target: Int, cmd: Int, app: Int) abi("C") -> Int:
+    """Quit (Cmd+Q): NSTerminateCancel (0) when the app would lose something (App.may_close), NSTerminateNow (1) else."""
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            return 1 if on_window_should_close[A](target, cmd, w) != 0 else 0
+    return 1
+
+
 def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
     """The window is closing (its close button, Cmd+W): App.closing, once, while the window still knows its host."""
     var window = msg(notification, "object")
@@ -5828,6 +5852,8 @@ def run[A: App]() -> c_int:
     add_protocol(c, "NSTableViewDataSource")
     add_method(c, "applicationShouldTerminateAfterLastWindowClosed:", quit_when_closed, "B@:@")
     add_method(c, "applicationWillTerminate:", on_will_terminate[A], "v@:@")  # (App.closing)
+    add_method(c, "windowShouldClose:", on_window_should_close[A], "B@:@")  # (App.may_close)
+    add_method(c, "applicationShouldTerminate:", on_should_terminate[A], "Q@:@")
     add_method(c, "windowWillClose:", on_window_will_close[A], "v@:@")
     register_class(c)
     var canvas = new_class("MojoCanvas", "NSImageView")
