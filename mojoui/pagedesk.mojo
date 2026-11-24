@@ -14,7 +14,7 @@ from std.collections import Dict
 from std.os import getenv
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint, stroke_outline
-from mojoui.shared import serial
+from mojoui.shared import serial, new_key
 from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
@@ -943,6 +943,7 @@ struct BoardTools(Movable):
     opens the page up). The look of new objects is the app's (the fields below). `changed` turns True on every change
     to the document (the app saves then)."""
     var tool: String
+    var draft_key: String  # the new text's name in the file, once a save took it ("": none did)
     var editing: Int  # an object being written (-1: none; -2: a new text not made yet)
     var words: WordsEdit  # its words, caret and selection
     var edit_x: Float64
@@ -1017,6 +1018,7 @@ struct BoardTools(Movable):
         self.erased = False
         self.before_press = List[Int]()
         self.handles = List[Float64]()
+        self.draft_key = ""
         self.handle = -1
         self.box_x0 = 0
         self.box_y0 = 0
@@ -1087,6 +1089,7 @@ struct BoardTools(Movable):
         self.words.insert(words, now_ms())
         if self.editing >= 0:
             layer.set_words(self.editing, self.words.text())
+        self.changed = True  # (a new text's words too: saved as they are typed)
         return True
 
     def words_caret(mut self, layer: ObjectLayer, v: DeskView) -> Tuple[Float64, Float64, Float64, Float64]:
@@ -1116,6 +1119,41 @@ struct BoardTools(Movable):
             return layer.selected.copy()
         return List[Int]()
 
+    def draft(mut self, mut layer: ObjectLayer):
+        """What is being written as the board would hold it, for a save to take meanwhile (a person's words reach the file
+        while they type): a new text becomes layer.draft (the board, its undo and its tiles don't change), a text written on
+        gets its height. layer.draft stays until the next call."""
+        layer.draft = None
+        if self.editing == -2:
+            var words = self.words.text()
+            if String(words.strip()) != "":
+                self.words.lay()
+                var row = Float64(Int(self.text_size * self.text_line * 100 + 0.5)) / 100
+                var o = Obj(0, TEXT, self.edit_x, self.edit_y, self.edit_w, row * Float64(max(len(self.words.lines), 1)), self.text_color)
+                o.text = words
+                o.line_width = 0
+                o.family = self.text_family
+                o.size = self.text_size
+                o.line_height = self.text_line
+                o.weight = 400
+                o.markdown = True
+                if self.draft_key == "":
+                    self.draft_key = new_key("obj-")  # (the same node from one save to the next, and when it is made)
+                o.key = self.draft_key
+                o.z = layer.z_top + 1
+                layer.draft = o^
+        elif self.editing >= 0:
+            self.hug_words(layer)
+
+    def hug_words(mut self, mut layer: ObjectLayer):
+        """The text being written on, as high as its words."""
+        var q = layer.index(self.editing)
+        if q >= 0 and layer.objs[q].kind == TEXT and self.words.ed.history.can_undo():  # (its words changed: so may its height)
+            self.words.lay()
+            var pad = layer.objs[q].pad
+            var row = self.words_box(layer)[3]
+            layer.set_height(self.editing, row * Float64(max(len(self.words.lines), 1)) + 2 * pad)
+
     def finish(mut self, mut layer: ObjectLayer):
         """Ends the writing in progress: a new text with words is made (one undo step with them), a sticky keeps its words."""
         if self.editing == -2:
@@ -1126,15 +1164,16 @@ struct BoardTools(Movable):
                 var id = layer.add_text(self.edit_x, self.edit_y, self.edit_w, Float64(Int(self.text_size * self.text_line * 100 + 0.5)) / 100 * Float64(max(len(self.words.lines), 1)), words,
                                         self.text_size, self.text_color)
                 layer.restyle(id, self.text_family, self.text_size, self.text_line, 400, True, self.text_color)
+                if self.draft_key != "":
+                    layer.objs[layer.index(id)].key = self.draft_key
                 layer.end_gesture()
                 self.changed = True
+            elif self.draft_key != "":  # (its words were saved while they were written, and taken back: so is it in the file)
+                self.changed = True
+            layer.draft = None
+            self.draft_key = ""
         elif self.editing >= 0:
-            var q = layer.index(self.editing)
-            if q >= 0 and layer.objs[q].kind == TEXT and self.words.ed.history.can_undo():  # (its words changed: so may its height)
-                self.words.lay()
-                var pad = layer.objs[q].pad
-                var row = self.words_box(layer)[3]
-                layer.set_height(self.editing, row * Float64(max(len(self.words.lines), 1)) + 2 * pad)
+            self.hug_words(layer)
             layer.end_gesture()
             if self.words.ed.history.can_undo():  # (a caret that came and went changed nothing)
                 self.changed = True
@@ -1353,9 +1392,10 @@ struct BoardTools(Movable):
                 self.tool = "select"
                 return True
             var r = self.words.key(name, mods, now_ms())
-            if r == 2 and self.editing >= 0:
-                layer.set_words(self.editing, self.words.text())
-                self.changed = True
+            if r == 2:
+                if self.editing >= 0:
+                    layer.set_words(self.editing, self.words.text())
+                self.changed = True  # (a new text's words too: saved as they are typed, layer.draft)
             return r != 0
         if (mods & 2) != 0 and (name == "y" or name == "Y"):
             layer.select_on_undo = True

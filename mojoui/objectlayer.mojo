@@ -347,6 +347,7 @@ struct Change(Undoable):
 struct ObjectLayer(Movable):
     var doc: Int  # which document this is (a process-wide serial, never shared): its versions and ids mean something only with it
     var read_only: Bool  # (review 3) a document that couldn't be read: editing tools refuse it
+    var draft: Optional[Obj]  # (review 4) an object still being written: saved and searched as if it were there, not yet on the board
     var src: CanvasSource  # (review 3) the document's own text, when it was read from one: what wasn't edited is saved as it was
     var adopted: Dict[Int, Bool]  # ids of its document that became objects (or joined a delete made while it was opening)
     var touched: Dict[Int, Bool]  # objects that may differ from their source (edited, undone, re-routed: compared at a save)
@@ -418,6 +419,7 @@ struct ObjectLayer(Movable):
     def __init__(out self):
         self.doc = serial()
         self.read_only = False
+        self.draft = None
         self.src = CanvasSource()
         self.touched = Dict[Int, Bool]()
         self.adopted = Dict[Int, Bool]()
@@ -2494,6 +2496,8 @@ def objects_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, pag
             var n = _made_node(o, node_key(o))
             if n != "":
                 nodes.append(n)
+    if layer.draft:
+        nodes.append(_made_node(layer.draft.value(), node_key(layer.draft.value())))
     return ('{"nodes":[' + ",".join(nodes) + '],"edges":[' + ",".join(edges) + '],"pn":{"schemaVersion":1,"page":{"columns":' + String(columns)
             + ',"rows":' + String(rows) + '},"grid":{"width":' + _jn(page_w) + ',"height":' + _jn(page_h) + "}}}")
 
@@ -2571,6 +2575,10 @@ def export_json_canvas(layer: ObjectLayer, columns: Int = 1, rows: Int = 1, page
         if made != "":
             nodes.append(DocPiece(made, 0, -1))
             node_at.append(-1)
+    if layer.draft:
+        same = False
+        nodes.append(DocPiece(_made_node(layer.draft.value(), node_key(layer.draft.value())), 0, -1))
+        node_at.append(-1)
     # what made no object stays (its node isn't an object, an edge whose end isn't a node): deleted objects don't, nor
     # edges that end at one
     var gone = Dict[String, Bool]()
@@ -2870,4 +2878,6 @@ def reading_text(layer: ObjectLayer) -> String:
         if a > 0:
             out += "\n\n"
         out += String(layer.objs[idx[a]].text.strip())
+    if layer.draft:
+        out += ("\n\n" if out != "" else "") + String(layer.draft.value().text.strip())
     return out^

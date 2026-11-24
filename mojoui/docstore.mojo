@@ -472,6 +472,19 @@ struct SaveOutbox(Movable):
             return False
         return private_write(self.path(id), text)
 
+    def spill(mut self, u: Unsaved) -> Bool:
+        """A save that waits its turn behind one a locked file holds up: on disk meanwhile (until unspill; a start after a crash
+        takes it over any earlier version of the same document). True: it is."""
+        return self.dir != "" and private_write(self.spill_path(u.id), unsaved_text(u))
+
+    def spill_path(mut self, id: Int) -> String:
+        self.claim()
+        return self.dir + "/unsaved-" + self.space + "-" + String(id) + "q." + self.owner + ".json"
+
+    def unspill(mut self, id: Int):
+        if self.dir != "" and self.claimed == self.dir:
+            _ = unlink(self.spill_path(id))
+
     def drop(mut self, id: Int):
         """It landed (or the person gave it up)."""
         var i = self.find(id)
@@ -512,6 +525,7 @@ struct SaveOutbox(Movable):
             return
         sort(names)
         var start = "unsaved-" + self.space + "-"
+        var whose = List[String]()  # (each item's owner)
         var asked = List[String]()  # the owners asked after, and whether each is gone
         var answer = List[Bool]()
         var locks = List[ArcPointer[FileLock]]()
@@ -549,8 +563,13 @@ struct SaveOutbox(Movable):
                 if have < 0:
                     if rename(full, self.path(u.id)) == 0:
                         self.items.append(u^)
+                        whose.append(owner)
                     continue
                 var mine = self.path(u.id)
+                if owner != "" and have < len(whose) and whose[have] == owner and stem[byte=0:dot].endswith("q"):  # (the same window's later version)
+                    if rename(full, mine) == 0:
+                        self.items[have] = u^
+                    continue
                 var spare = String(mine[byte = 0 : mine.find(".", mine.rfind("/"))]) + "x" + new_key("e") + "." + self.owner + ".json"
                 if u.revision > self.items[have].revision:  # (the later one is the document's, the earlier the spare)
                     if rename(mine, spare) == 0 and rename(full, mine) == 0:

@@ -24,7 +24,7 @@ from mojoui.libc import unlink
 from std.memory import ArcPointer
 
 comptime PATIENCE_US = 60_000_000  # how long a save waits for a locked file
-comptime SAVE_WAIT_US = 10_000_000  # how long done(wait=True) waits before it gives up (closing: never a window that hangs)
+comptime SAVE_WAIT_US = 3_000_000  # how long done(wait=True) waits before it gives up (closing: never a window that hangs)
 comptime TRY_MS = 100  # SQLite's own busy wait, between looks at whether to go on
 
 
