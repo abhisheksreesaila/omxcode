@@ -1,6 +1,7 @@
 # Goal 79: the web-look components on their own (mojoui.skin, mojoui.strokeicon, mojoui.notesshell, mojoui.pagesheet,
 # fonttext.line_metrics). Expected values are the web app's computed styles (docs/goals/79/ref.mjs's style dump).
 #   pixi run mojo run -I . -I examples/pnote tests/test_notesshell.mojo        → "notesshell: ok"
+from std.sys import CompilationTarget
 from mojoui.skin import hexc
 from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
 from mojoui.canvas import Surface, rgba
@@ -67,7 +68,12 @@ def main() raises:
     check(boxes.find("#sidebar") >= 0 and boxes.find("row:✈️ Lighthouse trip") >= 0 and boxes.find(".nav-row:Travel 0") >= 0, "panel boxes")
     var r = boxes.find("#rail-new-note")
     check(boxes.r[r * 4] == 27 and boxes.r[r * 4 + 1] == 133 and boxes.r[r * 4 + 2] == 258, "Quick note sits where the web's does")
-    check(title_island_width("Lighthouse trip", False) == 148, "title island width")
+    # (each machine against its own web reference: 148 on Linux, where text advances are whole pixels; on the Mac the
+    # title's face is 145.91 wide inside two 1 px borders: build/g79/ref-mac/page.boxes.json)
+    comptime if CompilationTarget.is_macos():
+        check(abs(title_island_width("Lighthouse trip", False) - 147.91) < 0.05, "title island width (the Mac's)")
+    else:
+        check(title_island_width("Lighthouse trip", False) == 148, "title island width")
     var sc = Scene(w, h, 1.0)
     var page = PageSheet()
     page.set_markdown("# Lighthouse trip\n\nThree days on the coast in **late May**.\n")

@@ -1,6 +1,7 @@
 # Goal 79: mojoui.omnibar, mojoui.islandcard, mojoui.settingswin, mojoui.pagesheet's editing and draw_radial_steps on
 # their own, against the web app's computed boxes (docs/goals/79/ref.mjs) and its rules.
 #   pixi run mojo run -I . -I examples/pnote tests/test_webpieces.mojo        → "webpieces: ok"
+from std.sys import CompilationTarget
 from pnlook import skin_named, pn_boxes, pn_panel, pn_skin_cards, canvas_dock_items
 from mojoui.scene import Scene
 from mojoui.notesshell import Boxes, draw_radial_steps
@@ -44,7 +45,13 @@ def main() raises:
     o.draw(sc, bx, 1440, 900, 1.6, sk)
     check(near(box(bx, "[Search or jump to]"), [340.0, 96.0, 760.0, 456.39]), "spotlight box")
     check(near(box(bx, "#omni-row-0"), [349.0, 224.0, 492.0, 56.0]), "first row box")
-    check(near(box(bx, ".omni-chip:Notes 2"), [400.0, 162.0, 68.0, 25.0]), "pill box")
+    # (each machine against its own web reference: on Linux the browser's text advances are whole pixels, on the Mac
+    # fractions: build/g79/ref/search.boxes.json and build/g79/ref-mac/search.boxes.json)
+    var pill: List[Float64] = [400.0, 162.0, 68.0, 25.0]
+    comptime if CompilationTarget.is_macos():
+        pill = [398.27, 162.0, 67.83, 25.0]
+        check(abs(box(bx, ".omni-chip:Notes 2")[0] - 398.27) < 0.05 and abs(box(bx, ".omni-chip:Notes 2")[2] - 67.83) < 0.05, "pill box, to 0.05 on the Mac")
+    check(near(box(bx, ".omni-chip:Notes 2"), pill), "pill box")
     check(word_match("Lighthouse trip", "li") and word_match("Reading list", "li") and not word_match("Garden plan", "li"), "word starts")
     check(relative_time("2026-11-20 04:00:00", utc_epoch("2026-11-20 04:00:30")) == "now", "now")
     check(relative_time("2026-11-20 04:00:00", utc_epoch("2026-11-20 04:05:10")) == "5 min ago", "minutes")
