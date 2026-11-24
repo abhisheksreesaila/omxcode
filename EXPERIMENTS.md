@@ -5,6 +5,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 ---
 
 
+## Goal 81 (2026-11-24): what the GPUI study found in our app layer
+Setup: Linux (4 cores, GTK headless) and the owner's M4. What worked: random screens, patched against built fresh, found
+eight faults nobody knew of besides the study's; Myers' diff plus a rising run keeps every row's widgets at any length; input
+that comes while a rebuild waits is held by widget and sent after; a hang monitor always on; pictures shared and
+filtered; Metal sends only new glyph rows. What broke: our own proofs first (a counter that couldn't fail, a check that ran
+less than it said: the review caught both); the picture counter wrote the environment (not thread safe), dropped. The Mac's
+new clock isn't measured (screen locked). New symbols in the Mac stub: _pipe, _usleep. Next small step: run
+`scripts/check M7` with the Mac unlocked, then merge. Report: docs/goals/81-report.md.
+
 ## Goal 80 (2026-11-23): the 2D renderer raced against nanoui
 Setup: Linux, Ryzen 5900X, RTX 3090; nanoui cfe6000 (Zig 0.17) on its own five scenes, both headless GL. What worked:
 culling before shaping, learned ASCII text, block-written batches, polygon bounds, Gaussian shadows, CPU executor on
