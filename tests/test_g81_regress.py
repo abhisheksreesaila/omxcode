@@ -82,7 +82,32 @@ def main():
                 if r.returncode != 0:
                     failed.append(f"{a} {what}")
                     print("  ", a, what, (r.stdout + r.stderr)[-300:].replace("\n", " "))
-        print("FACT builds", len(LINUX) + len(MAC))
+        # each Linux app opens (headless) and ends by itself; the AppKit examples do on the Mac, unshown (or it can't be reached: said, not judged)
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import headless
+        headless.ensure()
+        for a in LINUX:
+            exe = ROOT / "build" / a / "linux" / a
+            env = dict(os.environ, MOJOUI_TEST="pause:500", OMX_CONFIG=str(ROOT / "build" / "g81" / "config"), HOME=str(ROOT / "build" / "g81" / "home"))
+            (ROOT / "build" / "g81" / "home").mkdir(parents=True, exist_ok=True)
+            try:
+                r = subprocess.run([str(exe)], cwd=ROOT, capture_output=True, text=True, timeout=120, env=env)
+                bad = r.returncode != 0 or "CRITICAL" in r.stderr
+                why = [x for x in (r.stdout + r.stderr).splitlines() if "CRITICAL" in x or "rror" in x][:2] or [f"exit {r.returncode}"]
+            except Exception as x:
+                bad, why = True, [str(x)[:200]]
+            if bad:
+                failed.append(f"{a} runs")
+                print("  ", a, "run:", why)
+        m = run(["scripts/mac81", "apps"], 900)
+        if m.returncode == 75 or "UNREACHABLE" in m.stdout:
+            print("   the Mac couldn't be reached: its apps weren't run")
+        elif "mac_apps: ok" not in m.stdout:
+            failed.append("mac apps")
+            print("   mac apps:", m.stdout[-300:])
+        else:
+            print("   mac apps: 3 built and run")
+        print("FACT builds", len(LINUX) * 2 + len(MAC) + 1)
         print("FACT builds_failed", len(failed))
         m = run(["pixi", "run", "python", "scripts/components.py", "--check"], 300)
         print("FACT matrix", 1 if m.returncode == 0 else 0)
