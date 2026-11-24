@@ -60,6 +60,7 @@ from mojoui.hosts.objc import (
 )
 
 comptime NODE_BITS = 16
+comptime LINGER_NS = 1_000_000_000  # (D-8060) how long the frame clock keeps ticking with nothing to draw: the next event of a gesture meets a running one
 comptime MASK_SHIFT = 1 << 17  # NSEventModifierFlags
 comptime MASK_OPTION = 1 << 19
 comptime MASK_COMMAND = 1 << 20
@@ -316,7 +317,13 @@ struct AppKitHost[A: App](Movable):
     var tcells: List[Tuple[Int, Int, Int, Int, Int]]  # a Table's cells: (table, cell, its width constraint (0: the last column's), column, child node): fit_tables
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
-    var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
+    var link: Int  # what ticks every canvas, once a frame (0 = stopped): the screen's own clock (a CADisplayLink), else an NSTimer at 60 Hz
+    var link_is_screen: Bool
+    var link_ticks: Int  # ticks the clock itself gave (a prompt tick after input isn't one)
+    var link_seen: Int  # link_ticks at the last look (frameCheck:)
+    var idle_from: Int  # when the canvases went idle with the clock running (ns; 0: they aren't): it stops LINGER_NS later
+    var prompt_due: Bool  # a tick right after this event is on its way
+    var common_modes: Int  # NSRunLoopCommonModes itself (Core Foundation knows it by address: a string that only reads the same is a mode of its own, never run)
     var activity: InputActivity
     var watch: FrameWatch
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
@@ -417,6 +424,12 @@ struct AppKitHost[A: App](Movable):
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
+        self.link_is_screen = False
+        self.link_ticks = 0
+        self.link_seen = 0
+        self.idle_from = 0
+        self.prompt_due = False
+        self.common_modes = 0
         self.activity = InputActivity()
         self.watch = FrameWatch(env("MOJOUI_FRAME_WATCH") == "1")
         self.fx_due = -1
@@ -2166,9 +2179,7 @@ struct AppKitHost[A: App](Movable):
         for ref c in self.canvases:
             c.drop_surfaces()
         self.canvases = List[AppleCanvas]()
-        if self.link != 0:
-            _ = msg(self.link, "invalidate")
-            self.link = 0
+        self.stop_frames()
         var theme = self.rt.app.theme()
         if theme.key() != self.theme_key:  # Settings → Appearance: the skin switches live (D-156)
             self.theme_key = theme.key()
@@ -3085,10 +3096,14 @@ struct AppKitHost[A: App](Movable):
             self.drew_tick_ns = began
         self.finish_frame()
         self.watch.ticked(began, self.g2d_frames != frames0)
-        if self.link != 0 and self.idle():  # nothing to animate or redraw: stop waking up
-            self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
-            _ = msg(self.link, "invalidate")
-            self.link = 0
+        if not self.idle():
+            self.idle_from = 0
+        elif self.link != 0:  # nothing to animate or redraw: stop waking up, but not between two events of one gesture (each would wait for a clock to start: D-8060)
+            if self.idle_from == 0:
+                self.idle_from = Int(now_ns())
+            elif Int(now_ns()) - self.idle_from > LINGER_NS:
+                self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
+                self.stop_frames()
 
     def finish_frame(mut self):
         """After a frame's draws: the window draws and commits its own views, then GPU frames are shown oldest first,
@@ -3111,17 +3126,74 @@ struct AppKitHost[A: App](Movable):
         """Something may need drawing (a new version, frames, a new size): tick again."""
         self.start_frames()
 
-    def start_frames(mut self):
-        """Ticks every canvas 60 times a second until they're idle. A plain NSTimer, in the common run-loop modes (it keeps
-        ticking while a slider or a menu tracks the mouse). The view's display link (macOS 14+) never fired on the owner's
-        Mac (macOS 26, 2026-10-22: no canvas ever drew), and a timer doesn't depend on the view being on screen."""
-        if self.link != 0 or len(self.canvases) == 0:
+    def on_screen(self) -> Bool:
+        """Whether any of the window shows (not hidden, covered whole, minimized, or on a locked screen)."""
+        return self.window != 0 and (msg(self.window, "occlusionState") & 2) != 0  # NSWindowOcclusionStateVisible
+
+    def stop_frames(mut self):
+        if self.link == 0:
             return
-        self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
-        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, ns_string("kCFRunLoopCommonModes"))
+        _ = msg(self.link, "invalidate")
+        if self.link_is_screen:
+            _ = msg(self.link, "release")
+        self.link = 0
+        self.idle_from = 0
+
+    def start_frames(mut self):
+        """Ticks every canvas once a frame, by the clock of the screen the window is on, until they have been idle for a while;
+        when no clock was running, a first tick comes right after the event that asked (D-8060). A screen's clock that doesn't
+        tick (a window that can't be seen, a locked screen) is replaced by the 60 Hz NSTimer (frameCheck:). Both in the common
+        run-loop modes: they keep ticking while a slider or a menu tracks the mouse."""
+        if len(self.canvases) == 0:
+            return
+        self.idle_from = 0
+        if self.link != 0:
+            return
+        if self.common_modes == 0:
+            var name = String("NSRunLoopCommonModes")
+            var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
+            self.common_modes = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")
+        if env("MOJOUI_FRAME_CLOCK") != "timer" and self.on_screen():
+            self.link = msg(self.window, "displayLinkWithTarget:selector:", self.canvases[0].view, sel("canvasFrame:"))
+            if self.link != 0:
+                self.link = msg(self.link, "retain")
+                self.link_is_screen = True
+                _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), self.common_modes)
+                self.link_seen = self.link_ticks
+                self.check_frames()
+        if self.link == 0:
+            self.start_timer()
         self.watch.started()
+        if not self.prompt_due:
+            self.prompt_due = True
+            var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes)
+            _ = msg(self.canvases[0].view, "performSelector:withObject:afterDelay:inModes:", sel("canvasFrame:"), 0, Float64(0), modes)
         if self.ticks == 0:
-            self.report.note("frames: timer started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO TIMER") + ")")
+            self.report.note("frames: " + ("the screen's clock" if self.link_is_screen else "timer") + " started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO CLOCK") + ")")
+
+    def start_timer(mut self):
+        self.link_is_screen = False
+        self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
+        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, self.common_modes)
+
+    def check_frames(self):
+        """Looks at the screen's clock again in 0.1 s (frameCheck:)."""
+        var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes)
+        _ = msg(self.canvases[0].view, "performSelector:withObject:afterDelay:inModes:", sel("frameCheck:"), 0, Float64(0.1), modes)
+
+    def frames_checked(mut self):
+        """0.1 s later: the screen's clock has ticked, or the timer takes its place."""
+        if self.link == 0 or not self.link_is_screen or len(self.canvases) == 0:
+            return
+        if self.link_ticks != self.link_seen:
+            self.link_seen = self.link_ticks
+            self.check_frames()
+            return
+        self.stop_frames()
+        if len(self.canvases) > 0:
+            self.start_timer()
+        if self.watch.on:
+            print("FRAMEWATCH: the screen's clock doesn't tick: timer", flush=True)
 
     def keep_views(mut self, self_addr: Int):
         """(D-8016) The window is closing: a tiled canvas whose view is settled but not kept yet (a note opened and left
@@ -3781,7 +3853,15 @@ def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
 
 def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
     var t = from_tag(view)
+    if timer == 0:  # (the tick right after the event that started the clock)
+        host_at[A](t[0])[].prompt_due = False
+    else:
+        host_at[A](t[0])[].link_ticks += 1
     host_at[A](t[0])[].tick(msg[Float64](msg(cls("NSProcessInfo"), "processInfo"), "systemUptime"), t[0])
+
+
+def on_frame_check[A: App](view: Int, cmd: Int, nothing: Int) abi("C"):
+    host_at[A](from_tag(view)[0])[].frames_checked()
 
 
 def on_vsync_seen[A: App](view: Int, cmd: Int, link: Int) abi("C"):
@@ -4530,7 +4610,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
     if host[].watch.on:
         if host[].watch.link == 0 and host[].window != 0:
             host[].watch.link = msg(msg(host[].window, "displayLinkWithTarget:selector:", host[].canvases[k].view, sel("vsyncSeen:")), "retain")
-            _ = msg(host[].watch.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), ns_string("kCFRunLoopCommonModes"))
+            _ = msg(host[].watch.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), host[].common_modes)
         var scr = msg(host[].window, "screen")
         print("FRAMEWATCH: screen maximumFramesPerSecond=" + String(msg(scr, "maximumFramesPerSecond") if scr != 0 else -1) + " backingScale=" + one_decimal(msg[Float64](host[].window, "backingScaleFactor"))
               + " occlusion=" + String(msg(host[].window, "occlusionState")) + " canvas " + one_decimal(w) + "x" + one_decimal(h), flush=True)
@@ -4671,9 +4751,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var wait_by = Int(now_ns()) + 3_000_000_000  # (from a drawn, quiet canvas)
     while not host[].idle() and Int(now_ns()) < wait_by:
         pump_run_loop(0.005)
-    if host[].link != 0:
-        _ = msg(host[].link, "invalidate")
-        host[].link = 0
+    host[].stop_frames()
     node = canvas_node_at(host[], tag)
     k = host[].canvas_at(node) if node >= 0 else -1
     if k < 0:
@@ -6106,6 +6184,7 @@ def run[A: App]() -> c_int:
     register_class(c)
     var canvas = new_class("MojoCanvas", "NSImageView")
     add_method(canvas, "canvasFrame:", on_canvas_frame[A], "v@:@")
+    add_method(canvas, "frameCheck:", on_frame_check[A], "v@:@")
     add_method(canvas, "vsyncSeen:", on_vsync_seen[A], "v@:@")
     add_method(canvas, "canvasResized:", on_canvas_resized[A], "v@:@")
     add_method(canvas, "canvasPan:", on_canvas_pan[A], "v@:@")
