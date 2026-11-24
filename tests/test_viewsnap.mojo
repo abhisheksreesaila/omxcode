@@ -14,7 +14,7 @@ from std.testing import assert_true, assert_equal
 from std.random import random_ui64, seed
 from std.os import getenv
 from std.time import perf_counter_ns
-from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, SnapWriter, snap_read, snap_ahead, snap_take, snap_dir_ready, build_id
+from mojoui.viewsnap import rle_encode, rle_decode, SnapKey, ViewSnap, SnapWriter, snap_read, snap_ahead, snap_take, snap_dir_ready, build_id
 from mojoui.scene import Scene
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
@@ -324,7 +324,7 @@ def kept_by_more_alone() raises:
     var dir = getenv("TMPDIR", "/tmp") + "/viewsnap-test"
     var missed = String("")
     var n = 0
-    for size in [1, 7, 30, 90, 1200]:
+    for size in [1, 7, 30, 90, 300, 700, 1200]:
         for q in range(4):
             var layer = ObjectLayer()
             for i in range(size):
@@ -354,9 +354,67 @@ def kept_by_more_alone() raises:
     assert_true(n >= 8, "tiled boards tried: " + String(n))
 
 
+def closing_keeps() raises:
+    """(D-8016) A window closing right after its first frames (a note opened and left at once): drawn again in a hurry, the
+    view is kept whole, the same tiles and pixels as the unhurried save; the next renderer shows it identical."""
+    var dir = getenv("TMPDIR", "/tmp") + "/viewsnap-test"
+    var layer = board()
+    for v in [DeskView(-300, -200, 1.0), DeskView(0, 0, 0.5), DeskView(37, -190, 1.3)]:
+        var snaps = List[ViewSnap]()
+        var pic = List[UInt32]()
+        for hurry in [False, True]:
+            var path = dir + "/close-" + ("h" if hurry else "n") + ".snap"
+            _ = unlink(path)
+            var look = BoardLook()
+            look.keep_path = path
+            look.keep_tag = "note=3;rev=1;skin=paper"
+            var g = GPU2D()
+            assert_true(g.start(False), "start")
+            pic = frame(g, look, layer, v)
+            if hurry:
+                assert_true(g.tiles.keeping_due(), "not kept yet")
+                g.tiles.hurry = True
+                var draws = 0
+                while draws < 3:
+                    draws += 1
+                    assert_equal(differ(frame(g, look, layer, v), pic), 0)
+                    if not g.more:
+                        break
+                assert_true(not g.tiles.keeping_due(), "kept in " + String(draws) + " draws")
+            else:
+                var t0 = perf_counter_ns()
+                while (g.more or not snap_read(path, True).ok) and perf_counter_ns() - t0 < 5_000_000_000:
+                    _ = frame(g, look, layer, v)
+            snaps.append(snap_read(path))
+            g.gl.close()
+        assert_true(snaps[0].ok and snaps[1].ok, "both kept")
+        assert_equal(len(snaps[0].tiles), len(snaps[1].tiles), "as many tiles")
+        assert_true(len(snaps[0].tiles) >= 12, "a window's worth")
+        var same = 0
+        for ref a in snaps[0].tiles:
+            for ref b in snaps[1].tiles:
+                if a.i == b.i and a.j == b.j:
+                    assert_true(a.w == b.w and a.h == b.h and a.x0 == b.x0 and a.y0 == b.y0 and a.n == b.n, "the same part")
+                    for q in range(a.n):
+                        assert_equal(snaps[0].bytes[a.at + q], snaps[1].bytes[b.at + q])
+                    same += 1
+        assert_equal(same, len(snaps[0].tiles), "every tile")
+        var empty = ObjectLayer()
+        var look2 = BoardLook()
+        look2.keep_path = dir + "/close-h.snap"
+        look2.keep_tag = "note=3;rev=1;skin=paper"
+        look2.keep_hold = True
+        var g2 = GPU2D()
+        assert_true(g2.start(False), "start 2")
+        assert_equal(differ(frame(g2, look2, empty, v), pic), 0, "shown from the hurried save: identical")
+        g2.gl.close()
+    print("   closing: kept whole in a hurry, the same tiles as an unhurried save, shown identical (3 views)")
+
+
 def main() raises:
     codec()
     files()
     gl_identity()
     kept_by_more_alone()
+    closing_keeps()
     print("viewsnap: ok")

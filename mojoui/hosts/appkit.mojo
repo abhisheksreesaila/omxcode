@@ -3098,6 +3098,28 @@ struct AppKitHost[A: App](Movable):
         if self.ticks == 0:
             self.report.note("frames: timer started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO TIMER") + ")")
 
+    def keep_views(mut self, self_addr: Int):
+        """(D-8016) The window is closing: a tiled canvas whose view is settled but not kept yet (a note opened and left
+        within a second) is drawn up to three times more, now, so the next open shows it."""
+        if self.g2d == 0:
+            return
+        var g = Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)
+        if not g[].tiles.keeping_due():
+            return
+        var t0 = Int(now_ns())
+        g[].tiles.hurry = True
+        for k in range(len(self.canvases)):
+            for _ in range(3):
+                if Int(now_ns()) - t0 > 200_000_000:
+                    break
+                self.canvases[k].drawn = -1
+                self.draw_canvas(k, self_addr)
+                if not g[].more:
+                    break
+        g[].tiles.hurry = False
+        if env("MOJOUI_SNAP_LOG") == "1":
+            print("SNAP: closing: kept in " + one_decimal(Float64(Int(now_ns()) - t0) / 1e6) + " ms", flush=True)
+
     def draw_canvas(mut self, k: Int, self_addr: Int):
         """Asks the app to paint canvas k at its real pixel size (if its size or version changed); the first picture
         drawn notes the process's age (firstscreen:, D-7988)."""
@@ -5665,6 +5687,8 @@ def on_will_terminate[A: App](target: Int, cmd: Int, note: Int) abi("C"):
         if msg(w, "delegate") == target and msg(w, "identifier") != 0:
             addr = msg(msg(w, "identifier"), "longLongValue")
     if addr != 0:
+        if not host_at[A](addr)[].rt.closed:
+            host_at[A](addr)[].keep_views(addr)
         host_at[A](addr)[].rt.closing()
 
 
@@ -5673,7 +5697,10 @@ def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("
     var window = msg(notification, "object")
     var id = msg(window, "identifier")
     if id != 0:
-        host_at[A](msg(id, "longLongValue"))[].rt.closing()
+        var addr = msg(id, "longLongValue")
+        if not host_at[A](addr)[].rt.closed:
+            host_at[A](addr)[].keep_views(addr)
+        host_at[A](addr)[].rt.closing()
 
 
 def make_menu(app: Int, title: String):

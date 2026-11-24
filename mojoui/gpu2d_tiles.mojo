@@ -440,6 +440,7 @@ struct TileSet(Movable):
     var quiet_ver: Int
     var quiet_since: Int
     var save_list: List[Int]  # tiles still to read back for the snapshot being written, and its key and version
+    var save_left: Int  # tiles the snapshot being written still waits for
     var save_key: String
     var save_version: Int
     var writer: List[SnapWriter]
@@ -470,6 +471,7 @@ struct TileSet(Movable):
         self.quiet_since = 0
         self.saved = ""
         self.save_list = List[Int]()
+        self.save_left = 0
         self.save_key = ""
         self.save_version = -1
         self.writer = List[SnapWriter]()
@@ -497,6 +499,7 @@ struct Tiles(Movable):
     var drawn: Int
     var damaged: Int
     var budget_ops: Int
+    var hurry: Bool  # (D-8016) the window is closing: a settled view is kept in this frame, not after 750 ms, a tile a frame
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
     var promote_off: Bool
@@ -516,6 +519,7 @@ struct Tiles(Movable):
         self.drawn = 0
         self.damaged = 0
         self.budget_ops = TILE_BUDGET_OPS
+        self.hurry = False
         try:
             if getenv("MOJOUI_TILE_BUDGET") != "":  # (an A/B of the per-frame raster budget)
                 self.budget_ops = Int(getenv("MOJOUI_TILE_BUDGET"))
@@ -669,6 +673,8 @@ struct Tiles(Movable):
         """(D-7962) The layer's key and version have held for SNAP_QUIET_NS: a snapshot's reads (one a frame) start only
         then, never between the frames of a pan, a zoom or an edit (measured: 20 saves begun and dropped in one bench
         run, each frame paying a synchronous read). Until then it asks for a frame later (more)."""
+        if self.hurry:
+            return True
         var now = Int(perf_counter_ns())
         if self.sets[s].quiet_key != kt or self.sets[s].quiet_ver != v:
             self.sets[s].quiet_key = kt
@@ -677,6 +683,13 @@ struct Tiles(Movable):
         if now - self.sets[s].quiet_since >= SNAP_QUIET_NS:
             return True
         self.more = True
+        return False
+
+    def keeping_due(self) -> Bool:
+        """A view settled, or settling, isn't kept yet (a host about to close draws once more in a hurry: D-8016)."""
+        for s in range(len(self.sets)):
+            if self.sets[s].save_key != "" or (self.sets[s].quiet_key != "" and self.sets[s].quiet_key != self.sets[s].saved) or (self.sets[s].version >= 0 and self.sets[s].saved == "" and not self.sets[s].snap):
+                return True
         return False
 
     def _save_abort(mut self, s: Int):
@@ -691,7 +704,8 @@ struct Tiles(Movable):
         if s < 0 or s >= len(self.sets) or len(self.sets[s].writer) == 0:
             return
         self.sets[s].writer[0].add(rd.i, rd.j, rd.x0, rd.y0, rd.w, rd.h, addr)
-        if len(self.sets[s].save_list) == 0:
+        self.sets[s].save_left -= 1
+        if self.sets[s].save_left <= 0:  # (every tile is in: in a hurry they all come in one frame)
             var ok = self.sets[s].writer[0].finish()
             if ok:
                 self.sets[s].saved = self.sets[s].save_key
@@ -714,6 +728,7 @@ struct Tiles(Movable):
             for jj in range(j0, j1 + 1):
                 for ii in range(i0, i1 + 1):
                     self.sets[s].save_list.append(_pack(ii, jj))
+            self.sets[s].save_left = len(self.sets[s].save_list)
             self.sets[s].save_key = kt
             self.sets[s].save_version = scene.layer_versions[i]
             self.sets[s].writer = List[SnapWriter]()
@@ -737,7 +752,8 @@ struct Tiles(Movable):
                 out.reads.append(TileRead(s, -1, ij[0], ij[1], 0, 0, 0, 0))
                 continue
             out.reads.append(TileRead(s, slot, ij[0], ij[1], cx0 - ij[0] * TILE + TILE_BORDER, cy0 - ij[1] * TILE + TILE_BORDER, cx1 - cx0, cy1 - cy0))
-            break
+            if not self.hurry:
+                break
         self.more = True
 
     def _drop_tiles(mut self, s: Int):
@@ -892,7 +908,7 @@ struct Tiles(Movable):
             if key in self.sets[s].tiles and not (key in self.sets[s].dirty) and self._extend(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1):
                 continue  # (kept, good for less than the view now reaches: only the new strips, D-7947)
             var has_fb = len(self.sets[s].fb) > 0 and self._fb_covers(s, ii, jj, tk)
-            if has_fb and self.planned_ops >= self.budget_ops:
+            if has_fb and self.planned_ops >= self.budget_ops and not self.hurry:
                 missing.append(key)
                 self.more = True
                 continue
@@ -904,7 +920,7 @@ struct Tiles(Movable):
                 continue
         # the ring round the view (within the budget, once nothing on screen is missing; while a zoom moves too, at the
         # tiles' zoom: zooming out finds its edges ready)
-        if len(missing) == 0:
+        if len(missing) == 0 and not self.hurry:
             for jj in range(j0 - 1, j1 + 2):
                 for ii in range(i0 - 1, i1 + 2):
                     if jj >= j0 and jj <= j1 and ii >= i0 and ii <= i1:

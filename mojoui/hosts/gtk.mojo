@@ -3841,6 +3841,25 @@ struct GtkHost[A: App](Movable):
         c.shown_frame = frame
         c.shown_gpu = True
 
+    def keep_views(mut self, self_addr: Int):
+        """(D-8016) The window is closing: a tiled canvas whose view is settled but not kept yet (a note opened and left
+        within a second) is drawn up to three times more, now, so the next open shows it."""
+        if not self.scene_mode or self.g2d == 0 or self.g2d_state != 1 or not self.gpu2d()[].tiles.keeping_due():
+            return
+        var t0 = Int(perf_counter_ns())
+        self.gpu2d()[].tiles.hurry = True
+        for ci in range(len(self.canvases)):
+            for _ in range(3):
+                if Int(perf_counter_ns()) - t0 > 200_000_000:
+                    break
+                self.canvases[ci].drawn = -1
+                self.draw_canvas(ci, self_addr)
+                if not self.gpu2d()[].more:
+                    break
+        self.gpu2d()[].tiles.hurry = False
+        if getenv("MOJOUI_SNAP_LOG") == "1":
+            print("SNAP: closing: kept in " + String(round(Float64(Int(perf_counter_ns()) - t0) / 1e6, 1)) + " ms", flush=True)
+
     def draw_canvas(mut self, ci: Int, self_addr: Int, ahead: Bool = False, frame_us: Int = 0):
         """Asks the app to paint canvas ci at its real pixel size (if its size or version changed), for the frame at
         frame_us (frame-clock µs; 0: now). A frame drawn ahead for this one is shown instead when nothing changed since
@@ -9006,6 +9025,7 @@ def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
             host[].rt.app.window_shown(False)
             return 1  # TRUE: GTK doesn't destroy it
         print("mojoui: no tray to come back from (no StatusNotifierWatcher took the item): closing ends the app", flush=True)
+    host[].keep_views(host_addr)
     host[].rt.closing()
     host[].closed = True
     return 0
