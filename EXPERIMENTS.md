@@ -4,6 +4,9 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-23: goal 79, continuation 18 (Mac stress rows, idle warming, kept views)
+Mac stress zoom p95 8.4 → 4.1–5.5, note switch 22–25 → 6–9 ms, omnibar 17–19 → 6–9, first open 12–14 → 9.4–11. A kept view is now always kept (a product bug), and a closing window keeps it too. Found: after 8 ms idle the M4 runs the same paint 7× slower, and no thread policy changes it (probe_coldpaint). Still over the bar: Mac first opens and stress press, Linux stress undo (GPU at idle clocks) and zoom max. Report: docs/goals/79-report.md, continuation 18.
+
 ## Goal 79, continuation 17: one row left on Linux; M1 and M7 pass on the Mac (2026-11-23)
 - **Setup:** the desktop hard-stopped twice (an unproven link to another project's llama memory failures); builds and races now wait for memory and a quiet machine. The Mac is shared under a lock with goal 80 and measured only when quiet. Rulings and derivations in these messages are the main session's, not the owner's (D-7976 and others corrected).
 - **Worked:** an undo, drag or redo frame pays for its change, not for the board (D-7999, D-8005: connectors that didn't move no longer log, kept ops replay in bulk, drags lift by patch; D-8006: an index bug found and fixed on the way, where a replay could reuse another view's boxes). Glyph warm-up at idle (D-8002) and note switch/omnibar raced against the web (D-8001). M1 passes on both machines (0.03 device px, emoji included, rule on 63 sizes), M5 and M7 on the Mac. Linux M6 fails one row.

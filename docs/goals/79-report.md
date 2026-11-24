@@ -11,6 +11,9 @@ D-7900: framework first; every trick goes into mojoui; Linux and Mac count equal
 ## For the reviewer (standing list)
 Places where a proof, a checker or a test of this goal changed, or where a claim was wrong and corrected:
 - **tests/test_binsinc.mojo (continuation 17).** The whole-grid equality (grid and cells equal a fresh build) became conditional when the op index learned to patch itself in place (D-7999): a patched index keeps its old grid by design. The old strict equality still runs, in the same test run, with the in-place path off (`MOJOUI_BINS_INPLACE=0`'s code path). The patched one is held to: every box equal, 240 rects of every size equal to a fresh build, and equal to a brute-force scan of every op's box measured from the scene. 20 far moves were added after a mutant (an index that forgets its extra ops) survived the first version; it now fails.
+- **79-check.py, Mac run A (continuation 18).** Reran up to three times when it kept no view (5a3ad824). Cause found and fixed (D-8016); the rerun is gone and a run without a kept view FAILs: stricter than before.
+- **Two mistakes of mine this round, both caught before the final runs:** the first close-time save wrote a file of one tile (found by reading the run's log; test_viewsnap `closing_keeps` now compares the whole file); viewsnap and docstore imported the vendored job package, which broke every test built without it (found by M7, fixed in 29ee729b: D-8015 amended).
+- **Note switch and omnibar rows are with idle warming** running in the bench's own pauses: the numbers without it are in the report's continuation 18.
 - **The race's drags (D-8000)** time the lift and the drop (they never did): a strengthening; older drag rows are understated.
 - **Note switch and omnibar (D-8001)** are raced against the web and have a max; they had only a silky p95.
 - **The Mac's start-up runs (D-8002)** each get a fresh settings folder (they shared one): a strengthening.
@@ -23,6 +26,56 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 Decisions D-7976–D-8002; journal "continuation 14" to "continuation 17"; EXPERIMENTS likewise. In short:
 - **Mac:** NSTextInputClient (M5 PASS), the Mac's own Chrome as reference and the race on the Mac's GPU, AppKit bench steps, PingFang and kern-round rules, the tracking table (`trak`), Menlo fallback; raster tiles and kept views on Metal (D-7993, D-7994); the launcher's lower bound (D-7996).
 - **Linux:** the incremental op index (D-7987), a patch-in-place index, real re-routes only in the change log and bulk replay (D-7999); the glyph warm-up (D-8002).
+
+## Continuation 18, final table (2026-11-23; all code at 51a26d08)
+Every run below is of 51a26d08's code (later commits are only these results and this report). Mac: 20:30–21:26 (load 1.8–3.0 at each start; Spotlight back on one core during some runs, printed in race-mac.md). Linux: 20:52–21:24 (load 0.3–1.8).
+
+| # | Linux | Mac (M4, AppKit, Metal) |
+|---|---|---|
+| M0 | PASS | — (no Mac half) |
+| M1 | PASS (worst 0.00 px) | PASS (worst 0.03 px) |
+| M2, M3, M4 | PASS | pass inside M7 |
+| M5 | PASS | PASS |
+| M6 | **FAIL, two rows**: stress zoom max, stress undo | **FAIL**: first open (both notes), stress press; omnibar not settled |
+| M7 | — | **PASS** |
+
+**Rows whose verdict is the reruns' median, range in brackets** (the checker judges its own single race and its bar was not touched; the numbers here are the report's, as ruled):
+
+| Row (bar) | Race | Reruns: median [range] | Verdict |
+|---|---|---|---|
+| Linux stress zoom max (16.7) | 18.2 | 18.0 [15.4–19.1], 6 | **fails** |
+| Linux stress undo p95 (8.3) | 9.0 | 8.75 [8.5–9.7], 6 | **fails**; not settled before, now settled as a fail at idle GPU clocks |
+| Mac 600 first open of the process (8.3) | 10.7 (9.3 at 29ee729b) | 6.2 [6.1–6.7], 3, but those are the first open *after* others in the process | **fails** as the process's first open |
+| Mac stress first open (8.3) | 9.4 (10.3) | 11.0 [9.4–11.1], 3 | **fails** |
+| Mac stress press during an open (8.3) | 9.3 (8.8) | 9.2 [7.0–11.1], 3 | **fails** |
+| Mac 600 press during an open (8.3) | 7.8 (8.4) | 7.8 [7.8–9.1], 3 | passes, **not settled** |
+| Mac stress redo p95 / max (8.3 / 16.7) | 8.3 / 12.6 | 7.8 [7.1–7.9] / 16.0 [12.4–16.8], 3 | passes, max **not settled** |
+| Mac stress drag 40 max (16.7) | 14.3 (18.6) | 13.8 [13.6–15.5], 3 | passes |
+| Mac note switch p95 (8.3) | 6.3 (6.8) | 7.3 [6.3–8.7], 3 | passes, **not settled** |
+| Mac omnibar p95 (8.3) | 6.0 (8.7) | 8.8 [7.1–8.9], 3 | **fails** by the reruns; the race passed |
+
+(In brackets in the race column: the same race at 29ee729b, the code before D-8018.) The checker can't take a rerun median without a change to what it judges, so this is in the report only; flagged to the main session.
+
+### What still costs what, and can it reach the bar
+**The machine first (D-8017).** tests/probe_coldpaint.mojo times one board paint. On the M4 the same code takes 168 µs back to back and 1,165 µs after the thread slept 8 ms: 7×; Linux 2×. Interactive QoS changes nothing, the Mach time-constraint policy nothing. Every row below that fails on the Mac is the first frame after a pause, and is timed at that speed whatever the framework. That isn't proof it can't pass: less work still passes.
+- **Mac first open, stress (9.4–11.1).** Event 1.2–2.2, scene 1.7, batch 0.6, Metal 2.5–3.4 (kept view: read 0, decode 1.3–1.8, upload 0.7–2.0), GPU 0.9–2.6. The same open warm: 2.4 ms. Left to do: two small head reads in the event (~0.5), page chrome kept (962 ops), the 10 tiles' decode (a second copy costs what it saves). Can reach 8.3: about 25 % less work is needed.
+- **Mac first open of the process, 600 (9.3–10.7).** Same split, and its first use of the canvas path. Not split further this round.
+- **Mac press during an open (9.2).** Event 3.7–5.6 on a process's first press against 1.6–1.8 on the later ones, same work; the frame 3–5 against 1.4. Bound by the cold clock on the first press; can reach 8.3 only with less first-press work.
+- **Mac omnibar (7.1–8.9).** Event 1.2, scene 1.3, batch 1.2, rest 0.8, GPU 2.5–3.4 (the page under it 2.4, then scrim and panel). Can reach it: GPU overdraw is the largest part left.
+- **Mac drag 40 (13.8).** Lift patch 3–5, tile batches 5–7, GPU 2–6, all in the first moving frame.
+- **Linux stress undo (8.75).** GPU p95 5.7–5.9 of it, at idle clocks (P8). In a run on a warmer GPU (18:52) the same binary's predecessor gave 5.5 and 7.6. What is left: ops per damaged rect and GPU state changes (not done this round).
+- **Linux stress zoom max (18.0).** One frame: 5 tiles a zoom-out uncovers with nothing kept under them, 5,758 ops: plan 1.1, fill 3.2, raster calls 2.7, CPU 7.0, GPU 3–4, scene 1.2. The same max at P5 and P8 (13–15 in a short run): not the clock. Can reach it by keeping the last zoom's tiles under the view or bounding what a frame rasters; not built.
+- **No row is marked impossible.**
+
+### B, item by item
+- **Omnibar, note switch (D-8007, D-8008, D-8011–D-8014).** Before (f5e9bdb9, Mac): omnibar 17–19, switch 22–25. Idle warming readies the omnibar, the title card, settings and the 12 newest notes (≤ 64 KB), 4 ms at a time, none within 300 ms of input; one screen's painting is not sliced (≤ ~6 ms cold). **The race's rows are with it**, warming in the bench's own pauses (0.5 s before, 0.3 s between steps; no wait was added). **A switch before the warming finishes** (both warm-ups off, 3 starts each): Mac switch 24.2, 21.3, 22.0; Mac omnibar 32.7, 35.0, 34.3; with it 7.3, 8.7, 6.3 and 8.8, 7.1, 8.9. Linux off: 6.4–6.6 and 7.0. Every frame is whole either way: nothing is drawn blank.
+- **Open first frame, press (D-8015).** Read on a second thread while the frame is laid out; the outgoing board freed off the main thread (2.7 ms). Splitting the restore (visible tiles first) was not built: the restore already shows only the view's tiles.
+- **Tile bursts.** Zoom frames no longer walk the board (D-8010): Mac stress zoom p95 8.4 → 4.1–5.5, max 13.5–15.4 → 5.6–8.0. A drop was measured, not rebuilt: 5.5–5.7 on the Mac, so the keep-the-lifted-layer plan was not needed. A drag lifts at its first movement (D-8018): drag 40 16–18.6 → 13.6–15.5.
+- **Clocks (D-8017).** Proven for ordinary frames (GPU p95 3.5–3.7 ms at P8/210 MHz, 0.7–2.7 at P5), dropped for the worst one (max 13.1–13.6 cold, 13.9–14.7 warm). No clock setting changed, no work invented.
+
+### C
+- **A with no kept view was a product bug, found and fixed (D-8016).** A frame that rastered the last tile asked for nothing more, so the frame that would have kept the view came only by chance. test_viewsnap: driven by the renderer's `more` alone, 0 of 20 boards were kept before; every tiled one now. A window closing sooner than the save's 750 ms keeps its view at the close (Linux 16.6 ms; the next open 3.4 ms instead of 98). Race A no longer reruns: a run that keeps no view is a FAIL.
+- **Undo is settled as a fail on Linux.** Table above.
 
 ## Continuation 17, final table (2026-11-23; every number labelled with its commit)
 Code measured: Linux M0–M6 at b86e4ce0 (its code is 1c8de571's); Mac M1 at f96c5dbf, M5 at 1c8de571, M7 at 97129b6c, M6 at 1c8de571 (race-mac.md) with three reruns of the failing rows (build/g79/c17-mac-reruns.txt).
