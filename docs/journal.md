@@ -1783,5 +1783,5 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-24 goal 79 (continuation 20) — autopilot
 - 00:03, from 933bc1f5, after the third power-off (22:55). Brief: review round 3 (build/g79/review3.md: NEEDS WORK, 7 MUST, 11 SHOULD). Correctness and the user's notes before speed. Machine rule: scripts/gpu-free (new) says whether a GPU program may start (no omx-*/speed_study/llama/q3_hybrid process, nobody over 4 GB on a GPU); scripts/check and scripts/testscreen refuse (exit 75) when it says no. No timeout starts anything. The old gate was a scratchpad script of mine that waited and started anyway at 22:53; it is gone with the reboot and not rewritten. omx-nightly.timer fires 00:30. Nothing on the Mac.
-- 00:46 A done (D-8027…D-8033, all test first; a mutant or the old code fails each), B1/B6/B8/B10/B11 done (D-8034).
-- 01:05 the owner's ruling built: the judge is native vs web (D-8025, D-8026; judge_test.py); GOAL.md M6 amended under the row; gtk framebench's paced run, webopen.mjs; B4 (Mac web runs void under load) and B5 (same span; webswitch's header corrected). **Not run on a GPU yet**: needs the final race (D).
+- 00:46 A done (D-8027…D-8033, all test first), B1/B6/B8/B10/B11 done (D-8034).
+- 00:54 the owner's ruling built: the judge is native vs web (D-8025, D-8026; judge_test.py); GOAL.md M6 amended under the row; gtk framebench's paced run, webopen.mjs; B4 (Mac web runs void under load) and B5 (same span; webswitch's header corrected). **Not run on a GPU yet**: needs the final race (D).
