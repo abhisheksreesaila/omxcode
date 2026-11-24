@@ -17,6 +17,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -49,14 +50,44 @@ const FACES = {
 const unknownFamilies = new Set()
 const fontCss = (families) => families.map((fam) => (FACES[fam] ?? []).map(([style, file, weight]) =>
   `@font-face { font-family: "${fam}"; font-style: ${style}; font-weight: ${weight ?? '100 900'}; font-display: block; src: url("https://pn-fonts.local/${encodeURI(file)}") format("truetype"); }`).join('\n')).join('\n')
-async function routeFonts(ctx) {
-  await ctx.route('https://fonts.googleapis.com/**', (route) => {
-    const u = new URL(route.request().url())
-    const fams = u.searchParams.getAll('family').map((f) => f.split(':')[0].replace(/\+/g, ' '))
-    for (const f of fams) if (!FACES[f]) unknownFamilies.add(f)
-    route.fulfill({ contentType: 'text/css', body: fontCss(fams) })
-  })
-  await ctx.route('https://fonts.gstatic.com/**', (route) => route.abort())
+// (D-8053) --fonts=live, the default since: the page's own requests answered by Google Fonts, each answer kept in a folder
+// (--font-cache) so every shot of a run and every later run has the same bytes. --fonts=local: the families of fonts/ whole
+// (D-7901, until then): it gave the page weights and optical sizes the real one never loads (Source Serif 4 at 700).
+const FONTS = opt.fonts ?? 'live'
+const CACHE = path.resolve(opt['font-cache'] ?? path.join(ROOT, 'build/g79/webfonts'))
+const fontLog = {}
+async function live(url, ua) {
+  const key = path.join(CACHE, createHash('sha1').update(url).digest('hex'))
+  if (!fs.existsSync(key)) {
+    const r = await fetch(url, { headers: { 'user-agent': ua } })
+    if (!r.ok) throw new Error(`${r.status} ${url}`)
+    fs.mkdirSync(CACHE, { recursive: true })
+    fs.writeFileSync(key + '.tmp', Buffer.from(await r.arrayBuffer()))
+    fs.writeFileSync(key + '.url', url)
+    fs.renameSync(key + '.tmp', key)
+  }
+  const body = fs.readFileSync(key)
+  fontLog[url] = createHash('sha1').update(body).digest('hex')
+  return body
+}
+async function routeFonts(ctx, ua) {
+  if (FONTS === 'live') {
+    await ctx.route('https://fonts.googleapis.com/**', async (route) => {
+      const u = new URL(route.request().url())
+      for (const f of u.searchParams.getAll('family').map((x) => x.split(':')[0].replace(/\+/g, ' '))) if (!FACES[f]) unknownFamilies.add(f)
+      route.fulfill({ contentType: 'text/css', body: await live(route.request().url(), ua), headers: { 'access-control-allow-origin': '*' } })
+    })
+    await ctx.route('https://fonts.gstatic.com/**', async (route) => route.fulfill({ contentType: 'font/woff2', body: await live(route.request().url(), ua), headers: { 'access-control-allow-origin': '*' } }))
+  }
+  else {
+    await ctx.route('https://fonts.googleapis.com/**', (route) => {
+      const u = new URL(route.request().url())
+      const fams = u.searchParams.getAll('family').map((f) => f.split(':')[0].replace(/\+/g, ' '))
+      for (const f of fams) if (!FACES[f]) unknownFamilies.add(f)
+      route.fulfill({ contentType: 'text/css', body: fontCss(fams) })
+    })
+    await ctx.route('https://fonts.gstatic.com/**', (route) => route.abort())
+  }
   await ctx.route('https://pn-fonts.local/**', (route) => {
     const file = decodeURI(new URL(route.request().url()).pathname.slice(1))
     route.fulfill({ contentType: 'font/ttf', body: fs.readFileSync(path.join(ROOT, 'fonts', file)), headers: { 'access-control-allow-origin': '*' } })
@@ -143,7 +174,8 @@ const browser = await chromium.launch({ headless: true, args: ['--disable-dev-sh
 fs.mkdirSync(OUT, { recursive: true })
 fs.writeFileSync(path.join(OUT, 'made-by.json'), JSON.stringify({ browser: `${process.env.PW_CHANNEL || 'chromium'} ${browser.version()}`, platform: process.platform, arch: process.arch, dpr: DPR }, null, 1))
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: DPR, reducedMotion: 'reduce' })
-await routeFonts(ctx)
+const UA = (await (async () => { const t = await ctx.newPage(); const u = await t.evaluate(() => navigator.userAgent); await t.close(); return u })()).replace('HeadlessChrome', 'Chrome')
+await routeFonts(ctx, UA)
 const p = await ctx.newPage()
 await p.addInitScript(() => { if (!sessionStorage.getItem('pn-ref-skin-set')) { localStorage.setItem('personal-note:skin', 'paper'); sessionStorage.setItem('pn-ref-skin-set', '1') } })
 await p.goto(`${BASE}/notes`)
@@ -151,9 +183,10 @@ await p.locator('#island-title').waitFor()
 await p.evaluate(() => document.fonts.ready)
 await p.waitForTimeout(1500)
 const shotTimes = {}
+// (every face the page asked for is in: font-display is swap, a picture before that shows the fallback)
+const settled = async () => { for (let k = 0; k < 40; k++) { await p.evaluate(() => document.fonts.ready); await p.waitForTimeout(450); if (await p.evaluate(() => document.fonts.status === 'loaded' && ![...document.fonts].some((f) => f.status === 'loading'))) break } await p.waitForTimeout(450) }
 const shot = async (name) => {
-  await p.evaluate(() => document.fonts.ready)
-  await p.waitForTimeout(900)
+  await settled()
   await p.screenshot({ path: path.join(OUT, `${name}.png`) })
   shotTimes[name] = new Date().toISOString()
   fs.writeFileSync(path.join(OUT, `${name}.boxes.json`), JSON.stringify(await boxes(p), null, 1))
@@ -188,7 +221,7 @@ const widths = await tp.evaluate(async (lines) => {
   return Object.fromEntries(lines.map((l) => [l.id, document.getElementById(l.id).getBoundingClientRect().width * devicePixelRatio]))
 }, FIX.textlines)
 fs.writeFileSync(path.join(OUT, 'textwidths.json'), JSON.stringify({ dpr: DPR, widths }, null, 1))
-fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ dpr: DPR, viewport: [W, H], chromium: browser.version(), ids, shots: shotTimes, when: new Date().toISOString() }, null, 1))
+fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify({ dpr: DPR, viewport: [W, H], chromium: browser.version(), ids, shots: shotTimes, when: new Date().toISOString(), fonts: FONTS, faces: fontLog }, null, 1))
 await browser.close()
 stop()
 if (unknownFamilies.size) { console.error(`ref: the web asked for fonts not in fonts/: ${[...unknownFamilies].join(', ')}`); process.exit(3) }

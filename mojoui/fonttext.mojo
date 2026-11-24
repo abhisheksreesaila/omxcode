@@ -312,6 +312,7 @@ struct FontEngine(Movable):
     var faces: List[_Face]
     var insts: List[_Inst]
     var inst_of: Dict[String, Int]
+    var declared: Dict[String, List[Int]]  # (D-8053) family + style → the weights declared of it, then its optical size (0: follows the text's size)
     var face_of_file: Dict[String, Int]
     var fallback: Dict[Int, Int]  # codepoint → face (-1: none has it)
     var emoji_face: Int
@@ -385,6 +386,7 @@ struct FontEngine(Movable):
         self.faces = List[_Face]()
         self.insts = List[_Inst]()
         self.inst_of = Dict[String, Int]()
+        self.declared = Dict[String, List[Int]]()
         self.face_of_file = Dict[String, Int]()
         self.fallback = Dict[Int, Int]()
         self.emoji_face = -2
@@ -564,8 +566,32 @@ struct FontEngine(Movable):
                 best = i
         return best
 
-    def inst(mut self, face: Int, weight: Int, size: Float64) -> Int:
+    def declare(mut self, family: String, italic: Bool, weights: List[Int], opsz: Int = 0):
+        """(D-8053) Only these weights of a family exist, as when a page's @font-face rules load just them: text of another
+        weight is drawn in the nearest by CSS's rule, whatever the variable file could do. opsz: the one optical size it was
+        loaded at (0: the text's own size)."""
+        var v = weights.copy()
+        v.append(opsz)
+        self.declared[family + ("/italic" if italic else "")] = v^
+
+    def as_declared(self, face: Int, weight: Int, size: Float64) -> Tuple[Int, Float64]:
+        """The weight and optical size a face is really drawn at (declare)."""
+        ref f = self.faces[face]
+        var key = f.family + ("/italic" if f.italic else "")
+        try:
+            if key in self.declared:
+                ref v = self.declared[key]
+                var n = len(v) - 1
+                return (css_weight(weight, Span(v)[0:n]), Float64(v[n]) if v[n] > 0 else size)
+        except:
+            pass
+        return (weight, size)
+
+    def inst(mut self, face: Int, weight_in: Int, size_in: Float64) -> Int:
         """The face at a weight and (Chromium's automatic optical sizing: opsz = the size in CSS px) an optical size."""
+        var d = self.as_declared(face, weight_in, size_in)
+        var weight = d[0]
+        var size = d[1]
         comptime if CompilationTarget.is_macos():
             return self._mac_inst(face, weight, size)
         ref f = self.faces[face]
@@ -1443,6 +1469,32 @@ def _is_emoji(cp: Int, nxt: Int) -> Bool:
         return True
     return (cp >= 0x1F300 and cp <= 0x1F5FF) or (cp >= 0x1F600 and cp <= 0x1F64F) or (cp >= 0x1F680 and cp <= 0x1F6FF) or (
         cp >= 0x1F900 and cp <= 0x1FAFF) or (cp >= 0x1F1E6 and cp <= 0x1F1FF)
+
+
+def css_weight(want: Int, have: Span[Int, _]) -> Int:
+    """CSS font matching (css-fonts-4 §5.2): 400–500 look up to 500, then down, then up; lighter looks down first, heavier up."""
+    var below = -1
+    var above = -1
+    var to500 = -1
+    for w in have:
+        if w == want:
+            return want
+        if w < want and w > below:
+            below = w
+        if w > want and (above < 0 or w < above):
+            above = w
+        if want >= 400 and want <= 500 and w > want and w <= 500 and (to500 < 0 or w < to500):
+            to500 = w
+    if want >= 400 and want <= 500:
+        return to500 if to500 >= 0 else (below if below >= 0 else (above if above >= 0 else want))
+    if want < 400:
+        return below if below >= 0 else (above if above >= 0 else want)
+    return above if above >= 0 else (below if below >= 0 else want)
+
+
+def declare_face(family: String, italic: Bool, weights: List[Int], opsz: Int = 0):
+    """FontEngine.declare on the process's engine (call it while the app starts)."""
+    engine()[].declare(family, italic, weights, opsz)
 
 
 def _registry() -> List[List[String]]:

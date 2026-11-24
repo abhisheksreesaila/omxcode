@@ -9,7 +9,7 @@ from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
-from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
+from pnlook import pn_faces, pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
@@ -432,6 +432,7 @@ struct WebShell(Movable):
                 except:
                     pass
         self.dbs = List[Database]()
+        pn_faces()
         self.writer = RowSaver()
         self.written = List[Written]()
         self.at_risk = List[Int]()

@@ -7,7 +7,7 @@ from mojoui.canvas import rgba
 from mojoui.skin import Skin, Shadow, hexc
 from mojoui.notesshell import Boxes, PanelConfig, Shelf, SkinChoice, DockItem, DOCK_TOOL, DOCK_DIVIDER, DOCK_DOT, DOCK_ACCENT
 from mojoui.keycaps import keycap
-from mojoui.fonttext import TextStyle
+from mojoui.fonttext import TextStyle, declare_face
 
 
 def pn_names(mut b: Boxes):
@@ -343,6 +343,20 @@ def night_skin() -> Skin:
     s.locked_line = rgba(195, 168, 255, 82)
     s.derive()
     return s^
+
+
+def pn_faces():
+    """The faces Personal Note loads (skins.js, style.css and page-style.js's css2 requests): a weight it doesn't is drawn in
+    the nearest it does, Source Serif at one optical size."""
+    declare_face("Geist", False, [400, 500, 600])
+    declare_face("Geist Mono", False, [400, 500, 600])
+    declare_face("Caveat", False, [500, 600])
+    declare_face("IBM Plex Sans", False, [400, 500, 600, 700])
+    declare_face("Source Serif 4", False, [400, 600], 24)
+    declare_face("Source Serif 4", True, [400, 600], 24)
+    declare_face("Literata", False, [400, 700])
+    declare_face("Literata", True, [400])
+    declare_face("Figtree", False, [400, 500, 600])
 
 
 def skin_named(name: String) -> Skin:

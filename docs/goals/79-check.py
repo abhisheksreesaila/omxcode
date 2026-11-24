@@ -154,6 +154,9 @@ def m0():
     err = make_ref()
     if err:
         return "FAIL", err
+    meta = json.loads((REF / "meta.json").read_text())
+    if meta.get("fonts") != "live" or not any("gstatic" in u for u in meta.get("faces", {})):
+        probs.append("the reference isn't drawn with the fonts the live page loads (D-8053)")
     fix = json.loads(FIXTURE.read_text())
     kinds = [n["noteType"] for n in fix["notes"]]
     if kinds.count("page") < 4 or "canvas" not in kinds or "mindmap" not in kinds or not fix.get("notebooks"):
@@ -438,6 +441,58 @@ def hairline_color(img, box, dpr):
     return tuple(int(round(v)) for v in m)
 
 
+INK_BOX, INK_MID = 2, 1.7  # (device px) a small mark's ink: its edges, its middle
+
+
+def ink_marks(boxes):
+    """(D-8053, a sharpening) The small marks of a screen: each row's and title's emoji on its tile, the page's, every icon
+    button. Name → its rect and how far in its ink is looked for. (M2 passed emoji 8–16 px too high: boxes, fills and SSIM don't
+    see a glyph that small.)"""
+    for k, b in boxes.items():
+        if k.startswith("row:"):
+            yield "emoji of " + k, [b[0] + 8, b[1] + 5, 24, 24], 1.0
+        elif k == "[Change icon]":
+            yield "emoji of the page", b, 1.0
+        elif 8 <= max(b[2], b[3]) <= 66 and "Add branch" not in k:  # (those overlap the map's branches: no ground of their own)
+            yield k, b, 1.0 if max(b[2], b[3]) < 24 else 0.18 * min(b[2], b[3])
+
+
+def ink_of(img, rect, inset, dpr):
+    """Where a mark's ink is in its rect (pixels 48 levels off the ground's colour): its box and its middle; None: no ink."""
+    x, y, w, h = rect
+    x0, y0, x1, y1 = [max(0, int(round(v * dpr))) for v in (x + inset, y + inset, x + w - inset, y + h - inset)]
+    r = img[y0:y1, x0:x1].astype(np.int64)
+    if r.size == 0:
+        return None
+    v, n = np.unique((r[..., 0] << 16) | (r[..., 1] << 8) | r[..., 2], return_counts=True)
+    g = int(v[n.argmax()])
+    d = np.abs(r - np.array([g >> 16, (g >> 8) & 255, g & 255])).max(axis=2) > 48
+    if d.sum() < 6:
+        return None
+    ys, xs = np.nonzero(d)
+    return [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()), float(xs.mean()), float(ys.mean())]
+
+
+def ink_wrong(wa, web_boxes, na, nat_boxes, dpr):
+    """(how many marks were compared, the ones whose ink isn't where the web's is)."""
+    nat = {k: r for k, r, _ in ink_marks(nat_boxes)}
+    out, n = [], 0
+    k_dpr = dpr / LINUX_DPR
+    for k, r, inset in ink_marks(web_boxes):
+        a = ink_of(wa, r, inset, dpr)
+        if a is None:
+            continue
+        n += 1
+        b = ink_of(na, nat[k], inset, dpr) if k in nat else None
+        if b is None:
+            out.append(f"{k} has no ink")
+            continue
+        edge, mid = max(abs(a[i] - b[i]) for i in range(4)), max(abs(a[4] - b[4]), abs(a[5] - b[5]))
+        if edge > INK_BOX * k_dpr or mid > INK_MID * k_dpr:
+            out.append(f"{k} off {edge} px (middle {mid:.1f})")
+    return n, out
+
+
 def compare_screen(name, web_png, web_boxes, nat_png, nat_boxes, dpr, out_png):
     """(problems, ssim). Writes web │ native │ diff to out_png."""
     probs = []
@@ -467,6 +522,10 @@ def compare_screen(name, web_png, web_boxes, nat_png, nat_boxes, dpr, out_png):
         probs.append(f"{name}: {len(bad_box)}/{len(web_boxes)} boxes ({', '.join(bad_box[:6])})")
     if bad_fill:
         probs.append(f"{name}: {len(bad_fill)} fills ({', '.join(bad_fill[:4])})")
+    if wa.shape == na.shape:
+        n_ink, bad_ink = ink_wrong(wa, web_boxes, na, nat_boxes, dpr)
+        if bad_ink:
+            probs.append(f"{name}: ink of {len(bad_ink)}/{n_ink} marks ({'; '.join(bad_ink[:5])})")
     # web │ native │ diff
     if wa.shape == na.shape:
         diff = np.abs(wa.astype(np.int16) - na.astype(np.int16)).max(axis=2)

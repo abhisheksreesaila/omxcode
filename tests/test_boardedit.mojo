@@ -11,7 +11,7 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.ink import Stroke
 from mojoui.wordsedit import WordsEdit
-from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in
+from mojoui.fonttext import TextStyle, measure, line_metrics, baseline_in, css_weight, declare_face, engine
 from mojoui.textedit import Pos
 from mojoui.scene import Scene
 
@@ -301,6 +301,26 @@ def families() raises:
     assert_equal(measure(TextStyle("monospace", 400, False, 24), "Words on the board"), mono)
     assert_true(measure(TextStyle("Geist", 400, False, 24), "Words on the board") != mono, "another face")
     assert_equal(measure(TextStyle("sans-serif", 400, False, 24), "Words"), measure(TextStyle("Geist", 400, False, 24), "Words"))
+    # only the faces a page declares: the nearest weight by CSS's rule, one optical size
+    var have: List[Int] = [400, 600]
+    assert_equal(css_weight(700, Span(have)), 600)
+    assert_equal(css_weight(500, Span(have)), 400)
+    assert_equal(css_weight(600, Span(have)), 600)
+    assert_equal(css_weight(300, Span(have)), 400)
+    var some: List[Int] = [300, 500, 700]
+    assert_equal(css_weight(400, Span(some)), 500)
+    assert_equal(css_weight(450, Span(some)), 500)
+    assert_equal(css_weight(600, Span(some)), 700)
+    assert_equal(css_weight(200, Span(some)), 300)
+    var bold = TextStyle("Source Serif 4", 700, False, 60)
+    bold.exact = True
+    var wide = measure(bold, "Central idea")
+    declare_face("Source Serif 4", False, [400, 600], 24)
+    var semi = TextStyle("Source Serif 4", 600, False, 60)
+    semi.exact = True
+    assert_true(measure(TextStyle("Source Serif 4", 700, False, 61), "Central idea") != wide, "(another size: not from a cache)")
+    assert_equal(engine()[].as_declared(engine()[].pick("Source Serif 4", 700, False), 700, 60)[0], 600)
+    assert_equal(engine()[].as_declared(engine()[].pick("Source Serif 4", 700, False), 700, 60)[1], 24)
     # an emoji sits in the middle of its line (a bitmap face's metrics are its strike's: 0 drew every note's emoji 8 px high
     # on Linux, in every compare picture since M2, under the checker's bars)
     var e = TextStyle("emoji", 400, False, 38)

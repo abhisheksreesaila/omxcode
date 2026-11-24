@@ -254,11 +254,11 @@ def draw_round_button[P: Painter](mut p: P, mut bx: Boxes, name: String, x: Floa
 
 
 def draw_emoji_tile[P: Painter](mut p: P, emoji: String, x: Float64, y: Float64, size: Float64, radius: Float64, font_px: Float64,
-                                bg: UInt32):
-    """A note's emoji on its tinted tile, centred (font_px: the emoji's CSS size, line-height = font_px)."""
+                                bg: UInt32, dy: Float64 = 0):
+    """A note's emoji on its tinted tile, centred (font_px: the emoji's CSS size, line-height = font_px; dy: lower by so much)."""
     p.rect(x, y, size, size, bg, radius)
     var st = TextStyle("emoji", 400, False, font_px)
-    var top = y + (size - font_px) / 2
+    var top = y + (size - font_px) / 2 + dy
     p.run(st, emoji, x + size / 2, baseline_in(top, font_px, st), rgba(0, 0, 0), ALIGN_CENTER)
 
 
@@ -317,7 +317,7 @@ def draw_title_island[P: Painter](mut p: P, mut bx: Boxes, slot_x0: Float64, slo
     var title_x = x + 1 + 18
     bx.add("title.face:" + face_emoji + title, x + 1, y + 1, w - 2, 42)
     if has_icon:
-        draw_emoji_tile(p, emoji, x + 1 + 10, y + 1 + 9, 24, 7, 14, mix(tint, 36, sk.panel))
+        draw_emoji_tile(p, emoji, x + 1 + 10, y + 1 + 9, 24, 7, 16, mix(tint, 36, sk.panel), 1)
         bx.add("title.icon", x + 1, y + 1, 44, 42)
         title_x = x + 1 + 44
     bx.add("title.button", x + 1, y + 1, w - 2, 42)
