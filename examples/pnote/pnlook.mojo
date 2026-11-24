@@ -28,6 +28,7 @@ def pn_names(mut b: Boxes):
     b.alias("props.menu", "#notebook-picker-menu")
     b.alias("props.place-row:", "[Move to {}]")
     b.alias("props.danger", "#delete-note")
+    b.alias("props.rename", "#rename-notebook")
     b.alias("panel.action", "#rail-new-note")
     b.alias("panel.action-key", "#quick-note-kbd")
     b.alias("panel.navigator", "#notebook-navigator")

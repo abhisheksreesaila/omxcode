@@ -409,6 +409,87 @@ def notebooks() raises:
     print("   a new notebook; folds remembered")
 
 
+def place(s: WebShell, kind: Int, id: Int) raises -> Tuple[Float64, Float64]:
+    for k in range(0, len(s.panel.hits), 6):
+        if Int(s.panel.hits[k]) == kind and Int(s.panel.hits[k + 1]) == id:
+            return (s.panel.hits[k + 2] + s.panel.hits[k + 4] / 2, s.panel.hits[k + 3] + s.panel.hits[k + 5] / 2)
+    raise Error("no hit " + String(kind) + " " + String(id))
+
+
+def dragging_and_notebooks() raises:
+    var s = WebShell(DB, "paper")
+    s.open(s.notes[0].id)
+    while len(s.notes) > 4:  # (a short list, every row in view)
+        s.delete_note()
+    s.commit_delete()
+    s.panel.inbox_open = True
+    for k in range(len(s.panel.open_shelves)):
+        s.panel.open_shelves[k] = True
+    s.sidebar = True
+    s.open(s.notes[0].id)
+    paint(s)
+    var other = s.notes[2].id  # (not the open one)
+    var book = s.panel.notebooks[0].id
+    var a = place(s, 0, other)
+    var b = place(s, 1, book)
+    _ = s.press(a[0], a[1])
+    assert_true(s.pan(a[0] + 20, a[1] + 20), "lifted")
+    _ = s.pan(b[0], b[1])
+    paint(s)
+    assert_true(s.release(b[0], b[1]) and s.tap(b[0], b[1]), "dropped")
+    assert_equal(count("SELECT notebook_id FROM notes WHERE id = " + String(other)), book)
+    assert_true(s.notes[s.note_index(other)].notebook == book and book in s.panel.open_books and s.current != other, "filed, shown there, not opened")
+    s.dropped_us = -1_000_000
+    s.open(other)
+    assert_true(s.doc.may_edit(), "opens at its new revision")
+    paint(s)
+    # the open note, back to the Inbox; a drop on nothing changes nothing; a click still opens
+    a = place(s, 0, other)
+    b = place(s, 3, 0)
+    _ = s.press(a[0], a[1])
+    _ = s.pan(a[0], a[1] - 30)
+    _ = s.pan(b[0], b[1])
+    _ = s.release(b[0], b[1])
+    assert_equal(count("SELECT notebook_id IS NULL FROM notes WHERE id = " + String(other)), 1)
+    paint(s)
+    a = place(s, 0, other)
+    _ = s.press(a[0], a[1])
+    _ = s.pan(900, 500)
+    _ = s.release(900, 500)
+    assert_equal(count("SELECT notebook_id IS NULL FROM notes WHERE id = " + String(other)), 1)
+    s.dropped_us = -1_000_000
+    assert_true(row_tap(s, s.notes[1].id), "a click opens")
+    # a notebook's card: renamed, moved to another shelf, deleted with its notes back in the Inbox
+    s.file_at(other, book)
+    paint(s)
+    b = place(s, 1, book)
+    _ = s.hover(b[0], b[1])
+    paint(s)
+    var e = place(s, 4, book)
+    assert_true(s.tap(e[0], e[1]) and s.book_card == book, "its pencil")
+    tap(s, "#rename-notebook")
+    s.panel.naming_text = ""
+    typed(s, "Renamed é")
+    assert_true(s.key("Enter", 0), "named")
+    assert_equal(count("SELECT COUNT(*) FROM notebooks WHERE name = 'Renamed é'"), 1)
+    s.book_card = book
+    paint(s)
+    tap(s, "#notebook-picker")
+    tap(s, "[Move to 1]")
+    assert_equal(count("SELECT COUNT(*) FROM notebooks WHERE category = 'areas' AND id = " + String(book)), 1)
+    var rev = count("SELECT revision FROM notes WHERE id = " + String(other))
+    s.open(other)
+    s.book_card = book
+    paint(s)
+    tap(s, "#delete-note")
+    assert_true(s.book_index(book) < 0 and s.notes[s.note_index(other)].notebook == 0 and count("SELECT COUNT(*) FROM notebooks WHERE id = " + String(book)) == 0, "gone")
+    assert_true(count("SELECT notebook_id IS NULL FROM notes WHERE id = " + String(other)) == 1 and count("SELECT revision FROM notes WHERE id = " + String(other)) == rev + 1, "its notes back in the Inbox, a revision on")
+    assert_true(s.notes[s.note_index(other)].revision == rev + 1 and s.doc.revision == rev + 1, "and known here: the open note can still be saved")
+    assert_equal(count("SELECT COUNT(*) FROM workspace_changes WHERE change_type = 'deleted' AND resource_kind = 'notebook'"), 1)
+    s.close()
+    print("   dragging rows; a notebook renamed, moved, deleted")
+
+
 def main() raises:
     _ = private_dir("build/test_pnnotes_cfg")
     _ = setenv("OMX_CONFIG", "build/test_pnnotes_cfg")
@@ -424,4 +505,5 @@ def main() raises:
     over_the_board()
     another_app()
     notebooks()
+    dragging_and_notebooks()
     print("pnnotes: ok")

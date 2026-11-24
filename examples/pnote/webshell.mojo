@@ -31,7 +31,7 @@ from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
 from mojoui.notesshell import draw_dock, dock_height, draw_history_island, draw_page_zoom, draw_locked_cover
 from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, text_arg, int_arg, clock_us, SAVED, CONFLICT
-from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook
+from pnstore import make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
@@ -44,7 +44,7 @@ from mojoui.graphemes import typed_text
 from mojoui.files import private_dir, private_write, file_exists
 from mojoui.notesshell import draw_problem, draw_pill_button, draw_dock_flyout, draw_ink_options, draw_toast, PropsCard, PropsRow
 from mojoui.libc import unlink
-from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved
+from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved, row_revision
 from mojoui.canvasload import text_hash
 from mojoui.json import J_ARRAY, J_STRING
 from mojoui.snapahead import snap_ahead
@@ -328,6 +328,8 @@ struct WebShell(Movable):
     var props: PropsCard
     var flyout: Bool  # the canvas dock's more tools, or its colours and widths, are open
     var ink_options: Bool
+    var dropped_us: Int  # when a row's drag last ended (the tap that may follow it opens nothing)
+    var book_card: Int  # the notebook whose card is open (-1: none)
     var known_seq: Int  # the notes file's change feed, as last seen (-1: not yet)
     var clip: String  # what was copied last, and how many times something was
     var clip_version: Int
@@ -420,6 +422,8 @@ struct WebShell(Movable):
         self.bench_note = -1
         self.doubled_us = -1_000_000
         self.known_seq = -1
+        self.dropped_us = -1_000_000
+        self.book_card = -1
         self.flyout = False
         self.ink_options = False
         self.clip = ""
@@ -914,7 +918,7 @@ struct WebShell(Movable):
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
         var i = self.note_index(self.current)
-        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0):  # (a layer of their own: opening one leaves the shell's batches as they are)
+        if (self.card_open and i >= 0) or self.searching or self.settings_open or self.toast != "" or (self.props_open and i >= 0) or self.book_card >= 0:  # (a layer of their own: opening one leaves the shell's batches as they are)
             p.begin_layer("overlay")
             p.layer_transform(0, 0, k)
         if self.card_open and i >= 0:
@@ -936,8 +940,25 @@ struct WebShell(Movable):
             for t in range(len(ids)):
                 c.tiles.append(CardTile(ids[t], labels[t], icons[t], t == 9))
             c.draw(p, self.boxes, (296.0 if self.sidebar else 0.0) + 16, w - 16, k, self.sk)
-        if self.props_open and i >= 0:
+        var bi = self.book_index(self.book_card)
+        if bi >= 0:
             ref pc = self.props
+            pc.label = "Shelf"
+            pc.places.clear()
+            pc.place_colors.clear()
+            for k_ in range(len(self.panel.cfg.shelves)):
+                pc.places.append(self.panel.cfg.shelves[k_].label)
+                pc.place_colors.append(self.panel.notebooks[bi].color)
+                if self.panel.cfg.shelves[k_].key == self.panel.notebooks[bi].category:
+                    pc.place = k_
+            pc.facts = [PropsRow(self.panel.notebooks[bi].name, String(self.panel.notebooks[bi].count) + (" note" if self.panel.notebooks[bi].count == 1 else " notes"))]
+            pc.rename_label = "Rename"
+            pc.danger_label = "Delete notebook"
+            pc.draw(p, self.boxes, 296 + 16 + 160, 120, k, self.sk)
+        elif self.props_open and i >= 0:
+            ref pc = self.props
+            pc.label = "Notebook"
+            pc.rename_label = ""
             pc.places = ["Inbox"]
             pc.place_colors = [UInt32(0)]
             pc.place = 0
@@ -1490,6 +1511,14 @@ struct WebShell(Movable):
         var at = self.panel.naming
         var name = String(self.panel.naming_text.strip())
         self.panel.naming = -1
+        if self.panel.renaming >= 0:
+            var b = self.panel.renaming
+            self.panel.renaming = -1
+            var k = self.book_index(b)
+            if k >= 0 and name != "" and name != self.panel.notebooks[k].name:
+                var category = self.panel.notebooks[k].category
+                self.change_book(b, name, category)
+            return
         if at < 0 or name == "" or len(self.dbs) == 0:
             return
         var shelf = self.panel.cfg.shelves[at].key
@@ -1523,6 +1552,72 @@ struct WebShell(Movable):
         self.notes.insert(0, rec^)
         self.list_notes()
         self.panel.reveal(self.current)
+
+    def file_at(mut self, id: Int, notebook: Int):
+        """A note dragged onto a notebook (0: the Inbox)."""
+        var i = self.note_index(id)
+        if i < 0 or self.notes[i].notebook == notebook:
+            return
+        if id == self.current:
+            self.move_note(notebook)
+            return
+        if self.outbox.find(id) >= 0:
+            self.say("Couldn’t move it. Try again.")
+            return
+        var rev = row_revision(self.dbs[0], "notes", "id", id, "revision")
+        var r = file_note(self.dbs[0], id, rev, notebook)
+        if r.status != SAVED:
+            self.say("Couldn’t move it. Try again.")
+            return
+        i = self.note_index(id)
+        self.notes[i].revision = r.revision
+        self.notes[i].updated = r.value
+        self.notes[i].notebook = notebook
+        self.panel_counts()
+        var rec = self.notes.pop(i)
+        self.notes.insert(0, rec^)
+        self.list_notes()
+        self.panel.reveal(id)
+
+    def book_index(self, id: Int) -> Int:
+        for k in range(len(self.panel.notebooks)):
+            if self.panel.notebooks[k].id == id:
+                return k
+        return -1
+
+    def change_book(mut self, id: Int, name: String, category: String):
+        var k = self.book_index(id)
+        if k < 0 or len(self.dbs) == 0:
+            return
+        var why = change_notebook(self.dbs[0], id, name, category)
+        if why != "":
+            self.say("Couldn’t change it: " + why)
+            return
+        self.panel.notebooks[k].name = name
+        self.panel.notebooks[k].category = category
+        self.panel.notebooks[k].icon = notebook_icon(name)
+        self.panel.reveal_book(id)
+
+    def delete_book(mut self, id: Int):
+        """A notebook deleted, its notes back in the Inbox."""
+        var k = self.book_index(id)
+        if k < 0 or len(self.dbs) == 0:
+            return
+        self.settle_open()
+        self.flush()
+        var why = drop_notebook(self.dbs[0], id)
+        if why != "":
+            self.say("Couldn’t delete it: " + why)
+            return
+        _ = self.panel.notebooks.pop(k)
+        for i in range(len(self.notes)):
+            if self.notes[i].notebook == id:
+                self.notes[i].notebook = 0
+                self.notes[i].revision += 1
+                if self.notes[i].id == self.current:
+                    self.doc.saved(self.notes[i].revision)
+        self.list_notes()
+        self.say("Notebook deleted. Its notes are in the Inbox.")
 
     def panel_counts(mut self):
         for k in range(len(self.panel.notebooks)):
@@ -1788,6 +1883,9 @@ struct WebShell(Movable):
         if (mods & 4) != 0 and (mods & 2) == 0 and (name == "n" or name == "N") and not self.searching and not self.card.editing and not self.settings_open and not self.typing():
             self.create("canvas")
             return True
+        if self.book_card >= 0 and name == "Escape":
+            self.book_card = -1
+            return True
         if self.props_open and name == "Escape":
             if self.props.menu_open:
                 self.props.menu_open = False
@@ -2046,6 +2144,9 @@ struct WebShell(Movable):
         """The pointer went down (a drag may follow)."""
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
+        if self.sidebar and not self.searching and not self.settings_open and not self.props_open and not self.card_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
+            _ = self.panel.press(x, y)
+            return False
         self.title_focus = False  # (a click moves the focus: the ring goes)
         if self.on_canvas():
             if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button", "#dock-flyout", "#ink-options-popover"]) != "":
@@ -2138,6 +2239,8 @@ struct WebShell(Movable):
         return self.page.select_word(x, y)
 
     def pan(mut self, x: Float64, y: Float64) -> Bool:
+        if self.panel.drag_id >= 0:
+            return self.panel.drag(x, y)
         if self.on_canvas():
             if self.tools.tool == "hand":
                 return self.tools.pan(x, y, self.board.layer, self.view)  # (the hand tool moves self.view)
@@ -2154,6 +2257,13 @@ struct WebShell(Movable):
         return self.page.drag(x, y)
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
+        if self.panel.drag_id >= 0:
+            var was = self.panel.dragging
+            var d = self.panel.release(x, y)
+            if d[0] >= 0:
+                self.file_at(d[0], d[1])
+            self.dropped_us = clock_us() if was else self.dropped_us
+            return was
         if self.on_canvas():
             if self.tools.tool != "hand" and not self.editable():
                 return False
@@ -2194,7 +2304,7 @@ struct WebShell(Movable):
     def on_canvas(self) -> Bool:
         var i = self.note_index(self.current)
         return (i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.doc.is_failed() and not self.searching and not self.card_open
-                and not self.settings_open and not self.props_open)
+                and not self.settings_open and not self.props_open and self.book_card < 0)
 
     def canvas_tap(mut self, x: Float64, y: Float64, mods: Int = 0) -> Bool:
         """A tap on a canvas note: the dock, the history and zoom islands, else the board's tool (an edit: the whole board
@@ -2352,6 +2462,38 @@ struct WebShell(Movable):
             elif sh != "[Search or jump to]":  # (the Esc button, or outside it)
                 self.searching = False
             return True
+        if self.book_card >= 0:
+            var ph = self.boxes.hit_any(x, y, ["[Move to ", "#notebook-picker", "#delete-note", "#rename-notebook", "#note-popover"])
+            var b = self.book_card
+            var k = self.book_index(b)
+            if ph.startswith("[Move to ") and k >= 0:
+                try:
+                    var n = Int(String(ph[byte=9:].removesuffix("]")))
+                    var name = self.panel.notebooks[k].name
+                    self.book_card = -1
+                    self.props.menu_open = False
+                    self.change_book(b, name, String(self.panel.cfg.shelves[n].key))
+                except:
+                    pass
+            elif ph == "#notebook-picker":
+                self.props.menu_open = not self.props.menu_open
+            elif ph == "#rename-notebook" and k >= 0:
+                self.book_card = -1
+                for q in range(len(self.panel.cfg.shelves)):
+                    if self.panel.cfg.shelves[q].key == self.panel.notebooks[k].category:
+                        self.panel.naming = q
+                self.panel.naming_text = self.panel.notebooks[k].name
+                self.panel.renaming = b
+            elif ph == "#delete-note":
+                self.book_card = -1
+                self.delete_book(b)
+            elif ph == "":
+                self.book_card = -1
+            else:
+                self.props.menu_open = False
+            return True
+        if clock_us() - self.dropped_us < 200_000:  # (the end of a row's drag)
+            return True
         if self.props_open:
             var ph = self.boxes.hit_any(x, y, ["[Move to ", "#notebook-picker", "#delete-note", "#note-popover"])
             if ph.startswith("[Move to "):
@@ -2435,9 +2577,14 @@ struct WebShell(Movable):
             var at = self.panel.add_at(x, y)
             if at >= 0:
                 self.panel.naming = at
+                self.panel.renaming = -1
                 self.panel.naming_text = ""
                 self.panel.open_shelves[at] = True
                 return True
+        if hit.startswith(".nav-row:") and self.panel.edit_at(x, y) >= 0:
+            self.book_card = self.panel.edit_at(x, y)
+            self.props.menu_open = False
+            return True
         if hit.startswith(".nav-row:"):
             var id = self.panel.hit(x, y, 1)
             if id >= 0:

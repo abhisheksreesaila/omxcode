@@ -413,6 +413,11 @@ struct NotesPanel(Movable):
     var scroll_max: Float64
     var list_y0: Float64
     var list_y1: Float64
+    var drag_id: Int  # a note being dragged onto a notebook (-1: none), where its press was, and whether it has moved
+    var drag_x: Float64
+    var drag_y: Float64
+    var dragging: Bool
+    var renaming: Int  # the notebook whose name is being written (-1: a new one)
     var naming: Int  # the shelf a new notebook is being named on (its place in cfg.shelves; -1: none), and its words
     var naming_text: String
     var px: Float64  # where the pointer is (a shelf's + shows under it)
@@ -435,10 +440,64 @@ struct NotesPanel(Movable):
         self.list_y0 = 0
         self.list_y1 = 0
         self.hits = List[Float64]()
+        self.drag_id = -1
+        self.drag_x = 0
+        self.drag_y = 0
+        self.dragging = False
+        self.renaming = -1
         self.naming = -1
         self.naming_text = ""
         self.px = -1
         self.py = -1
+
+    def press(mut self, x: Float64, y: Float64) -> Bool:
+        """The pointer went down on a note's row: a drag may file it."""
+        self.drag_id = self.hit(x, y, 0)
+        self.drag_x = x
+        self.drag_y = y
+        self.dragging = False
+        return self.drag_id >= 0
+
+    def drag(mut self, x: Float64, y: Float64) -> Bool:
+        if self.drag_id < 0:
+            return False
+        self.px = x
+        self.py = y
+        if abs(x - self.drag_x) + abs(y - self.drag_y) > 6:
+            self.dragging = True
+        return self.dragging
+
+    def drop_at(self, x: Float64, y: Float64) -> Int:
+        """Where a dragged note would be filed at (x, y): a notebook's id, 0 the loose shelf, -1 nowhere."""
+        var b = self.hit(x, y, 1)
+        if b >= 0:
+            return b
+        if y < self.list_y0 or y >= self.list_y1:
+            return -1
+        for i in range(0, len(self.hits), 6):
+            if Int(self.hits[i]) == 3 and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
+                return 0
+        return -1
+
+    def release(mut self, x: Float64, y: Float64) -> Tuple[Int, Int]:
+        """Up: (the note dropped, where), (-1, -1) when nothing was."""
+        var id = self.drag_id
+        var was = self.dragging
+        self.drag_id = -1
+        self.dragging = False
+        if id < 0 or not was:
+            return (-1, -1)
+        var to = self.drop_at(x, y)
+        return (id, to) if to >= 0 else (-1, -1)
+
+    def edit_at(self, x: Float64, y: Float64) -> Int:
+        """The notebook whose pencil is at (x, y) (drawn while the pointer is on its row); -1: none."""
+        if y < self.list_y0 or y >= self.list_y1:
+            return -1
+        for i in range(0, len(self.hits), 6):
+            if Int(self.hits[i]) == 4 and x >= self.hits[i + 2] and x < self.hits[i + 2] + self.hits[i + 4] and y >= self.hits[i + 3] and y < self.hits[i + 3] + self.hits[i + 5]:
+                return Int(self.hits[i + 1])
+        return -1
 
     def add_at(self, x: Float64, y: Float64) -> Int:
         """The shelf whose + is at (x, y) (drawn while the pointer is on its head); -1: none."""
@@ -602,6 +661,9 @@ struct NotesPanel(Movable):
         if self.inbox_open:
             p.rect(cx, cy, cw, inbox_h, sk.shelf, 13)
         bx.add("panel.shelf", cx, cy, cw, inbox_h)
+        self._hit(3, 0, cx, cy, cw, 38)
+        if self.dragging and self.drop_at(self.px, self.py) == 0:
+            p.rect(cx + 2, cy + 2, cw - 4, 34, sk.hover, 11)
         cy = self._shelf(p, bx, k, sk, cx, cy, cw, self.cfg.loose_label, self.cfg.loose_icon, self.inbox_open, String(len(inbox_notes)), True, False)
         if self.inbox_open:
             var rows_y = cy + 2
@@ -658,6 +720,10 @@ struct NotesPanel(Movable):
                     for i in books:
                         self._notebook_row(p, bx, k, sk, cx + 2, ny, cw - 4, self.notebooks[i])
                         self._hit(1, self.notebooks[i].id, cx + 2, ny, cw - 4, 30)
+                        if self.py >= ny and self.py < ny + 30 and self.px >= cx and self.px < cx + cw and not self.dragging and self.naming < 0:  # (its …)
+                            p.rect(cx + cw - 72, ny + 4, 22, 22, sk.panel, 7)
+                            draw_icon(p, "pencil", cx + cw - 68, ny + 8, 14, k, sk.ink_soft)
+                            self._hit(4, self.notebooks[i].id, cx + cw - 74, ny + 2, 26, 26)
                         var bh = self._book_height(self.notebooks[i].id)
                         if bh > 0:
                             var inside = self._book_notes(self.notebooks[i].id)
@@ -677,6 +743,17 @@ struct NotesPanel(Movable):
                     bx.add("panel.empty:" + self.cfg.empty_text, cx + 2, cy, cw - 4, 10)
                 cy += 2
         bx.add("panel.list", cx, list_top, cw, cy - list_top)
+        if self.dragging:  # (the row under the pointer, and where it would go)
+            var to = self.drop_at(self.px, self.py)
+            for i in range(0, len(self.hits), 6):
+                if to > 0 and Int(self.hits[i]) == 1 and Int(self.hits[i + 1]) == to:
+                    p.rect(self.hits[i + 2], self.hits[i + 3], self.hits[i + 4], self.hits[i + 5], with_alpha(sk.accent, 0.16), 8)
+            for ref n in self.notes:
+                if n.id == self.drag_id:
+                    var gst = TextStyle(UI, 500, False, 12.5)
+                    var gw = min(measure(gst, n.title) + 24, 200.0)
+                    draw_lifted(p, self.px + 12, self.py - 14, gw, 30, 10, sk.shadow2, sk.panel)
+                    text_at(p, gst, fitted(gst, n.title, gw - 24), self.px + 24, self.py - 14, 30, sk.ink)
         if clipped:
             p.pop_clip()
             var track = self.list_y1 - self.list_y0
@@ -1133,8 +1210,10 @@ struct PropsCard(Movable):
     var menu_open: Bool
     var facts: List[PropsRow]
     var danger_label: String
+    var rename_label: String  # a quiet button above the danger one ("" : none; box "props.rename")
 
     def __init__(out self):
+        self.rename_label = ""
         self.label = "Notebook"
         self.place = 0
         self.places = List[String]()
@@ -1148,7 +1227,7 @@ struct PropsCard(Movable):
         var x = cx - w / 2
         var lst = TextStyle(UI, 700, False, 10)
         lst.letter_spacing = 0.8
-        var h = 4 + 12 + 14 + 9 + 38 + 12 + 1 + 12 + Float64(len(self.facts)) * 15 + Float64(max(len(self.facts) - 1, 0)) * 13 + 12 + 12 + 38 + 14
+        var h = 4 + 12 + 14 + 9 + 38 + 12 + 1 + 12 + Float64(len(self.facts)) * 15 + Float64(max(len(self.facts) - 1, 0)) * 13 + 12 + 12 + 38 + 14 + (45.0 if self.rename_label != "" else 0.0)
         draw_lifted(p, x, y, w, h, 16, sk.shadow2, sk.panel)
         bx.add("props", x, y, w, h)
         var ix = x + 18
@@ -1170,6 +1249,12 @@ struct PropsCard(Movable):
             text_at(p, fst, f.value, ix + iw - measure(fst, f.value), cy, 15, sk.ink)
             cy += 28
         cy += 11.0 if len(self.facts) > 0 else 24.0
+        if self.rename_label != "":
+            draw_bordered(p, ix, cy, iw, 38, 19, sk.panel, sk.line)
+            var rst = TextStyle(UI, 600, False, 12)
+            text_at(p, rst, self.rename_label, ix + (iw - measure(rst, self.rename_label)) / 2, cy, 38, sk.ink)
+            bx.add("props.rename", ix, cy, iw, 38)
+            cy += 45
         draw_bordered(p, ix, cy, iw, 38, 19, sk.panel, sk.line)
         var dst = TextStyle(UI, 600, False, 12)
         var dw = 15 + 8 + measure(dst, self.danger_label)

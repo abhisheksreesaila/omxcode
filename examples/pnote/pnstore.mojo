@@ -3,7 +3,7 @@
 # (services.py create_note, move_note, delete_note): the row, the search index and the change log in one transaction.
 
 from mojoui.sqlite import Database
-from mojoui.docstore import RowNew, RowSave, Followup, SqlArg, NewResult, SaveResult, NEW_ROW, text_arg, int_arg, new_row, drop_row, save_row
+from mojoui.docstore import RowNew, RowSave, Followup, SqlArg, NewResult, SaveResult, NEW_ROW, text_arg, int_arg, new_row, drop_row, save_row, row_revision
 from mojoui.crypto import random_bytes
 from mojoui.files import private_dir, data_dir
 
@@ -239,6 +239,42 @@ def make_notebook(mut db: Database, name: String, category: String) -> NewResult
         return new_row(db, s)
     except e:
         return NewResult(0, String(e))
+
+
+def change_notebook(mut db: Database, id: Int, name: String, category: String) -> String:
+    """A notebook's name and shelf (services.update_notebook), on the revision its row has now; "" or why not."""
+    var rev = row_revision(db, "notebooks", "id", id, "revision")
+    if rev < 0:
+        return "gone"
+    var s = RowSave("notebooks", "id", id, "revision", rev)
+    s.set("name", text_arg(name))
+    s.set("category", text_arg(category))
+    s.stamp("updated_at")
+    for f in changed("notebook", id, "updated", "notebooks"):
+        s.after.append(f.copy())
+    var r = save_row(db, s)
+    return "" if r.ok() else r.message
+
+
+def drop_notebook(mut db: Database, id: Int) -> String:
+    """A notebook deleted, its notes back in the Inbox at their next revisions (services.delete_notebook), all or nothing."""
+    var before = List[Followup]()
+    var ids = List[Int]()
+    try:
+        var q = db.prepare("SELECT id FROM notes WHERE notebook_id = ?")
+        q.bind(1, id)
+        while q.step():
+            ids.append(q.int(0))
+    except e:
+        return String(e)
+    before.append(Followup("UPDATE notes SET notebook_id = NULL, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE notebook_id = ?", [int_arg(id)]))
+    for n in ids:
+        for f in changed("note", n, "updated"):
+            before.append(f.copy())
+    for f in changed("notebook", id, "deleted", "notebooks"):
+        before.append(f.copy())
+    before.append(Followup("UPDATE x_notebook SET notebook_id = NULL WHERE notebook_id = ?", [int_arg(id)]))
+    return drop_row(db, "notebooks", "id", id, before)
 
 
 def file_note(mut db: Database, id: Int, revision: Int, notebook: Int) -> SaveResult:
