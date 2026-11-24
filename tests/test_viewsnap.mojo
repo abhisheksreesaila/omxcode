@@ -317,8 +317,46 @@ def files() raises:
     print("files: ok")
 
 
+def kept_by_more_alone() raises:
+    """(D-8016) A host draws again only while the renderer says there is more to do: from any board and view, that alone
+    ends with the view kept. (Once, on the Mac, a frame that rastered its last tile asked for nothing more: the view was
+    never kept and the next open started from nothing.)"""
+    var dir = getenv("TMPDIR", "/tmp") + "/viewsnap-test"
+    var missed = String("")
+    var n = 0
+    for size in [1, 7, 30, 90, 1200]:
+        for q in range(4):
+            var layer = ObjectLayer()
+            for i in range(size):
+                _ = layer.add_sticky(Float64(i % 40) * 120, Float64(i // 40) * 110, 90, "Sticky " + String(i))
+            var v = [DeskView(-300, -200, 1.0), DeskView(100, 80, 0.3), DeskView(-1700, -900, 1.7), DeskView(40, 30, 1.0)][q]
+            var path = dir + "/more-" + String(size) + "-" + String(q) + ".snap"
+            _ = unlink(path)
+            var look = BoardLook()
+            look.keep_path = path
+            look.keep_tag = "note=2;rev=1;skin=paper"
+            var g = GPU2D()
+            assert_true(g.start(False), "start")
+            var t0 = perf_counter_ns()
+            while True:
+                _ = frame(g, look, layer, v)
+                if not g.more or perf_counter_ns() - t0 > 6_000_000_000:
+                    break
+            if g.tiles.drawn == 0:  # (a board too small for tiles draws whole: there is nothing to keep)
+                g.gl.close()
+                continue
+            n += 1
+            if not snap_read(path, True).ok:
+                missed += " " + String(size) + "@" + String(q)
+            g.gl.close()
+    print("   kept by `more` alone:", n, "boards and views; not kept:" + (missed if missed != "" else String(" none")))
+    assert_equal(missed, "")
+    assert_true(n >= 8, "tiled boards tried: " + String(n))
+
+
 def main() raises:
     codec()
     files()
     gl_identity()
+    kept_by_more_alone()
     print("viewsnap: ok")

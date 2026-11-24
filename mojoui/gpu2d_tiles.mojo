@@ -719,6 +719,8 @@ struct Tiles(Movable):
             self.sets[s].writer = List[SnapWriter]()
             self.sets[s].writer.append(SnapWriter(scene.layer_snap[i], self.snap_key(scene, i, w, h), scene.layer_snap_note[i]))
         else:
+            if want and not ready and kt != self.sets[s].saved and len(out.rasters) > 0:
+                self.more = True  # (D-8016: this frame rastered: whether it has settled is the next one's to say. A host draws again only while there is more)
             return
         # one tile a frame (an empty one costs nothing: then the next too)
         var tx = Int(scene.layer_tx[i])
