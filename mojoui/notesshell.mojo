@@ -1106,7 +1106,7 @@ def draw_toast[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, bottom: Float64
     var h = 44.0
     var x = cx - w / 2
     var y = bottom - h
-    draw_lifted(p, x, y, w, h, 8, sk.shadow3, rgba(41, 42, 37))
+    draw_lifted(p, x, y, w, h, 8, sk.shadow2, rgba(41, 42, 37))
     bx.add("toast", x, y, w, h)
     text_at(p, st, words, x + 16, y, h, rgba(255, 255, 255))
     if action != "":

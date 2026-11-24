@@ -157,6 +157,12 @@ def search() raises:
     var l = at(s, "#search-results")
     assert_true(p[1] > l[1] - 160 and p[1] < l[1] + 160, "in view")
     _ = s.key("Escape", 0)
+    s.create("page", "İstanbul’dan ẞ notlar")  # (letters whose lower case is longer or shorter: marked or not, never cut)
+    for q in ["i", "ist", "ß", "notlar", "İ", "’"]:
+        _ = s.key("k", 2)
+        typed(s, String(q))
+        paint(s)
+        _ = s.key("Escape", 0)
     var w = fts_words("naïve-word \"OR\" x_1")
     assert_equal(len(w), 4)
     s.close()
@@ -372,6 +378,7 @@ def notebooks() raises:
 def main() raises:
     _ = private_dir("build/test_pnnotes_cfg")
     _ = setenv("OMX_CONFIG", "build/test_pnnotes_cfg")
+    _ = unlink("build/test_pnnotes_cfg/settings.txt")  # (folds a run before remembered)
     default_file()
     fresh()
     fresh_file()

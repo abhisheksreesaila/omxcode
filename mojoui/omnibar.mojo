@@ -212,7 +212,7 @@ struct Omnibar(Movable):
         var room = w - 10 - 40 - 12 - 10 - (0.0 if r.badge == "" else 12 + 24 + measure(TextStyle(MONO, 500, False, 10.5), r.badge))
         var title = fitted(tst, r.title, room)
         var q = self.query.lower()
-        var at = _word_match(title.lower(), q)
+        var at = _marked(title, q)
         var penx = tx
         if at >= 0 and q != "":
             var before = String(title[byte=0:at])
@@ -248,11 +248,16 @@ struct Omnibar(Movable):
             return
         var px = x + 1 + 18
         var py = y + 18
+        if self.preview_kind == "":  # (an action, a notebook: no document to tell of)
+            var big = fitted(TextStyle(sk.display, sk.display_weight, sk.display_italic, 20), r.title, 212)
+            text_at(p, TextStyle(sk.display, sk.display_weight, sk.display_italic, 20), big, px, py + 44 + 8, 24, sk.ink)
+            text_at(p, TextStyle(UI, 400, False, 12.5), r.sub if r.sub != "" else String("Press Enter to run it."), px, py + 44 + 8 + 24 + 8, 18, sk.ui_muted)
+            return
         if r.emoji != "":
             var est = TextStyle("emoji", 400, False, 40)
             text_at(p, est, r.emoji, px, py, 44, rgba(0, 0, 0))
         var hst = TextStyle(sk.display, sk.display_weight, sk.display_italic, 20)
-        text_at(p, hst, r.title, px, py + 44 + 8, 24, sk.ink)
+        text_at(p, hst, fitted(hst, r.title, 212), px, py + 44 + 8, 24, sk.ink)
         var ny = py + 44 + 8 + 24 + 6 + 3.63
         if r.badge != "":
             var bst = TextStyle(MONO, 500, False, 10.5)
@@ -282,6 +287,24 @@ def _word_match(text: String, q: String) -> Int:
             return i
         i = text.find(q, i + 1)
     return -1
+
+
+def _marked(title: String, q: String) -> Int:
+    """Where the typed letters stand in a title, a word's start first (byte index), else -1. Never inside a character: a
+    title whose lower case is written differently long isn't marked."""
+    var low = title.lower()
+    if q == "" or low.byte_length() != title.byte_length():
+        return -1
+    var at = _word_match(low, q)
+    if at < 0:
+        at = low.find(q)
+    if at < 0:
+        return -1
+    var b = title.as_bytes()
+    var e = at + q.byte_length()
+    if (Int(b[at]) & 0xC0) == 0x80 or (e < len(b) and (Int(b[e]) & 0xC0) == 0x80):
+        return -1
+    return at
 
 
 def word_match(text: String, q: String) -> Bool:
