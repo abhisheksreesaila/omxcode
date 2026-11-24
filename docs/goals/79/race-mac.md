@@ -2,86 +2,138 @@
 
 Web renderer on the Mac: 158.0.8127.88 renderer ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version).
 
-**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower bound of its first paint, process start to its own server sending the page (ruling D, D-7992; desktop_cold_mac.py, scratch HOME, database and folders).
+**The Mac (M4), 1440×900 at 2.0×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory, note switch, opens and the fresh-Chrome cold start by webmem, webswitch, webopen and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. **The Mac's frames shown aren't measured (its screen is locked, and the AppKit host has no paced run): its frame rows say "work only, not like-for-like" and are not judged.** PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower bound of its first paint, process start to its own server sending the page (D-7992).
 
-Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at 1.6×. Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, the same steps through test mode. Silky = native p95 ≤ 8.3 ms and max ≤ 16.7 ms, no CPU frame.
+Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at 2.0×. Web: benchmark-f034.mjs --gpu (Chromium with the GPU), webopen.mjs, webswitch.mjs. Native: pnote's web look (PNOTE_DB), the same steps through test mode.
 
-**What the numbers are (they are not the same unit):**
-- *web*: requestAnimationFrame gaps (frame to frame) in Chromium, which can't go below one refresh, 16.7 ms at 60 Hz; undo and redo are "to the frame after"; open is one open to the first settled frame (its p50 stands for p95 and max): a page load in a new browser context of an already-running Chromium (benchmark-f034's open row).
-- *native work*: each frame's own work: the event, the app's update, the redraw, the GPU time, GTK's paint and a display round trip (the GTK host's framebench). The canvas is handed to the compositor (graphics offload), so GTK never composites it and presentation is not in this number.
-- *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after its work plus its shown time; read the web column against that sum, not against the work alone.
-- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), progressively (mojoui.canvasload, D-7944), its board's raster tiles dropped first and the first timed open coming from another note (D-7951); and once more as the process's very first open of it (PNOTE_FIRST). Every frame counts its draw, its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). (D-7956, D-7958) A canvas whose settled view was kept on disk (mojoui.viewsnap: same document revision, skin, zoom, view, size, GPU and build) opens from it: the first frame shows those tiles, the note is read and skimmed on a job thread, the view's objects come in by slices, then the kept tiles become the board's tiles. The first-open row says which path it took and how many cold opens used it; the open without a kept view (the very first open of a note, and MOJOUI_SNAP=0) is printed after the table, not judged. Judged by D-7946: (a) the first frame, showing the chrome and the visible board, within 8.3 ms (its max over the cold opens and the first open); (b) every frame after it until the board is complete silky, and the frame showing a press made during the open (the app finishes the load first, D-7952); (c) complete (wall clock, to the frame that shows it) sooner than the web's open; (d) tests/test_canvasload (a pan and an edit during the open) passes: yes. A reopen of a canvas kept parsed at the revision the file still holds is printed after the table, not judged.
+**How it is judged** (the owner, 2026-11-24: "yandong have a bar,  it sjust need better than web (sind its antive) if tis very close its ok"; the main session's reading, not the owner's words: no absolute ms bar decides; a row passes when native is better than the web on the same machine, and *very close* is within 3 %). A frame that both show in one refresh at 60 Hz is "a tie at the display's refresh" and passes. Still required: no canvas frame drawn on the CPU; tests/test_canvasload (a pan and an edit during an open): passes. The silky marks (p95 ≤ 8.3 ms, max ≤ 16.7 ms of work) are printed on every row, as information.
 
-| note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |
-|---|---|---|---|---|---|
-| 600 | open (cold): first frame (the process's first open: 10.7, from the kept view); the kept view shown in 30 of 30 cold opens | 371.0 / 371.0 | 10.7 / 10.7 | — | ✗ |
-| 600 | open: frames during (n 304) | — | 4.8 / 6.3 | | ✓ |
-| 600 | open: a press during it, the frame that shows it (n 10) | — | 7.8 / 7.8 | | ✓ |
-| 600 | open: complete (wall) | 371.0 | 19.2 / 180.5 | | ✓ |
-| 600 | pan 30% | 16.7 / 16.8 | 3.1 / 3.1 | — | ✓ |
-| 600 | zoom from 30% | 16.8 / 16.8 | 3.7 / 5.0 | — | ✓ |
-| 600 | pan 100% | 16.7 / 16.8 | 2.6 / 2.8 | — | ✓ |
-| 600 | drag one | 16.7 / 16.8 | 3.2 / 5.1 | — | ✓ |
-| 600 | drag 40 | 16.8 / 16.8 | 3.6 / 6.3 | — | ✓ |
-| 600 | undo | 20.5 / 21.8 | 4.5 / 5.6 | — | ✓ |
-| 600 | redo | 20.4 / 25.1 | 5.5 / 6.9 | — | ✓ |
-| 600 | pen | 16.8 / 33.4 | 1.7 / 2.1 | — | ✓ |
-| 600 | typing | 16.8 / 16.8 | 3.8 / 7.7 | — | ✓ |
-| stress | open (cold): first frame (the process's first open: 9.4, from the kept view); the kept view shown in 30 of 30 cold opens | 602.0 / 602.0 | 9.4 / 9.4 | — | ✗ |
-| stress | open: frames during (n 1162) | — | 3.7 / 13.1 | | ✓ |
-| stress | open: a press during it, the frame that shows it (n 10) | — | 9.3 / 9.3 | | ✗ |
-| stress | open: complete (wall) | 602.0 | 100.7 / 473.3 | | ✓ |
-| stress | pan 30% | 16.8 / 16.8 | 3.5 / 4.1 | — | ✓ |
-| stress | zoom from 30% | 16.7 / 33.4 | 5.4 / 8.0 | — | ✓ |
-| stress | pan 100% | 16.8 / 16.8 | 3.9 / 4.1 | — | ✓ |
-| stress | drag one | 16.7 / 16.8 | 3.6 / 8.4 | — | ✓ |
-| stress | drag 40 | 16.8 / 33.4 | 4.7 / 14.3 | — | ✓ |
-| stress | undo | 22.2 / 23.0 | 5.6 / 6.1 | — | ✓ |
-| stress | redo | 24.2 / 24.3 | 8.3 / 12.6 | — | ✓ |
-| stress | pen | 16.8 / 116.8 | 3.1 / 3.9 | — | ✓ |
-| stress | typing | 16.7 / 16.8 | 3.8 / 8.0 | — | ✓ |
-| 600 | the process's first open ever, no kept view on disk (parsed; not judged) | — | 44.2 / 44.2 | | |
-| stress | the process's first open ever, no kept view on disk (parsed; not judged) | — | 100.3 / 100.3 | | |
-| 600 | open again, kept parsed (not judged) | — | 3.6 / 3.6 | | |
-| stress | open again, kept parsed (not judged) | — | 4.9 / 4.9 | | |
+**What is compared:**
+- *Frames* (pan, zoom, drags, pen, typing, the frames of an open): the gap from one frame to the next. Web: requestAnimationFrame gaps (every refresh, whether or not the picture changed). Native: from one frame's paint to the next one's, every frame showing a new picture, the next gesture given once the last is painted, nothing measured inside the frames (MOJOUI_BENCH_PACED). p95, max and missed frames (gaps over 20 ms, benchmark-f034's own "slow"), over the same number of gestures. Neither side has the compositor's presentation time: the hidden screen reports none ("shown: not measured" in every earlier race), and a page can't read it.
+- *Latency* (opens, a press during one, undo, redo, note switch, omnibar): from the event to the frame that shows it painted by the app's thread and handed on. Web: a requestAnimationFrame, then a task after it; from the input event's own timestamp, undo and redo from the call (as benchmark-f034 times them). Native: to GTK's after-paint; undo and redo from the key event, the note switch and omnibar from the app's own step (no pointer event in front: the one difference left, in native's favour by its hit test).
+- *Opens*: the same note opened inside the running app from another note, first time in the process (native: nothing kept, the note parsed; and a new process opening it from the view the last one kept) and again. Web: webopen.mjs, the click to the frame after its canvas settled; native: the open request to the frame that completes the board. benchmark-f034's own open row (a page load in a new browser context) is printed, not compared: it loads the app too.
+- *Not warmed*: pnote readies glyphs and the next zoom's and undo's pictures while nothing happens (D-8002, D-8019). The paced race is run once more with that off (MOJOUI_SCENEWARM=0, MOJOUI_GLYPHWARM=0) and judged against the web as well; the start-up rows are the first start's, nothing readied.
+- *native work* (beside): each frame's own work: event, update, redraw, GPU time, GTK's paint and a display round trip, in a run of its own.
 
-| | web | native | |
+| note | row | web p95 / max (missed) | native p95 / max (missed) | verdict | native work p95 / max | silky marks (information) |
+|---|---|---|---|---|---|---|
+| 600 | the first open ever (nothing kept: parsed): its first frame | 202.5 / 202.5 | — | work only, not like-for-like | 40.1 / 40.1 | over: p95 > 8.3, max > 16.7 |
+| 600 | the first open ever (nothing kept: parsed): complete | 202.5 / 202.5 | — | work only, not like-for-like | — |  |
+| 600 | a new process's first open, from the view the last one kept: its first frame | 202.5 / 202.5 | — | work only, not like-for-like | 9.7 / 9.7 | over: p95 > 8.3 |
+| 600 | a new process's first open, from the view the last one kept: complete | 202.5 / 202.5 | — | work only, not like-for-like | — |  |
+| 600 | open again (cold: the row read each time): its first frame | 203.0 / 203.0 | — | work only, not like-for-like | 6.2 / 6.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | open again: complete | 203.0 / 203.0 | — | work only, not like-for-like | — |  |
+| 600 | open again: the frames while it comes in (gaps) | 16.8 / 33.4 | — | work only, not like-for-like | 4.5 / 8.7 | ≤ 8.3 and ≤ 16.7 |
+| 600 | a press during an open | 13.9 / 13.9 | — | work only, not like-for-like | 8.2 / 8.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 30% (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 2.5 / 3.7 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 30%, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| 600 | zoom from 30% (frames) | 16.8 / 33.3 | — | work only, not like-for-like | 3.6 / 4.6 | ≤ 8.3 and ≤ 16.7 |
+| 600 | zoom from 30%, not warmed (frames) | 16.8 / 33.3 | — | work only, not like-for-like | — |  |
+| 600 | pan 100% (frames) | 16.8 / 16.8 | — | work only, not like-for-like | 2.9 / 3.1 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 100%, not warmed (frames) | 16.8 / 16.8 | — | work only, not like-for-like | — |  |
+| 600 | drag one (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.1 / 5.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | drag one, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| 600 | drag 40 (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.8 / 6.3 | ≤ 8.3 and ≤ 16.7 |
+| 600 | drag 40, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| 600 | undo (latency) | 23.0 / 24.8 | — | work only, not like-for-like | 5.0 / 6.9 | ≤ 8.3 and ≤ 16.7 |
+| 600 | undo, not warmed (latency) | 23.0 / 24.8 | — | work only, not like-for-like | — |  |
+| 600 | redo (latency) | 20.2 / 21.1 | — | work only, not like-for-like | 4.8 / 6.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | redo, not warmed (latency) | 20.2 / 21.1 | — | work only, not like-for-like | — |  |
+| 600 | pen (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 2.4 / 4.0 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pen, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| 600 | typing (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.1 / 7.4 | ≤ 8.3 and ≤ 16.7 |
+| 600 | typing, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| stress | the first open ever (nothing kept: parsed): its first frame | 602.4 / 602.4 | — | work only, not like-for-like | 104.6 / 104.6 | over: p95 > 8.3, max > 16.7 |
+| stress | the first open ever (nothing kept: parsed): complete | 602.4 / 602.4 | — | work only, not like-for-like | — |  |
+| stress | a new process's first open, from the view the last one kept: its first frame | 602.4 / 602.4 | — | work only, not like-for-like | 11.5 / 11.5 | over: p95 > 8.3 |
+| stress | a new process's first open, from the view the last one kept: complete | 602.4 / 602.4 | — | work only, not like-for-like | — |  |
+| stress | open again (cold: the row read each time): its first frame | 584.3 / 584.3 | — | work only, not like-for-like | 11.3 / 11.3 | over: p95 > 8.3 |
+| stress | open again: complete | 584.3 / 584.3 | — | work only, not like-for-like | — |  |
+| stress | open again: the frames while it comes in (gaps) | 33.4 / 233.4 | — | work only, not like-for-like | 3.8 / 5.4 | ≤ 8.3 and ≤ 16.7 |
+| stress | a press during an open | 21.4 / 21.4 | — | work only, not like-for-like | 8.3 / 8.3 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30% (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.5 / 5.1 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30%, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| stress | zoom from 30% (frames) | 16.7 / 49.9 | — | work only, not like-for-like | 5.4 / 8.4 | ≤ 8.3 and ≤ 16.7 |
+| stress | zoom from 30%, not warmed (frames) | 16.7 / 49.9 | — | work only, not like-for-like | — |  |
+| stress | pan 100% (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 2.2 / 3.1 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 100%, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| stress | drag one (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.8 / 10.5 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag one, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+| stress | drag 40 (frames) | 16.7 / 33.3 | — | work only, not like-for-like | 4.4 / 14.6 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag 40, not warmed (frames) | 16.7 / 33.3 | — | work only, not like-for-like | — |  |
+| stress | undo (latency) | 21.0 / 21.4 | — | work only, not like-for-like | 5.4 / 6.5 | ≤ 8.3 and ≤ 16.7 |
+| stress | undo, not warmed (latency) | 21.0 / 21.4 | — | work only, not like-for-like | — |  |
+| stress | redo (latency) | 23.9 / 24.1 | — | work only, not like-for-like | 9.5 / 12.4 | over: p95 > 8.3 |
+| stress | redo, not warmed (latency) | 23.9 / 24.1 | — | work only, not like-for-like | — |  |
+| stress | pen (frames) | 16.8 / 83.3 | — | work only, not like-for-like | 2.6 / 4.3 | ≤ 8.3 and ≤ 16.7 |
+| stress | pen, not warmed (frames) | 16.8 / 83.3 | — | work only, not like-for-like | — |  |
+| stress | typing (frames) | 16.7 / 16.8 | — | work only, not like-for-like | 3.7 / 9.3 | ≤ 8.3 and ≤ 16.7 |
+| stress | typing, not warmed (frames) | 16.7 / 16.8 | — | work only, not like-for-like | — |  |
+
+**Beside, not judged:**
+
+| note | what | web | native |
 |---|---|---|---|
-| cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its own server sending the page (D-7992); its window on screen at 389.1 ms | 457.6 ms | 150.0 ms | ✓ |
-| cold start: a fresh Chromium process on the built app | 634.7 ms | 150.0 ms | ✓ |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | — ms | 150.0 ms | |
-| RSS after opening all three kinds | 853.4 MB | 175.6 MB | ✓ |
-| note switch p95 / max (5 runs of 5; p95 the median run's, max the worst) | 65.3 / 72.5 ms | 6.3 / 6.4 ms | ✓ |
-| omnibar open p95 / max (5 runs of 5; p95 the median run's, max the worst) | 37.6 / 43.1 ms | 6.0 / 7.8 ms | ✓ |
-| the app's second start (glyphs of the first readied at idle, mojoui.glyphwarm, D-8002; not judged): note switch · omnibar p95 | — | 5.7 · 6.5 ms | |
+| 600 | benchmark-f034's open (a page load in a new context) | 375.0 | |
+| 600 | pen: input to frame p95 / max | 23.7 / 37.1 | — |
+| 600 | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 24.0 / 24.0 | — |
+| 600 | cold opens that showed the kept view | | 30 of 30 |
+| 600 | work: the first open ever, first frame · frames during p95 / max · complete | | 40.1 · 4.7 / 4.7 · 70.4 |
+| 600 | work: a new process's first open from the kept view | | 9.7 · 6.0 / 7.8 · 93.5 |
+| 600 | work: open again, kept parsed | | 4.2 / 4.2 |
+| stress | benchmark-f034's open (a page load in a new context) | 610.0 | |
+| stress | pen: input to frame p95 / max | 23.6 / 114.0 | — |
+| stress | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 592.0 / 648.0 | — |
+| stress | cold opens that showed the kept view | | 30 of 30 |
+| stress | work: the first open ever, first frame · frames during p95 / max · complete | | 104.6 · 4.2 / 4.2 · 156.4 |
+| stress | work: a new process's first open from the kept view | | 11.5 · 5.4 / 6.2 · 541.7 |
+| stress | work: open again, kept parsed | | 5.2 / 5.2 |
 
-Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar (D-8001): native, the step's event, view, draw and GPU time (the host's app_step_bench); web, docs/goals/79/webswitch.mjs: the input event's timestamp to the frame after the new title (or the search panel) shows, in Chromium with the GPU: a fresh page per run.
+| | web | native | verdict |
+|---|---|---|---|
+| cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its own server sending the page (D-7992); its window on screen at 389.5 ms | 456.0 ms | 153.3 ms | better (work only: the screen is locked; not judged) |
+| cold start: a fresh Chromium process on the built app | 523.4 ms | 153.3 ms | better (work only: the screen is locked; not judged) |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | — ms | 153.3 ms | |
+| RSS after opening all three kinds | 849.0 MB | 176.7 MB | ✓ better |
+| note switch p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 68.2 / 68.8 ms | not measured | not measured (work only: the screen is locked; not judged) |
+| note switch p95 / max, the second start (the first one's glyphs readied, D-8002) | 68.2 / 68.8 ms | not measured | not measured (work only: the screen is locked; not judged) |
+| note switch: native work p95 / max (first start · second), beside | | 8.6 / 10.0 · 7.8 / 7.8 ms | over: p95 > 8.3 |
+| omnibar open p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 34.1 / 42.2 ms | not measured | not measured (work only: the screen is locked; not judged) |
+| omnibar open p95 / max, the second start (the first one's glyphs readied, D-8002) | 34.1 / 42.2 ms | not measured | not measured (work only: the screen is locked; not judged) |
+| omnibar open: native work p95 / max (first start · second), beside | | 8.3 / 8.6 · 8.4 / 8.4 ms | ≤ 8.3 and ≤ 16.7 |
+
+Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. Each side's 'quiet' rule: no run starts while scripts/gpu-free says another job has the machine (Linux), or while the Mac's load is 3 or more; a run that did is void and run again.
 
 The Mac while measured (load, busiest processes at each measured run's start; void ones named):
-- web race: load 1.81 20:50  up 4 days,  8:42, 1 user, load averages: 1.81 1.98 2.16 7.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- web memory and switch: load 1.39 20:52  up 4 days,  8:44, 1 user, load averages: 1.39 1.77 2.05 11.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/V
-- build: 20:54  up 4 days,  8:46, 1 user, load averages: 2.52 1.88 2.04 | top: 1.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 0.6 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/contextstored; 0.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- first-600-A: load 2.48 20:54  up 4 days,  8:46, 1 user, load averages: 2.48 1.88 2.04 9.0 sshd-session:; 8.0 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd;
-- first-600-A: 20:55  up 4 days,  8:47, 1 user, load averages: 2.48 1.88 2.04 | top: 59.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 59.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 28.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- first-600-B: load 2.38 20:55  up 4 days,  8:47, 1 user, load averages: 2.38 1.89 2.04 16.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- first-600-B: 20:55  up 4 days,  8:47, 1 user, load averages: 2.35 1.89 2.04 | top: 64.1 (mdworker_shared); 62.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 29.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- race-600: load 2.51 20:55  up 4 days,  8:47, 1 user, load averages: 2.51 1.94 2.05 10.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
-- race-600: 20:55  up 4 days,  8:47, 1 user, load averages: 2.92 2.07 2.10 | top: 66.7 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 1.3 /usr/libexec/aned; 0.8 /usr/libexec/dasd; 
-- first-stress-A: load 2.38 20:56  up 4 days,  8:48, 1 user, load averages: 2.38 2.03 2.08 85.2 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 13.8 /S
-- first-stress-A: 20:56  up 4 days,  8:48, 1 user, load averages: 2.38 2.03 2.08 | top: 94.3 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 28.8 /usr/libexec/textunderstandingd; 26.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- first-stress-B: load 2.83 20:56  up 4 days,  8:48, 1 user, load averages: 2.83 2.17 2.13 56.1 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 45.1 /u
-- first-stress-B: 20:56  up 4 days,  8:48, 1 user, load averages: 2.83 2.17 2.13 | top: 61.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 35.1 /usr/libexec/textunderstandingd; 25.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
-- race-stress: load 2.96 20:57  up 4 days,  8:49, 1 user, load averages: 2.96 2.33 2.19 63.2 /usr/libexec/textunderstandingd; 36.3 /System/Library/PrivateFrameworks/MediaAnalysis.framew
-- race-stress: 20:57  up 4 days,  8:49, 1 user, load averages: 2.96 2.33 2.19 | top: 64.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 38.4 /usr/libexec/textunderstandingd; 31.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
-- start-0: load 2.98 20:58  up 4 days,  8:50, 1 user, load averages: 2.98 2.48 2.26 53.8 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 18.1 /u
-- start-0: 20:58  up 4 days,  8:50, 1 user, load averages: 2.98 2.48 2.26 | top: 72.2 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 29.1 /usr/libexec/textunderstandingd; 26.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- start-1: load 2.64 21:00  up 4 days,  8:52, 1 user, load averages: 2.64 2.71 2.39 56.7 /usr/libexec/textunderstandingd; 36.9 /System/Library/PrivateFrameworks/MediaAnalysis.framew
-- start-1: 21:00  up 4 days,  8:52, 1 user, load averages: 2.67 2.72 2.39 | top: 35.3 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 27.4 /usr/libexec/textunderstandingd; 16.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- start-2: load 2.49 21:00  up 4 days,  8:52, 1 user, load averages: 2.49 2.68 2.38 70.8 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 22.3 /u
-- start-2: 21:00  up 4 days,  8:52, 1 user, load averages: 2.61 2.70 2.39 | top: 57.6 /usr/libexec/textunderstandingd; 40.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 37.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- start-3: load 2.59 21:00  up 4 days,  8:52, 1 user, load averages: 2.59 2.69 2.39 58.7 /usr/libexec/textunderstandingd; 31.0 /System/Library/PrivateFrameworks/MediaAnalysis.framew
-- start-3: 21:01  up 4 days,  8:52, 1 user, load averages: 2.46 2.66 2.38 | top: 50.4 /usr/libexec/textunderstandingd; 40.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 28.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
-- start-4: load 2.56 21:01  up 4 days,  8:53, 1 user, load averages: 2.56 2.68 2.39 70.8 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 29.2 /u
-- start-4: 21:01  up 4 days,  8:53, 1 user, load averages: 2.56 2.68 2.39 | top: 51.2 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 42.5 /usr/libexec/textunderstandingd; 37.8 (mdworker_shared); 
-- start-5: load 2.7 21:02  up 4 days,  8:53, 1 user, load averages: 2.70 2.76 2.44 189.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 10.5 s
-- start-5: 21:02  up 4 days,  8:54, 1 user, load averages: 2.70 2.76 2.44 | top: 148.4 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd; 31.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 25.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- web race: load 1.07 5:24  up 4 days, 17:16, 1 user, load averages: 1.07 1.12 1.20 14.7 sshd-session:; 7.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/M
+- web memory: load 1.1 5:26  up 4 days, 17:18, 1 user, load averages: 1.10 1.13 1.20 11.1 sshd-session:; 10.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/F
+- web switch: load 1.08 5:26  up 4 days, 17:18, 1 user, load averages: 1.08 1.13 1.19 15.7 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Ve
+- web cold desktop: load 1.02 5:27  up 4 days, 17:19, 1 user, load averages: 1.02 1.10 1.17 24.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Ve
+- web cold chromium: load 1.01 5:28  up 4 days, 17:20, 1 user, load averages: 1.01 1.09 1.17 17.5 sshd-session:; 3.2 /usr/libexec/opendirectoryd; 1.4 /Applications/Tailscale.app/Contents/Plug
+- web open 600: load 1.71 5:28  up 4 days, 17:20, 1 user, load averages: 1.71 1.26 1.22 40.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- web open stress: load 1.31 5:30  up 4 days, 17:22, 1 user, load averages: 1.31 1.24 1.22 105.3 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension;
+- build: 5:32  up 4 days, 17:24, 1 user, load averages: 1.62 1.33 1.25 | top: 4.5 /System/Library/PrivateFrameworks/TCC.framework/Support/tccd; 3.2 /usr/libexec/trustd; 1.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- first-600-A: load 1.61 5:32  up 4 days, 17:24, 1 user, load averages: 1.61 1.33 1.25 14.8 sshd-session:; 7.6 /usr/libexec/nsurlsessiond; 6.5 /Applications/Tailscale.app/Contents/PlugI
+- first-600-A: 5:32  up 4 days, 17:24, 1 user, load averages: 1.61 1.33 1.25 | top: 44.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 40.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 30.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- first-600-B: load 1.95 5:32  up 4 days, 17:24, 1 user, load averages: 1.95 1.43 1.29 17.9 sshd-session:; 13.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/
+- first-600-B: 5:32  up 4 days, 17:24, 1 user, load averages: 2.11 1.47 1.31 | top: 42.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 32.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 21.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd; 
+- race-600: load 2.09 5:32  up 4 days, 17:24, 1 user, load averages: 2.09 1.49 1.31 18.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- race-600: 5:32  up 4 days, 17:24, 1 user, load averages: 2.09 1.49 1.31 | top: 28.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 28.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 24.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- first-stress-A: load 2.13 5:33  up 4 days, 17:25, 1 user, load averages: 2.13 1.58 1.35 21.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- first-stress-A: 5:33  up 4 days, 17:25, 1 user, load averages: 2.13 1.58 1.35 | top: 42.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 41.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 37.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- first-stress-B: load 2.21 5:33  up 4 days, 17:25, 1 user, load averages: 2.21 1.63 1.37 19.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- first-stress-B: 5:33  up 4 days, 17:25, 1 user, load averages: 2.20 1.63 1.38 | top: 33.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 32.5 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 25.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- race-stress: load 2.01 5:33  up 4 days, 17:25, 1 user, load averages: 2.01 1.61 1.37 24.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- race-stress: 5:33  up 4 days, 17:25, 1 user, load averages: 2.01 1.61 1.37 | top: 41.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores; 36.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 34.8 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-0: load 2.05 5:34  up 4 days, 17:26, 1 user, load averages: 2.05 1.72 1.43 22.6 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-0: 5:34  up 4 days, 17:26, 1 user, load averages: 2.05 1.72 1.43 | top: 35.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 26.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 24.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- start-1: load 2.51 5:34  up 4 days, 17:26, 1 user, load averages: 2.51 1.85 1.48 11.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-1: 5:35  up 4 days, 17:26, 1 user, load averages: 2.51 1.85 1.48 | top: 31.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 30.4 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 30.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- start-2: load 2.53 5:35  up 4 days, 17:27, 1 user, load averages: 2.53 1.89 1.50 12.7 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-2: 5:35  up 4 days, 17:27, 1 user, load averages: 2.53 1.89 1.50 | top: 47.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 26.2 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 17.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 
+- start-3: load 2.26 5:35  up 4 days, 17:27, 1 user, load averages: 2.26 1.86 1.49 11.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-3: 5:35  up 4 days, 17:27, 1 user, load averages: 2.26 1.86 1.49 | top: 48.8 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 25.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds; 22.9 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 
+- start-4: load 2.92 5:35  up 4 days, 17:27, 1 user, load averages: 2.92 2.10 1.59 15.3 sshd-session:; 1.2 /sbin/launchd; 1.0 /Applications/Tailscale.app/Contents/PlugIns/IPNExtensi
+- start-4: 5:36  up 4 days, 17:27, 1 user, load averages: 2.92 2.10 1.59 | top: 48.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 47.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 46.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
+- start-5: load 2.59 5:37  up 4 days, 17:28, 1 user, load averages: 2.59 2.27 1.70 14.2 sshd-session:; 10.4 /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow; 
+- start-5: 5:37  up 4 days, 17:29, 1 user, load averages: 2.59 2.27 1.70 | top: 24.8 /Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension; 23.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 23.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared; 
