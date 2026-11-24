@@ -4354,9 +4354,8 @@ struct GtkHost[A: App](Movable):
             elif kind == OP_UNCLIP:
                 external_call["gtk_snapshot_pop", NoneType](snap)
             elif kind == OP_IMAGE:  # (pixels made elsewhere: a texture, scaled by the renderer)
-                var pw = Int(sc.num(op, 5))
-                ref px = sc.images[Int(sc.num(op, 4))]
-                var tex = texture(px, pw, len(px) // pw)
+                var pic = sc.images[Int(sc.num(op, 4))].copy()
+                var tex = texture(pic[].levels[0], pic[].w, pic[].h)
                 self.put_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3))
                 external_call["gtk_snapshot_append_texture", NoneType](snap, tex, self.at(4))
                 external_call["g_object_unref", NoneType](tex)

@@ -26,6 +26,7 @@
 from std.math import sqrt, cos, sin, floor, ceil
 
 from mojoui.scene import Painter
+from mojoui.bitmap import Bitmap, make_bitmap
 from mojoui.ink import Stroke
 from mojoui.history import History, Undoable
 from mojoui.textedit import TextEdit, PlainStyler, Styler, Pos
@@ -200,7 +201,7 @@ struct Obj(Copyable, Movable):
     var text: String  # TEXT, STICKY
     var size: Float64  # font size
     var rev: Int  # the text's revision (unique per layer: an editor built from it is still good while it matches)
-    var pixels: List[UInt32]  # PICTURE
+    var picture: List[Bitmap]  # PICTURE: its pixels (one, shared by every copy of the object)
     var pw: Int
     var ph: Int
     var stroke: Stroke  # INK, in page points (moves with the box)
@@ -240,7 +241,7 @@ struct Obj(Copyable, Movable):
         self.text = ""
         self.size = 16
         self.rev = 0
-        self.pixels = List[UInt32]()
+        self.picture = List[Bitmap]()
         self.pw = 0
         self.ph = 0
         self.stroke = Stroke(2, color)
@@ -297,6 +298,10 @@ struct Obj(Copyable, Movable):
         var ey = hw * s + hh * c
         return (self.cx() - ex, self.cy() - ey, self.cx() + ex, self.cy() + ey)
 
+    def pixels(self) -> List[UInt32]:
+        """A picture's pixels (a copy)."""
+        return self.picture[0][].levels[0].copy() if len(self.picture) > 0 else List[UInt32]()
+
     def dump(self) -> String:
         """Every field that matters, as one canonical line (tests compare these)."""
         var s = String(self.id) + " " + kind_name(self.kind) + " " + String(self.x) + "," + String(self.y) + "," + String(self.w) + ","
@@ -306,7 +311,7 @@ struct Obj(Copyable, Movable):
             s += " s" + String(self.size) + " [" + self.text + "]"
         elif self.kind == PICTURE:
             var sum = 0
-            for p in self.pixels:
+            for p in self.pixels():
                 sum = (sum * 31 + Int(p)) % 1000000007
             s += " px" + String(self.pw) + "x" + String(self.ph) + "#" + String(sum)
         elif self.kind == INK:
@@ -758,7 +763,7 @@ struct ObjectLayer(Movable):
 
     def add_picture(mut self, x: Float64, y: Float64, w: Float64, h: Float64, pixels: List[UInt32], pw: Int, ph: Int) -> Int:
         var o = Obj(0, PICTURE, x, y, w, h, 0)
-        o.pixels = pixels.copy()
+        o.picture.append(make_bitmap(pixels.copy(), pw, ph))
         o.pw = pw
         o.ph = ph
         o.line_width = 0
@@ -1776,7 +1781,8 @@ struct ObjectLayer(Movable):
             p.note("object ink " + String(id))
         elif kind == PICTURE:
             ref o = self.objs[i]
-            p.image(o.pixels, o.pw, o.ph, o.x, o.y, o.w, o.h)
+            if len(o.picture) > 0:
+                p.bitmap(o.picture[0], o.x, o.y, o.w, o.h)
             p.note("object picture " + String(id))
         elif kind == CONNECTOR:
             ref o = self.objs[i]

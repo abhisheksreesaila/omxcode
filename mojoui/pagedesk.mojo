@@ -250,7 +250,7 @@ def _obj_key(ref o: Obj) -> Int:
     h = _mix(h, o.radius.to_bits().cast[DType.uint64]())
     for b in o.family.as_bytes():
         h = _mix(h, UInt64(b))
-    h = _mix(h, UInt64(len(o.pixels)))
+    h = _mix(h, o.picture[0][].hash if len(o.picture) > 0 else 0)
     return Int(h >> 1)
 
 

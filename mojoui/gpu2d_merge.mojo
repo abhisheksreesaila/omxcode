@@ -209,7 +209,7 @@ def merge_runs(mut src: Frame2D, mut dst: Frame2D):
     dst.width = src.width
     dst.height = src.height
     dst.scale = src.scale
-    swap(dst.pixels, src.pixels)
+    swap(dst.pics, src.pics)
     for li in range(len(src.layers)):
         ref layer = src.layers[li]
         var first_run = len(dst.runs)

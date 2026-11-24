@@ -12,7 +12,7 @@
 # (base instance = the run's first) of six pipelines built at start:
 #   quad_over / quad_replace   SDF rounded boxes and capsules (gpu2d's coverage formulas, at the pixel centre)
 #   glyph                      R8 atlas texture, the same bilinear sampling and 2×2 supersampling rule as execute_cpu
-#   image                      nearest, from the frame's pixels (one buffer, an offset per image), blending off
+#   image                      mojoui.bitmap's filter, from the picture's own buffer, blending off
 #   tri + cover                a polygon: each fan triangle adds its exact coverage on gpu2d's four scan lines per pixel
 #                              row into the accumulator (signed, so the fan sums to the winding), then the cover blends
 #                              the colour by min(|sum|, 1) and zeroes the accumulator (programmable blending, D-7534)
@@ -33,7 +33,8 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS, opening_fill
+from mojoui.bitmap import Bitmap
+from mojoui.gpu2d import IMAGE_FLOATS, layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS, opening_fill
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
 from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
@@ -60,7 +61,6 @@ comptime B_IMAGES = 3
 comptime B_POLYS = 4
 comptime B_FAN = 5
 comptime B_PIXELS = 6
-comptime B_OFFSETS = 7
 comptime B_TRIS = 8  # (PolyPlan: the fan triangles of each polygon group, in group order)
 comptime B_COVERS = 9  # (PolyPlan: the polygons of each group)
 comptime BUFFERS = 10
@@ -275,7 +275,8 @@ fragment float4 glyph_f(VOut in [[stage_in]], device const float* g [[buffer(2)]
     return float4(d[8], d[9], d[10], cov);
 }
 
-// ---- IMAGE (IMAGE_FLOATS = 12), nearest, blending off ----
+// ---- IMAGE (IMAGE_FLOATS = 12): a picture's own buffer, [levels, its pixels, its half sizes' …] (goal 81); blending off
+// or over. mojoui.bitmap Sampler's arithmetic ----
 
 vertex VOut image_v(uint vid [[vertex_id]], uint iid [[instance_id]], device const float* m [[buffer(3)]], constant U& u [[buffer(1)]]) {
     device const float* d = m + iid * 12;
@@ -287,8 +288,27 @@ vertex VOut image_v(uint vid [[vertex_id]], uint iid [[instance_id]], device con
     return v;
 }
 
+inline float4 pic_pre(device const uint* px, uint at) {
+    uint p = px[at];
+    float a = float(p >> 24) / 255.0;
+    return float4(float(p & 255u) / 255.0 * a, float((p >> 8) & 255u) / 255.0 * a, float((p >> 16) & 255u) / 255.0 * a, a);
+}
+
+inline float4 pic_level(device const uint* px, int pw, int ph, float2 uv, int l) {
+    uint at = 1u;
+    for (int k = 0; k < l; k++) at += uint(max(pw >> k, 1) * max(ph >> k, 1));
+    int2 n = int2(max(pw >> l, 1), max(ph >> l, 1));
+    float2 p = uv * float2(n) - 0.5;
+    float2 f = floor(p);
+    float2 t = p - f;
+    int2 a = clamp(int2(f), int2(0), n - 1);
+    int2 b = clamp(int2(f) + 1, int2(0), n - 1);
+    return mix(mix(pic_pre(px, at + uint(a.y * n.x + a.x)), pic_pre(px, at + uint(a.y * n.x + b.x)), t.x),
+               mix(pic_pre(px, at + uint(b.y * n.x + a.x)), pic_pre(px, at + uint(b.y * n.x + b.x)), t.x), t.y);
+}
+
 fragment float4 image_f(VOut in [[stage_in]], device const float* m [[buffer(3)]], constant U& u [[buffer(1)]],
-                        device const uint* pixels [[buffer(6)]], device const uint* offsets [[buffer(7)]]) {
+                        device const uint* pixels [[buffer(6)]]) {
     device const float* d = m + in.iid * 12;
     float2 pc = in.pos.xy;
     if (clipped(pc, d[8], d[9], d[10], d[11], u)) discard_fragment();
@@ -296,10 +316,21 @@ fragment float4 image_f(VOut in [[stage_in]], device const float* m [[buffer(3)]
     int pw = int(d[5]), ph = int(d[6]);
     if (w <= 0.0 || h <= 0.0 || pw <= 0 || ph <= 0) discard_fragment();
     if (pc.x < x || pc.x >= x + w || pc.y < y || pc.y >= y + h) discard_fragment();
-    int sy = min(ph - 1, int(floor((pc.y - y) / h * float(ph))));
-    int sx = min(pw - 1, int(floor((pc.x - x) / w * float(pw))));
-    uint p = pixels[offsets[int(d[4])] + uint(sy * pw + sx)];
-    return float4(float(p & 255u), float((p >> 8) & 255u), float((p >> 16) & 255u), float(p >> 24)) / 255.0;
+    if (d[7] > 0.5 || (abs(w - float(pw)) < 0.01 && abs(h - float(ph)) < 0.01)) {
+        int sy = min(ph - 1, int(floor((pc.y - y) / h * float(ph))));
+        int sx = min(pw - 1, int(floor((pc.x - x) / w * float(pw))));
+        uint p = pixels[1u + uint(sy * pw + sx)];
+        return float4(float(p & 255u), float((p >> 8) & 255u), float((p >> 16) & 255u), float(p >> 24)) / 255.0;
+    }
+    float r = max(float(pw) / w, float(ph) / h);
+    float lod = r <= 1.5 ? 0.0 : (r < 2.0 ? (r - 1.5) * 2.0 : log2(r));
+    int last = int(pixels[0]) - 1;
+    int l0 = min(int(floor(lod)), last);
+    int l1 = min(l0 + 1, last);
+    float2 uv = float2((pc.x - x) / w, (pc.y - y) / h);
+    float4 q = pic_level(pixels, pw, ph, uv, l0);
+    if (l1 > l0) q = mix(q, pic_level(pixels, pw, ph, uv, l1), min(lod - float(l0), 1.0));
+    return q.a > 0.0 ? float4(q.rgb / q.a, q.a) : float4(0.0);
 }
 
 // ---- POLY (POLY_FLOATS = 16): coverage accumulated from the fan's triangles, then the cover ----
@@ -541,6 +572,14 @@ struct Metal2D(Movable):
     var atlas_w: Int
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last copied into the atlas's dynamic rows
+    var pic_hash: List[UInt64]  # (goal 81) each picture's buffer, by its hash and size
+    var pic_w: List[Int]
+    var pic_h: List[Int]
+    var pic_levels: List[Int]
+    var pic_buf: List[Int]
+    var pic_used: List[Int]  # the serial of the frame that last drew it
+    var pic_uploads: Int  # (always on) pictures' buffers made, and their bytes
+    var pic_bytes: Int
     var page_syncs: Int  # (goal 81, always on) copies of glyph rows, and the rows they sent
     var page_rows: Int
     var p_tri: Int
@@ -638,6 +677,14 @@ struct Metal2D(Movable):
         self.atlas_w = atlas.width
         self.atlas_dyn = atlas.dyn_y0
         self.pages_version = -1
+        self.pic_hash = List[UInt64]()
+        self.pic_w = List[Int]()
+        self.pic_h = List[Int]()
+        self.pic_levels = List[Int]()
+        self.pic_buf = List[Int]()
+        self.pic_used = List[Int]()
+        self.pic_uploads = 0
+        self.pic_bytes = 0
         self.page_syncs = 0
         self.page_rows = 0
         self.p_tri = 0
@@ -1272,10 +1319,71 @@ struct Metal2D(Movable):
             elif run.pipe == PIPE_GLYPH:
                 pipe = self.p_t_glyph if self.tile_mode else self.p_glyph
             else:
-                pipe = (self.p_t_image_over if self.tile_mode else self.p_image_over) if run.blend == BLEND_OVER else self.p_image
+                self._use(enc, (self.p_t_image_over if self.tile_mode else self.p_image_over) if run.blend == BLEND_OVER else self.p_image)
+                for i in range(first, first + count):  # (each picture its own buffer)
+                    var which = Int(frame.images[i * IMAGE_FLOATS + 4])
+                    if which < 0 or which >= len(frame.pics):
+                        continue
+                    var buf = self.picture_buffer(frame.pics[which])
+                    if buf == 0:
+                        continue
+                    _send[NoneType](f, enc, self.s_set_fbuf, buf, 0, B_PIXELS)
+                    _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, 1, i)
+                continue
             self._use(enc, pipe)
             _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, count, first)
         _ = len(self.uniform)
+
+    def picture_buffer(mut self, b: Bitmap) -> Int:
+        """A picture's buffer ([levels, pixels, half sizes …]), made when it's first drawn and again when it needs more
+        half sizes; those not drawn for 600 frames go (a pending command buffer keeps the ones it reads)."""
+        var at = -1
+        for k in range(len(self.pic_hash)):
+            if self.pic_hash[k] == b[].hash and self.pic_w[k] == b[].w and self.pic_h[k] == b[].h:
+                at = k
+                break
+        if at >= 0 and self.pic_levels[at] >= len(b[].levels):
+            self.pic_used[at] = self.serial
+            return self.pic_buf[at]
+        var n = 1
+        for ref l in b[].levels:
+            n += len(l)
+        var buf = msg(self.device, "newBufferWithLength:options:", n * 4, 0)
+        if buf == 0:
+            return 0
+        var base = _send(self.f, buf, self.s_contents)
+        Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=base)[] = UInt32(len(b[].levels))
+        var to = base + 4
+        for ref l in b[].levels:
+            _copy(self.memcpy, to, Int(l.unsafe_ptr()), len(l) * 4)
+            to += len(l) * 4
+        self.pic_uploads += 1
+        self.pic_bytes += n * 4
+        if at >= 0:
+            _ = msg(self.pic_buf[at], "release")
+            self.pic_buf[at] = buf
+            self.pic_levels[at] = len(b[].levels)
+            self.pic_used[at] = self.serial
+            return buf
+        var k = 0
+        while k < len(self.pic_hash):  # (a new one came: a good time to let old ones go)
+            if self.serial - self.pic_used[k] > 600 or (len(self.pic_hash) > 64 and self.serial - self.pic_used[k] > 8):
+                _ = msg(self.pic_buf[k], "release")
+                _ = self.pic_hash.pop(k)
+                _ = self.pic_w.pop(k)
+                _ = self.pic_h.pop(k)
+                _ = self.pic_levels.pop(k)
+                _ = self.pic_buf.pop(k)
+                _ = self.pic_used.pop(k)
+                continue
+            k += 1
+        self.pic_hash.append(b[].hash)
+        self.pic_w.append(b[].w)
+        self.pic_h.append(b[].h)
+        self.pic_levels.append(len(b[].levels))
+        self.pic_buf.append(buf)
+        self.pic_used.append(self.serial)
+        return buf
 
     def sync_pages(mut self):
         """fonttext's glyphs packed since the last copy into the atlas's dynamic rows: only the rows written since (goal
@@ -1437,14 +1545,12 @@ struct GpuBuffers(Movable):
     var bufs: List[Int]
     var caps: List[Int]  # their sizes in bytes
     var used: List[Int]  # bytes holding the last upload (a tail upload copies only past it)
-    var offsets: List[UInt32]  # IMAGE: where each image's pixels start in B_PIXELS (in pixels)
     var used_by: Int  # the serial of the last committed frame that drew from these buffers (0: none)
 
     def __init__(out self):
         self.bufs = List[Int](length=BUFFERS, fill=0)
         self.caps = List[Int](length=BUFFERS, fill=0)
         self.used = List[Int](length=BUFFERS, fill=0)
-        self.offsets = List[UInt32]()
         self.used_by = 0
 
 
@@ -1506,20 +1612,6 @@ def upload_frame(device: Int, f: Int, s_contents: Int, memcpy: Int, frame: Frame
     _put(device, f, s_contents, memcpy, gb, B_IMAGES, Int(frame.images.unsafe_ptr()), len(frame.images) * 4, tail)
     _put(device, f, s_contents, memcpy, gb, B_POLYS, Int(frame.polys.unsafe_ptr()), len(frame.polys) * 4, tail)
     _put(device, f, s_contents, memcpy, gb, B_FAN, Int(frame.fan.unsafe_ptr()), len(frame.fan) * 4, tail)
-    if len(frame.pixels) > 0 and not tail:  # (a grown layer adds no images: append_frame refuses them)
-        gb.offsets.clear()
-        var total = 0
-        for ref px in frame.pixels:
-            gb.offsets.append(UInt32(total))
-            total += len(px)
-        _ = _ensure(device, gb, B_PIXELS, total * 4)
-        if gb.bufs[B_PIXELS] != 0:
-            var base = _send(f, gb.bufs[B_PIXELS], s_contents)
-            for i in range(len(frame.pixels)):
-                ref px = frame.pixels[i]
-                _copy(memcpy, base + Int(gb.offsets[i]) * 4, Int(px.unsafe_ptr()), len(px) * 4)
-            gb.used[B_PIXELS] = total * 4
-        _put(device, f, s_contents, memcpy, gb, B_OFFSETS, Int(gb.offsets.unsafe_ptr()), len(gb.offsets) * 4)
 
 
 def upload_plan(device: Int, f: Int, s_contents: Int, memcpy: Int, plan: PolyPlan, mut gb: GpuBuffers, tail: Bool = False):

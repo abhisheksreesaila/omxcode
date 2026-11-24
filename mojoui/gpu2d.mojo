@@ -45,13 +45,14 @@
 #   glyph, bilinear; 2×2 supersamples per pixel when s·k < 0.75 (s·k = w·k / (u1 − u0)); coverage × a; ≤ 0.003 drawn
 #   nothing. Face choice and alignment follow Font.draw (Font.pick at the size on screen, size·k).
 #
-# IMAGE (IMAGE_FLOATS = 12): pixels made elsewhere, scaled into a rect, BLEND_REPLACE (nearest, as blit).
+# IMAGE (IMAGE_FLOATS = 12): a picture scaled into a rect, BLEND_REPLACE (see-through ones BLEND_OVER), filtered as
+# mojoui.bitmap says (goal 81).
 #   0–3  x, y, w, h
-#   4    which          index into Frame2D.pixels (a copy of the scene's images, rows of pw RGBA UInt32)
+#   4    which          index into Frame2D.pics (the scene's pictures: Bitmap handles)
 #   5–6  pw, ph
-#   7    0              reserved
+#   7    0 filtered, 1 nearest
 #   8–11 clip x0, y0, x1, y1
-#   A pixel whose centre is in the rect samples texel floor((centre − x) / w · pw) (and the same in y).
+#   A pixel whose centre is in the rect shows the picture at ((centre − x) / w, …); unscaled, or nearest: texel floor(that · pw).
 #
 # POLY (POLY_FLOATS = 16): filled polygons, non-zero winding, by stencil and cover.
 #   0    first fan vertex   into Frame2D.fan (x, y pairs; n − 2 triangles zig-zagging in from both ends of the
@@ -85,6 +86,7 @@ from std.atomic import Atomic
 from std.sys.info import num_logical_cores
 from mojoui import libc
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_RUN, OP_STROKE, OP_SHADOW
+from mojoui.bitmap import Bitmap, Sampler, make_bitmap, unscaled, lod_of, levels_for
 
 comptime PIPE_QUAD = 0
 comptime PIPE_GLYPH = 1
@@ -133,7 +135,7 @@ struct GlyphPages(Movable):
     var resets: Int
     var row_v: List[Int]  # (goal 80) the version that last wrote each row
     var straight_of: Dict[Int, Int]  # a colour glyph (engine image × 256 + the run's alpha) → its straight-alpha pixels
-    var straight_px: List[List[UInt32]]
+    var straight_px: List[Bitmap]
 
     def __init__(out self, width: Int):
         self.width = width
@@ -151,9 +153,9 @@ struct GlyphPages(Movable):
         self.resets = 0
         self.row_v = List[Int](length=DYN_ROWS, fill=0)
         self.straight_of = Dict[Int, Int]()
-        self.straight_px = List[List[UInt32]]()
+        self.straight_px = List[Bitmap]()
 
-    def straight(mut self, image: Int, alpha: Int, rgba: List[UInt32]) -> List[UInt32]:
+    def straight(mut self, image: Int, alpha: Int, rgba: List[UInt32], w: Int, h: Int) -> Bitmap:
         """A colour glyph's premultiplied pixels as straight alpha times the run's alpha, converted once and kept
         (bounded: 2,048 kept, then started again), not on every frame (D-7932)."""
         var key = image * 256 + alpha
@@ -172,7 +174,7 @@ struct GlyphPages(Movable):
                 var gg = min(255, Int((q >> 8) & 0xFF) * 255 // aa)
                 var bb = min(255, Int((q >> 16) & 0xFF) * 255 // aa)
                 pix.append(UInt32(rr) | (UInt32(gg) << 8) | (UInt32(bb) << 16) | (UInt32(aa * alpha // 255) << 24))
-            self.straight_px.append(pix^)
+            self.straight_px.append(make_bitmap(pix^, w, h))
             at = len(self.straight_px) - 1
             self.straight_of[key] = at
         return self.straight_px[at].copy()
@@ -419,7 +421,7 @@ struct Frame2D(Movable):
     var polys: List[Float32]
     var points: List[Float32]  # POLY's points, x, y pairs
     var fan: List[Float32]  # POLY's stencil fans as triangles, x, y per vertex (ready to upload)
-    var pixels: List[List[UInt32]]  # IMAGE's pixels (the scene's images)
+    var pics: List[Bitmap]  # IMAGE's pictures (the scene's images, shared, and colour glyphs)
 
     def __init__(out self):
         self.width = 0
@@ -433,7 +435,7 @@ struct Frame2D(Movable):
         self.polys = List[Float32](capacity=1024 * POLY_FLOATS)
         self.points = List[Float32](capacity=8192)
         self.fan = List[Float32](capacity=24576)
-        self.pixels = List[List[UInt32]]()
+        self.pics = List[Bitmap]()
 
     def clear(mut self):
         """Empty, keeping the memory."""
@@ -445,7 +447,7 @@ struct Frame2D(Movable):
         self.polys.clear()
         self.points.clear()
         self.fan.clear()
-        self.pixels.clear()
+        self.pics.clear()
 
     def instances(self, pipe: Int) -> Int:
         """How many instances pipeline `pipe` has in the frame."""
@@ -765,8 +767,8 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
     f.height = scene.h
     f.scale = scene.k
     if content_k <= 0:  # (a tile's layer has no OP_IMAGE: its only pixels are colour glyphs, added as they come)
-        for ref px in scene.images:
-            f.pixels.append(px.copy())
+        for ref b in scene.images:
+            f.pics.append(b.copy())  # (the handle)
     var styles = List[TextStyle]()  # (the frame's first few styles: a card's label, number and note alternate)
     var st = TextStyle("", 0, False, 0)  # (the last run's style: made again only when the next one's differs)
     var pg = atlas.pages()  # (goal 80: no registry lookup per build, let alone per text op)
@@ -924,12 +926,12 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                         continue
                     if im.color:
                         var al = Int((color >> 24) & 0xFF)
-                        f.pixels.append(pg[].straight(ii, al, im.rgba))
+                        f.pics.append(pg[].straight(ii, al, im.rgba, iw, ih))
                         f.images.append(Float32(x_l))
                         f.images.append(Float32(y_l))
                         f.images.append(Float32(Float64(iw) * ik))
                         f.images.append(Float32(Float64(ih) * ik))
-                        f.images.append(Float32(len(f.pixels) - 1))
+                        f.images.append(Float32(len(f.pics) - 1))
                         f.images.append(Float32(iw))
                         f.images.append(Float32(ih))
                         f.images.append(0)
@@ -1047,19 +1049,21 @@ def fill_layers(mut f: Frame2D, scene: Scene, atlas: GlyphAtlas, font: Font, fir
                 mode = BLEND_REPLACE
                 before = len(f.images) // IMAGE_FLOATS
                 var which = Int(e)
-                for ref px in scene.images[which]:  # (a picture with see-through pixels is blended over: icons, D-7910)
-                    if (px >> 24) != 255:
-                        mode = BLEND_OVER
-                        break
-                var pw = Int(scene.nums[base + 5])
+                var smooth = scene.nums[base + 5] > 0
+                var pic = scene.images[which].copy()
+                if not pic[].opaque:  # (a picture with see-through pixels is blended over: icons, D-7910)
+                    mode = BLEND_OVER
+                var pw = pic[].w
+                if smooth and not unscaled(pw, pic[].h, c * tk, d * tk):  # (the half sizes it's read from)
+                    pic[].need(levels_for(lod_of(pw, pic[].h, c * tk, d * tk)))
                 f.images.append(Float32(a))
                 f.images.append(Float32(b))
                 f.images.append(Float32(c))
                 f.images.append(Float32(d))
                 f.images.append(Float32(which))
                 f.images.append(Float32(pw))
-                f.images.append(Float32(len(scene.images[which]) // pw if pw > 0 else 0))
-                f.images.append(0)
+                f.images.append(Float32(pic[].h))
+                f.images.append(Float32(0) if smooth else Float32(1))
                 _clip4(f.images, c0, c1, c2, c3)
                 added = 1
             else:
@@ -1310,19 +1314,18 @@ def _cpu_image(mut s: Surface, frame: Frame2D, q: List[Float32], at: Int, tx: Fl
     var which = Int(q[at + 4])
     var pw = Int(q[at + 5])
     var ph = Int(q[at + 6])
-    if w <= 0 or h <= 0 or pw <= 0 or ph <= 0 or which < 0 or which >= len(frame.pixels):
+    if w <= 0 or h <= 0 or pw <= 0 or ph <= 0 or which < 0 or which >= len(frame.pics):
         return
-    ref px = frame.pixels[which]
+    var at_uv = Sampler(frame.pics[which], w, h, q[at + 7] == 0)
     var x0 = max(Int(ceil(x - 0.5)), _lo(Float64(q[at + 8]), tx, tk, s.width))
     var y0 = max(Int(ceil(y - 0.5)), _lo(Float64(q[at + 9]), ty, tk, s.height))
     var x1 = min(Int(ceil(x + w - 0.5)), _hi(Float64(q[at + 10]), tx, tk, s.width))
     var y1 = min(Int(ceil(y + h - 0.5)), _hi(Float64(q[at + 11]), ty, tk, s.height))
     var p = s.pixels()
     for py in range(max(y0, r0), min(y1, r1)):
-        var sy = min(ph - 1, Int(floor((Float64(py) + 0.5 - y) / h * Float64(ph))))
+        var v = (Float64(py) + 0.5 - y) / h
         for qx in range(max(x0, 0), min(x1, s.width)):
-            var sx = min(pw - 1, Int(floor((Float64(qx) + 0.5 - x) / w * Float64(pw))))
-            var src = px[sy * pw + sx]
+            var src = at_uv.at((Float64(qx) + 0.5 - x) / w, v)
             var dp = p.unsafe_offset(py * s.width + qx)
             if mode == BLEND_REPLACE or (src >> 24) == 255:
                 dp[] = src

@@ -12,6 +12,7 @@
 
 from std.collections import Dict
 from mojoui.canvas import Surface
+from mojoui.bitmap import Bitmap, Sampler, make_bitmap
 from mojoui.draw import rect, line, circle, hline, polygon, blend
 from mojoui.shadow import draw_shadow, shadow_reach
 from mojoui.text import Font, REGULAR, LEFT
@@ -49,7 +50,7 @@ struct KeptOps(Copyable, Movable):
     var colors: List[UInt32]
     var text_of: List[Int32]
     var texts: List[String]
-    var images: List[List[UInt32]]
+    var images: List[Bitmap]
     var path: List[Float32]
     var note_ops: List[Int]
     var notes: List[String]
@@ -65,7 +66,7 @@ struct KeptOps(Copyable, Movable):
         self.colors = List[UInt32]()
         self.text_of = List[Int32]()
         self.texts = List[String]()
-        self.images = List[List[UInt32]]()
+        self.images = List[Bitmap]()
         self.path = List[Float32]()
         self.note_ops = List[Int]()
         self.notes = List[String]()
@@ -166,8 +167,14 @@ trait Painter:
     def pop_clip(mut self):
         ...
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-        """Pixels made elsewhere (a GPU kernel's output: the lens, a heat map, a video frame), scaled into the rect."""
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        """Pixels made elsewhere (a GPU kernel's output, a video frame), scaled into the rect: filtered, or (smooth=False)
+        each pixel a hard-edged block (a heat map's cells). They're copied and hashed each time: a picture that stays the
+        same is a Bitmap (mojoui.bitmap), drawn with bitmap()."""
+        ...
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        """A picture made once (make_bitmap), scaled into the rect; nothing is copied, hashed or sent again."""
         ...
 
     def note(mut self, meaning: String):
@@ -217,21 +224,21 @@ trait Painter:
         ...
 
 
-def blit(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-    """Pixels scaled (nearest) into a rect of the surface."""
-    if pw <= 0 or ph <= 0 or w <= 0 or h <= 0:
+def draw_bitmap(mut s: Surface, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool):
+    """A picture scaled into a rect of the surface (straight alpha over what's there: icons, glyph-like pictures; goal 79)."""
+    if w <= 0 or h <= 0 or b[].w <= 0 or b[].h <= 0:
         return
+    var at = Sampler(b, w, h, smooth)
     var x0 = Int(x)
     var y0 = Int(y)
     for dy in range(Int(h)):
-        var sy = min(ph - 1, Int(Float64(dy) * Float64(ph) / h))
+        var v = (Float64(dy) if at.plain else Float64(dy) + 0.5) / h
         for dx in range(Int(w)):
-            var sx = min(pw - 1, Int(Float64(dx) * Float64(pw) / w))
-            var src = pixels[sy * pw + sx]
+            var src = at.at((Float64(dx) if at.plain else Float64(dx) + 0.5) / w, v)
             var a = (src >> 24) & 0xFF
             if a == 255:
                 s.set(x0 + dx, y0 + dy, src)
-            elif a > 0:  # (straight alpha over what's there: icons, glyph-like pictures; goal 79)
+            elif a > 0:
                 s.set(x0 + dx, y0 + dy, blend(s.get(x0 + dx, y0 + dy), src, 1.0))
 
 
@@ -341,8 +348,13 @@ struct SurfacePainter(Painter, Movable):
         var k = self.tk
         draw_run(self.s, r, run_x(r, x, align) * k + self.tx, baseline * k + self.ty, k, color, self.clip())
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-        blit(self.s, pixels, pw, ph, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk)
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        if pw <= 0 or ph <= 0 or len(pixels) < pw * ph:
+            return
+        self.bitmap(make_bitmap(pixels.copy(), pw, ph), x, y, w, h, smooth)
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        draw_bitmap(self.s, b, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk, smooth)
 
     def note(mut self, meaning: String):
         pass
@@ -401,7 +413,9 @@ struct Scene(Painter, Movable, Copyable):
     var layer_keys: List[String]
     var layer_starts: List[Int]  # the first op of each layer
     var layer_versions: List[Int]  # each layer's version (-1: compare its items)
-    var images: List[List[UInt32]]  # OP_IMAGE's pixels (num 4 = which, num 5 = its width; height = len / width)
+    var images: List[Bitmap]  # OP_IMAGE's pictures (num 4 = which, num 5 = its width, negative: not smooth)
+    var px_copied: Int  # (always on) pixels image() has copied and hashed into this scene, since it was made
+    var px_hashed: Int
     var path: List[Float32]  # OP_POLY's points, x, y interleaved (num 0 = the first point's index, num 1 = how many)
     var layer_tx: List[Float64]  # each layer's transform (layer_transform; not part of its picture: same_layer ignores it)
     var layer_ty: List[Float64]
@@ -436,7 +450,9 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_keys = List[String]()
         self.layer_starts = List[Int]()
         self.layer_versions = List[Int]()
-        self.images = List[List[UInt32]]()
+        self.px_copied = 0
+        self.px_hashed = 0
+        self.images = List[Bitmap]()
         self.path = List[Float32](capacity=4096)
         self.layer_tx = List[Float64]()
         self.layer_ty = List[Float64]()
@@ -755,14 +771,18 @@ struct Scene(Painter, Movable, Copyable):
     def pop_clip(mut self):
         self._op(OP_UNCLIP, 0, 0, 0, 0, 0, 0, 0, -1)
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
         if pw <= 0 or ph <= 0 or len(pixels) < pw * ph:
             return
-        var exact = List[UInt32](capacity=pw * ph)  # (exactly pw × ph: a replay reads the height back as len / pw)
-        for k in range(pw * ph):
-            exact.append(pixels[k])
-        self.images.append(exact^)
-        self._op(OP_IMAGE, x, y, w, h, Float64(len(self.images) - 1), Float64(pw), 0, -1)
+        self.px_copied += pw * ph
+        self.px_hashed += pw * ph
+        self.bitmap(make_bitmap(pixels.copy(), pw, ph), x, y, w, h, smooth)
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        if b[].w <= 0 or b[].h <= 0:
+            return
+        self.images.append(b.copy())
+        self._op(OP_IMAGE, x, y, w, h, Float64(len(self.images) - 1), Float64(b[].w) if smooth else -Float64(b[].w), 0, -1)
 
     def note(mut self, meaning: String):
         if len(self.kinds) > 0:
@@ -918,7 +938,7 @@ struct Scene(Painter, Movable, Copyable):
                 return False
         if self.text_of[p] >= 0 and self.text_at(p) != other.text_at(q):
             return False
-        if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))] != other.images[Int(other.num(q, 4))]:
+        if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))][].hash != other.images[Int(other.num(q, 4))][].hash:
             return False
         return True
 
@@ -1134,9 +1154,7 @@ struct Scene(Painter, Movable, Copyable):
                 for z in range(m):
                     circle(s, self.poly_x(op, z) * tk + tx, self.poly_y(op, z) * tk + ty, sw / 2, c)
             elif kind == OP_IMAGE:
-                var pw = Int(self.num(op, 5))
-                ref px = self.images[Int(self.num(op, 4))]
-                blit(s, px, pw, len(px) // pw, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk)
+                draw_bitmap(s, self.images[Int(self.num(op, 4))], self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk, self.num(op, 5) > 0)
             elif kind == OP_TEXT:
                 font.draw(s, self.text_at(op), self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c, Int(self.num(op, 4)), Int(self.num(op, 5)),
                           self.num(op, 3))

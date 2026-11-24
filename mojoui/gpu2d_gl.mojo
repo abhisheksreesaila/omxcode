@@ -599,15 +599,42 @@ comptime IMAGE_FS = """
 flat in vec4 v_rect;
 flat in vec4 v_clip;
 uniform sampler2D img;
+uniform vec2 opt;  // nearest (1), levels sent
 out vec4 o;
+vec4 pre(ivec2 at, int l) {
+    vec4 c = texelFetch(img, at, l);
+    return vec4(c.rgb * c.a, c.a);
+}
+// (goal 81) mojoui.bitmap Sampler's arithmetic: bilinear in a level, premultiplied
+vec4 level(vec2 uv, int l) {
+    ivec2 n = textureSize(img, l);
+    vec2 p = uv * vec2(n) - 0.5;
+    vec2 f = floor(p);
+    vec2 t = p - f;
+    ivec2 a = clamp(ivec2(f), ivec2(0), n - 1);
+    ivec2 b = clamp(ivec2(f) + 1, ivec2(0), n - 1);
+    return mix(mix(pre(a, l), pre(ivec2(b.x, a.y), l), t.x), mix(pre(ivec2(a.x, b.y), l), pre(b, l), t.x), t.y);
+}
 void main() {
     vec2 c = gl_FragCoord.xy;
     if (c.x < v_clip.x || c.y < v_clip.y || c.x >= v_clip.z || c.y >= v_clip.w) discard;
     if (c.x < v_rect.x || c.y < v_rect.y || c.x >= v_rect.x + v_rect.z || c.y >= v_rect.y + v_rect.w) discard;
     ivec2 n = textureSize(img, 0);
-    int sx = min(n.x - 1, int(floor((c.x - v_rect.x) / v_rect.z * float(n.x))));
-    int sy = min(n.y - 1, int(floor((c.y - v_rect.y) / v_rect.w * float(n.y))));
-    o = texelFetch(img, ivec2(sx, sy), 0);
+    vec2 uv = (c - v_rect.xy) / v_rect.zw;
+    if (opt.x > 0.5 || (abs(v_rect.z - float(n.x)) < 0.01 && abs(v_rect.w - float(n.y)) < 0.01)) {
+        int sx = min(n.x - 1, int(floor((c.x - v_rect.x) / v_rect.z * float(n.x))));
+        int sy = min(n.y - 1, int(floor((c.y - v_rect.y) / v_rect.w * float(n.y))));
+        o = texelFetch(img, ivec2(sx, sy), 0);
+        return;
+    }
+    float r = max(float(n.x) / v_rect.z, float(n.y) / v_rect.w);
+    float lod = r <= 1.5 ? 0.0 : (r < 2.0 ? (r - 1.5) * 2.0 : log2(r));
+    int last = int(opt.y) - 1;
+    int l0 = min(int(floor(lod)), last);
+    int l1 = min(l0 + 1, last);
+    vec4 q = level(uv, l0);
+    if (l1 > l0) q = mix(q, level(uv, l1), min(lod - float(l0), 1.0));
+    o = q.a > 0.0 ? vec4(q.rgb / q.a, q.a) : vec4(0.0);
 }
 """
 
@@ -736,13 +763,27 @@ def _covers_meet(b: List[Float32], i: Int, j: Int, pad: Float32) -> Bool:
     return _tri_meets(pj[4], pj[5], pj[6] - pj[4], pj[7] - pj[5], pi[0] - e, pi[1] - e, pi[2] + e, pi[3] + e)
 
 
-def _pixels_hash(px: List[UInt32], n: Int) -> UInt64:
-    """(goal 80) A 64-bit hash of an image's first n pixels (FNV-1a over 32-bit words, its length mixed in), never 0."""
-    var h = UInt64(14695981039346656037) ^ UInt64(n)
-    var p = px.unsafe_ptr()
-    for i in range(min(n, len(px))):
-        h = (h ^ UInt64(p[i])) * 1099511628211
-    return h | 1
+struct GLPicture(Copyable, Movable):
+    """(goal 81) A picture's texture: the picture it holds now (its hash, its levels) and when, and for which target, it
+    was last drawn."""
+    var hash: UInt64
+    var w: Int
+    var h: Int
+    var levels: Int  # sent
+    var made: Int  # levels its storage has
+    var tex: Int
+    var used: Int  # GL2D.frames
+    var target: Int
+
+    def __init__(out self, w: Int, h: Int, made: Int, tex: Int):
+        self.hash = 0
+        self.w = w
+        self.h = h
+        self.levels = 0
+        self.made = made
+        self.tex = tex
+        self.used = 0
+        self.target = 0
 
 
 struct GL2D(Movable):
@@ -763,6 +804,7 @@ struct GL2D(Movable):
     var loc_replace: Int
     var loc_atlas: Int
     var loc_img: Int
+    var loc_opt: Int
     var loc_rect: Int
     var loc_clip: Int
     var vao: List[Int]
@@ -792,16 +834,15 @@ struct GL2D(Movable):
     var atlas_w: Int
     var atlas_dyn: Int
     var pages_version: Int  # the GlyphPages version last uploaded into the atlas's dynamic rows (goal 79)
-    var img_tex: List[Int]
-    var img_hash: List[UInt64]  # (goal 80) each image texture's pixels' hash: unchanged pixels aren't sent again
+    var pictures: List[GLPicture]  # (goal 81: by the picture's hash, whatever frame, layer or canvas draws it)
+    var pic_of: List[Int]  # the frame being drawn: its pictures' places in `pictures` (-1: not drawn)
+    var target_now: Int
     var skip_fill: Bool  # (goal 80) this frame cleared to the opening fill's colour: layer() leaves that quad out, once
     var opening: List[Float32]  # the colour begin() clears to
     var tex_uploads: Int  # (goal 80, always on) texture uploads, the bytes they sent, buffer stores (re)allocated and
     var tex_upload_bytes: Int  # render targets allocated, since the context started: a frame's waste is the difference
     var buf_allocs: Int  # (tests/test_gpu2d_waste)
     var target_allocs: Int
-    var img_w: List[Int]
-    var img_h: List[Int]
     var samples: Int  # stencil (raster) samples per pixel; MSAA mode: colour samples too
     var mixed: Bool  # NV_framebuffer_mixed_samples: 1 colour sample (the ring texture itself), `samples` stencil samples,
     # each fragment's alpha × the share of its raster samples that pass (coverage modulation): no MSAA colour, no resolve
@@ -888,6 +929,7 @@ struct GL2D(Movable):
         self.loc_replace = -1
         self.loc_atlas = -1
         self.loc_img = -1
+        self.loc_opt = -1
         self.loc_rect = -1
         self.loc_clip = -1
         self.vao = List[Int](length=VAOS, fill=0)
@@ -913,16 +955,15 @@ struct GL2D(Movable):
         self.pages_version = -1
         self.atlas_w = 0
         self.atlas_dyn = 0
-        self.img_tex = List[Int]()
-        self.img_hash = List[UInt64]()
+        self.pictures = List[GLPicture]()
+        self.pic_of = List[Int]()
+        self.target_now = 0
         self.skip_fill = False
         self.opening = [0.0, 0.0, 0.0, 0.0]
         self.tex_uploads = 0
         self.tex_upload_bytes = 0
         self.buf_allocs = 0
         self.target_allocs = 0
-        self.img_w = List[Int]()
-        self.img_h = List[Int]()
         self.samples = 8
         self.mixed = False
         self.cov_mod = 0
@@ -1182,6 +1223,7 @@ struct GL2D(Movable):
         self.loc_replace = self.uniform(self.prog[P_QUAD], "replace")
         self.loc_atlas = self.uniform(self.prog[P_GLYPH], "atlas")
         self.loc_img = self.uniform(self.prog[P_IMAGE], "img")
+        self.loc_opt = self.uniform(self.prog[P_IMAGE], "opt")
         self.loc_rect = self.uniform(self.prog[P_IMAGE], "rect")
         self.loc_clip = self.uniform(self.prog[P_IMAGE], "clip")
         self.tile_prog = self.compile(head + String(TILE_VS), head + String(TILE_FS))
@@ -1568,43 +1610,71 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_UNIFORM_1I), c_int(self.loc_img), c_int(0))
 
     def images(mut self, frame: Frame2D):
-        """The frame's images as textures, each sent again only when its pixels changed (goal 80: their hash; they were
-        re-sent every frame)."""
-        for i in range(len(frame.pixels)):
-            if i >= len(self.img_tex):
-                self.img_tex.append(0)
-                self.img_w.append(0)
-                self.img_h.append(0)
-                self.img_hash.append(0)
-        # (sizes come from the instances: pw, ph)
+        """The frame's pictures as textures, each sent once (goal 81: known by the hash made with the picture; nothing is
+        hashed here). A new picture takes the texture of one its size that this target no longer draws (a video's last
+        frame), else a new one; those not drawn for 600 frames go."""
+        self.pic_of = List[Int](length=len(frame.pics), fill=-1)
         var n = len(frame.images) // IMAGE_FLOATS
-        for j in range(n):
-            var at = j * IMAGE_FLOATS
-            var which = Int(frame.images[at + 4])
-            var pw = Int(frame.images[at + 5])
-            var ph = Int(frame.images[at + 6])
-            if which < 0 or which >= len(frame.pixels) or pw <= 0 or ph <= 0 or len(frame.pixels[which]) < pw * ph:
-                continue
-            if self.img_tex[which] == 0 or self.img_w[which] != pw or self.img_h[which] != ph:
-                self.delete(F_DELETE_TEXTURES, self.img_tex[which])
-                var t = self.gen(F_GEN_TEXTURES)
-                fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(t))
-                self.tex_params(GL_NEAREST)
-                fcall[NoneType](self.f(F_TEX_STORAGE_2D), c_uint(GL_TEXTURE_2D), c_int(1), c_uint(GL_RGBA8), c_int(pw), c_int(ph))
-                self.img_tex[which] = t
-                self.img_w[which] = pw
-                self.img_h[which] = ph
-                self.img_hash[which] = 0
-            var hsh = _pixels_hash(frame.pixels[which], pw * ph)  # (goal 80: the same pixels aren't sent again)
-            if hsh == self.img_hash[which]:
-                continue
-            self.img_hash[which] = hsh
-            fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.img_tex[which]))
-            fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(0), c_int(0), c_int(0), c_int(pw), c_int(ph),
-                            c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), Int(frame.pixels[which].unsafe_ptr()))
-            self.tex_uploads += 1
-            self.tex_upload_bytes += pw * ph * 4
+        for pass_ in range(2):  # (first the ones that are there, so none of them is taken for another)
+            for j in range(n):
+                var which = Int(frame.images[j * IMAGE_FLOATS + 4])
+                if which < 0 or which >= len(frame.pics) or self.pic_of[which] >= 0:
+                    continue
+                ref b = frame.pics[which][]
+                if b.w <= 0 or b.h <= 0:
+                    continue
+                var at = -1
+                for k in range(len(self.pictures)):
+                    if self.pictures[k].hash == b.hash and self.pictures[k].w == b.w and self.pictures[k].h == b.h:
+                        at = k
+                        break
+                if at < 0 and pass_ == 0:
+                    continue
+                if at < 0:
+                    at = self.place_picture(b.w, b.h)
+                    self.pictures[at].hash = b.hash
+                    self.pictures[at].levels = 0
+                self.pictures[at].used = self.frames
+                self.pictures[at].target = self.target_now
+                self.pic_of[which] = at
+                if self.pictures[at].levels < len(b.levels):
+                    fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.pictures[at].tex))
+                    fcall[NoneType](self.f(F_PIXEL_STOREI), c_uint(GL_UNPACK_ALIGNMENT), c_int(4))
+                    for l in range(self.pictures[at].levels, min(len(b.levels), self.pictures[at].made)):
+                        fcall[NoneType](self.f(F_TEX_SUB_IMAGE_2D), c_uint(GL_TEXTURE_2D), c_int(l), c_int(0), c_int(0), c_int(b.level_w(l)), c_int(b.level_h(l)),
+                                        c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), Int(b.levels[l].unsafe_ptr()))
+                        self.tex_uploads += 1
+                        self.tex_upload_bytes += b.level_w(l) * b.level_h(l) * 4
+                    self.pictures[at].levels = len(b.levels)
+        if self.frames % 64 == 0:
+            var k = 0
+            while k < len(self.pictures):
+                if self.frames - self.pictures[k].used > 600:
+                    self.delete(F_DELETE_TEXTURES, self.pictures[k].tex)
+                    _ = self.pictures.pop(k)
+                    for w in range(len(self.pic_of)):
+                        if self.pic_of[w] > k:
+                            self.pic_of[w] -= 1
+                    continue
+                k += 1
         fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(0))
+
+    def place_picture(mut self, w: Int, h: Int) -> Int:
+        """A texture for a w × h picture: one its size that nothing draws any more, else a new one."""
+        for k in range(len(self.pictures)):
+            ref p = self.pictures[k]
+            if p.w == w and p.h == h and p.used < self.frames and (p.target == self.target_now or self.frames - p.used > 120):
+                return k
+        var made = 1
+        while (max(w, h) >> made) > 0:
+            made += 1
+        var t = self.gen(F_GEN_TEXTURES)
+        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(t))
+        self.tex_params(GL_NEAREST)
+        fcall[NoneType](self.f(F_TEX_PARAMETERI), c_uint(GL_TEXTURE_2D), c_uint(GL_TEXTURE_MIN_FILTER), c_int(0x2700))  # GL_NEAREST_MIPMAP_NEAREST (its levels are read)
+        fcall[NoneType](self.f(F_TEX_STORAGE_2D), c_uint(GL_TEXTURE_2D), c_int(made), c_uint(GL_RGBA8), c_int(w), c_int(h))
+        self.pictures.append(GLPicture(w, h, made, t))
+        return len(self.pictures) - 1
 
     def render(mut self, frame: Frame2D, tex: Int, w: Int, h: Int) -> Bool:
         """Draws the frame's runs (each layer through its transform) into the RGBA8 texture tex of w × h: cleared to
@@ -1634,6 +1704,7 @@ struct GL2D(Movable):
         if not self.target(w, h):
             return False
         self.frames += 1
+        self.target_now = tex
         self.draws = 0
         self.poly_groups = 0
         self.uploaded = 0
@@ -1739,9 +1810,11 @@ struct GL2D(Movable):
                     for i in range(run.first, run.first + run.count):
                         var at = i * IMAGE_FLOATS
                         var which = Int(frame.images[at + 4])
-                        if which < 0 or which >= len(self.img_tex) or self.img_tex[which] == 0:
+                        if which < 0 or which >= len(self.pic_of) or self.pic_of[which] < 0:
                             continue
-                        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(self.img_tex[which]))
+                        ref gp = self.pictures[self.pic_of[which]]
+                        fcall[NoneType](self.f(F_BIND_TEXTURE), c_uint(GL_TEXTURE_2D), c_uint(gp.tex))
+                        fcall[NoneType](self.f(F_UNIFORM_2F), c_int(self.loc_opt), frame.images[at + 7], Float32(min(gp.levels, gp.made)))
                         fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.loc_rect), frame.images[at], frame.images[at + 1], frame.images[at + 2], frame.images[at + 3])
                         fcall[NoneType](self.f(F_UNIFORM_4F), c_int(self.loc_clip), frame.images[at + 8], frame.images[at + 9], frame.images[at + 10], frame.images[at + 11])
                         fcall[NoneType](self.f(F_DRAW_ARRAYS_INSTANCED), c_uint(GL_TRIANGLES), c_int(0), c_int(3), c_int(1))
@@ -2351,9 +2424,9 @@ struct GL2D(Movable):
                 self.sync[i] = 0
             self.delete(F_DELETE_TEXTURES, self.tex[i])
             self.tex[i] = 0
-        for i in range(len(self.img_tex)):
-            self.delete(F_DELETE_TEXTURES, self.img_tex[i])
-            self.img_tex[i] = 0
+        for i in range(len(self.pictures)):
+            self.delete(F_DELETE_TEXTURES, self.pictures[i].tex)
+        self.pictures.clear()
         self.delete(F_DELETE_TEXTURES, self.atlas_tex)
         self.atlas_tex = 0
         if self.unpack_sync != 0:
@@ -2405,11 +2478,10 @@ def _fills(f: Frame2D) -> Int:
         elif run.pipe == PIPE_IMAGE:
             for i in range(run.first, run.first + run.count):
                 var which = Int(f.images[i * IMAGE_FLOATS + 4])
-                if which < 0 or which >= len(f.pixels):
+                if which < 0 or which >= len(f.pics):
                     return -1
-                for px in f.pixels[which]:
-                    if px >> 24 != 0xFF:
-                        return -1
+                if not f.pics[which][].opaque:
+                    return -1
     return out
 
 
@@ -2883,7 +2955,7 @@ struct GPU2D(Movable):
                 var has_images = len(self.frames[i].images) > 0
                 var near = scene.layer_tk[i] >= self.built_k[i] * 0.25
                 var zoom_ok = not zoom_bound or scene.layer_tk[i] == self.built_k[i]
-                if (same_place or (fixed and near and zoom_ok)) and not has_images:
+                if same_place or (fixed and near and zoom_ok and not has_images):  # (goal 81: a layer with pictures is kept too where it is)
                     self.frames[i].layers[0].dx = scene.layer_tx[i]
                     self.frames[i].layers[0].dy = scene.layer_ty[i]
                     self.frames[i].layers[0].k = scene.layer_tk[i]
