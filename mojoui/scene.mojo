@@ -51,11 +51,11 @@ struct KeptOps(Copyable, Movable):
     var path: List[Float32]
     var note_ops: List[Int]
     var notes: List[String]
-    var from_v: Int  # (D-7987) the source layer's ops version when kept (-1: unknown): a renderer's index of that version still fits them
+    var cap_id: Int  # (D-8006) which keeping this is (unique): a renderer's index built from these very ops names it (-1: none)
     var layer_off: Int  # (D-7987) where in that layer the kept run began (ops from the layer's first)
 
     def __init__(out self):
-        self.from_v = -1
+        self.cap_id = -1
         self.layer_off = 0
         self.ok = False
         self.kinds = List[UInt8]()
@@ -188,7 +188,7 @@ trait Painter:
         """(D-7963) How many ops the painter holds now (for ops_capture), -1 when it can't keep ops."""
         ...
 
-    def ops_capture(self, from_op: Int) -> KeptOps:
+    def ops_capture(mut self, from_op: Int) -> KeptOps:
         """(D-7963) The ops from from_op on, kept to be replayed in a later frame (empty when it can't keep ops)."""
         ...
 
@@ -340,7 +340,7 @@ struct SurfacePainter(Painter, Movable):
     def ops_mark(self) -> Int:
         return -1
 
-    def ops_capture(self, from_op: Int) -> KeptOps:
+    def ops_capture(mut self, from_op: Int) -> KeptOps:
         return KeptOps()
 
     def ops_replay_range(mut self, kept: KeptOps, a: Int, b: Int) -> Bool:
@@ -456,7 +456,9 @@ struct Scene(Painter, Movable, Copyable):
     var layer_snap_tag: List[String]
     var layer_hold: List[Bool]
     var layer_opsv: List[Int]  # (D-7969) layer_ops_version (-1: none given)
-    var layer_reuse_v: List[Int]  # (D-7987) the ops version every replayed run in the layer was kept at (-1: none, -2: several)
+    var layer_reuse_v: List[Int]  # (D-7987, D-8006) the keeping every replayed run in the layer came from (-1: none, -2: several)
+    var layer_cap: List[Int]  # (D-8006) the keeping made of this layer's ops while they were drawn (-1: none), and how many
+    var layer_cap_n: List[Int]
     var reuse: List[Int]  # (D-7987) replayed runs: layer, offset in it, offset in the kept version's layer, count (4 per run)
     var layer_snap_note: List[String]  # (written in the snapshot's head for the app to read back first: its page grid)
     var dmg_layer: List[Int]
@@ -493,6 +495,8 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_note = List[String]()
         self.layer_opsv = List[Int]()
         self.layer_reuse_v = List[Int]()
+        self.layer_cap = List[Int]()
+        self.layer_cap_n = List[Int]()
         self.reuse = List[Int]()
         self.dmg_layer = List[Int]()
         self.dmg = List[Float64]()
@@ -529,6 +533,8 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_note.clear()
         self.layer_opsv.clear()
         self.layer_reuse_v.clear()
+        self.layer_cap.clear()
+        self.layer_cap_n.clear()
         self.reuse.clear()
         self.dmg_layer.clear()
         self.dmg.clear()
@@ -571,6 +577,8 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_snap_note.append("")
         self.layer_opsv.append(-1)
         self.layer_reuse_v.append(-1)
+        self.layer_cap.append(-1)
+        self.layer_cap_n.append(0)
 
     def layer_tiles(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64):
         if len(self.layer_keys) == 0:
@@ -607,13 +615,16 @@ struct Scene(Painter, Movable, Copyable):
     def ops_mark(self) -> Int:
         return len(self.kinds)
 
-    def ops_capture(self, from_op: Int) -> KeptOps:
+    def ops_capture(mut self, from_op: Int) -> KeptOps:
         var k = KeptOps()
         k.ok = True
         if len(self.layer_keys) > 0:  # (D-7987) which version of the layer these ops belong to, and where in it they began
             var li = len(self.layer_keys) - 1
-            k.from_v = self.layer_opsv[li] if self.layer_opsv[li] >= 0 else self.layer_versions[li]
+            k.cap_id = Int(now_ns())
             k.layer_off = from_op - self.layer_range(li)[0]
+            if k.layer_off == 0:  # (the layer's whole op list so far is what is being kept: an index built from it names it)
+                self.layer_cap[li] = k.cap_id
+                self.layer_cap_n[li] = len(self.kinds) - from_op
         _copy_ops(self.kinds, self.nums, self.colors, self.text_of, self.texts, self.images, self.path, from_op, len(self.kinds),
                   k.kinds, k.nums, k.colors, k.text_of, k.texts, k.images, k.path)
         for q in range(len(self.note_ops)):
@@ -652,12 +663,12 @@ struct Scene(Painter, Movable, Copyable):
         var li = len(self.layer_keys) - 1
         if li < 0 or n <= 0:
             return
-        if kept.from_v < 0:
+        if kept.cap_id < 0:
             self.layer_reuse_v[li] = -2
             return
         if self.layer_reuse_v[li] == -1:
-            self.layer_reuse_v[li] = kept.from_v
-        elif self.layer_reuse_v[li] != kept.from_v:
+            self.layer_reuse_v[li] = kept.cap_id
+        elif self.layer_reuse_v[li] != kept.cap_id:
             self.layer_reuse_v[li] = -2
             return
         var dst = base - self.layer_range(li)[0]
@@ -669,8 +680,8 @@ struct Scene(Painter, Movable, Copyable):
         self.reuse += [li, dst, src, n]
 
     def reuse_of(self, i: Int) -> List[Int]:
-        """(D-7987) Layer i's replayed runs as (offset in the layer, offset in the kept version's layer, count) triples,
-        all kept at version layer_reuse_v[i]; empty when none, or when they came from several versions."""
+        """(D-7987) Layer i's replayed runs as (offset in the layer, offset in the kept one, count) triples,
+        all of the keeping layer_reuse_v[i]; empty when none, or when they came from several."""
         var out = List[Int]()
         if i >= len(self.layer_reuse_v) or self.layer_reuse_v[i] < 0:
             return out^

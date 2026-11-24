@@ -157,6 +157,22 @@ def edits(in_place: Bool) raises:
         if inc.reused > 0:
             builds += 1
     print("   patched in place (D-7999): " + String(inc.patched))
+    # (D-8006) another view in between, then back: the same board version draws another op list there, and the kept ops are
+    # replayed whole when the first view returns; the index must not take the other list's boxes for them
+    for trip in range(3):
+        var away = scene_of(look, layer, v.zoomed_at(0.4 + 0.1 * Float64(trip), 720, 450))
+        inc.build(away, board_layer(away))
+        var far = OpBins()
+        far.incremental = False
+        far.build(away, board_layer(away))
+        same_bins(inc, far, "away " + String(trip), not in_place)
+        for _ in range(2):  # (the second paint replays the kept ops whole)
+            var back = scene_of(look, layer, v)
+            inc.build(back, board_layer(back))
+            var f2 = OpBins()
+            f2.incremental = False
+            f2.build(back, board_layer(back))
+            same_bins(inc, f2, "back " + String(trip), not in_place)
     if in_place:
         assert_true(inc.patched >= 5, "some edits keep every op's place: patched in place")
     else:

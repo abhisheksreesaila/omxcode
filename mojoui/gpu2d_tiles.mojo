@@ -98,6 +98,17 @@ def op_box(scene: Scene, op: Int) -> Tuple[Float64, Float64, Float64, Float64]:
     return (-1e300, -1e300, 1e300, 1e300)  # (fills, clips: everywhere; a tiled layer has none)
 
 
+def _index_id(scene: Scene, i: Int, n: Int) -> Int:
+    """(D-8006) Which keeping (KeptOps.cap_id) layer i's n ops are: one made of exactly these ops while they were drawn, or
+    one replayed whole; -1: none (nothing a later frame replays can be matched with this index)."""
+    if scene.layer_cap[i] >= 0 and scene.layer_cap_n[i] == n:
+        return scene.layer_cap[i]
+    var runs = scene.reuse_of(i)
+    if len(runs) == 3 and runs[0] == 0 and runs[1] == 0 and runs[2] == n:
+        return scene.layer_reuse_v[i]
+    return -1
+
+
 comptime EXTRA_MAX = 512  # (D-7999) ops drawn again kept beside the grid before it's built whole
 
 
@@ -122,6 +133,7 @@ struct OpBins(Movable):
     var stamp_now: Int
     var widths: Dict[Int, Float64]  # a run's shaped width by a hash of its text and style (kept across builds)
     var incremental: Bool  # (D-7987) boxes of replayed ops taken from the last build (MOJOUI_BINS_INCREMENTAL=0: all measured)
+    var src_id: Int  # (D-8006) the keeping (KeptOps.cap_id) whose ops this index was built from, or is brought up to date with (-1: none)
     var reused: Int  # how many boxes the last build took from the one before
     var in_place: Bool  # (D-7999) MOJOUI_BINS_INPLACE=0: the grid built whole each time (the comparison)
     var extra: List[Int]  # ops drawn again since the grid was built, looked through by every query
@@ -131,6 +143,7 @@ struct OpBins(Movable):
     def __init__(out self):
         self.widths = Dict[Int, Float64]()
         self.incremental = getenv("MOJOUI_BINS_INCREMENTAL") != "0"
+        self.src_id = -1
         self.in_place = getenv("MOJOUI_BINS_INPLACE") != "0"
         self.extra = List[Int]()
         self.in_extra = Dict[Int, Bool]()
@@ -174,7 +187,7 @@ struct OpBins(Movable):
         # (an edit's objects) are measured; the grid is rebuilt from the boxes either way
         var src = List[Int]()
         var old_n = len(self.bx0)
-        if self.incremental and self.version >= 0 and scene.layer_reuse_v[i] == self.version and old_n == self.nops:
+        if self.incremental and self.src_id >= 0 and scene.layer_reuse_v[i] == self.src_id and old_n == self.nops:
             var runs = scene.reuse_of(i)
             if len(runs) > 0:
                 src = List[Int](length=n, fill=-1)
@@ -189,6 +202,7 @@ struct OpBins(Movable):
         var old_x1 = self.bx1^
         var old_y1 = self.by1^
         self.reused = 0
+        self.src_id = _index_id(scene, i, n)
         self.version = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]
         self.nops = n
         self.ext = List[Float64]()
@@ -268,7 +282,7 @@ struct OpBins(Movable):
         """(D-7999) The index brought up to date in place: the layer's ops are the ones it was built from, at the same
         places, but for a few drawn again (a moved object): those are measured again and kept in `extra`, which every
         query looks through (the grid still lists them where they were; the box decides). False: build it whole."""
-        if not self.incremental or not self.in_place or self.version < 0 or scene.layer_reuse_v[i] != self.version or n != self.nops or len(self.bx0) != n or self.nx == 0:
+        if not self.incremental or not self.in_place or self.src_id < 0 or scene.layer_reuse_v[i] != self.src_id or n != self.nops or len(self.bx0) != n or self.nx == 0:
             return False
         for c in range(4):
             if len(self.ext) != 4 or self.ext[c] != scene.layer_ext[4 * i + c]:
@@ -298,6 +312,7 @@ struct OpBins(Movable):
                 self.extra.append(o)
         self.reused = n - len(changed)
         self.patched += 1
+        self.src_id = _index_id(scene, i, n)
         self.version = scene.layer_opsv[i] if scene.layer_opsv[i] >= 0 else scene.layer_versions[i]
         return True
 
