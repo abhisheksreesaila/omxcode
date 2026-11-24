@@ -77,6 +77,39 @@ from the web's CSS; **nobody has seen them on a screen**.
 - **A page's marks saved by this app before today counted bytes** where the web counts UTF-16 units, and stayed behind edits (D-8040). No migration: such a file is the reference copies' only.
 - **scripts/gpu-free** was narrowed once (51d18dc6: a `.lock` path in a command isn't a job).
 
+### Part two: a person's first five minutes (2026-11-24, from 02:30)
+`docs/goals/79/first5.py` drives the app with real X pointer and key events on a headless display (drawn on the CPU; no GPU): a
+first start with no notes file, a page typed with lists, code and a link, select, copy, paste, undo, a long page, marks, rename,
+file, delete and Undo, search with é, a canvas (words, shapes, sticky, colours, ink, marquee), a mind map (made, dragged,
+written, undone), notebooks, a restart. `first5web.mjs` opens a copy of the same file with the web app's own code, edits it, and
+`first5.py back` opens that. All steps pass; pictures in `build/g79/first5-*.png`. What it found, each fixed with a test first
+unless marked:
+
+| Found | Fix |
+|---|---|
+| No words at all without a GPU | D-8043 |
+| Spaces typed through the input method dropped in search, titles, ideas; no caret in search | e6a9af49 |
+| Ink lost points in slow frames; translucent strokes darkened on themselves; eraser missed fast strokes | 4894e37d, D-8044 (not on the Mac) |
+| Canvas opened zoomed out, page without its caret; words being written lost when another note opened | 0a8dfa70, D-8045 |
+| **Emoji 8–16 px too high on Linux, since M2, which passed it** | 03ced5bc, D-8046 |
+| Web texts with a CSS family list drawn in the sans; "bold" read as regular | 03ced5bc, D-8046 |
+| The open note's notebook not marked; New note ignored it; opened notebooks closed at a restart | 03ced5bc, 77f78bff, D-8047 |
+| A real map: sizes, wrapping, emoji, font ignored; no caret while an idea is written, the centre's new words not shown; ring without corners; wrong shadows | e3e75b34, 77f78bff, D-8048 |
+| Rows don't answer the pointer; a notebook's + and … missing | 5673d226 |
+| The software raster drew past a clip (the GPU was right) | 5673d226 |
+| A sticky's shadow ignores its round corner | **open** (79-gaps 72): needs a renderer change, not made before a race |
+
+Draw operations against c761a99f on the fixture's ten screens: the same but for emoji's baseline, the map's ring, shadow and
+highlight, the search's caret, a quote's `>` and code ticks.
+
+**For the reviewer, this part:**
+- **M2's check passed emoji 8–16 px off**: its region compare isn't enough for a glyph that small. It wasn't changed this round.
+- **The reference isn't quite the real web** (D-8048): its fonts are whole families (D-7901), so its map's centre is weight 700; the real page loads 400 and 600 only. Native follows the reference.
+- test_webpieces and test_notesshell now hold the Mac to the Mac's reference (D-8049): the Linux numbers are untouched.
+- test_pnnotes (mine, this continuation): one claim changed, a row dragged onto a notebook doesn't open it (D-8047); the assertion text stands because that notebook is open already.
+- D-7912 (the map centre's 20 px) was wrong as a rule and is replaced by the web's (D-8048).
+- The first run of the Mac half at 03:57 waited on its own lock for 8 minutes (my mistake: the lock taken twice); killed and run again.
+
 ## Continuation 19 (2026-11-23, evening; Linux only; not judged by M6 or M7)
 D-8019…D-8024, b3cb79c6…933bc1f5. Aimed at the old bar's last Linux rows; kept because they are correct and tested, not judged
 since. Measured in the race's own sequence on the desktop before the third power-off: stress zoom's worst frame 18–21 → ~7 ms,
