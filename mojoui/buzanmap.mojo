@@ -13,6 +13,8 @@ from mojoui.skin import Skin, Shadow, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, draw_radial_steps
 from mojoui.canvas import rgba
+from mojoui.shared import new_key
+from mojoui.jsonpatch import Change, patched, members, elements, find_member, part
 from mojoui.json import Json, json_string
 
 comptime SERIF = "Source Serif 4"
@@ -100,7 +102,7 @@ struct BuzanMap(Movable):
         self.made += 1
         var font = self.topics[parent].font if self.topics[parent].font != "" else String("hand")
         var i = self.add(parent, "New idea", self.topics[parent].x + side * max(190.0, 330.0 - Float64(depth) * 55),
-                         self.topics[parent].y + position * 76, color, "node-made-" + String(self.made), max(15.0, 25.0 - Float64(depth) * 3), depth == 1, font)
+                         self.topics[parent].y + position * 76, color, new_key("node-"), max(15.0, 25.0 - Float64(depth) * 3), depth == 1, font)
         self.selected = i
         self.begin_edit(i)
         return i
@@ -552,6 +554,84 @@ def map_json(m: BuzanMap, title: String, root_id: String) -> String:
             out += "," + t.extra
         out += "}"
     return out + "]}"
+
+
+def _topic_json(m: BuzanMap, i: Int) -> String:
+    """An idea made here as the document stores one."""
+    ref t = m.topics[i]
+    var pid = String("null") if t.parent < 0 else json_string(m.topics[t.parent].id)
+    var out = '{"id":' + json_string(t.id) + ',"parentId":' + pid + ',"text":' + json_string(t.text) + ',"x":' + _jnum(t.x) + ',"y":' + _jnum(t.y)
+    out += ',"color":"' + _hexs(t.color) + '"'
+    if t.font_size > 0:
+        out += ',"fontSize":' + _jnum(t.font_size) + ',"bold":' + ("true" if t.bold else "false")
+    if t.font != "":
+        out += ',"font":' + json_string(t.font)
+        if t.extra.find('"presentation":') < 0:
+            out += ',"presentation":"box","curve":78'
+    if t.extra != "":
+        out += "," + t.extra
+    return out + "}"
+
+
+def map_json_from(m: BuzanMap, source: String, title: String, root_id: String) raises -> String:
+    """The map as it is saved when it was read from `source` (review 3): that text with what was edited changed: an idea
+    nobody touched is its own text (due times, pictures, keys nobody here knows, their order), an edited one has the
+    members it changed replaced, one made here is appended, one deleted is gone; every other top-level member as it was."""
+    if source == "":
+        return map_json(m, title, root_id)
+    var j = Json.parse(source)
+    var ms = members(source, 0, source.byte_length())
+    var n = find_member(ms, "nodes")
+    if n < 0:
+        return map_json(m, title, root_id)
+    var spans = elements(source, ms[n].start, ms[n].end)
+    var at = Dict[String, Int]()
+    var nodes = j.get(0, "nodes")
+    for q in range(j.size(nodes)):
+        at[j.text(j.get(j.at(nodes, q), "id"))] = q
+    var out = List[String]()
+    for i in range(len(m.topics)):
+        ref t = m.topics[i]
+        var q = at.get(t.id, -1)
+        if q < 0:
+            out.append(_topic_json(m, i))
+            continue
+        var nd = j.at(nodes, q)
+        var raw = part(source, spans[q].start, spans[q].end)
+        var ch = List[Change]()
+        var pid = String("") if t.parent < 0 else m.topics[t.parent].id
+        var had = j.text(j.get(nd, "parentId"))
+        if had != pid and not (pid == "" and had not in at):  # (an orphan's parent, whoever that was, stays written)
+            ch.append(Change("parentId", "null" if pid == "" else json_string(pid)))
+        if j.text(j.get(nd, "text")) != t.text:
+            ch.append(Change("text", json_string(t.text)))
+        if j.real(j.get(nd, "x")) != t.x:
+            ch.append(Change("x", _jnum(t.x)))
+        if j.real(j.get(nd, "y")) != t.y:
+            ch.append(Change("y", _jnum(t.y)))
+        if hexc(j.text(j.get(nd, "color"), "#3d8fe8")) != t.color:
+            ch.append(Change("color", '"' + _hexs(t.color) + '"'))
+        if j.real(j.get(nd, "fontSize"), 0) != t.font_size:
+            ch.append(Change("fontSize", _jnum(t.font_size)))
+        if j.flag(j.get(nd, "bold")) != t.bold:
+            ch.append(Change("bold", "true" if t.bold else "false"))
+        if j.text(j.get(nd, "font")) != t.font:
+            ch.append(Change("font", json_string(t.font)))
+        out.append(patched(raw, ch))
+    # (as it stands: the very text, spaces and all)
+    var same = len(out) == len(spans)
+    if same:
+        for q in range(len(spans)):
+            if out[q] != part(source, spans[q].start, spans[q].end):
+                same = False
+                break
+    if same:
+        return source
+    var ch = List[Change]()
+    ch.append(Change("nodes", "[" + ",".join(out) + "]"))
+    if j.text(j.get(0, "rootId"), "root") != root_id:
+        ch.append(Change("rootId", json_string(root_id)))
+    return patched(source, ch)
 
 
 def node_extra(j: Json, node: Int) -> String:

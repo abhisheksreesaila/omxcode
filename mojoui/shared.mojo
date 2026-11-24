@@ -16,6 +16,7 @@ from std.ffi import external_call, c_int
 from std.memory.alloc import alloc, Layout
 from std.atomic import Atomic
 from mojoui import libc
+from mojoui.clock import now_ns
 
 
 def key(slot: Int) -> String:
@@ -108,6 +109,20 @@ def serial() -> Int:
     """A number never given before in this process (from 1 on, any thread): what names a document, a kept picture or a
     version of one wherever something is cached by number, so no cache can take one's for another's."""
     return count_add(SLOT_SERIAL, 1) + 1
+
+
+def new_key(prefix: String) -> String:
+    """A document id never given before, here or in an earlier session: the clock's nanoseconds and the process's next
+    serial, in hex after `prefix`."""
+    var out = prefix
+    for v in [Int(now_ns()), serial()]:
+        var digits = String("")
+        var x = v
+        while x > 0:
+            digits = String("0123456789abcdef"[byte=x % 16:x % 16 + 1]) + digits
+            x //= 16
+        out += digits
+    return out^
 
 
 def make_dir(path: String):

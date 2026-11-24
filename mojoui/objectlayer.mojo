@@ -25,8 +25,7 @@
 
 from std.math import sqrt, cos, sin, floor, ceil
 
-from mojoui.shared import serial
-from mojoui.clock import now_ns
+from mojoui.shared import serial, new_key
 from mojoui.canvassource import CanvasSource
 from mojoui.jsonpatch import Change as Patch, patched, patched_in, member_text
 from mojoui.scene import Painter
@@ -742,7 +741,7 @@ struct ObjectLayer(Movable):
         self.next_id += 1
         self.z_top += 1
         o.z = self.z_top
-        o.key = new_key()  # (its own name in any document, whatever ids it already holds: a layer id is given again after a reload)
+        o.key = new_key("obj-")  # (its own name in any document, whatever ids it already holds: a layer id is given again after a reload)
         var id = o.id
         self._touch(id)
         self.pos_of[id] = len(self.objs)
@@ -2395,19 +2394,6 @@ def _jn(v: Float64) -> String:
 def _geometry(x: Float64, y: Float64, w: Float64, h: Float64, rot: Float64) -> String:
     return ('{"x":' + _jn(x) + ',"y":' + _jn(y) + ',"width":' + _jn(w) + ',"height":' + _jn(h) + ',"rotation":' + _jn(rot * 180 / PI)
             + ',"scaleX":1,"scaleY":1,"flipX":false,"flipY":false,"skewX":0,"skewY":0}')
-
-
-def new_key() -> String:
-    """A document id never given before: the clock's nanoseconds and the process's next serial, in hex."""
-    var out = String("obj-")
-    for v in [Int(now_ns()), serial()]:
-        var digits = String("")
-        var x = v
-        while x > 0:
-            digits = String("0123456789abcdef"[byte=x % 16:x % 16 + 1]) + digits
-            x //= 16
-        out += digits
-    return out^
 
 
 def node_key(ref o: Obj) -> String:

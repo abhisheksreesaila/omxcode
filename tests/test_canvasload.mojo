@@ -25,6 +25,13 @@ from mojoui import libc
 from std.os import makedirs
 
 
+def named(mut l: ObjectLayer):
+    """Objects made here named by their layer ids (their document keys are new in every process)."""
+    for q in range(len(l.objs)):
+        if l.objs[q].src_at < 0:
+            l.objs[q].key = "obj-" + String(l.objs[q].id)
+
+
 def rnd(mut seed: UInt64) -> Int:
     seed = seed * 6364136223846793005 + 1442695040888963407
     return Int(seed >> 33)
@@ -339,6 +346,8 @@ def main() raises:
     while pb.step(R0, R1, R2, R3, 300):
         pass
     assert_false(pb.loading())
+    named(pb.layer)
+    named(edited)
     assert_equal(objects_json_canvas(pb.layer, 4, 3), objects_json_canvas(edited, 4, 3))
     assert_true(pb.layer.unsaved(), "the edits are edits")
     for _ in range(3):

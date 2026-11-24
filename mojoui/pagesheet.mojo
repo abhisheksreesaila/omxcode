@@ -11,7 +11,8 @@ from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_bordered, draw_emoji_tile, text_at, text_normal
 from mojoui.canvas import rgba
-from mojoui.json import json_string
+from mojoui.jsonpatch import Change, patched, member_text
+from mojoui.json import Json, json_string
 
 comptime PAGE_DESK: UInt32 = 0xFFDAE4E9  # #e9e4da
 comptime PAGE_PAPER: UInt32 = 0xFFF8FDFF  # #fffdf8
@@ -239,7 +240,11 @@ struct PageSheet(Movable):
 
     def ink_json(self) -> String:
         """The marks as the web stores them in a page's content.ink ({marks, drawings})."""
-        var out = String('{"marks":[')
+        return '{"marks":[' + self.marks_json() + '],"drawings":[]}'
+
+    def marks_json(self) -> String:
+        """The marks made here, as elements of content.ink.marks."""
+        var out = String("")
         for i in range(len(self.marks)):
             ref m = self.marks[i]
             if i > 0:
@@ -253,7 +258,30 @@ struct PageSheet(Movable):
             var exact = String(md[byte=m.pos:m.end]) if m.end <= md.byte_length() else String("")
             out += '],"anchor":{"pos":' + String(m.pos) + ',"end":' + String(m.end) + ',"quote":{"exact":' + json_string(exact) + "}}"
             out += ',"dx":' + _num(m.dx) + ',"dy":' + _num(m.dy) + "}"
-        return out + '],"drawings":[]}'
+        return out
+
+    def page_json(self, source: String) raises -> String:
+        """The page as it is saved when it was read from `source` (review 3): that text with its markdown replaced, when it
+        changed, and the marks made here added after the ones it had; every other member (its other ink, keys nobody here
+        knows) as it was. A page made here: the web's shape."""
+        var md = self.markdown()
+        if source == "":
+            return '{"version":1,"markdown":' + json_string(md) + ',"ink":' + self.ink_json() + "}"
+        var j = Json.parse(source)
+        var out = source
+        if j.get(0, "markdown") < 0 or j.text(j.get(0, "markdown")) != md:
+            out = patched(out, [Change("markdown", json_string(md))])
+        if len(self.marks) > 0:
+            var ink = member_text(out, "ink")
+            if not ink.startswith("{"):
+                ink = '{"marks":[],"drawings":[]}'
+            var had = member_text(ink, "marks")
+            if not had.startswith("["):
+                had = "[]"
+            var inner = String(had[byte=1:had.byte_length() - 1].strip())
+            ink = patched(ink, [Change("marks", "[" + inner + ("," if inner != "" else "") + self.marks_json() + "]")])
+            out = patched(out, [Change("ink", ink)])
+        return out
 
     def caret_end(mut self):
         self.caret_line = len(self.lines) - 1
