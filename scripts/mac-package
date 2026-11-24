@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# An example's Mac download, in one command, built on the Mac (its GPU, its Metal runtime; cross-linking from Linux can't
+# take Mojo's parallel runtime): the sources over as scripts/mac-ssh sends them, scripts/build.sh <example> mac there, then
+# scripts/package.sh <example> mac, its signature checked, and the zip back as dist/<example>-mac-arm64.zip.
+#   MAC_SSH=user@host scripts/mac-package pnote
+# Under the Mac lock, one build. Nothing else on the Mac changes (its folder: ~/$MAC_SSH_DIR, as mac-ssh's).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [ "${OMX_MAC_LOCKED:-0}" != 1 ]; then
+    exec env OMX_MAC_LOCKED=1 flock -w 5400 "$HOME/.cache/omx-mac.lock" "$0" "$@"
+fi
+app=${1:?usage: scripts/mac-package <example>}
+host=${MAC_SSH:?set MAC_SSH=user@host (the Mac to build on)}
+key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}
+remote=${MAC_SSH_DIR:-omxcode-g54}
+ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 "$host")
+mkdir -p build/mac-ssh dist
+src=build/mac-ssh/package-src.tar.gz
+tar -czf "$src" --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py scripts/package.sh \
+    LICENSE mojoui themes hosts "examples/$app" apple vendor fonts bridge/mac_ime.m
+"${ssh_[@]}" "mkdir -p $remote/data"
+scp -q -i "$key" "$src" "$host:$remote/data/"
+"${ssh_[@]}" bash -s -- "$app" "$remote" <<'REMOTE'
+set -euo pipefail
+app=$1
+cd ~/"$2" && tar -xzf data/package-src.tar.gz
+export PATH=$HOME/.pixi/bin:$PATH
+pixi install > install.txt 2>&1 || { tail -20 install.txt; exit 1; }
+MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1 || { tail -30 build.txt; exit 1; }
+bash scripts/package.sh "$app" mac
+codesign --verify --deep "dist/mac-$app/$app.app" && echo "signature: ok (ad-hoc)"
+otool -L "dist/mac-$app/$app.app/Contents/MacOS/"* | grep -v "/usr/lib\|/System\|:$" | sed 's/ (compat.*//' | sort -u
+REMOTE
+scp -q -i "$key" "$host:$remote/dist/$app-mac-arm64.zip" "dist/$app-mac-arm64.zip"
+ls -la "dist/$app-mac-arm64.zip"
+rm -f "$src"
