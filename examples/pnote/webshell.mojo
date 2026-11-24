@@ -41,7 +41,7 @@ from mojoui.snapahead import snap_ahead
 from mojoui.letgo import let_go
 from std.os import listdir
 from mojoui.framebudget import FrameBudget
-from mojoui.pagedesk import board_rect
+from mojoui.pagedesk import board_rect, BOARD_REACH
 from mojoui.buzanmap import map_text, node_extra
 
 comptime S_PAGE = 0
@@ -572,6 +572,7 @@ struct WebShell(Movable):
                 if self.board.problem != "":
                     print("PNOTE ERROR: canvas: " + self.board.problem, flush=True)
                     self.board.problem = ""
+            self.look.reach = 0 if self.board.loading() else BOARD_REACH
             if self.look.keep_path != "":  # (D-7956) the kept view: shown while the view's nodes load, kept again when settled
                 self.look.keep_hold = self.board.holding(r[0], r[1], r[2], r[3])
                 var still = len(self.tools.lifted(self.board.layer)) == 0 and not self.board.layer.unsaved() and self.save_kind == ""  # (a selection is drawn above the board: its pixels unchanged)

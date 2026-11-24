@@ -427,6 +427,8 @@ struct TileSet(Movable):
     var dirty_r: List[Int]
     var fb_k: Float64
     var fb: Dict[Int, Int]
+    var fb_good: Dict[Int, Int]  # (D-8020) a fallback tile → index into fb_good_r: the part it holds (layer units), as good/good_r
+    var fb_good_r: List[Float64]
     var k_seen: Float64
     var k_since: Int
     var used: Int
@@ -458,6 +460,8 @@ struct TileSet(Movable):
         self.empty = Dict[Int, Bool]()
         self.fb_k = 0
         self.fb = Dict[Int, Int]()
+        self.fb_good = Dict[Int, Int]()
+        self.fb_good_r = List[Float64]()
         self.k_seen = 0
         self.k_since = 0
         self.used = 0
@@ -499,6 +503,7 @@ struct Tiles(Movable):
     var drawn: Int
     var damaged: Int
     var budget_ops: Int
+    var ahead: Bool  # (D-8019) kept tiles extended ahead of a zoom-out (MOJOUI_TILE_AHEAD=0: A/B)
     var hurry: Bool  # (D-8016) the window is closing: a settled view is kept in this frame, not after 750 ms, a tile a frame
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
@@ -520,6 +525,7 @@ struct Tiles(Movable):
         self.damaged = 0
         self.budget_ops = TILE_BUDGET_OPS
         self.hurry = False
+        self.ahead = getenv("MOJOUI_TILE_AHEAD") != "0"
         try:
             if getenv("MOJOUI_TILE_BUDGET") != "":  # (an A/B of the per-frame raster budget)
                 self.budget_ops = Int(getenv("MOJOUI_TILE_BUDGET"))
@@ -573,6 +579,8 @@ struct Tiles(Movable):
         for e in self.sets[s].fb.items():
             self.free.append(e.value)
         self.sets[s].fb = Dict[Int, Int]()
+        self.sets[s].fb_good = Dict[Int, Int]()
+        self.sets[s].fb_good_r = List[Float64]()
         self.sets[s].snap = False
 
     # ---------- (D-7956) the layer's last view, kept on disk (mojoui.viewsnap) ----------
@@ -639,6 +647,8 @@ struct Tiles(Movable):
             self.sets[s].snap_good_r.append(max(oy + Float64(parts[4 * q + 1]), Float64(ij[1] * TILE)) / tk)
             self.sets[s].snap_good_r.append(min(ox + Float64(parts[4 * q] + parts[4 * q + 2]), Float64((ij[0] + 1) * TILE)) / tk)
             self.sets[s].snap_good_r.append(min(oy + Float64(parts[4 * q + 1] + parts[4 * q + 3]), Float64((ij[1] + 1) * TILE)) / tk)
+        self.sets[s].fb_good = self.sets[s].snap_good.copy()
+        self.sets[s].fb_good_r = self.sets[s].snap_good_r.copy()
         self.sets[s].fb_k = scene.layer_tk[i]
         self.sets[s].k = scene.layer_tk[i]
         self.sets[s].k_seen = scene.layer_tk[i]
@@ -834,6 +844,8 @@ struct Tiles(Movable):
                         except:
                             pass
                     swap(self.sets[s].fb, self.sets[s].tiles)
+                    swap(self.sets[s].fb_good, self.sets[s].good)
+                    swap(self.sets[s].fb_good_r, self.sets[s].good_r)
                     self.sets[s].fb_k = self.sets[s].k
                     self.sets[s].tiles = Dict[Int, Int]()
                     self.sets[s].good = Dict[Int, Int]()
@@ -907,7 +919,7 @@ struct Tiles(Movable):
                 continue
             if key in self.sets[s].tiles and not (key in self.sets[s].dirty) and self._extend(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1):
                 continue  # (kept, good for less than the view now reaches: only the new strips, D-7947)
-            var has_fb = len(self.sets[s].fb) > 0 and self._fb_covers(s, ii, jj, tk)
+            var has_fb = len(self.sets[s].fb) > 0 and self._fb_covers(s, max(px0, ex0 / tk), max(py0, ey0 / tk), min(px1, ex1 / tk), min(py1, ey1 / tk))
             if has_fb and self.planned_ops >= self.budget_ops and not self.hurry:
                 missing.append(key)
                 self.more = True
@@ -937,6 +949,25 @@ struct Tiles(Movable):
                         self.more = True
                         break
                     _ = self._raster(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1)
+            # (D-8019) kept tiles good for less than the extent now gives them (it grew: a zoom-out, a pan's edge), their
+            # strips rastered ahead within the budget, the visible ones first: a zoom-out that reaches past them finds
+            # them ready instead of rastering every edge tile's strip in the frame it is seen
+            if self.ahead:
+                for ring in range(2):
+                    for jj in range(j0 - ring, j1 + 1 + ring):
+                        for ii in range(i0 - ring, i1 + 1 + ring):
+                            if ring == 1 and jj >= j0 and jj <= j1 and ii >= i0 and ii <= i1:
+                                continue
+                            var key = _pack(ii, jj)
+                            if not (key in self.sets[s].tiles) or key in self.sets[s].dirty:
+                                continue
+                            if self._good_for(s, key, max(Float64(ii) * TILE, ex0) / tk, max(Float64(jj) * TILE, ey0) / tk,
+                                              min(Float64(ii + 1) * TILE, ex1) / tk, min(Float64(jj + 1) * TILE, ey1) / tk):
+                                continue
+                            if self.planned_ops >= self.budget_ops or len(out.rasters) >= 6:
+                                self.more = True
+                                break
+                            _ = self._extend(out, s, i, ii, jj, tk, ex0, ey0, ex1, ey1)
         # what's shown: the fallback under the missing tiles, then the current tiles
         if len(missing) > 0:
             var fsc = k / self.sets[s].fb_k
@@ -1047,18 +1078,32 @@ struct Tiles(Movable):
         self.sets[s].good_r[4 * g + 3] = n3
         return True
 
-    def _fb_covers(self, s: Int, ii: Int, jj: Int, tk: Float64) -> Bool:
-        """Whether the fallback tiling has any tile under current tile (ii, jj)."""
-        var f = self.sets[s].fb_k / tk
-        var a0 = Int(floor(Float64(ii) * f))
-        var b0 = Int(floor(Float64(jj) * f))
-        var a1 = Int(floor((Float64(ii + 1) * f) - 1e-9))
-        var b1 = Int(floor((Float64(jj + 1) * f) - 1e-9))
+    def _fb_covers(self, s: Int, x0: Float64, y0: Float64, x1: Float64, y1: Float64) -> Bool:
+        """Whether the fallback tiling holds the whole of this rect (layer units): every one of its tiles that meets it
+        kept, and good for its share (D-8020: any tile under it used to do, so a jump's uncovered part showed blank)."""
+        if x1 <= x0 or y1 <= y0:
+            return True
+        var fk = self.sets[s].fb_k
+        if fk <= 0:
+            return False
+        var side = Float64(TILE) / fk
+        var a0 = Int(floor(x0 / side + 1e-9))
+        var b0 = Int(floor(y0 / side + 1e-9))
+        var a1 = Int(floor(x1 / side - 1e-9))
+        var b1 = Int(floor(y1 / side - 1e-9))
+        ref r = self.sets[s].fb_good_r
         for b in range(b0, b1 + 1):
             for a in range(a0, a1 + 1):
-                if _pack(a, b) in self.sets[s].fb:
-                    return True
-        return False
+                var key = _pack(a, b)
+                if not (key in self.sets[s].fb):
+                    return False
+                var g = self.sets[s].fb_good.get(key, -1)
+                if g < 0:
+                    return False
+                if (r[4 * g] > max(x0, Float64(a) * side) + 1e-6 or r[4 * g + 1] > max(y0, Float64(b) * side) + 1e-6
+                        or r[4 * g + 2] < min(x1, Float64(a + 1) * side) - 1e-6 or r[4 * g + 3] < min(y1, Float64(b + 1) * side) - 1e-6):
+                    return False
+        return True
 
     def _raster(mut self, mut out: TilePlan, s: Int, layer: Int, ii: Int, jj: Int, tk: Float64, ex0: Float64, ey0: Float64, ex1: Float64,
                 ey1: Float64, rx0: Int = 0, ry0: Int = 0, rx1: Int = TILE_TEX, ry1: Int = TILE_TEX) -> Bool:

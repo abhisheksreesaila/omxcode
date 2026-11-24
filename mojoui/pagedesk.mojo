@@ -36,6 +36,7 @@ comptime CONNECTOR_HEAD = 15.0
 comptime LABEL_FAMILY = "Geist Mono"
 comptime LABEL_SIZE = 10.5
 comptime FOLD: UInt32 = 0x21161B1F  # rgba(31, 27, 22, .13)
+comptime BOARD_REACH = 160.0  # (D-8019) screen px
 comptime BOARD_TILE = 512.0  # the board layer culls to whole tiles of page px (a pan inside them keeps the layer)
 
 
@@ -206,13 +207,15 @@ def _dashed[P: Painter](mut p: P, x0: Float64, y0: Float64, x1: Float64, y1: Flo
         t += 11
 
 
-def board_rect(v: DeskView, view_w: Float64, view_h: Float64) -> Tuple[Float64, Float64, Float64, Float64]:
-    """The page rect BoardLook.paint draws objects from for this view: the window, 64 px more, snapped out to whole
-    BOARD_TILEs (a progressive open's first slice takes exactly this: mojoui.canvasload.OpenBoard)."""
+def board_rect(v: DeskView, view_w: Float64, view_h: Float64, reach: Float64 = 0) -> Tuple[Float64, Float64, Float64, Float64]:
+    """The page rect BoardLook.paint draws objects from for this view: the window, 64 page px or `reach` screen px more
+    (the larger), snapped out to whole BOARD_TILEs (a progressive open's first slice takes the reach 0 one:
+    mojoui.canvasload.OpenBoard)."""
     var tl = v.to_page(0, 0)
     var br = v.to_page(view_w, view_h)
-    return (floor((tl[0] - 64) / BOARD_TILE) * BOARD_TILE, floor((tl[1] - 64) / BOARD_TILE) * BOARD_TILE,
-            ceil((br[0] + 64) / BOARD_TILE) * BOARD_TILE, ceil((br[1] + 64) / BOARD_TILE) * BOARD_TILE)
+    var m = max(64.0, reach / max(v.scale, 0.01))
+    return (floor((tl[0] - m) / BOARD_TILE) * BOARD_TILE, floor((tl[1] - m) / BOARD_TILE) * BOARD_TILE,
+            ceil((br[0] + m) / BOARD_TILE) * BOARD_TILE, ceil((br[1] + m) / BOARD_TILE) * BOARD_TILE)
 
 
 @fieldwise_init
@@ -283,6 +286,7 @@ struct BoardLook(Movable):
     var keep_hold: Bool
     var kept: KeptOps  # (D-7963) the board's ops from the last paint, replayed while kept_token holds
     var kept_token: String
+    var reach: Float64  # (D-8019) how far past the window (screen px) the ops are complete, so a zoom-out finds its edges rastered (an app sets 0 while the board is still loading)
     var kept_gen: Int  # (D-8010) the look the kept ops were painted with
     var seg_at: Dict[Int, Int]  # (D-7974) the kept ops per object: id → its range [seg_a, seg_b)
     var seg_a: List[Int]
@@ -335,6 +339,7 @@ struct BoardLook(Movable):
         self.kept = KeptOps()
         self.kept_token = ""
         self.kept_gen = -1
+        self.reach = BOARD_REACH
         self.seg_at = Dict[Int, Int]()
         self.seg_a = List[Int]()
         self.seg_b = List[Int]()
@@ -420,7 +425,7 @@ struct BoardLook(Movable):
         its damage meets. `lifted` (ids: what a drag is moving) is drawn in a layer of its own above the board, with the
         connectors that end at it, so the board's tiles stay as they are until the drag lets go."""
         # culled to the window snapped out to whole tiles of page px (D-7929): the layer's extent, its ops complete there
-        var cull = board_rect(v, view_w, view_h)
+        var cull = board_rect(v, view_w, view_h, self.reach)
         var tx0 = cull[0]
         var ty0 = cull[1]
         var tx1 = cull[2]
