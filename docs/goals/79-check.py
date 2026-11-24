@@ -1084,7 +1084,11 @@ def m6_mac(race):
         for run_ in ("A", "B"):
             steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
             # (D-7994: one build for the Mac's half, the first run's; the kept view names its program, as on Linux)
-            out, e = mac_measured(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db])
+            for attempt in range(3):  # (A must have kept its view, or B isn't the run it is printed as: A again, up to 3×)
+                out, e = mac_measured(f"first-{note}-{run_}", steps, dict(base, PNOTE_FIRST=other), [db])
+                if e or run_ == "B" or "SNAP: saved" in out:
+                    break
+                MAC_LOAD.append(f"first-{note}-A: no kept view saved, run again")
             if e:
                 return "FAIL", f"first open {run_} on {note}: {e}"
             fo = native_race(out).get("open")
