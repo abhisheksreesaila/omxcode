@@ -52,9 +52,10 @@ from mojoui.hosts.appkit_webview import (
 from mojoui.hosts.gtk_webview import Inbound, IN_EVENT, IN_REPLY, theme_message
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
+from mojoui.macactivity import InputActivity
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
-    new_class, add_method, add_protocol, register_class, pool_push, fn_address,
+    new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT,
 )
 
 comptime NODE_BITS = 16
@@ -315,6 +316,7 @@ struct AppKitHost[A: App](Movable):
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
+    var activity: InputActivity
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -412,6 +414,7 @@ struct AppKitHost[A: App](Movable):
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
+        self.activity = InputActivity()
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -2984,12 +2987,18 @@ struct AppKitHost[A: App](Movable):
                 return k
         return -1
 
+    def input_activity(mut self, self_addr: Int):
+        """(D-8023) Input came: macOS told that someone waits (mojoui.macactivity; off unless MOJOUI_ACTIVITY is set)."""
+        if self.activity.touch():
+            _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("activityDue:"), ns_number(self_addr), self.activity.due_in())
+
     def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int,
                     pressure: Float64 = 0):
         if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
         self.gpu_input(node)
+        self.input_activity(self_addr)
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
 
@@ -4040,6 +4049,25 @@ def rss_mb() -> Float64:
     return Float64(Int(buf[1])) / 1048576.0
 
 
+def print_bench_state[A: App](host_addr: Int, what: String):
+    """What macOS thinks of the app while it is measured (MOJOUI_BENCHSTATE=1): is it active, is its window key, is the
+    screen locked (-1: not known), is an activity held (D-8023)."""
+    var host = host_at[A](host_addr)
+    var app = msg(cls("NSApplication"), "sharedApplication")
+    var locked = -1
+    var name = String("CGSessionCopyCurrentDictionary")
+    var found = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())  # RTLD_DEFAULT
+    if found != 0:
+        var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=found)
+        var d = Pointer(to=raw).unsafe_bitcast[def() thin abi("C") -> Int]()[]()
+        if d != 0:
+            var v = msg(d, "objectForKey:", ns_string("CGSSessionScreenIsLocked"))
+            locked = msg(v, "intValue") if v != 0 else 0
+            _ = msg(d, "release")
+    print("BENCHSTATE: " + what + " active=" + String(Int(msg[Int8](app, "isActive"))) + " key=" + String(Int(msg[Int8](host[].window, "isKeyWindow")) if host[].window != 0 else -1)
+          + " locked=" + String(locked) + " activity=" + String(host[].activity.mode) + (" held" if host[].activity.token != 0 else " not held"), flush=True)
+
+
 def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     """noteswitch:N / omnibar:N / openall: as GTK's (D-7988): App.bench(first canvas, "bench:<what>") changes the app's
     state N times; each is timed from the call through its frame: the app's step and view, the canvas drawn as the tick
@@ -4048,11 +4076,14 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     if len(host[].canvases) == 0:
         print(label + ": no canvas", flush=True)
         return
+    if env("MOJOUI_BENCHSTATE") == "1":
+        print_bench_state[A](host_addr, label)
     bench_settle[A](host_addr, 500_000_000)
     var times = List[Float64]()
     for _ in range(n):
         var node = host[].canvases[0].node
         var t0 = Int(now_ns())
+        host[].input_activity(host_addr)  # (the click or key the step stands for)
         _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:" + what)
         var d = host[].rt.refresh()
         host[].apply(d, host_addr)
@@ -4223,6 +4254,12 @@ def on_debug_open[A: App](target: Int, cmd: Int, item: Int) abi("C"):
     var host = host_at[A](msg(item, "tag"))
     host[].start_report()
     _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "fileURLWithPath:", ns_string(host[].report.dir)))
+
+
+def on_activity_due[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    var addr = msg(number, "longLongValue")
+    if host_at[A](addr)[].activity.due():
+        _ = msg(target, "performSelector:withObject:afterDelay:", sel("activityDue:"), number, host_at[A](addr)[].activity.due_in())
 
 
 def on_effects_due[A: App](target: Int, cmd: Int, number: Int) abi("C"):
@@ -4463,6 +4500,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         elif what == "undo" or what == "redo" or what == "undoredo":  # (⌘Z / ⇧⌘Z: one step back or forth each frame; undoredo alternates)
             host[].canvas_key(node, "z", 2 if what == "undo" or (what == "undoredo" and i % 2 == 0) else 3, host_addr)
         elif what == "open" or what == "openpress":  # (the app reopens the note, cold: its first frame is this frame's)
+            host[].input_activity(host_addr)  # (the click the open stands for)
             _ = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:reopen")
             var dro = host[].rt.refresh()
             host[].apply(dro, host_addr)
@@ -4631,6 +4669,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if on_g2d > 0:  # (goal 75 M3: our renderer on Metal drew them; each frame's GPU work is in its draw time)
         renderer = String("gpu2d-Metal") if on_g2d == len(works) else String("gpu2d-Metal-mixed")
     var scale = msg[Float64](window, "backingScaleFactor") if window != 0 else 0.0
+    if env("MOJOUI_BENCHSTATE") == "1":
+        print_bench_state[A](host_addr, what)
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=0 renderer=" + renderer
           + " labels_in_place=" + String(host[].labels_in_place - inplace0) + " labels_relaid=" + String(host[].labels_relaid - relaid0)
           + " p50=" + one_decimal(pct(works, 0.5)) + " p95=" + one_decimal(pct(works, 0.95)) + " max=" + one_decimal(pct(works, 1.0))
@@ -5766,6 +5806,7 @@ def run[A: App]() -> c_int:
     add_method(c, "debugOpen:", on_debug_open[A], "v@:@")
     add_method(c, "debugQueued:", on_debug_queued[A], "v@:@")
     add_method(c, "effectsDue:", on_effects_due[A], "v@:@")
+    add_method(c, "activityDue:", on_activity_due[A], "v@:@")
     add_method(c, "testStep:", on_test_step[A], "v@:@")
     add_method(c, "webInbox:", on_web_inbox[A], "v@:@")
     add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")

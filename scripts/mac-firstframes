@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# The Mac's first frames after a pause (goal 79, D-8017, D-8023), in one command, about ten minutes: what idling costs one
+# paint with and without an NSProcessInfo activity (tests/probe_coldpaint.mojo), then the failing rows 3× each with
+# MOJOUI_ACTIVITY=0, 1 and 2, interleaved, each with what macOS thought of the app then (active, key window, screen
+# locked). Run it with the screen unlocked and the app in front as well: a locked Mac never makes the app active, and its
+# numbers may be pessimistic. Changes nothing on the Mac (scratch folders under ~/omxcode-g54/data; no settings, no unlock).
+#   MAC_SSH=user@host scripts/mac-firstframes [runs, default 3]     → build/g79/mac-firstframes-<time>.txt
+set -euo pipefail
+cd "$(dirname "$0")/.."
+runs=${1:-3}
+if [ "${OMX_MAC_LOCKED:-0}" != 1 ]; then
+    exec env OMX_MAC_LOCKED=1 flock -w 5400 "$HOME/.cache/omx-mac.lock" "$0" "$@"
+fi
+: "${MAC_SSH:?set MAC_SSH=user@host (the Mac to run on)}"
+out=build/g79/mac-firstframes-$(date +%H%M%S).txt
+mkdir -p build/g79
+say() { echo "$*" | tee -a "$out"; }
+say "commit $(git rev-parse --short HEAD) $(date '+%Y-%m-%d %H:%M')"
+for a in 0 1; do
+    say "== one paint, MOJOUI_ACTIVITY=$a"
+    scripts/mac-ssh-test tests/probe_coldpaint.mojo MOJOUI_ACTIVITY=$a 2>&1 | grep "^COLDPAINT" | tee -a "$out" || true
+done
+shot() {  # shot <nobuild> <activity> <tag> <db> <steps…>: one run; its rows and states
+    local nobuild=$1 act=$2 tag=$3 db=$4; shift 4
+    local snaps=$tag
+    case $db in *race-*) snaps="ff-$(basename "$db" .db)" ;; esac
+    { printf '%s\n' "$@"; echo quit; } > build/g79/ff.steps
+    MAC_NOBUILD=$nobuild MAC_ENV="PNOTE_DB={data}/$(basename "$db"),OMX_CONFIG={data}/cfg-$tag-$(date +%s),PNOTE_SNAPS={data}/snaps-$snaps,MOJOUI_BENCHSTATE=1,MOJOUI_ACTIVITY=$act" \
+        scripts/mac-ssh pnote build/g79/ff.steps "$db" > build/g79/ff.log 2>&1 || { say "FAILED: $(tail -1 build/g79/ff.log)"; return 0; }
+    local r; r=$(tail -1 build/g79/ff.log)
+    say "-- $tag activity=$act $(grep -o 'load averages: [0-9. ]*' build/g79/ff.log | tail -1)"
+    grep "^BENCHSTATE\|^FRAMEBENCH\|^NOTESWITCH\|^OMNIBAR" "$r/stdout.txt" | sed 's/ missed=.* p50=/ p50=/; s/ draw_p95=.*during_max/ during_max/; s/ shown=.*//' | cut -c1-200 | tee -a "$out"
+}
+first=0
+for db in build/g79/race/race-600.db build/g79/race/race-stress.db; do  # (each note's view kept once, by this build)
+    shot $first 0 keep "$db" wait:800 window:1440x900 appbench:desk=coldopens framebench:desk=open,1 wait:5000
+    first=1
+done
+for r in $(seq "$runs"); do
+    for act in 0 1 2; do
+        say "==== run $r activity=$act"
+        for db in build/g79/race/race-600.db build/g79/race/race-stress.db; do
+            shot 1 $act "open-$(basename "$db" .db)" "$db" wait:800 window:1440x900 appbench:desk=coldopens framebench:desk=open,20 framebench:desk=openpress,10 appbench:desk=zoom100 framebench:desk=pan,60 framebench:desk=drag40,60 framebench:desk=undo,25 framebench:desk=redo,25
+        done
+        shot 1 $act start build/g79/ref-mac/pn.db firstscreen: noteswitch:5 omnibar:5
+    done
+done
+say "done: $out"

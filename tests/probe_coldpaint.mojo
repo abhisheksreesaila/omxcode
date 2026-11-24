@@ -6,6 +6,7 @@ from std.os import getenv
 from std.sys import CompilationTarget
 from std.ffi import external_call, c_int
 from mojoui.scene import Scene
+from mojoui.macactivity import InputActivity
 from mojoui.clock import now_ns
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
 from mojoui.objectlayer import ObjectLayer
@@ -15,6 +16,10 @@ def policy(mode: String):
     """macOS thread policies for this thread (process-local): "qos": user interactive; "rt": time constraint (a frame's
     work every 8.3 ms, as render and audio threads declare)."""
     comptime if CompilationTarget.is_macos():
+        if getenv("MOJOUI_ACTIVITY") == "1" or getenv("MOJOUI_ACTIVITY") == "2":  # (held through the run: NSProcessInfo, user-initiated and latency-critical)
+            var a = InputActivity()
+            _ = a.touch()
+            print("COLDPAINT: activity held, begun", a.begun)
         if mode == "qos" or mode == "rt":
             print("COLDPAINT: qos", external_call["pthread_set_qos_class_self_np", c_int](c_int(33), c_int(0)))
         if mode == "rt":
