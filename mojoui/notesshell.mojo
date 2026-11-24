@@ -203,7 +203,12 @@ def draw_bordered[P: Painter](mut p: P, x: Float64, y: Float64, w: Float64, h: F
     if (border >> 24) == 0:
         p.rect(x, y, w, h, fill, radius)
         return
-    p.rect(x, y, w, h, border, radius)
+    # (D-8014: an opaque fill hides the border rect's middle: left out of a big one, a window-sized box fills once, not twice)
+    var hole = bw + 0.3 * radius + 1
+    if ((fill >> 24) & 0xFF) == 0xFF and min(w, h) > 2 * hole + 48:
+        p.rect_hole(x, y, w, h, border, radius, hole)
+    else:
+        p.rect(x, y, w, h, border, radius)
     p.rect(x + bw, y + bw, w - 2 * bw, h - 2 * bw, fill, max(0.0, radius - bw))
 
 

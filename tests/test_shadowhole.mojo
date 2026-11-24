@@ -6,7 +6,7 @@ from std.testing import assert_true, assert_equal
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE
 from mojoui.gpu2d_gl import GPU2D, headless_gl33
 from mojoui.pagedesk import DeskView, BoardLook, BoardTools
-from mojoui.notesshell import draw_shadows, draw_lifted, draw_radial_steps
+from mojoui.notesshell import draw_shadows, draw_lifted, draw_radial_steps, draw_bordered
 from mojoui.skin import Shadow
 from mojoui.canvas import Surface, rgba
 from mojoui.scene import SurfacePainter
@@ -151,20 +151,25 @@ def radial_frame(mode: Int, k: Float64) raises -> Tuple[List[UInt32], Int]:
     src.begin_layer("a")
     src.layer_transform(0, 0, k)
     draw_radial_steps(src, 6, 66, 1400, 820, 0.48, 0.44, rgba(255, 254, 250), rgba(244, 240, 232), 0.74, 14)
+    var bx = 1420.0
+    for q in range(6):  # (D-8014: bordered boxes: big ones leave out the middle of their border's rect)
+        draw_bordered(src, bx + 3.3 * Float64(q), 900 - 130 * Float64(q), 60.0 + 70 * Float64(q), 120, 4.0 * Float64(q), rgba(250, 240, 230), rgba(20, 60, 90), 1 + 0.5 * Float64(q))
+    draw_bordered(src, 700, 900, 600, 200, 20, rgba(250, 240, 230), rgba(20, 60, 90), 1)
+    draw_bordered(src, 340, 900, 340, 200, 20, rgba(250, 240, 230, 180), rgba(20, 60, 90), 1)
     draw_radial_steps(src, 20, 900, 300, 90, 0.3, 0.8, rgba(90, 10, 200), rgba(0, 200, 90), 0.9, 8)
     var sc = Scene(W, H, k)
     sc.begin_layer("a")
     sc.layer_transform(0, 0, k)
     sc.fill(0xFFF0F2F5)
     var holed = 0
-    sc.push_clip(0, 0, 1500, 1200)
+    sc.push_clip(0, 0, 2000, 1400)
     for op in range(src.ops()):
         var n0 = op * 6
         if Int(src.kinds[op]) == OP_RECT:
             var hole = Float64(src.nums[n0 + 5])
             if hole > 0:
                 holed += 1
-            if mode == 2 and hole > 0:
+            if mode == 2 and hole > 0 and Float64(src.nums[n0 + 2]) == Float64(src.nums[n0 + 3]):
                 var r = Float64(src.nums[n0 + 2]) / 2
                 sc.circle(Float64(src.nums[n0]) + r, Float64(src.nums[n0 + 1]) + r, r, src.colors[op])
             else:
