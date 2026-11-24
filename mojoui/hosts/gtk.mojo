@@ -22,7 +22,7 @@ from mojoui.view import (
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
 from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
-from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES
+from mojoui.diff import Diff, Patch, diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES
 from mojoui.boardlook import board_gtk_css
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
@@ -46,6 +46,9 @@ from mojoui.hosts.gtk_webview import (
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtktree import tree_words
+from mojoui.hosts.gtk_held import (
+    Held, hold, same_view, HELD_MESSAGE, HELD_SEND, HELD_OPTION, HELD_FIELD, HELD_GESTURE, HELD_KEY, HELD_WORDS, HELD_CANCEL, HELD_CLICK, HELD_BOARD, HELD_LINK, HELD_SHORTCUT,
+)
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.uijobs import wake_pipe, drain_wakes
 from mojoui.tray import TrayItem
@@ -229,6 +232,20 @@ def set_busy(on: Bool):
     var key = String("mojoui-busy")
     var app = external_call["g_application_get_default", Int]()
     external_call["g_object_set_data", NoneType](app, key.as_c_string_span(), 1 if on else 0)
+
+
+def set_waiting():
+    """Marks that a rebuild waits for its idle turn: input that comes now is held (goal 81, M4)."""
+    var key = String("mojoui-busy")
+    var app = external_call["g_application_get_default", Int]()
+    external_call["g_object_set_data", NoneType](app, key.as_c_string_span(), 2)
+
+
+def writing() -> Bool:
+    """Whether the host itself is changing widgets right now: their signals are its own, not a person's."""
+    var key = String("mojoui-busy")
+    var app = external_call["g_application_get_default", Int]()
+    return external_call["g_object_get_data", Int](app, key.as_c_string_span()) == 1
 
 
 comptime GTK_ACCESSIBLE_PROPERTY_LABEL = 4  # (gtkenums.h, GtkAccessibleProperty)
@@ -773,9 +790,9 @@ struct GtkHost[A: App](Movable):
     var content_h: Int
     var echo_node: Int  # the field whose event the app just answered (-1: none), and the text it sent
     var echo_text: String
-    var release_node: Int  # a canvas whose drag ended while the host was busy (-1: none): it gets its RELEASE after
-    var release_x: Float64
-    var release_y: Float64
+    var built: View  # while a rebuild waits: the screen the widgets still show
+    var new_of_old: List[Int]  # while a partial rebuild waits: each of its nodes' node on the new screen (-1: its widget goes)
+    var full_waits: Bool  # a full rebuild waits
     var pending: Diff  # a partial rebuild waiting for the next idle turn
     var has_pending: Bool
     var partial_ok: Bool
@@ -979,9 +996,9 @@ struct GtkHost[A: App](Movable):
         self.content_h = 0
         self.echo_node = -1
         self.echo_text = ""
-        self.release_node = -1
-        self.release_x = 0
-        self.release_y = 0
+        self.built = View([])
+        self.new_of_old = List[Int]()
+        self.full_waits = False
         self.pending = Diff(False, List[Patch]())
         self.has_pending = False
         self.dialog = 0
@@ -1222,6 +1239,7 @@ struct GtkHost[A: App](Movable):
                     if b.board == j and b.node == c and dragging:  # (a drag that ended while busy left them set)
                         entry.active = b.active
                         entry.resizing = b.resizing
+            set_board_tone(entry.widget, board_tone(self.rt.shown.nodes[j], k))  # (its tone goes by its place: a new or moved one's too, goal 81)
             mine.append(entry^)
         var boards = List[BoardChild]()
         for b in self.boards:
@@ -2400,7 +2418,22 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_unparent", NoneType](pop)
         self.popovers = List[Int]()
         self.popups = List[Int]()
+        if len(held_input()[]) > 0:
+            var map = List[Int]()
+            if len(self.built.nodes) > 0:  # (a rebuild waited: what its widgets showed, against what comes)
+                var d = diff(self.built, self.rt.shown)
+                map = List[Int](length=len(self.built.nodes), fill=-1)
+                for j in range(len(d.kept)):
+                    if d.kept[j] >= 0:
+                        map[d.kept[j]] = j
+                if not d.rebuild:
+                    for j in range(len(map)):
+                        map[j] = j
+            self.name_held(map)
         self.has_pending = False  # (a full rebuild covers any partial one waiting)
+        self.full_waits = False
+        self.built = View([])
+        self.new_of_old = List[Int]()
         self.widgets = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.outers = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.kinds = List[Int](capacity=len(self.rt.shown.nodes))
@@ -2411,12 +2444,12 @@ struct GtkHost[A: App](Movable):
             self.ids.append(k)
             self.id_node.append(k)
         self.publish_ids()
+        self.settle_held()
         self.release_canvases(List[Bool]())
         self.canvases = List[GtkCanvas]()
         self.boards = List[BoardChild]()
         self.board_scrollers = List[Tuple[Int, Int]]()
         self.board_drags = List[Tuple[Int, Int]]()
-        self.release_node = -1  # (a release from the old screen names a canvas that's gone)
         self.echo_node = -1
         var root = self.build(0, self_addr)
         if self.rt.shown.nodes[0].grows or self.rt.shown.nodes[0].fills:  # the screen fills the window
@@ -2539,6 +2572,7 @@ struct GtkHost[A: App](Movable):
         for j in range(n):
             if kept[j] >= 0:
                 new_of_old[kept[j]] = j
+        self.name_held(new_of_old)
         # What went: its dialog closes, its popovers go (the rest goes with the widgets that held it).
         for o in range(old_n):
             if new_of_old[o] >= 0 or self.widgets[o] == 0:
@@ -2578,6 +2612,9 @@ struct GtkHost[A: App](Movable):
                 self.id_node.append(j)
         self.ids = ids^
         self.publish_ids()
+        self.settle_held()
+        self.built = View([])
+        self.new_of_old = List[Int]()
         var widgets = List[Int](length=n, fill=0)
         var outers = List[Int](length=n, fill=0)
         var kinds = List[Int](capacity=n)
@@ -2633,7 +2670,6 @@ struct GtkHost[A: App](Movable):
         self.editor_node = new_of_old[self.editor_node] if 0 <= self.editor_node < old_n else -1
         self.picker_node = new_of_old[self.picker_node] if 0 <= self.picker_node < old_n else -1
         self.reveal_pending = new_of_old[self.reveal_pending] if 0 <= self.reveal_pending < old_n else -1
-        self.release_node = new_of_old[self.release_node] if 0 <= self.release_node < old_n else -1
         self.echo_node = new_of_old[self.echo_node] if 0 <= self.echo_node < old_n else -1
         # The stacks whose children changed: build the new children, drop the old, put them in order.
         var moving = List[Int]()  # kept popovers whose anchor is being built again: held, then moved to the new one
@@ -2719,13 +2755,6 @@ struct GtkHost[A: App](Movable):
             fresh[j] = kept[j] < 0
         self.focus_after_build(fresh)  # (a kept field keeps its text and caret: someone may be typing in it)
         self.apply_patches(patches, self_addr, fresh)
-        if self.release_node >= 0:  # a drag ended while this was pending: the app still hears it
-            var node = self.release_node
-            self.release_node = -1
-            for k in range(len(self.canvases)):
-                if self.canvases[k].node == node:
-                    self.canvas_send(k, RELEASE, self.release_x, self.release_y, 0, 0, 1, self_addr)
-                    break
         if self.rt.trace:
             print("TRACE: partial " + ms(perf_counter_ns() - t0) + " built " + String(built) + " of " + String(n) + " in " + String(len(resync)) + " stacks")
 
@@ -2885,6 +2914,60 @@ struct GtkHost[A: App](Movable):
                 var icon = String("mojoui-app-logo")
                 external_call["gtk_window_set_icon_name", NoneType](self.window, icon.as_c_string_span())  # (the window's icon, where the desktop shows one)
 
+    def wait_partial(mut self, var d: Diff, self_addr: Int):
+        """Diff d (kept, resync, patches) is done on the main loop's next turn."""
+        self.new_of_old = List[Int](length=len(self.built.nodes), fill=-1)
+        for j in range(len(d.kept)):
+            if d.kept[j] >= 0:
+                self.new_of_old[d.kept[j]] = j
+        self.pending = d^
+        set_waiting()
+        if not self.has_pending:
+            self.has_pending = True
+            _ = external_call["g_idle_add_full", c_uint](c_int(REBUILD_PRIORITY), on_idle_partial[Self.A], self_addr, Int(0))
+
+    def shown_at(self, node: Int) -> Int:
+        """A widget's node (get_node) on the screen as the app has it now: while a rebuild waits the widgets are still
+        numbered as the old screen (-1: gone, or not known until it's built)."""
+        if self.full_waits:
+            return -1
+        if not self.has_pending:
+            return node if node < len(self.rt.shown.nodes) else -1
+        return self.new_of_old[node] if 0 <= node < len(self.new_of_old) else -1
+
+    def id_of(self, node: Int) -> Int:
+        return self.ids[node] if 0 <= node < len(self.ids) else -1
+
+    def name_held(mut self, new_of_old: List[Int]):
+        """Each held input's view on the new screen (called while the ids are still the old screen's)."""
+        var queue = held_input()
+        for ref h in queue[]:
+            h.node = -1
+            if h.id < 0 or h.id >= len(self.id_node):
+                continue
+            var o = self.id_node[h.id]
+            if 0 <= o < len(new_of_old) and new_of_old[o] >= 0:
+                h.node = new_of_old[o]
+            elif len(self.built.nodes) > 0:
+                h.node = same_view(self.built, self.rt.shown, o)
+            elif len(new_of_old) == 0:  # (the same screen built again)
+                h.node = o
+
+    def settle_held(mut self):
+        """Held input by its new ids; what was for views that went goes with them."""
+        var queue = held_input()
+        if len(queue[]) == 0:
+            return
+        var rest = List[Held]()
+        for ref h in queue[]:
+            if h.what == HELD_MESSAGE or h.what == HELD_SHORTCUT:
+                rest.append(h.copy())
+            elif 0 <= h.node < len(self.ids):
+                var k = h.copy()
+                k.id = self.ids[h.node]
+                rest.append(k^)
+        queue[] = rest^
+
     def apply(mut self, d: Diff, self_addr: Int):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.send_commands(self_addr)  # (and the widget commands it asked for go to their pages)
@@ -2892,20 +2975,31 @@ struct GtkHost[A: App](Movable):
         self.theme_webviews()  # (a new theme reaches the widgets' pages even when no view changed)
         self.copy_if_asked()
         self.open_if_asked()
-        if d.rebuild and d.partial and self.partial_ok and not self.always_fresh and not self.has_pending and len(self.widgets) > 0 and not busy():
-            # Only the parts that changed, on the next idle turn (never inside a signal handler: a widget that goes
-            # may be the one that sent the signal). Events wait until then.
-            self.pending = d.copy()
-            self.has_pending = True
-            set_busy(True)
-            _ = external_call["g_idle_add", c_uint](on_idle_partial[Self.A], self_addr)
-            return
+        if self.full_waits:
+            return  # (it builds whatever the screen is by then)
         if d.rebuild or self.always_fresh:
-            # Rebuild on the next idle turn, never inside a signal handler: the widget
-            # that sent the signal would be destroyed while GTK is still using it.
-            self.has_pending = False  # (the full rebuild covers it)
-            set_busy(True)  # ignore events until the new widgets are up
-            _ = external_call["g_idle_add", c_uint](on_idle_rebuild[Self.A], self_addr)
+            # On the main loop's next turn, never inside a signal handler: a widget that goes may be the one that sent
+            # the signal. Input that comes before it is held (held_input) and sent after.
+            if not self.has_pending:
+                swap(self.built, self.rt.before)  # (what the widgets show until then)
+                if d.partial and self.partial_ok and not self.always_fresh and len(self.widgets) > 0 and not busy():
+                    self.wait_partial(d.copy(), self_addr)
+                    return
+            else:  # another change of shape before the first was built: both at once, from what the widgets show
+                var both = diff(self.built, self.rt.shown)
+                if not both.rebuild:  # (it's back as it was: nothing to build, only patches)
+                    both.partial = True
+                    both.kept = List[Int](capacity=len(self.rt.shown.nodes))
+                    for k in range(len(self.rt.shown.nodes)):
+                        both.kept.append(k)
+                if both.partial:
+                    self.wait_partial(both^, self_addr)
+                    return
+                self.has_pending = False
+            self.full_waits = True
+            self.new_of_old = List[Int]()
+            set_waiting()
+            _ = external_call["g_idle_add_full", c_uint](c_int(REBUILD_PRIORITY), on_idle_rebuild[Self.A], self_addr, Int(0))
             return
         if self.has_pending:  # the widgets are still the old screen's: these patches wait for the partial rebuild
             for p in d.patches:
@@ -3216,6 +3310,11 @@ struct GtkHost[A: App](Movable):
     def canvas_send(mut self, ci: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int):
         if ci < 0 or ci >= len(self.canvases):
             return
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_GESTURE, self.id_of(self.canvases[ci].node), kind=kind, x=x, y=y, dx=dx, dy=dy, zoom=zoom, pressure=self.canvases[ci].pressure))
+            return
         var t0 = perf_counter_ns()
         var p = self.canvases[ci].pressure if kind == PRESS or kind == PAN or kind == RELEASE else 0.0
         var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom, p)
@@ -3226,11 +3325,64 @@ struct GtkHost[A: App](Movable):
     def canvas_key(mut self, ci: Int, name: String, modifiers: Int, self_addr: Int):
         if ci < 0 or ci >= len(self.canvases):
             return
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_KEY, self.id_of(self.canvases[ci].node), name, modifiers))
+            return
         var t0 = perf_counter_ns()
         var d = self.rt.key(self.canvases[ci].node, name, modifiers)
         self.trace_diff("event key " + name, t0, d)
         self.apply(d, self_addr)
         self.ahead_after_input(self_addr)
+
+    def canvas_words(mut self, ci: Int, kind: Int, text: String, self_addr: Int, x: Float64 = 0, y: Float64 = 0, w: Float64 = 0, h: Float64 = 0, cursor: Float64 = 0):
+        """An input method's words (IME_COMMIT, IME_PREEDIT) or pasted ones (PASTE), to canvas ci."""
+        if ci < 0 or ci >= len(self.canvases) or writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_WORDS, self.id_of(self.canvases[ci].node), text, kind=kind, x=x, y=y, dx=w, dy=h, zoom=cursor))
+            return
+        var d = self.rt.text_event(self.canvases[ci].node, kind, text, x, y, w, h, cursor)
+        self.apply(d, self_addr)
+
+    def send_option(mut self, node: Int, index: Int, self_addr: Int):
+        """A control's choice: its message with the option's words."""
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_OPTION, self.id_of(node), number=index))
+            return
+        if node < 0 or node >= len(self.rt.shown.nodes) or index < 0 or index >= len(self.rt.shown.nodes[node].options):
+            return
+        var words = self.rt.shown.nodes[node].options[index]
+        self.send(node, False, words, index, self_addr)
+
+    def cancel_field(mut self, node: Int, text: String, self_addr: Int):
+        """Escape in a field with on_cancel."""
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_CANCEL, self.id_of(node), text))
+            return
+        var d = self.rt.cancel(node, text)
+        self.apply(d, self_addr)
+
+    def board_send(mut self, board: Int, kind: Int, index: Int, dx: Float64, dy: Float64, self_addr: Int):
+        """A Board's object was moved (PAN) or resized (ZOOM)."""
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_BOARD, self.id_of(board), kind=kind, number=index, dx=dx, dy=dy))
+            return
+        var d = self.rt.gesture(board, kind, Float64(index), 0, dx, dy, 1)
+        self.apply(d, self_addr)
+
+    def canvas_at(self, node: Int) -> Int:
+        for k in range(len(self.canvases)):
+            if self.canvases[k].node == node:
+                return k
+        return -1
 
     def pointer(self, ci: Int) -> Tuple[Float64, Float64]:
         """Where the pointer is over canvas ci (its centre if it hasn't been seen)."""
@@ -4663,48 +4815,96 @@ struct GtkHost[A: App](Movable):
 
     def answer(mut self, msg: Int, text: String, self_addr: Int):
         """A message with a path from outside the widgets (a file dialog's answer, a dropped file): to update() now, or,
-        while a rebuild is pending, held and sent once it's up (drain_fields), in order."""
+        while a rebuild is pending, held and sent once it's up (drain_held), in order."""
         if msg == 0:
             return
-        if busy() or self.has_pending or len(held_events()[]) > 0:
-            held_events()[].append((msg, text))
+        if busy() or self.has_pending or len(held_input()[]) > 0:
+            hold(held_input()[], Held(HELD_MESSAGE, -1, text, msg))
             return
         var d = self.rt.dispatch(Event(msg, text, 0))
         self.apply(d, self_addr)
 
-    def drain_fields(mut self, self_addr: Int):
-        """The field changes held while the host was busy (D-1321): each field whose held text isn't the app's value
-        gets it (shown, if a rebuild put the app's back) and its on_change, one at a time until the host is busy again."""
-        var events = held_events()
-        while len(events[]) > 0 and not busy() and not self.has_pending:
-            var e = events[].pop(0)
-            var d = self.rt.dispatch(Event(e[0], e[1], 0))
-            self.apply(d, self_addr)
-        var held = held_fields()
-        while len(held[]) > 0 and not busy() and not self.has_pending:
-            var id = held[][0][0]
-            var text = held[][0][1]
-            _ = held[].pop(0)
-            if id >= len(self.id_node):
+    def drain_held(mut self, self_addr: Int):
+        """The input held while a rebuild waited, in the order it came, until one of them asks for another rebuild (which
+        sends the rest). A field's words that the app has already change nothing (D-1321)."""
+        var queue = held_input()
+        while len(queue[]) > 0 and not busy() and not self.has_pending:
+            var h = queue[].pop(0)
+            if h.what == HELD_MESSAGE:
+                var d = self.rt.dispatch(Event(h.number, h.text, 0))
+                self.apply(d, self_addr)
                 continue
-            var node = self.id_node[id]
-            if node < 0 or node >= len(self.rt.shown.nodes) or self.rt.shown.nodes[node].kind != FIELD:
+            if h.what == HELD_SHORTCUT:
+                _ = self.shortcut(h.text, self_addr)
                 continue
-            if self.rt.shown.nodes[node].text == text or self.widgets[node] == 0:
+            var node = self.id_node[h.id] if 0 <= h.id < len(self.id_node) else -1
+            if node < 0 or node >= len(self.rt.shown.nodes):
                 continue
+            if h.what == HELD_SEND:
+                self.send(node, h.second, h.text, h.number, self_addr)
+            elif h.what == HELD_OPTION:
+                self.send_option(node, h.number, self_addr)
+            elif h.what == HELD_FIELD:
+                self.held_words(node, h.text, self_addr)
+            elif h.what == HELD_GESTURE:
+                var ci = self.canvas_at(node)
+                if ci >= 0:
+                    self.canvases[ci].pressure = h.pressure
+                    self.canvas_send(ci, h.kind, h.x, h.y, h.dx, h.dy, h.zoom, self_addr)
+            elif h.what == HELD_KEY:
+                self.canvas_key(self.canvas_at(node), h.text, h.number, self_addr)
+            elif h.what == HELD_WORDS:
+                self.canvas_words(self.canvas_at(node), h.kind, h.text, self_addr, h.x, h.y, h.dx, h.dy, h.zoom)
+            elif h.what == HELD_CANCEL:
+                self.cancel_field(node, h.text, self_addr)
+            elif h.what == HELD_CLICK:
+                button_clicked[Self.A](self_addr, node)
+            elif h.what == HELD_BOARD:
+                self.board_send(node, h.kind, h.number, h.dx, h.dy, self_addr)
+            elif h.what == HELD_LINK:
+                link_clicked[Self.A](self_addr, node, h.number)
+
+    def held_words(mut self, node: Int, text: String, self_addr: Int):
+        """A field's (or text area's) words typed while a rebuild waited: shown again if the rebuild put the app's back,
+        and its on_change, unless the app has them already."""
+        var kind = self.rt.shown.nodes[node].kind
+        if (kind != FIELD and kind != TEXTAREA) or self.rt.shown.nodes[node].text == text or self.widgets[node] == 0:
+            return
+        set_busy(True)  # (its own signals aren't a person's)
+        if kind == FIELD:
             if c_str(external_call["gtk_editable_get_text", Int](self.widgets[node])) != text:
-                set_busy(True)
-                external_call["gtk_editable_set_text", NoneType](self.widgets[node], text.as_c_string_span())
-                set_busy(False)
-                var rest = List[Tuple[Int, String]]()  # (that set held its own "" and text: dropped)
-                for h in held[]:
-                    if h[0] != id:
-                        rest.append(h)
-                held[] = rest^
-            self.send(node, False, text, 0, self_addr)
+                var t = text
+                external_call["gtk_editable_set_text", NoneType](self.widgets[node], t.as_c_string_span())
+        else:
+            var buffer = external_call["gtk_text_view_get_buffer", Int](self.widgets[node])
+            if buffer_text(buffer) != text:
+                var t = text
+                external_call["gtk_text_buffer_set_text", NoneType](buffer, t.as_c_string_span(), c_int(-1))
+        set_busy(False)
+        self.send(node, False, text, 0, self_addr)
+
+    def shortcut(mut self, name: String, self_addr: Int) -> Bool:
+        """The menu item declaring this shortcut fires; False: none does."""
+        for i in range(len(self.rt.shown.nodes)):
+            ref n = self.rt.shown.nodes[i]
+            if n.kind == ITEM and len(n.options) > 0 and n.options[0] == name and n.value & DISABLED == 0 and n.msg != 0:
+                if busy():
+                    hold(held_input()[], Held(HELD_SHORTCUT, -1, name))
+                else:
+                    self.send(i, False, "", 0, self_addr)
+                return True
+        return False
 
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
-        """A widget changed: build the event, run update(), patch the widgets."""
+        """A widget changed: build the event, run update(), patch the widgets. While a rebuild waits (node: the widget's,
+        as the old screen numbers it) it's held and sent after."""
+        if writing():
+            return
+        if busy():
+            hold(held_input()[], Held(HELD_SEND, self.id_of(node), text, number, second), 0 <= node < len(self.kinds) and self.kinds[node] == SLIDER)
+            return
+        if node < 0 or node >= len(self.rt.shown.nodes):
+            return
         ref n = self.rt.shown.nodes[node]
         var message = n.msg2 if second else n.msg
         if message == 0:
@@ -4723,7 +4923,7 @@ struct GtkHost[A: App](Movable):
 def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
     """A string let go over a DropTarget: its on_drop, with event.text = the string."""
     var node = get_node(target)
-    if node < 0 or busy():
+    if node < 0 or writing():
         return 0
     var text = c_str(external_call["g_value_get_string", Int](value))
     host_at[A](host_addr)[].send(node, False, text, 0, host_addr)
@@ -4733,7 +4933,7 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
 def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
     """Files let go over a DropTarget with on_file (a GdkFileList): its on_file once per file, event.text = its path."""
     var node = get_node(target)
-    if node < 0 or busy():
+    if node < 0 or writing():
         return 0
     var files = external_call["g_value_get_boxed", Int](value)
     if files == 0:
@@ -4750,9 +4950,10 @@ def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_
         at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
     external_call["g_slist_free", NoneType](list)
     var host = host_at[A](host_addr)
-    if node >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[node].kind != DROP or host[].rt.shown.nodes[node].msg2 == 0:
+    var now = host[].shown_at(node)
+    if now < 0 or host[].rt.shown.nodes[now].kind != DROP or host[].rt.shown.nodes[now].msg2 == 0:
         return 0
-    var msg = host[].rt.shown.nodes[node].msg2  # (by message, not node: the first file's screen may renumber the nodes)
+    var msg = host[].rt.shown.nodes[now].msg2  # (by message, not node: the first file's screen may renumber the nodes)
     for p in paths:
         host[].answer(msg, p, host_addr)
     return 1 if len(paths) > 0 else 0
@@ -4777,23 +4978,31 @@ def open_url(url: String):
 def on_activate_link[A: App](label: Int, uri: Int, host_addr: Int) abi("C") -> c_int:
     """A Paragraph's link tapped (GTK's activate-link: uri = the run's index, set by pango_markup): its on_link with
     event.number = the run and event.text = its href from the screen; with no on_link, the href opens in the browser."""
-    var node = get_node(label)
-    var host = host_at[A](host_addr)
-    if node < 0 or node >= len(host[].rt.shown.nodes) or busy():
+    if writing():
         return 1
     var index = 0
     for c in c_str(uri).as_bytes():
         if c < 48 or c > 57:
             return 1
         index = index * 10 + Int(c - 48)
+    if busy():
+        hold(held_input()[], Held(HELD_LINK, id_data(label), number=index))
+        return 1
+    link_clicked[A](host_addr, get_node(label), index)
+    return 1
+
+
+def link_clicked[A: App](host_addr: Int, node: Int, index: Int):
+    var host = host_at[A](host_addr)
+    if node < 0 or node >= len(host[].rt.shown.nodes):
+        return
     var href = link_href(host[].rt.shown.nodes[node], index)
     if href == "":
-        return 1
+        return
     if host[].rt.shown.nodes[node].msg == 0:
         open_url(href)
-        return 1
+        return
     host[].send(node, False, href, index, host_addr)
-    return 1
 
 
 def is_webview(widget: Int) -> Bool:
@@ -4974,17 +5183,20 @@ def on_effects[A: App](host_addr: Int) abi("C") -> c_int:
     return 0  # G_SOURCE_REMOVE: each poll arms its own
 
 
+comptime REBUILD_PRIORITY = -100  # (G_PRIORITY_HIGH: before the next input event and the next frame, so little is ever held)
+
+
 def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].has_pending:  # (a full rebuild may have come first)
         host[].update_part(host_addr)  # update_part() clears the busy flag (apply_patches)
-    host[].drain_fields(host_addr)
+    host[].drain_held(host_addr)
     return 0
 
 
 def on_idle_rebuild[A: App](host_addr: Int) abi("C") -> c_int:
     host_at[A](host_addr)[].show(host_addr)  # show() clears the busy flag
-    host_at[A](host_addr)[].drain_fields(host_addr)
+    host_at[A](host_addr)[].drain_held(host_addr)
     return 0  # G_SOURCE_REMOVE: run once
 
 
@@ -6011,19 +6223,13 @@ def on_drag_begin[A: App](drag: Int, x0: Float64, y0: Float64, host_addr: Int) a
     if host[].canvases[ci].keys != 0:  # keys go to the canvas pressed last
         _ = external_call["gtk_widget_grab_focus", c_int](host[].canvases[ci].widget)
         host[].key_node = host[].canvases[ci].node
-    if not busy():
+    if not writing():
         host[].canvas_send(ci, PRESS, x, y, Float64(mods_of(drag)), 0, 1, host_addr)  # where a drag (or a tap) starts (dx: modifiers)
 
 
 def on_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var ci = get_index(drag)
-    if busy():  # (mid-update: the release still counts; it's sent once the widgets are up, if they stay)
-        if 0 <= ci < len(host[].canvases) and host[].canvases[ci].moved and host[].has_pending:
-            host[].release_node = host[].canvases[ci].node
-            host[].release_x = host[].canvases[ci].start_x + off_x
-            host[].release_y = host[].canvases[ci].start_y + off_y
-        return
     if ci < 0 or ci >= len(host[].canvases) or not host[].canvases[ci].moved:
         return  # (a plain tap: the click gesture sends TAP)
     host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
@@ -6031,7 +6237,7 @@ def on_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: In
 
 
 def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var ci = get_index(drag)
@@ -6052,7 +6258,7 @@ def on_scroll[A: App](scroll: Int, dx: Float64, dy: Float64, host_addr: Int) abi
     """Mouse wheel / touchpad scroll: zoom around the pointer (4 notches = 2×). On a Canvas(scroll_pans=True) a plain
     scroll pans instead (WHEEL: dx, dy = how far the content moves, points; a notch = 40 points) and ctrl+scroll zooms
     (a touchpad pinch arrives through the zoom gesture, on_pinch)."""
-    if busy():
+    if writing():
         return 1
     var host = host_at[A](host_addr)
     var ci = get_index(scroll)
@@ -6060,7 +6266,7 @@ def on_scroll[A: App](scroll: Int, dx: Float64, dy: Float64, host_addr: Int) abi
         return 1
     var at = host[].pointer(ci)
     var touchpad = external_call["gtk_event_controller_scroll_get_unit", c_int](scroll) == 1  # (surface pixels, not notches)
-    var node = host[].canvases[ci].node
+    var node = host[].shown_at(host[].canvases[ci].node)
     var pans = 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].spacing == 1
     if pans and not host[].canvases[ci].test_zoom and (mods_of(scroll) & CTRL) == 0:
         var step = 1.0 if touchpad else 40.0
@@ -6094,7 +6300,7 @@ def on_pinch_begin[A: App](pinch: Int, sequence: Int, host_addr: Int) abi("C"):
 
 
 def on_pinch[A: App](pinch: Int, scale: Float64, host_addr: Int) abi("C"):
-    if busy() or scale <= 0:
+    if writing() or scale <= 0:
         return
     var host = host_at[A](host_addr)
     var ci = get_index(pinch)
@@ -6171,7 +6377,7 @@ def holds_keyboard(w: Int) -> Bool:
 
 
 def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
-    if busy():
+    if writing():
         return c_int(0)
     var host = host_at[A](host_addr)
     var ci = get_index(keys)
@@ -6184,7 +6390,8 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     if (mods & CTRL) != 0 and (name == "v" or name == "V"):  # (goal 79) a paste: the system clipboard's text, read for the canvas
         var display = external_call["gdk_display_get_default", Int]()
         external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], (host_addr << 10) | ci)
-    im_place[A](host_addr, ci)
+    if not busy():
+        im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
     return c_int(0 if (mods & (CTRL | ALT)) != 0 and name != "Home" and name != "End" else 1)
 
@@ -6197,10 +6404,8 @@ def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
         return
     var t = c_str(text)
     host[].canvases[ci].test_preedit_on = False
-    var d = host[].rt.text_event(host[].canvases[ci].node, IME_COMMIT, t)
-    host[].apply(d, host_addr)
-    var d2 = host[].rt.text_event(host[].canvases[ci].node, IME_PREEDIT, "")
-    host[].apply(d2, host_addr)
+    host[].canvas_words(ci, IME_COMMIT, t, host_addr)
+    host[].canvas_words(ci, IME_PREEDIT, "", host_addr)
 
 
 def on_im_preedit[A: App](im: Int, host_addr: Int) abi("C"):
@@ -6226,9 +6431,8 @@ def on_im_preedit[A: App](im: Int, host_addr: Int) abi("C"):
         if at[0] != 0:
             external_call["pango_attr_list_unref", NoneType](at[0])
         _ = cur
-    ref c = host[].canvases[ci]
-    var d = host[].rt.text_event(c.node, IME_PREEDIT, text, Float64(c.im_x), Float64(c.im_y), Float64(c.im_w), Float64(c.im_h), Float64(cursor))
-    host[].apply(d, host_addr)
+    var c = host[].canvases[ci].copy()
+    host[].canvas_words(ci, IME_PREEDIT, text, host_addr, Float64(c.im_x), Float64(c.im_y), Float64(c.im_w), Float64(c.im_h), Float64(cursor))
 
 
 def on_paste_read[A: App](clipboard: Int, result: Int, data: Int) abi("C"):
@@ -6241,8 +6445,7 @@ def on_paste_read[A: App](clipboard: Int, result: Int, data: Int) abi("C"):
         return
     var text = c_str(t)
     external_call["g_free", NoneType](t)
-    var d = host[].rt.text_event(host[].canvases[ci].node, PASTE, text)
-    host[].apply(d, host_addr)
+    host[].canvas_words(ci, PASTE, text, host_addr)
 
 
 def im_place[A: App](host_addr: Int, ci: Int):
@@ -6269,31 +6472,30 @@ def im_place[A: App](host_addr: Int, ci: Int):
 
 def on_field_key[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
     """Escape in a field with on_cancel."""
-    if busy() or key_name(Int(keyval)) != "Escape":
+    if writing() or key_name(Int(keyval)) != "Escape":
         return c_int(0)
     var host = host_at[A](host_addr)
     var node = get_node(keys)
     if node < 0 or node >= len(host[].widgets) or host[].widgets[node] == 0:
         return c_int(0)
     var text = c_str(external_call["gtk_editable_get_text", Int](host[].widgets[node]))
-    var d = host[].rt.cancel(node, text)
-    host[].apply(d, host_addr)
+    host[].cancel_field(node, text, host_addr)
     return c_int(1)
 
 
 def on_image_released[A: App](tap: Int, presses: c_int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     """A click on an Image(on_tap=…): its message, as a button's."""
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var node = get_node(external_call["gtk_event_controller_get_widget", Int](tap))
-    if 0 <= node < len(host[].rt.shown.nodes):
+    if node >= 0:
         host[].send(node, False, "", 0, host_addr)
 
 
 def on_secondary_released[A: App](click: Int, presses: c_int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     """A right click on a canvas: SECONDARY at (x, y), where the app may open a context menu."""
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var ci = get_index(click)
@@ -6305,7 +6507,7 @@ def on_secondary_released[A: App](click: Int, presses: c_int, x: Float64, y: Flo
 
 def on_item_clicked[A: App](button: Int, host_addr: Int) abi("C"):
     """A menu item: close the menu it's in, then send its message like a button."""
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var popover = external_call["gtk_widget_get_ancestor", Int](button, external_call["gtk_popover_get_type", Int]())
@@ -6321,19 +6523,19 @@ def on_item_clicked[A: App](button: Int, host_addr: Int) abi("C"):
 
 def on_menu_closed[A: App](popover: Int, host_addr: Int) abi("C"):
     """A context menu or popover dismissed (a click elsewhere, Escape): the app's on_close takes it out of the view."""
-    if busy():
+    if writing():
         return
     var node = get_node(popover)
     if node < 0:
         return
     var host = host_at[A](host_addr)
-    if node < len(host[].rt.shown.nodes) and (host[].rt.shown.nodes[node].kind == MENU or host[].rt.shown.nodes[node].kind == POPOVER):
+    if node < len(host[].kinds) and (host[].kinds[node] == MENU or host[].kinds[node] == POPOVER):
         host[].send(node, True, "", 0, host_addr)
 
 
 def on_overlay_close[A: App](button: Int, host_addr: Int) abi("C"):
     """A dialog's ✕: on_close."""
-    if busy():
+    if writing():
         return
     var node = get_node(button)
     var host = host_at[A](host_addr)
@@ -6343,18 +6545,18 @@ def on_overlay_close[A: App](button: Int, host_addr: Int) abi("C"):
 
 def on_dialog_closed[A: App](dialog: Int, host_addr: Int) abi("C"):
     """A dialog closed by Escape (or its ✕): on_close, unless the screen is being replaced."""
-    if busy():
+    if writing():
         return
     var node = get_node(dialog)
     if node < 0:
         return
     var host = host_at[A](host_addr)
-    if node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].kind == DIALOG:
+    if node < len(host[].kinds) and host[].kinds[node] == DIALOG:
         host[].send(node, True, "", 0, host_addr)
 
 
 def on_toast_action[A: App](toast: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var node = get_node(toast)
     if node >= 0:
@@ -6363,11 +6565,11 @@ def on_toast_action[A: App](toast: Int, host_addr: Int) abi("C"):
 
 def on_toast_dismissed[A: App](toast: Int, host_addr: Int) abi("C"):
     """The toast's time ran out (or its ✕): on_close takes it out of the view."""
-    if busy():
+    if writing():
         return
     var node = get_node(toast)
     var host = host_at[A](host_addr)
-    if node >= 0 and node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].kind == TOAST:
+    if node >= 0 and node < len(host[].kinds) and host[].kinds[node] == TOAST:
         host[].send(node, True, "", 0, host_addr)
 
 
@@ -6402,7 +6604,7 @@ def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint
                 return 1
             w = external_call["gtk_widget_get_parent", Int](w)
         return 0  # (elsewhere GTK moves the focus; a view it lands in focuses its first or last stop)
-    if busy():
+    if writing():
         return 0
     var name = shortcut_name(Int(keyval), Int(state))
     if name == "":
@@ -6413,12 +6615,7 @@ def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint
         if focus != 0 and (external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_editable_get_type", Int]()) != 0
                            or external_call["g_type_check_instance_is_a", c_int](focus, external_call["gtk_text_view_get_type", Int]()) != 0):
             return 0  # a text field's own copy, cut, paste, select all and undo
-    for i in range(len(host[].rt.shown.nodes)):
-        ref n = host[].rt.shown.nodes[i]
-        if n.kind == ITEM and len(n.options) > 0 and n.options[0] == name and n.value & DISABLED == 0 and n.msg != 0:
-            host[].send(i, False, "", 0, host_addr)
-            return 1
-    return 0
+    return c_int(1 if host[].shortcut(name, host_addr) else 0)
 
 
 def animations_enabled() -> Bool:
@@ -6441,7 +6638,7 @@ def mods_of(controller: Int) -> Int:
 
 
 def on_click_released[A: App](click: Int, presses: c_int, x: Float64, y: Float64, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var ci = get_index(click)
@@ -6488,7 +6685,10 @@ def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int)
     var bi = first
     while bi < len(host[].boards) and host[].boards[bi].drag == drag:
         ref b = host[].boards[bi]
-        ref n = host[].rt.shown.nodes[b.node]
+        var now = host[].shown_at(b.node)
+        if now < 0:
+            return
+        ref n = host[].rt.shown.nodes[now]
         var w = Float64(Int(external_call["gtk_widget_get_width", c_int](b.widget)))
         var h = Float64(Int(external_call["gtk_widget_get_height", c_int](b.widget)))
         var lx = x - Float64(n.x)
@@ -6514,7 +6714,12 @@ def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: In
     var bi = last  # the topmost object under the pointer (later children draw above earlier ones)
     while bi >= first:
         ref b = host[].boards[bi]
-        ref n = host[].rt.shown.nodes[b.node]
+        var now = host[].shown_at(b.node)
+        var page = host[].shown_at(b.board)
+        if now < 0 or page < 0:
+            bi -= 1
+            continue
+        ref n = host[].rt.shown.nodes[now]
         var w = Float64(Int(external_call["gtk_widget_get_width", c_int](b.widget)))
         var h = Float64(Int(external_call["gtk_widget_get_height", c_int](b.widget)))
         var lx = x - Float64(n.x)
@@ -6525,7 +6730,7 @@ def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: In
                 return
             host[].boards[bi].resizing = lx > w - 24 and ly > h - 24
             host[].boards[bi].active = host[].boards[bi].resizing or ly < 44  # the header moves it; the rest is the object's own
-            var holds = host[].rt.shown.nodes[host[].boards[bi].board].hint != ""  # (Board(on_hold=…): a press held still is a hold)
+            var holds = host[].rt.shown.nodes[page].hint != ""  # (Board(on_hold=…): a press held still is a hold)
             host[].held = False
             host[].hold_bi = -1
             if holds and not host[].boards[bi].resizing:
@@ -6598,8 +6803,6 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
         _ = external_call["g_timeout_add", c_uint](c_uint(5), on_release_retry[A], host_addr)
         return
     var was_held = end_hold[A](host, host_addr)
-    if busy():
-        return
     var bi = board_object[A](host, drag)
     if bi < 0:
         return
@@ -6608,8 +6811,9 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
         return
     host[].boards[bi].active = False
     var b = host[].boards[bi].copy()
-    var d = host[].rt.gesture(b.board, ZOOM if b.resizing else PAN, Float64(b.index), 0, off_x, off_y, 1)
-    host[].apply(d, host_addr)
+    host[].board_send(b.board, ZOOM if b.resizing else PAN, b.index, off_x, off_y, host_addr)
+    if busy():  # (held, or its screen waits to be built: which puts each card where its node says)
+        return
     # a clipping Board (Board(clips=True)): the app decides where the card ends, back to its node's place and size also
     # when the app changed nothing (a tiled Board snaps a card that wasn't dropped on another back into its tile)
     for k in range(len(host[].boards)):
@@ -6622,10 +6826,18 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
 
 
 def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
+    var id = id_data(button)
+    if busy():
+        hold(held_input()[], Held(HELD_CLICK, id))
+        return
+    button_clicked[A](host_addr, get_node(button))
+
+
+def button_clicked[A: App](host_addr: Int, node: Int):
+    """A button was clicked: its file dialog opens, or its message goes."""
     var host = host_at[A](host_addr)
-    var node = get_node(button)
     if 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):  # a FileSaver: the platform's save dialog
         host[].picker_node = node
         host[].picker_msg = host[].rt.shown.nodes[node].msg2
@@ -6724,145 +6936,119 @@ def on_folder_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
+    if writing():
+        return
     var text = c_str(external_call["gtk_editable_get_text", Int](entry))
     if busy():
         # (D-1321: gtk_editable_set_text and a paste over a selection change the text twice, "" then the new text; if
-        # the first change's screen needs a rebuild, the second arrives while it's pending. Held, by the field's node
-        # id, and sent after the rebuild (drain_fields) unless it's what the app already has: the host's own sets.)
+        # the first change's screen needs a rebuild, the second comes while it waits: held, and sent after)
         hold_field(entry, text)
         return
     drop_held(entry)  # (D-1703: this change is newer than any held for the field; a drain mustn't write the older back)
     host_at[A](host_addr)[].send(get_node(entry), False, text, 0, host_addr)
 
 
-def held_fields() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
-    """The field changes that came while the host was busy: (node id, text), the last per field. On the GApplication
-    (a heap list), not a host field: they arrive re-entrantly while a `mut self` method runs (see set_busy)."""
-    var addr = app_data("mojoui-held-fields")
+def held_input() -> Pointer[List[Held], MutUntrackedOrigin]:
+    """The input that came while a rebuild waits, in order. On the GApplication (a heap list), not a host field: it
+    arrives re-entrantly while a `mut self` method runs (see set_busy)."""
+    var addr = app_data("mojoui-held-input")
     if addr == 0:
-        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
-        p.unsafe_write(List[Tuple[Int, String]]())
+        var p = alloc(Layout[List[Held]].single()).unsafe_leak()
+        p.unsafe_write(List[Held]())
         addr = Int(p)
-        set_app_data("mojoui-held-fields", addr)
-    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+        set_app_data("mojoui-held-input", addr)
+    return Pointer[List[Held], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def id_data(widget: Int) -> Int:
+    """The widget's node id (set_node), -1: none."""
+    var key = String(NODE_KEY)
+    return external_call["g_object_get_data", Int](widget, key.as_c_string_span()) - 1
 
 
 def is_held(entry: Int) -> Bool:
-    """A change of this field waits in held_fields (the host mustn't write the app's older value over it)."""
-    var key = String(NODE_KEY)
-    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
-    for h in held_fields()[]:
-        if h[0] == id:
+    """A change of this field waits in held_input (the host mustn't write the app's older value over it)."""
+    var id = id_data(entry)
+    for ref h in held_input()[]:
+        if h.what == HELD_FIELD and h.id == id:
             return True
     return False
 
 
-def held_events() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
-    """Messages with a path (dialog answers, dropped files) that came while a rebuild was pending: (message, text)."""
-    var addr = app_data("mojoui-held-events")
-    if addr == 0:
-        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
-        p.unsafe_write(List[Tuple[Int, String]]())
-        addr = Int(p)
-        set_app_data("mojoui-held-events", addr)
-    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
-
-
 def hold_field(entry: Int, text: String):
-    var key = String(NODE_KEY)
-    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
-    if id < 0:
-        return
-    var held = held_fields()
-    for i in range(len(held[])):
-        if held[][i][0] == id:
-            held[][i] = (id, text)
-            return
-    held[].append((id, text))
+    var id = id_data(entry)
+    if id >= 0:
+        hold(held_input()[], Held(HELD_FIELD, id, text))
 
 
 def drop_held(entry: Int):
     """Forgets the held changes of this field (a newer one is going through)."""
-    var key = String(NODE_KEY)
-    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
-    var held = held_fields()
-    if id < 0 or len(held[]) == 0:
+    var id = id_data(entry)
+    var queue = held_input()
+    if id < 0 or len(queue[]) == 0:
         return
-    var rest = List[Tuple[Int, String]]()
-    for h in held[]:
-        if h[0] != id:
-            rest.append(h)
-    held[] = rest^
+    var rest = List[Held]()
+    for ref h in queue[]:
+        if h.what != HELD_FIELD or h.id != id:
+            rest.append(h.copy())
+    queue[] = rest^
 
 
 def on_field_submit[A: App](entry: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var text = c_str(external_call["gtk_editable_get_text", Int](entry))
     host_at[A](host_addr)[].send(get_node(entry), True, text, 0, host_addr)
 
 
 def on_toggled[A: App](check: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var on = Int(external_call["gtk_check_button_get_active", c_int](check))
     host_at[A](host_addr)[].send(get_node(check), False, "", on, host_addr)
 
 
 def on_selected[A: App](dropdown: Int, pspec: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
-    var index = Int(external_call["gtk_drop_down_get_selected", c_uint](dropdown))
-    var host = host_at[A](host_addr)
-    var node = get_node(dropdown)
-    var text = String("")
-    if index < len(host[].rt.shown.nodes[node].options):
-        text = host[].rt.shown.nodes[node].options[index]
-    host[].send(node, False, text, index, host_addr)
+    host_at[A](host_addr)[].send_option(get_node(dropdown), Int(external_call["gtk_drop_down_get_selected", c_uint](dropdown)), host_addr)
 
 
 def on_toggle_group[A: App](group: Int, pspec: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
-    var host = host_at[A](host_addr)
-    var node = get_node(group)
-    var index = Int(external_call["adw_toggle_group_get_active", c_uint](group))
-    ref opts = host[].rt.shown.nodes[node].options
-    if index < 0 or index >= len(opts):
-        return
-    host[].send(node, False, opts[index], index, host_addr)
+    host_at[A](host_addr)[].send_option(get_node(group), Int(external_call["adw_toggle_group_get_active", c_uint](group)), host_addr)
 
 
 def on_radio[A: App](button: Int, host_addr: Int) abi("C"):
-    if busy() or external_call["gtk_check_button_get_active", c_int](button) == 0:
+    if writing() or external_call["gtk_check_button_get_active", c_int](button) == 0:
         return  # (the button being switched off also fires)
-    var host = host_at[A](host_addr)
-    var node = get_node(button)
-    var index = get_index(button)
-    host[].send(node, False, host[].rt.shown.nodes[node].options[index], index, host_addr)
+    host_at[A](host_addr)[].send_option(get_node(button), get_index(button), host_addr)
 
 
 def on_text_changed[A: App](buffer: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
+    if busy():
+        hold_field(buffer, buffer_text(buffer))
+        return
+    drop_held(buffer)
     host_at[A](host_addr)[].send(get_node(buffer), False, buffer_text(buffer), 0, host_addr)
 
 
 def on_alert_response[A: App](dialog: Int, response: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var host = host_at[A](host_addr)
     var node = get_node(dialog)
-    if node < 0 or node >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[node].kind != ALERT:
+    if node < 0 or node >= len(host[].kinds) or host[].kinds[node] != ALERT:
         return  # (an alert the app already took away)
     var index = 0
     try:
         index = Int(c_str(response))
     except:
         return
-    if index < 0 or index >= len(host[].rt.shown.nodes[node].options):
-        return
-    host[].send(node, False, host[].rt.shown.nodes[node].options[index], index, host_addr)
+    host[].send_option(node, index, host_addr)
 
 
 def pin_key() -> String:
@@ -6888,7 +7074,7 @@ def on_pin_moved(adj: Int, data: Int) abi("C"):
 
 
 def on_day_selected[A: App](cal: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     host_at[A](host_addr)[].send(get_node(cal), False, calendar_date(cal), 0, host_addr)
 
@@ -6906,8 +7092,8 @@ def on_row_setup[A: App](factory: Int, item: Int, host_addr: Int) abi("C"):
 
 def on_row_bind[A: App](factory: Int, item: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
-    var node = get_node(factory)
-    if node < 0 or node >= len(host[].rt.shown.nodes):
+    var node = host[].shown_at(get_node(factory))
+    if node < 0:
         return
     var position = Int(external_call["gtk_list_item_get_position", c_uint](item))
     var text = host[].rt.app.row(host[].rt.shown.nodes[node].msg2, position)  # asked for on demand
@@ -6943,14 +7129,14 @@ def on_row_unbind(factory: Int, item: Int, host_addr: Int) abi("C"):
 
 
 def on_row_activate[A: App](list: Int, position: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     # `position` is a C guint: only the low 32 bits of the register are defined.
     host_at[A](host_addr)[].send(get_node(list), False, "", position & 0xFFFFFFFF, host_addr)
 
 
 def on_slid[A: App](scale: Int, host_addr: Int) abi("C"):
-    if busy():
+    if writing():
         return
     var value = Int(external_call["gtk_range_get_value", Float64](scale) + 0.5)
     host_at[A](host_addr)[].send(get_node(scale), False, "", value, host_addr)

@@ -282,6 +282,7 @@ struct Runtime[A: App](Movable):
 
     var app: Self.A
     var shown: View
+    var before: View  # the screen before `shown` (a host that updates its widgets a turn later still knows what they show)
     var trace: Bool  # MOJOUI_TRACE=1: hosts print each change's time and kind (TRACE: lines); the runtime keeps no clock (Android and iOS link no timing symbols here)
     var inflight: List[InFlight]  # HTTP requests out on their workers
     var undeliverable: List[Event]  # replies made without sending (an app with HTTP = False), handed over at the next poll
@@ -299,6 +300,7 @@ struct Runtime[A: App](Movable):
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
         resolve_layout(self.shown, app.theme().look)
+        self.before = View([])
         self.app = app^
         self.trace = False  # (hosts that can read the environment turn it on: GTK reads MOJOUI_TRACE; iOS has no getenv)
         self.inflight = List[InFlight]()
@@ -587,7 +589,8 @@ struct Runtime[A: App](Movable):
         var t0 = self._t0()
         var next = self.view()
         var d = diff(self.shown, next)
-        self.shown = next^
+        swap(self.shown, next)
+        self.before = next^
         self._slow("view", cause, t0)
         return d^
 
