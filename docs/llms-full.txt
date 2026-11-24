@@ -1138,6 +1138,19 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Font text (real faces at device px: FreeType + HarfBuzz + fontconfig, fallback faces, colour emoji, Chromium's advance rule, the AAT tracking table; CoreText on the Mac)` | `mojoui/fonttext.mojo` | Canvas | ✅ | 🔨 | 🔨 | ✅ | 🔨 | 🔨 | pnote |
 | `Skins as themes (a token set an app fills: desk, panel, ink, accent, tints, faces, radii, shadow scale, locked colours; color-mix; Personal Note's Paper, Night and Crayon live in pnote, D-7928)` | `mojoui/skin.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Document store (rows with a revision: a save debounce, saves written only on the revision the editor read with conflicts reported, parsed documents kept by revision; D-7927, D-7934)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Open document gate and save outbox (a document that wasn't read whole is never edited, saved or kept; edits that couldn't be written are held on disk until they land; review 3)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Canvas document (a JSON Canvas board that keeps what it was read with: unedited nodes, edges and members are written back as their own text; the progressive open)` | `mojoui/canvassource.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `JSON patch (members of a JSON text changed in place, every other byte kept)` | `mojoui/jsonpatch.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Private files (0600 in a 0700 folder, in place in one step, leftovers cleaned, a cache folder held to a size)` | `mojoui/files.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Kept views (a tiled layer's last picture on disk, shown as the document opens; read ahead on a job thread)` | `mojoui/viewsnap.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Glyph warm-up (the glyphs drawn last time, readied on idle ticks)` | `mojoui/glyphwarm.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Screen warm-up (the next screen's text readied on idle ticks)` | `mojoui/scenewarm.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Frame budget (how much of a frame a background slice may take)` | `mojoui/framebudget.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Let go (a big value's end on a job thread)` | `mojoui/letgo.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Kept paint (a layer painted once per look, its ops replayed)` | `mojoui/scene.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Raster tiles (a big layer as tiles: pans composite, edits raster their damage; GL and Metal)` | `mojoui/gpu2d_tiles.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Keycaps (a shortcut as the platform writes it)` | `mojoui/keycaps.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Graphemes (where a caret may stand: whole characters, in every field)` | `mojoui/graphemes.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Stroke icons (Lucide geometry rasterized natively at device px)` | `mojoui/strokeicon.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Notes shell (dotted desk, round islands, title island, floating notes panel with shelves, Boxes hit-test registry, map chrome)` | `mojoui/notesshell.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | ❌ | pnote |
 | `Page sheet (a page note: host, Write/Draw toolbar, sheet, Markdown on CSS line boxes)` | `mojoui/pagesheet.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
@@ -1230,12 +1243,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 206 | 11 | 0 |
-| Web | 174 | 26 | 17 |
-| Android | 19 | 77 | 121 |
-| Mac (AppKit) | 9 | 181 | 27 |
-| iPhone (UIKit) | 0 | 148 | 69 |
-| Agent (MCP) | 66 | 55 | 96 |
+| Linux (GTK) | 219 | 11 | 0 |
+| Web | 174 | 39 | 17 |
+| Android | 19 | 90 | 121 |
+| Mac (AppKit) | 9 | 194 | 27 |
+| iPhone (UIKit) | 0 | 161 | 69 |
+| Agent (MCP) | 66 | 68 | 96 |
 
 ## Inside one app, not components yet (the debt)
 
