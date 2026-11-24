@@ -127,7 +127,11 @@ struct Gen:
         elif kind <= 7:
             v = VStack(self.children(path, depth, 5), spacing=4 * self.pick(path, 51, 3, 12))
         elif kind == 8:
-            v = HStack(self.children(path, depth, 5), spacing=4 * self.pick(path, 51, 3, 12))
+            var row = self.children(path, depth, 5)
+            if self.pick(path, 49, 4, 5) == 0:  # (equal shares: every child grows)
+                for k in range(len(row)):
+                    row[k] = row[k].copy().grow()
+            v = HStack(row, spacing=4 * self.pick(path, 51, 3, 12))
         elif kind == 9:
             v = Card(self.children(path, depth, 4), tone=self.pick(path, 52, 3, 8) + 1)
         elif kind == 10:

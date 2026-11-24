@@ -33,7 +33,7 @@ from mojoui.gpu2d import build_batches, execute_cpu
 from mojoui.gpu2d_backend import set_backend_name
 from mojoui.gpu import GPU_BUILD
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY, OP_STROKE, OP_SHADOW
-from std.collections import Dict
+from std.collections import Dict, Set
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
@@ -45,6 +45,7 @@ from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
+from mojoui.hosts.gtktree import tree_words
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.uijobs import wake_pipe, drain_wakes
 from mojoui.tray import TrayItem
@@ -441,13 +442,13 @@ def refresh_rows(list: Int, count: Int):
     if Int(external_call["g_list_model_get_n_items", c_uint](model)) != count:
         fresh_rows(list, count)
         return
-    var app = external_call["g_application_get_default", Int]()
+    var rows = external_call["gtk_list_view_get_factory", Int](list)  # (each list's own range, on its factory: one for the whole app left the other lists' rows as they were, goal 81)
     var lo = String("mojoui-bound-lo")
     var hi = String("mojoui-bound-hi")
-    var first = external_call["g_object_get_data", Int](app, lo.as_c_string_span()) - 1
-    var last = external_call["g_object_get_data", Int](app, hi.as_c_string_span()) - 1
-    external_call["g_object_set_data", NoneType](app, lo.as_c_string_span(), 0)  # start tracking afresh:
-    external_call["g_object_set_data", NoneType](app, hi.as_c_string_span(), 0)  # the splice re-binds what's shown
+    var first = external_call["g_object_get_data", Int](rows, lo.as_c_string_span()) - 1
+    var last = external_call["g_object_get_data", Int](rows, hi.as_c_string_span()) - 1
+    external_call["g_object_set_data", NoneType](rows, lo.as_c_string_span(), 0)  # start tracking afresh:
+    external_call["g_object_set_data", NoneType](rows, hi.as_c_string_span(), 0)  # the splice re-binds what's shown
     var n = min(last + 1, count) - max(first, 0)
     if first < 0 or n <= 0:
         return
@@ -778,6 +779,7 @@ struct GtkHost[A: App](Movable):
     var pending: Diff  # a partial rebuild waiting for the next idle turn
     var has_pending: Bool
     var partial_ok: Bool
+    var always_fresh: Bool  # (MOJOUI_ALWAYS_FRESH=1, a test: every change builds the whole screen again; what a patched one is held against, goal 81)
     var scene_mode: Bool  # (MOJOUI_SCENE=0 turns it off) canvases that record a display list are drawn by GTK's renderer (goal 26)
     var layouts: Dict[String, Int]  # PangoLayouts by text, face and size (an index into the lists below), kept across frames
     var layout_w: List[Float64]  # each layout's width and baseline (pixels), measured once
@@ -915,6 +917,7 @@ struct GtkHost[A: App](Movable):
         self.paint_counter = List[Int](length=64, fill=-1)
         self.paint_end_us = List[Int](length=64, fill=0)
         self.partial_ok = getenv("MOJOUI_NO_PARTIAL") == ""
+        self.always_fresh = getenv("MOJOUI_ALWAYS_FRESH") == "1"
         self.scene_mode = getenv("MOJOUI_SCENE") != "0"  # (the default since goal 27, D-261; 0: the pixel path)
         self.layouts = Dict[String, Int]()
         self.layout_w = List[Float64]()
@@ -1120,23 +1123,30 @@ struct GtkHost[A: App](Movable):
         var children = self.rt.shown.nodes[j].children.copy()
         for c in children:
             want.append(self.outers[c] if kept[c] >= 0 else 0)
+        var staying = Set[Int]()
+        for w in want:
+            staying.add(w)
         var cur = external_call["gtk_widget_get_first_child", Int](grid)
         while cur != 0:
             var next = external_call["gtk_widget_get_next_sibling", Int](cur)
-            if cur not in want:
+            if cur not in staying:
                 external_call["gtk_grid_remove", NoneType](grid, cur)
             cur = next
         var layout = external_call["gtk_widget_get_layout_manager", Int](grid)
+        var prev = 0
         for k in range(len(children)):
-            if want[k] != 0:
-                var lc = external_call["gtk_layout_manager_get_layout_child", Int](layout, want[k])
+            var child = want[k]
+            if child != 0:
+                var lc = external_call["gtk_layout_manager_get_layout_child", Int](layout, child)
                 external_call["gtk_grid_layout_child_set_column", NoneType](lc, c_int(k % cols))
                 external_call["gtk_grid_layout_child_set_row", NoneType](lc, c_int(k // cols))
             else:
-                var child = self.build(children[k], self_addr)
-                self.place_in_grid(j, children[k], child)
+                child = self.build(children[k], self_addr)
+                self.place_in_grid(j, children[k], child, k)
                 external_call["gtk_grid_attach", NoneType](grid, child, c_int(k % cols), c_int(k // cols), c_int(1), c_int(1))
+                external_call["gtk_widget_insert_after", NoneType](child, grid, prev)  # (in node order: the order a screen reader reads, goal 81)
                 built += 1
+            prev = child
         return built
 
     def column_gap(self, role: String, spacing: Int) -> Int:
@@ -1146,14 +1156,21 @@ struct GtkHost[A: App](Movable):
                 return self.gap_cols[g]
         return spacing
 
-    def place_in_grid(self, grid: Int, c: Int, child: Int):
-        """A fitted grid's item (style 1) from its start, centred down: the web's justify-items: start, align-items:
-        center (a key's or a value's box its words' width, not the column's, D-495). An item told to fill fills."""
-        if self.rt.shown.nodes[grid].style != 1:
-            return
-        if not self.rt.shown.nodes[c].fills:
-            external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
-        external_call["gtk_widget_set_valign", NoneType](child, c_int(3))
+    def place_in_grid(self, grid: Int, c: Int, child: Int, k: Int):
+        """A grid's k-th item. A fitted grid's (style 1) from its start, centred down: the web's justify-items: start,
+        align-items: center (a key's or a value's box its words' width, not the column's, D-495). An item told to fill
+        fills. (diff.mojo builds an item again when it comes into or leaves the last column of such a grid.)"""
+        ref g = self.rt.shown.nodes[grid]
+        ref n = self.rt.shown.nodes[c]
+        var last = k % max(g.value, 1) == max(g.value, 1) - 1
+        if g.style == 1:
+            if not n.fills:
+                external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
+            external_call["gtk_widget_set_valign", NoneType](child, c_int(3))
+            if not last and n.kind == TEXT:
+                external_call["gtk_label_set_wrap", NoneType](self.widgets[c], c_int(0))  # (a fitted column is as wide as its widest words, never wrapped: the web's max-content)
+        if g.hint == "E" and last:  # (the last column's items at its trailing edge)
+            external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
 
     def board_drag(self, board: Int) -> Bool:
         """Whether Board node `board` (current numbering) has its drag gesture on record."""
@@ -1175,10 +1192,13 @@ struct GtkHost[A: App](Movable):
         var want = List[Int]()
         for c in children:
             want.append(self.outers[c] if kept[c] >= 0 else 0)
+        var staying = Set[Int]()
+        for w in want:
+            staying.add(w)
         var cur = external_call["gtk_widget_get_first_child", Int](fixed)
         while cur != 0:
             var next = external_call["gtk_widget_get_next_sibling", Int](cur)
-            if cur not in want:
+            if cur not in staying:
                 external_call["gtk_fixed_remove", NoneType](fixed, cur)
             cur = next
         var mine = List[BoardChild]()
@@ -1217,33 +1237,45 @@ struct GtkHost[A: App](Movable):
         self.boards = boards^
         return built
 
+    def laid_out(self, i: Int) -> Int:
+        """The widget apply_layout() gave node i's sizes and tooltip: what's in its parent, less a Board child's clip
+        and a width cap's clamp (0: nothing on screen)."""
+        var w = self.outers[i]
+        if w == 0:
+            return 0
+        var clip_class = String("mui-board-clip")
+        if Int(external_call["gtk_widget_has_css_class", c_int](w, clip_class.as_c_string_span())) != 0:
+            w = external_call["gtk_overlay_get_child", Int](w)  # (the scroller under the grip)
+            if w == 0:
+                return 0
+            w = external_call["gtk_scrolled_window_get_child", Int](w)
+            if w == 0:
+                return 0
+            if Int(external_call["g_type_check_instance_is_a", c_int](w, external_call["gtk_viewport_get_type", Int]())) != 0:
+                w = external_call["gtk_viewport_get_child", Int](w)
+        ref node = self.rt.shown.nodes[i]
+        if (node.max_w != 0 or node.w != 0) and Int(external_call["g_type_check_instance_is_a", c_int](w, external_call["adw_clamp_get_type", Int]())) != 0:
+            w = external_call["adw_clamp_get_child", Int](w)
+        return w
+
     def resize_widget(self, i: Int):
         """A SET_SIZE patch: node i's sizes onto the widget apply_layout() sized (inside its clamp, if it has one)."""
         ref node = self.rt.shown.nodes[i]
-        var outer = self.outers[i]
-        if outer == 0:
+        var target = self.laid_out(i)
+        if target == 0:
             return
-        var target = outer
         var clip_class = String("mui-board-clip")
-        if Int(external_call["gtk_widget_has_css_class", c_int](outer, clip_class.as_c_string_span())) != 0:
-            # (a Board child's clip: the holder takes the size, and so does what it holds, then on as below)
-            external_call["gtk_widget_set_size_request", NoneType](outer, c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
-            outer = external_call["gtk_overlay_get_child", Int](outer)  # (the scroller under the grip)
-            if outer == 0:
-                return
-            outer = external_call["gtk_scrolled_window_get_child", Int](outer)
-            if outer == 0:
-                return
-            if Int(external_call["g_type_check_instance_is_a", c_int](outer, external_call["gtk_viewport_get_type", Int]())) != 0:
-                outer = external_call["gtk_viewport_get_child", Int](outer)
-            target = outer
+        if Int(external_call["gtk_widget_has_css_class", c_int](self.outers[i], clip_class.as_c_string_span())) != 0:
+            # (a Board child's clip: the holder takes the size, and so does what it holds)
+            external_call["gtk_widget_set_size_request", NoneType](self.outers[i], c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
         var cap = node.max_w if node.max_w != 0 else node.w
-        if cap != 0 and Int(external_call["g_type_check_instance_is_a", c_int](outer, external_call["adw_clamp_get_type", Int]())) != 0:
-            external_call["adw_clamp_set_maximum_size", NoneType](outer, c_int(cap))
-            external_call["adw_clamp_set_tightening_threshold", NoneType](outer, c_int(cap))
-            target = external_call["adw_clamp_get_child", Int](outer)
+        var clamp = external_call["gtk_widget_get_parent", Int](target)
+        if cap != 0 and clamp != 0 and Int(external_call["g_type_check_instance_is_a", c_int](clamp, external_call["adw_clamp_get_type", Int]())) != 0:
+            external_call["adw_clamp_set_maximum_size", NoneType](clamp, c_int(cap))
+            external_call["adw_clamp_set_tightening_threshold", NoneType](clamp, c_int(cap))
         var want_w = max(node.w, node.min_w)
-        external_call["gtk_widget_set_size_request", NoneType](target, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
+        if want_w != 0 or node.h != 0:  # (only a cap changed: a control's own size stays, as apply_layout() leaves it)
+            external_call["gtk_widget_set_size_request", NoneType](target, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
 
     def full_page(self):
         """For a picture (MOJOUI_SHOT), after the test's report: the page scroller stops scrolling, so a screen taller
@@ -1469,6 +1501,15 @@ struct GtkHost[A: App](Movable):
                 if Int(m[0]) != want[c]:
                     external_call["gtk_widget_set_size_request", NoneType](spacer, c_int(want[c]), c_int(0))
             _ = len(m)
+
+    def equal_shares(self, i: Int) -> Bool:
+        """A row whose children all grow from zero, as the web's flex: 1 1 0: equal shares."""
+        ref node = self.rt.shown.nodes[i]
+        var growers = 0
+        for c in node.children:
+            if self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0:
+                growers += 1
+        return growers >= 2 and growers == len(node.children)
 
     def build_child(mut self, parent: Int, c: Int, self_addr: Int) -> Int:
         """Builds child c of stack `parent` and aligns it in the stack."""
@@ -1901,12 +1942,7 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 or len(node.options) > 0 else 1))  # (fitted: columns to their content; shares: fit_measures() sizes them)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
-                self.place_in_grid(i, node.children[k], child)
-                var last = k % node.value == node.value - 1
-                if node.style == 1 and not last and self.rt.shown.nodes[node.children[k]].kind == TEXT:
-                    external_call["gtk_label_set_wrap", NoneType](self.widgets[node.children[k]], c_int(0))  # (a fitted column is as wide as its widest words, never wrapped: the web's max-content)
-                if node.hint == "E" and last:  # (the last column's items at its trailing edge)
-                    external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
+                self.place_in_grid(i, node.children[k], child, k)
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
         elif node.kind == LAZYLIST:
             var model = external_call["gtk_string_list_new", Int](0)
@@ -2322,11 +2358,7 @@ struct GtkHost[A: App](Movable):
                     add_class(w, "mui-good")
             if node.kind == HSTACK:
                 external_call["gtk_widget_set_halign", NoneType](w, c_int(ALIGN_CENTER))
-                var growers = 0
-                for c in node.children:
-                    if self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0:
-                        growers += 1
-                if growers >= 2 and growers == len(node.children):  # (all growing from zero, as the web's flex: 1 1 0: equal shares)
+                if self.equal_shares(i):
                     external_call["gtk_box_set_homogeneous", NoneType](w, c_int(1))
             # justify: GtkBox packs from the start; invisible expanding spacers do the rest.
             var j = node.justify_items
@@ -2626,6 +2658,8 @@ struct GtkHost[A: App](Movable):
             if self.rt.shown.nodes[j].kind == BOARD:
                 built += self.reboard(j, kept, self_addr)
                 continue
+            if self.rt.shown.nodes[j].kind == HSTACK:
+                external_call["gtk_box_set_homogeneous", NoneType](box, c_int(1 if self.equal_shares(j) else 0))
             var want = List[Int]()
             for c in self.rt.shown.nodes[j].children.copy():
                 if kept[c] >= 0:
@@ -2633,10 +2667,13 @@ struct GtkHost[A: App](Movable):
                 else:
                     want.append(self.build_child(j, c, self_addr))
                     built += 1
+            var staying = Set[Int]()
+            for w in want:
+                staying.add(w)
             var cur = external_call["gtk_widget_get_first_child", Int](box)
             while cur != 0:
                 var next = external_call["gtk_widget_get_next_sibling", Int](cur)
-                if cur not in want and not is_webview(cur):  # (a WebComponent's view stays: sync_webviews owns it)
+                if cur not in staying and not is_webview(cur):  # (a WebComponent's view stays: sync_webviews owns it)
                     external_call["gtk_box_remove", NoneType](box, cur)
                 cur = next
             var prev = 0
@@ -2855,7 +2892,7 @@ struct GtkHost[A: App](Movable):
         self.theme_webviews()  # (a new theme reaches the widgets' pages even when no view changed)
         self.copy_if_asked()
         self.open_if_asked()
-        if d.rebuild and d.partial and self.partial_ok and not self.has_pending and len(self.widgets) > 0 and not busy():
+        if d.rebuild and d.partial and self.partial_ok and not self.always_fresh and not self.has_pending and len(self.widgets) > 0 and not busy():
             # Only the parts that changed, on the next idle turn (never inside a signal handler: a widget that goes
             # may be the one that sent the signal). Events wait until then.
             self.pending = d.copy()
@@ -2863,7 +2900,7 @@ struct GtkHost[A: App](Movable):
             set_busy(True)
             _ = external_call["g_idle_add", c_uint](on_idle_partial[Self.A], self_addr)
             return
-        if d.rebuild:
+        if d.rebuild or self.always_fresh:
             # Rebuild on the next idle turn, never inside a signal handler: the widget
             # that sent the signal would be destroyed while GTK is still using it.
             self.has_pending = False  # (the full rebuild covers it)
@@ -2917,7 +2954,10 @@ struct GtkHost[A: App](Movable):
                             else:
                                 external_call["gtk_widget_remove_css_class", NoneType](cell, name.as_c_string_span())
                     r += 1
-            if p.op == SET_TEXT and kind == TEXTAREA:
+            if p.op == SET_TEXT and kind == ICON:  # (goal 81: it stayed the old picture)
+                var name = gtk_icon(p.text)
+                external_call["gtk_image_set_from_icon_name", NoneType](w, name.as_c_string_span())
+            elif p.op == SET_TEXT and kind == TEXTAREA:
                 var buffer = external_call["gtk_text_view_get_buffer", Int](w)
                 if buffer_text(buffer) != p.text:  # don't fight the typist
                     var t = p.text
@@ -2965,7 +3005,13 @@ struct GtkHost[A: App](Movable):
                 self.resize_widget(p.node)
             elif p.op == SET_TIP:  # a canvas's words (its tooltip and accessible name), in place: the picture stays
                 var tip = p.text
-                external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
+                var target = self.laid_out(p.node)  # (where apply_layout() put it: a canvas sits in a wrapper)
+                if target == 0:
+                    target = w
+                if tip == "":  # (none, as a new one has; "" would be an empty tooltip)
+                    external_call["gtk_widget_set_tooltip_markup", NoneType](target, Int(0))
+                else:
+                    external_call["gtk_widget_set_tooltip_text", NoneType](target, tip.as_c_string_span())
                 set_accessible_label(w, explicit_name(self.rt.shown.nodes[p.node]))
             elif p.op == SET_TONES and kind == BOARD:  # (each child's tone: classes the theme eases between, mojoui.boardlook)
                 for b in self.boards:
@@ -6866,15 +6912,14 @@ def on_row_bind[A: App](factory: Int, item: Int, host_addr: Int) abi("C"):
     var position = Int(external_call["gtk_list_item_get_position", c_uint](item))
     var text = host[].rt.app.row(host[].rt.shown.nodes[node].msg2, position)  # asked for on demand
     count_up("mojoui-rows-bound")
-    # Track the range of rows drawn since the last refresh (stored +1; 0 = none yet).
-    var app = external_call["g_application_get_default", Int]()
+    # Track the range of rows drawn since the last refresh, per list (stored +1; 0 = none yet).
     var lo = String("mojoui-bound-lo")
     var hi = String("mojoui-bound-hi")
-    var low = external_call["g_object_get_data", Int](app, lo.as_c_string_span())
+    var low = external_call["g_object_get_data", Int](factory, lo.as_c_string_span())
     if low == 0 or position + 1 < low:
-        external_call["g_object_set_data", NoneType](app, lo.as_c_string_span(), position + 1)
-    if position + 1 > external_call["g_object_get_data", Int](app, hi.as_c_string_span()):
-        external_call["g_object_set_data", NoneType](app, hi.as_c_string_span(), position + 1)
+        external_call["g_object_set_data", NoneType](factory, lo.as_c_string_span(), position + 1)
+    if position + 1 > external_call["g_object_get_data", Int](factory, hi.as_c_string_span()):
+        external_call["g_object_set_data", NoneType](factory, hi.as_c_string_span(), position + 1)
     if position == 0:  # (for the test report: what row 0 shows right now)
         var key = String("mojoui-row0")
         var app = external_call["g_application_get_default", Int]()
@@ -7658,6 +7703,15 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
+    elif verb == "treedump":  # treedump:name: every widget's properties (mojoui.hosts.gtktree), appended to $MOJOUI_TREE
+        var words = "SCREEN " + rest + "\n" + tree_words(host[].page)
+        var path = getenv("MOJOUI_TREE")
+        try:
+            var f = open(path, "a")
+            f.write(words)
+            f.close()
+        except:
+            print("TEST: can't write", path)
     elif verb == "shot":  # shot:/path.png: a picture now, mid-run (goal 48: an agent's UI caught while it streams)
         save_png(host[].window, rest)
     elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)

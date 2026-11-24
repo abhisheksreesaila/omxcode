@@ -1,6 +1,6 @@
 # Compare the screen before and after an update, so hosts change only what changed.
 
-from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START, DRAG, EMBED, WEBCOMP
+from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START, DRAG, EMBED, WEBCOMP, IMAGE
 
 comptime SET_TEXT = 1  # label text, button title, field contents, toggle label
 comptime SET_MSG = 2
@@ -89,8 +89,8 @@ def same_shape(a: View, b: View) -> Bool:
                 return False
         elif not x.same_layout(y):  # layout settings changed: lay it out again
             return False
-        # A Back button appearing or going, or an alert's question changing, is a new layout.
-        if x.kind == NAVBAR and (x.msg == 0) != (y.msg == 0):
+        # A Back button appearing or going, a picture becoming tappable or not, or an alert's question changing, is a new layout.
+        if (x.kind == NAVBAR or x.kind == IMAGE) and (x.msg == 0) != (y.msg == 0):
             return False
         if x.kind == ALERT and (x.text != y.text or x.hint != y.hint):
             return False
@@ -144,8 +144,8 @@ def compatible(x: Node, y: Node, x_on_board: Bool, y_on_board: Bool) -> Bool:
         return False
     if x.kind == WEBCOMP and x.value != y.value:  # (another widget id: another widget)
         return False
-    # A Back button appearing or going, or an alert's question changing, is a new layout.
-    if x.kind == NAVBAR and (x.msg == 0) != (y.msg == 0):
+    # A Back button appearing or going, a picture becoming tappable or not, or an alert's question changing, is a new layout.
+    if (x.kind == NAVBAR or x.kind == IMAGE) and (x.msg == 0) != (y.msg == 0):
         return False
     if x.kind == ALERT and (x.text != y.text or x.hint != y.hint):
         return False
@@ -157,7 +157,8 @@ def resizable(x: Node, y: Node) -> Bool:
     there was none changes how the view takes space, which is a new layout)."""
     var x_cap = x.max_w if x.max_w != 0 else x.w
     var y_cap = y.max_w if y.max_w != 0 else y.w
-    return (x.w == 0) == (y.w == 0) and (x.h == 0) == (y.h == 0) and (x_cap == 0) == (y_cap == 0)
+    return ((x.w == 0) == (y.w == 0) and (x.h == 0) == (y.h == 0) and (x_cap == 0) == (y_cap == 0)
+            and (max(x.w, x.min_w) == 0) == (max(y.w, y.min_w) == 0))
 
 
 def sized_differently(a: Node, b: Node) -> Bool:
@@ -369,8 +370,11 @@ struct Reconciler:
         if resyncable(new.nodes[n]):
             var pairs = pairs_of(old, new, oc, nc)
             var changed = len(pairs) != len(oc) or len(pairs) != len(nc)
+            ref grid = new.nodes[n]
+            var ends = grid.kind == GRID and (grid.style == 1 or grid.hint == "E")  # (its last column is placed another way: an item that comes into it or leaves it is built again)
             for p in pairs:
-                if not self.keep(old, new, oc[p[0]], nc[p[1]]):
+                var moved = ends and (p[0] % max(grid.value, 1) == grid.value - 1) != (p[1] % max(grid.value, 1) == grid.value - 1)
+                if moved or not self.keep(old, new, oc[p[0]], nc[p[1]]):
                     unkeep(new, nc[p[1]], self.kept)
                     changed = True
             if changed:
