@@ -581,6 +581,15 @@ struct SaveOutbox(Movable):
                     self.extra_files.append(spare)
             except e:
                 print("SaveOutbox: " + full + ": " + String(e), flush=True)
+        for n in names:  # (the names of owners that ended with nothing held: a process's end runs no destructor)
+            var head = "unsaved-" + self.space + "."
+            if n.startswith(head) and n.endswith(".lock"):
+                var owner = String(n[byte = head.byte_length() : n.byte_length() - 5])
+                if owner != self.owner and owner not in asked:
+                    var lock = ArcPointer(FileLock())
+                    asked.append(owner)
+                    answer.append(self.gone(owner, lock[]))
+                    locks.append(lock^)
         for k in range(len(asked)):  # (a gone owner's name goes with its last file)
             if not answer[k] or asked[k] == "":
                 continue

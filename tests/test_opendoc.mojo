@@ -160,6 +160,9 @@ def two_windows() raises:
     _ = d^
     _ = e^
     _ = c^
+    for k in range(5):  # (processes that ended holding nothing)
+        with open(dir + "/unsaved-s.p99999" + String(k) + "-k.lock", "w") as f:
+            f.write("")
     var f2 = SaveOutbox(dir, "s")
     f2.load()
     assert_equal(len(f2.items) + len(f2.extras), 0)
@@ -167,7 +170,7 @@ def two_windows() raises:
     for n in listdir(dir):
         if String(n).endswith(".lock"):
             left += 1
-    assert_true(left <= 2 and not file_exists(bp), "names of the gone don't pile up: " + String(left))
+    assert_true(left == 1 and not file_exists(bp), "names of the gone don't pile up: " + String(left))
 
 
 def main() raises:
