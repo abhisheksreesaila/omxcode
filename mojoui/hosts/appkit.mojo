@@ -5730,9 +5730,10 @@ def on_will_terminate[A: App](target: Int, cmd: Int, note: Int) abi("C"):
         if msg(w, "delegate") == target and msg(w, "identifier") != 0:
             addr = msg(msg(w, "identifier"), "longLongValue")
     if addr != 0:
-        if not host_at[A](addr)[].rt.closed:
+        var first = not host_at[A](addr)[].rt.closed
+        host_at[A](addr)[].rt.closing()  # (what must not be lost first; its pictures after)
+        if first and host_at[A](addr)[].rt.app.draws_after_closing():
             host_at[A](addr)[].keep_views(addr)
-        host_at[A](addr)[].rt.closing()
 
 
 def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
@@ -5741,9 +5742,10 @@ def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("
     var id = msg(window, "identifier")
     if id != 0:
         var addr = msg(id, "longLongValue")
-        if not host_at[A](addr)[].rt.closed:
+        var first = not host_at[A](addr)[].rt.closed
+        host_at[A](addr)[].rt.closing()  # (what must not be lost first; its pictures after)
+        if first and host_at[A](addr)[].rt.app.draws_after_closing():
             host_at[A](addr)[].keep_views(addr)
-        host_at[A](addr)[].rt.closing()
 
 
 def make_menu(app: Int, title: String):

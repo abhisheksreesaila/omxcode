@@ -1141,9 +1141,8 @@ struct WebShell(Movable):
 
     def editable(mut self) -> Bool:
         """The open note was read and may be edited (a deferred open is waited for: what it needs of the view)."""
-        if self.doc.loading() and self.board.pending():
-            var r = self.view_rect()
-            _ = self.board.near(r[0], r[1], r[2], r[3]).version
+        if self.doc.loading() and self.board.pending() and not self.board.wait(250):
+            return False  # (still being read: no edit yet)
         self.settle_open()
         return self.doc.may_edit()
 
@@ -1300,8 +1299,6 @@ struct WebShell(Movable):
                     self.open(n.id)
                     break
         if name == "bench:reopen":
-            if self.cold_opens:  # (D-7951, review 2: a cold open finds nothing of the note: no kept parse, no tiles)
-                self.look.forget()
             self.open(self.bench_note if self.bench_note >= 0 else self.current)
             return (-1.0, -1.0)
         if name == "bench:coldopens" or name == "bench:keptopens":  # (the race's two open rows)

@@ -308,6 +308,7 @@ def node_box(addr: Int, start: Int, end: Int) -> Tuple[Float64, Float64, Float64
     return (_number_at(addr, v[0], v[1], 0), _number_at(addr, v[2], v[3], 0), _number_at(addr, v[4], v[5], 200), _number_at(addr, v[6], v[7], 100))
 
 
+comptime ADOPT_WAIT_US = 5_000_000  # the longest anything waits for a document's reading job
 comptime _PENDING = 0
 comptime _ADOPTED = 1
 comptime _NOTHING = 2  # parsed: the importer makes no object of it (or it isn't JSON)
@@ -924,6 +925,14 @@ struct OpenBoard(Movable):
         self.layer.mark_saved()
         self.job = start_ui_job(CanvasOpenJob[S](src^, x0, y0, x1, y1, connector_gap, take_on_job))
 
+    def wait(mut self, ms: Int) -> Bool:
+        """An open_later() given up to `ms` to land (then adopted, or failed): False while it is still reading."""
+        var by = clock_us() + ms * 1000
+        while self.job and self.job.value().poll() == JOB_RUNNING and clock_us() < by:
+            _ = libc.usleep(100)
+        _ = self._adopt(False)
+        return not Bool(self.job)
+
     def pending(self) -> Bool:
         """An open_later() whose job hasn't been adopted yet."""
         return Bool(self.job)
@@ -940,7 +949,12 @@ struct OpenBoard(Movable):
             return False
         if not wait and self.job.value().poll() == JOB_RUNNING:
             return False
+        var by = clock_us() + ADOPT_WAIT_US
         while self.job.value().poll() == JOB_RUNNING:
+            if clock_us() > by:  # (a file that doesn't answer: said, with the app's Retry, instead of a window that hangs)
+                self.job = None
+                self._fail("reading it is taking too long")
+                return True
             _ = libc.usleep(100)
         var job = self.job.take()
         var got = OpenedCanvas()

@@ -453,7 +453,7 @@ def snap_take(path: String) -> ViewSnap:
     if have != 0:
         var a = Pointer[SnapAhead, MutUntrackedOrigin](unsafe_from_address=have)
         if a[].started and a[].path == path and Int(now_ns()) - a[].at < SNAP_AHEAD_NS:
-            var by = Int(now_ns()) + 1_000_000_000
+            var by = Int(now_ns()) + 50_000_000  # (a read takes a few ms; past this the thread isn't running: read here, the UI never waits on it)
             while a[].ready.load() == 0:
                 if Int(now_ns()) > by:  # (the thread never got to it: read here; it finishes on its own)
                     return snap_read(path)

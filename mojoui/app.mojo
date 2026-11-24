@@ -179,6 +179,11 @@ trait App(Movable, Deinitable):
         default does nothing."""
         pass
 
+    def draws_after_closing(self) -> Bool:
+        """True: after closing() returned (everything saved), the host may draw the app once or twice more to keep its
+        canvases' views for the next open (D-8016). The default says no."""
+        return False
+
     def background(self) -> Bool:
         """True keeps the app running when its window is closed (goal 45): the window hides instead of closing, the app
         keeps its state, timers, jobs and folder watchers, an item in the system tray (mojoui.tray) opens the window

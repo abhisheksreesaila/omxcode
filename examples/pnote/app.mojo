@@ -535,6 +535,9 @@ struct Main(App):
             return [Every(WARM_TICK_MS, WARM_TICK)]
         return List[Every]()
 
+    def draws_after_closing(self) -> Bool:
+        return len(self.web) > 0
+
     def closing(mut self):
         if len(self.web) > 0:
             self.web[0].flush()

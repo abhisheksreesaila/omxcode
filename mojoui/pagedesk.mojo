@@ -12,6 +12,7 @@
 
 from std.collections import Dict
 from std.os import getenv
+from std.sys import CompilationTarget
 from std.math import sqrt, cos, sin, atan2, exp, floor, ceil
 from mojoui.graphemes import without_last, typed_text
 from mojoui.scene import Painter, snap_px, KeptOps, corner_rect, KeptPaint
@@ -357,6 +358,8 @@ struct BoardLook(Movable):
         self.kept_gen = -1
         self.reach = BOARD_REACH
         self.corner_quads = getenv("MOJOUI_CORNER_QUADS") != "0"
+        comptime if CompilationTarget.is_macos():  # (not run there yet: off unless asked for)
+            self.corner_quads = getenv("MOJOUI_CORNER_QUADS") == "1"
         self.seg_at = Dict[Int, Int]()
         self.seg_a = List[Int]()
         self.seg_b = List[Int]()
