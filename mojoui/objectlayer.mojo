@@ -28,7 +28,7 @@ from std.math import sqrt, cos, sin, floor, ceil
 from mojoui.shared import serial, new_key
 from mojoui.canvassource import CanvasSource
 from mojoui.pagegrow import PageBox
-from mojoui.jsonpatch import Change as Patch, patched, patched_in, member_text
+from mojoui.jsonedit import Change as Patch, patched, patched_in, member_text
 from mojoui.scene import Painter
 from mojoui.ink import Stroke
 from mojoui.history import History, Undoable

@@ -20,7 +20,7 @@ from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time,
 from mojoui.shared import environment
 from mojoui.textedit import now_ms, Pos
 from mojoui.graphemes import one_line
-from mojoui.files import write_setting, read_setting
+from mojoui.files import write_setting, read_setting, file_exists
 from mojoui.islandcard import IslandCard, CardTile
 from mojoui.settingswin import SettingsWindow, SettingsPage, skin_cards
 from std.ffi import external_call
@@ -30,7 +30,7 @@ from mojoui.skin import hexc
 from mojoui.objectlayer import ObjectLayer, import_json_canvas, import_json_canvas_doc, export_json_canvas, TEXT, STICKY, CH_MOVE, CONNECTOR
 from mojoui.pagedesk import BoardTools, T_BOX, T_MOVE, writing_view, give_way
 from mojoui.pagegrow import PageBox, settle_pages, grow_for_drag, grow_for_text
-from mojoui.jsonpatch import Change as Patch, patched, patched_in
+from mojoui.jsonedit import Change as Patch, patched, patched_in
 
 from mojoui.notesshell import draw_selection_bar, DockItem
 from mojoui.pagedesk import DeskView, BoardLook, opening_view, draw_page_chrome, PAGE_W, PAGE_H
@@ -1877,7 +1877,7 @@ struct WebShell(Movable):
 
     def queue_save(mut self, kind: String):
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure or not self.doc.may_edit():
+        if i < 0 or self.notes[i].kind != kind or self.notes[i].secure or not self.doc.may_edit() or (kind == "canvas" and self.board.broken):
             return
         self.save_kind = kind
         self.saver.touch(clock_us())
@@ -2389,7 +2389,12 @@ struct WebShell(Movable):
         self.flush()
         try:
             makedirs(self.export_folder(), exist_ok=True)
-            var path = self.export_folder() + "/Personal Note backup " + stamp_now() + ".db"
+            var base = self.export_folder() + "/Personal Note backup " + stamp_now()
+            var path = base + ".db"
+            var again = 1
+            while file_exists(path):  # (two in one second)
+                again += 1
+                path = base + " " + String(again) + ".db"
             var q = self.dbs[0].prepare("VACUUM INTO ?")
             q.bind(1, path)
             _ = q.step()

@@ -162,6 +162,9 @@ def new_text() raises:
     settle(s)
     assert_true("brand new" in all_words() and s.tools.editing == -2, "in the file while it is written")
     s.export_backup()
+    var one = s.toast
+    s.export_backup()
+    assert_true(s.toast.startswith("Backed up") and s.toast != one, "two in one second: " + s.toast)
     committed(s, " words")
     due(s)
     settle(s)

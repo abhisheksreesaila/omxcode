@@ -9,7 +9,7 @@
 #   ink.save(content) → the content.ink value as JSON text
 
 from mojoui.json import Json, J_NUMBER, json_string
-from mojoui.jsonpatch import Change, patched, patched_in, member_text, elements, part
+from mojoui.jsonedit import Change, patched, patched_in, member_text, elements, part
 from mojoui.shared import new_key
 
 

@@ -534,7 +534,8 @@ def check_prop(j: Json, v: Int, p: Prop, where: String, comp: String) raises:
             var at = bad + "[" + String(i) + "]"
             if j.kind(it) != J_OBJECT:
                 raise Error(at + " must be an object")
-            for key in j.keys[it]:
+            for ki in range(j.size(it)):
+                var key = j.key(it, ki)
                 var known = False
                 for ref f in p.fields:
                     if f.name == key:
@@ -578,8 +579,8 @@ def walk(j: Json, n: Int, depth: Int, where: String, specs: List[Spec], mut coun
             all += (", " if all.byte_length() > 0 else "") + s.name
         raise Error("unknown component " + json_string(name) + " at " + where + " (the catalog: " + all + ")")
     ref spec = specs[at]
-    for k in range(len(j.keys[n])):
-        var key = j.keys[n][k]
+    for k in range(j.size(n)):
+        var key = j.key(n, k)
         if key == "component":
             continue
         var found = -1
@@ -588,10 +589,10 @@ def walk(j: Json, n: Int, depth: Int, where: String, specs: List[Spec], mut coun
                 found = i
         if found < 0:
             raise Error("bad prop: " + where + ": " + name + " has no prop " + json_string(key))
-        for k2 in range(k + 1, len(j.keys[n])):
-            if j.keys[n][k2] == key:
+        for k2 in range(k + 1, j.size(n)):
+            if j.key(n, k2) == key:
                 raise Error("bad prop: " + where + ": " + name + "'s " + key + " is given twice")
-        check_prop(j, j.kids[n][k], spec.props[found], where, name)
+        check_prop(j, j.at(n, k), spec.props[found], where, name)
     for ref p in spec.props:
         if p.required and j.get(n, p.name) < 0:
             raise Error("bad prop: " + where + ": " + name + " needs " + json_string(p.name))
@@ -612,7 +613,8 @@ def validate(args: String) -> String:
         return "bad prop: the arguments aren't JSON (" + String(e) + ")"
     if j.kind(0) != J_OBJECT or j.get(0, "ui") < 0:
         return "bad prop: the arguments must be {\"ui\": a component}"
-    for k in j.keys[0]:
+    for ki in range(j.size(0)):
+        var k = j.key(0, ki)
         if k != "ui":
             return "bad prop: the arguments have " + json_string(k) + " besides ui"
     var count = 0
@@ -647,8 +649,8 @@ def dump(j: Json, n: Int) -> String:
         return out + "]"
     if k == J_OBJECT:
         var out = String("{")
-        for i in range(len(j.keys[n])):
-            out += ("," if i > 0 else "") + json_string(j.keys[n][i]) + ":" + dump(j, j.kids[n][i])
+        for i in range(j.size(n)):
+            out += ("," if i > 0 else "") + json_string(j.key(n, i)) + ":" + dump(j, j.at(n, i))
         return out + "}"
     return "null"
 

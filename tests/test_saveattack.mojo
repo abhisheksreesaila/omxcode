@@ -1,7 +1,7 @@
 # The save thread attacked (goal 79, continuation 21, item 3): the file locked while notes are left and opened again, closing
 # with it locked, notes deleted elsewhere before and during a save, a full disk, two windows on one file. In every case no edit
 # is lost silently. (Kill -9 at each stage and another process's lock: tests/savekill.py.) No window.
-#   pixi run mojo run -I . -I vendor -I examples/pnote tests/test_saveattack.mojo
+#   pixi run mojo build -I . -I vendor -I examples/pnote tests/test_saveattack.mojo -o build/test_saveattack && build/test_saveattack   (built: `mojo run` has no job threads)
 from std.ffi import external_call, c_int
 from std.os import setenv, listdir
 from std.testing import assert_true, assert_equal

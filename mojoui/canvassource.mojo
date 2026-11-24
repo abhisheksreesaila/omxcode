@@ -1,7 +1,7 @@
 # The text a JSON Canvas board was read from, kept with it (review 3, MUST 5): where each node and edge is in it, so a save
 # writes back what wasn't edited as it was: node kinds and keys this program knows nothing of, edge labels and sides, the
 # order, the other top-level members, every number as spelled (mojoui.objectlayer.export_json_canvas).
-from mojoui.jsonpatch import members, elements, find_member
+from mojoui.jsonedit import members, elements, find_member
 from mojoui.shared import serial
 
 

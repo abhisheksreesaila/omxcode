@@ -16,7 +16,7 @@ from mojoui.notesshell import Boxes, draw_lifted, draw_shadows, draw_bordered, d
 from mojoui.canvas import rgba
 from mojoui.history import History, Snapshot
 from mojoui.shared import new_key
-from mojoui.jsonpatch import Change, patched, members, elements, find_member, part
+from mojoui.jsonedit import Change, patched, members, elements, find_member, part
 from mojoui.json import Json, json_string
 from mojoui.textedit import now_ms
 from mojoui.wordsedit import WordsEdit

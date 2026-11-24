@@ -24,7 +24,7 @@ from mojoui.skin import Skin, Shadow, mix, with_alpha, hexc
 from mojoui.fonttext import TextStyle, measure, line_metrics, ALIGN_LEFT, ALIGN_CENTER
 from mojoui.notesshell import Boxes, draw_lifted, draw_bordered, draw_emoji_tile, text_at, text_normal
 from mojoui.canvas import rgba
-from mojoui.jsonpatch import Change, patched
+from mojoui.jsonedit import Change, patched
 from mojoui.pageink import PageInk, PageMark
 from mojoui.json import Json, json_string
 

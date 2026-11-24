@@ -30,7 +30,7 @@ from mojoui.json import Json, c_locale, c_float, pow5_table
 from mojoui.objectlayer import ObjectLayer, Obj, canvas_node_obj, canvas_edge_obj, CONNECTOR
 from mojoui.docstore import clock_us
 from mojoui.canvassource import CanvasSource
-from mojoui.jsonpatch import member_text
+from mojoui.jsonedit import member_text
 from mojoui.shared import serial
 from mojoui.objectlayer import import_json_canvas_doc
 from mojoui.sqlite import Database
