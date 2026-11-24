@@ -30,7 +30,7 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 | | Linux (RTX 3090) | Mac (M4, 144 Hz external screen, scale 1.0) |
 |---|---|---|
 | M0–M5 | PASS, all six, at 2e198b04 | M1 and M5 halves PASS |
-| M6 | **FAIL: 58 ✓, 2 ✗**, each one frame: 600 redo max 18.6 (web 17.2), stress undo not warmed max 18.9 (web 17.0); p95 better on both | **PASS, 60 ✓, 0 ✗**, unlocked and in front at every step, 12:18–12:42 at dfca9816. Locked since: not raced again |
+| M6 | **FAIL: 58 ✓, 2 ✗**, each one frame: 600 redo max 18.6 (web 17.2), stress undo not warmed max 18.9 (web 17.0); p95 better on both | ~~PASS, 60 ✓~~ **not like-for-like, superseded (review 5, M3: the web headless at 2× and 60 Hz, native at 1× and 144 Hz)**; unlocked and in front at every step, 12:18–12:42 at dfca9816. Locked since: not raced again |
 | M7 | not a Linux milestone | nine looks PASS (.987–.998) at 2e198b04 |
 | Tests | 84-test wide run at dfca9816's code: all that can run here pass (9 need data, a server or a library this worktree hasn't; the ones that didn't build are below); reruns at the end | at be45d39f: pnnotes pnshell savelater saveattack review4 opendoc longpara pageedit pagegrow graphemes jsonedit mapmarks boardedit pans tickchanges canvasload; at 2e198b04: opendoc framebudget |
 | Attacks | savekill (40 random kills), the reviewer's two processes on one file, the walk native → web → native: ok at 2e198b04's parent | — |
