@@ -862,6 +862,8 @@ def m6():
     probs = []
     # the web at its best: PN's own benchmarks, Chromium with the GPU, at the native run's device scale
     print("(running Personal Note's own benchmarks: several minutes)", flush=True)
+    if why := not_free():
+        return "BLOCKED", why
     r = run(["node", "scripts/benchmark-f034.mjs", "--gpu", f"--dpr={LINUX_DPR}", "--note=both", f"--out={race / 'web-f034.json'}"], 3600, cwd=PN)
     (race / "web-f034.log").write_text(r.stdout + r.stderr)
     if r.returncode or not (race / "web-f034.json").exists():
@@ -874,10 +876,14 @@ def m6():
     err = make_ref()
     if err:
         return "FAIL", err
+    if why := not_free():
+        return "BLOCKED", why
     r3 = run(["node", str(ROOT / "docs/goals/79/webmem.mjs"), str(REF / "pn.db"), "--gpu"], 600, cwd=PN)
     (race / "web-mem.log").write_text(r3.stdout + r3.stderr)
     mm = re.search(r"WEB RSS MB: ([\d.]+)", r3.stdout)
     web["rss_mb"] = float(mm.group(1)) if mm else None
+    if why := not_free():
+        return "BLOCKED", why
     rs = run(["node", str(ROOT / "docs/goals/79/webswitch.mjs"), str(REF / "pn.db"), "--gpu", f"--dpr={LINUX_DPR}"], 900, cwd=PN)  # (D-8001)
     (race / "web-switch.log").write_text(rs.stdout + rs.stderr)
     web.update(web_switch(rs.stdout))
@@ -893,7 +899,13 @@ def m6():
     (race / "seedrace.log").write_text(r.stdout + r.stderr)
     if r.returncode or "SEEDED stress" not in r.stdout:
         return "FAIL", f"seeding the race notes through the web API: {tail(r.stdout + r.stderr)}"
-    nat, shown = {}, {}
+    for note in RACE_NOTES:  # (D-8026: the web's opening of the same note inside the running app, the native open row's span)
+        if why := not_free():
+            return "BLOCKED", why
+        rw = run(["node", str(ROOT / "docs/goals/79/webopen.mjs"), str(race / f"race-{note}.db"), "--gpu", f"--dpr={LINUX_DPR}"], 900, cwd=PN)
+        (race / f"web-open-{note}.log").write_text(rw.stdout + rw.stderr)
+        web.setdefault(note, {}).update(web_open(rw.stdout))
+    nat, shown, paced, unwarm, opens = {}, {}, {}, {}, {}
     # (D-7951, review 2) the process's very first open of each race note: pnote starts on another note (PNOTE_FIRST), so
     # nothing of the canvas (tiles, parses, its glyphs at that zoom) exists in the process. (D-7956/D-7958) Twice: A, the
     # first open ever (no kept view on disk: parsed; printed, not judged), which keeps the settled view (it waits 4 s);
@@ -919,6 +931,37 @@ def m6():
             snapinfo.setdefault(note, {})[run_] = {"open": fo, "snap": used, "saved": "SNAP: saved" in log}
             if run_ == "B" and fo:
                 nat.setdefault(note, {})["first open"] = dict(fo, snap=used)
+    # (D-8026) frames shown: the process's first open ever (nothing kept) and the next process's, from its kept view, with
+    # nothing of the measurement in the frames (MOJOUI_BENCH_PACED)
+    for note in RACE_NOTES:
+        cfg = race / f"cfg-firstpaced-{note}"
+        shutil.rmtree(cfg, ignore_errors=True)
+        cfg.mkdir()
+        shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
+        for run_ in ("A", "B"):
+            steps = ["wait:800", "window:1440x900", "appbench:desk=coldopens", "framebench:desk=open,1"] + (["wait:4000"] if run_ == "A" else [])
+            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), PNOTE_FIRST=other,
+                       MOJOUI_SNAP_LOG="1", MOJOUI_BENCH_PACED="1", MOJOUI_TEST=";".join(steps), MOJOUI_SHOT="")
+            r = run(["scripts/testscreen", str(APP)], 600, env=env)
+            log = r.stdout + r.stderr
+            (race / f"native-firstpaced-{note}-{run_}.log").write_text(log)
+            opens.setdefault(note, {})[run_] = dict(native_race(log).get("open") or {}, snap="SNAP: restored" in log)
+    # (D-8026) the whole race once more as frames are shown: the app as it runs, and once with its idle warming off
+    for note in RACE_NOTES:
+        for warm in (True, False):
+            cfg = race / f"cfg-paced-{note}"
+            shutil.rmtree(cfg, ignore_errors=True)
+            cfg.mkdir()
+            shutil.copy(race / f"race-{note}.db", cfg / "pn.db")
+            if (race / f"cfg-first-{note}" / "snaps").exists():
+                shutil.copytree(race / f"cfg-first-{note}" / "snaps", cfg / "snaps")
+            env = dict(os.environ, PNOTE_DIR=str(cfg), OMX_CONFIG=str(cfg), PNOTE_DB=str(cfg / "pn.db"), MOJOUI_SNAP_LOG="1", MOJOUI_BENCH_PACED="1",
+                       MOJOUI_TEST=";".join(["wait:800", "window:1440x900"] + PACED_RACE), MOJOUI_SHOT="")
+            if not warm:
+                env.update(MOJOUI_SCENEWARM="0", MOJOUI_GLYPHWARM="0")
+            r = run(["scripts/testscreen", str(APP)], 1800, env=env)
+            (race / f"native-paced-{note}{'' if warm else '-notwarm'}.log").write_text(r.stdout + r.stderr)
+            (paced if warm else unwarm)[note] = native_race(r.stdout + r.stderr)
     for note in RACE_NOTES:
         for visible in (False, True):
             cfg = race / f"cfg-{note}"
@@ -982,14 +1025,14 @@ def m6():
         (race / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
         m = re.search(rf"WEBCOLD {mode} median: ([\d.]+)", r.stdout)
         web[f"cold_{mode}_ms"] = float(m.group(1)) if m else None
-    rows, ok = race_table(web, nat, nstart, shown)
+    rows, ok = race_table(web, nat, nstart, shown, paced=paced, unwarm=unwarm, opens=opens)
     (ROOT / "docs/goals/79").mkdir(parents=True, exist_ok=True)
     (ROOT / "docs/goals/79/race.md").write_text(rows)
     linux = "PASS (docs/goals/79/race.md)" if ok else "FAIL: " + "; ".join(l for l in rows.splitlines() if "✗" in l)[:700]
     # (D-7988) the Mac's half runs whatever Linux's said, and both are reported
     mst, mmsg = m6_mac(race)
     if ok and mst == "PASS":
-        return "PASS", "native faster on every step, starts sooner, less memory, silky, on both machines; docs/goals/79/race.md, race-mac.md"
+        return "PASS", "native better than the web, or within 3 % of it, on every row, on both machines (the owner's ruling, GOAL.md M6); docs/goals/79/race.md, race-mac.md"
     status = "FAIL" if (not ok or mst == "FAIL") else "BLOCKED"
     return status, f"Linux {linux}; Mac {mst}: {mmsg}"
 
@@ -1035,36 +1078,50 @@ def m6_mac(race):
     # the web, on the Mac
     print("(the web's race on the Mac in its own Chrome on Metal: several minutes)", flush=True)
     lock = MacLock().__enter__()
-    mac_quiet("web race")
     mac_sh(f"mkdir -p {MAC_WEB}/pn/.g79 {MAC_WEB}/race-mac", 60)
-    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "webswitch.mjs", "desktop_cold_mac.py"):
+    for f in ("macgpu.mjs", "webmem.mjs", "webcold.mjs", "webswitch.mjs", "webopen.mjs", "desktop_cold_mac.py"):
         if not mac_put(ROOT / "docs/goals/79" / f, f"{MAC_WEB}/pn/.g79/{f}"):
             return "FAIL", f"copying {f} to the Mac"
     if not mac_put(REF_MAC / "pn.db", f"{MAC_WEB}/race-mac/ref.db"):
         return "FAIL", "copying the reference database to the Mac"
     envp = f"cd {MAC_WEB}/pn && export PATH=$HOME/{MAC_WEB}/node/bin:$PATH PW_CHANNEL=chrome PN_PYTHON=$HOME/{MAC_WEB}/pyenv/.pixi/envs/default/bin/python && "
-    r = mac_sh(envp + f"node --import ./.g79/macgpu.mjs scripts/benchmark-f034.mjs --gpu --dpr={MAC_DPR:g} --note=both --out=../race-mac/web-f034.json", 3600)
+    r, e = mac_web("web race", envp + f"node --import ./.g79/macgpu.mjs scripts/benchmark-f034.mjs --gpu --dpr={MAC_DPR:g} --note=both --out=../race-mac/web-f034.json", 3600)
+    if e:
+        return "FAIL", e
     (rm / "web-f034.log").write_text(r.stdout + r.stderr)
     if r.returncode or not mac_get(f"{MAC_WEB}/race-mac/web-f034.json", rm / "web-f034.json"):
         return "FAIL", f"benchmark-f034 on the Mac, exit {r.returncode}: {tail(r.stdout + r.stderr)}"
     gpu = re.search(r"MACGPU: (.*)", r.stdout + r.stderr)
     web = web_race(json.loads((rm / "web-f034.json").read_text()), "")
-    mac_quiet("web memory and switch")
-    r = mac_sh(envp + f"node .g79/webmem.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)
+    r, e = mac_web("web memory", envp + f"node .g79/webmem.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)
+    if e:
+        return "FAIL", e
     (rm / "web-mem.log").write_text(r.stdout + r.stderr)
     mm = re.search(r"WEB RSS MB: ([\d.]+)", r.stdout)
     web["rss_mb"] = float(mm.group(1)) if mm else None
-    r = mac_sh(envp + f"node .g79/webswitch.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)  # (D-8001)
+    r, e = mac_web("web switch", envp + f"node .g79/webswitch.mjs ../race-mac/ref.db --gpu --dpr={MAC_DPR:g}", 900)  # (D-8001)
+    if e:
+        return "FAIL", e
     (rm / "web-switch.log").write_text(r.stdout + r.stderr)
     web.update(web_switch(r.stdout))
     for mode in ("desktop", "chromium"):
-        r = mac_sh(envp + f"node .g79/webcold.mjs ../race-mac/ref.db {mode} 5", 900)
+        r, e = mac_web(f"web cold {mode}", envp + f"node .g79/webcold.mjs ../race-mac/ref.db {mode} 5", 900)
+        if e:
+            return "FAIL", e
         (rm / f"web-cold-{mode}.log").write_text(r.stdout + r.stderr)
         mc = re.search(rf"WEBCOLD {mode} median: ([\d.]+)", r.stdout)
         web[f"cold_{mode}_ms"] = float(mc.group(1)) if mc else None
         mw_ = re.search(r"WEBCOLD desktop window median: ([\d.]+)", r.stdout)
         if mode == "desktop":
             web["cold_desktop_window_ms"] = float(mw_.group(1)) if mw_ else None
+    for note in RACE_NOTES:  # (D-8026)
+        if not mac_put(race / f"race-{note}.db", f"{MAC_WEB}/race-mac/race-{note}.db"):
+            return "FAIL", f"copying race-{note}.db to the Mac"
+        r, e = mac_web(f"web open {note}", envp + f"node .g79/webopen.mjs ../race-mac/race-{note}.db --gpu --dpr={MAC_DPR:g}", 900)
+        if e:
+            return "FAIL", e
+        (rm / f"web-open-{note}.log").write_text(r.stdout + r.stderr)
+        web.setdefault(note, {}).update(web_open(r.stdout))
     lock.__exit__()
     # (D-8002) built once, then every native run from that bundle, the machine held for one note's runs at a time
     lock = MacLock().__enter__()
@@ -1125,6 +1182,8 @@ def m6_mac(race):
     rows = rows.replace("\n\n", f"\n\nWeb renderer on the Mac: {gpu.group(1) if gpu else 'not reported'}.\n\n", 1)
     rows += "\nThe Mac while measured (load, busiest processes at each measured run's start; void ones named):\n" + "\n".join("- " + l for l in MAC_LOAD) + "\n"
     (ROOT / "docs/goals/79/race-mac.md").write_text(rows)
+    if not ok and "work only" in rows and "✗" not in rows:
+        return "BLOCKED", "the Mac's frames shown are not measured (screen locked, or the AppKit host's paced run not written): work only, not like-for-like; docs/goals/79/race-mac.md"
     if not ok:
         return "FAIL", "see docs/goals/79/race-mac.md: " + "; ".join(l for l in rows.splitlines() if l.startswith("|") and l.rstrip().endswith("✗ |"))[:900]
     return "PASS", "docs/goals/79/race-mac.md"
@@ -1175,6 +1234,11 @@ def native_race(out):
                 continue
             res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
                          "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
+            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
+                if k in kv:
+                    res[name][k] = float(kv[k])
+            if what.group(1) == "openpress" and "press_lat_n" in kv:
+                res.setdefault(opens, {}).update({k: float(kv[k]) for k in ("press_lat_n", "press_lat_p95", "press_lat_max")})
             if what.group(1) == "openpress":  # (review 2, D-7953) a press during the open: judged with the frames during it
                 o = res.setdefault(opens, {})
                 o.update(press_n=int(kv.get("press_n", "0")), press_p95=float(kv.get("press_p95", "0")), press_max=float(kv.get("press_max", "0")))
@@ -1187,6 +1251,54 @@ def native_race(out):
         except (KeyError, ValueError):
             pass
     return res
+
+
+# (D-8026) the paced run (frames shown): the web benchmark's own numbers of gestures (120 wheel events, 120 zooms, 90 drag
+# moves, four strokes of 60, 80 keys), so "missed" counts mean the same number of gestures on both sides
+PACED_RACE = ["appbench:desk=coldopens", "framebench:desk=open,20", "framebench:desk=openpress,10", "appbench:desk=zoom30", "framebench:desk=pan,120", "framebench:desk=zoom,120",
+              "appbench:desk=zoom100", "framebench:desk=pan,120", "framebench:desk=dragone,90", "framebench:desk=drag40,60", "framebench:desk=undo,25", "framebench:desk=redo,25",
+              "framebench:desk=draw,240", "framebench:desk=typing,80"]
+
+
+def not_free():
+    """'' when the machine is free for a GPU program (scripts/gpu-free), else why not: each measured run asks (continuation 20)."""
+    r = run(["scripts/gpu-free"], 60)
+    return "" if r.returncode == 0 else "the machine isn't free: " + (r.stderr or r.stdout).strip()[:200]
+
+
+def web_open(out):
+    """webopen.mjs's lines: {'web open first'|'again'|'gaps'|'press': {p95, max, n}}."""
+    res = {}
+    for k in ("first", "again", "gaps", "press"):
+        m = re.search(rf"^WEBOPEN {k} p95: ([\d.]+) max: ([\d.]+).* n: (\d+)", out, re.M)
+        if m:
+            res["web open " + k] = {"p95": float(m.group(1)), "max": float(m.group(2)), "n": int(m.group(3))}
+    return res
+
+
+REFRESH = 1000 / 60  # (one refresh at 60 Hz: what "a tie at the display's refresh" means; the web's rAF runs at 60)
+CLOSE = 1.03         # ("very close": within 3 %, the main session's reading of the owner's ruling, GOAL.md M6's amendment)
+
+
+def verdict(n, w, gaps=False):
+    """(owner, 2026-11-24, as the main session reads it) native against the web, the same number on both sides: 'better',
+    'within 3 %', 'tie at the display's refresh' (both show it in one refresh), or '' (worse). Never an absolute bar."""
+    if n is None or w is None:
+        return ""
+    if n < w:
+        return "better"
+    if n <= w * CLOSE:
+        return "within 3 %"
+    one = (lambda ms: ms <= 20.0) if gaps else (lambda ms: ms <= REFRESH * 1.1)  # (over 20 ms is benchmark-f034's own "slow" frame)
+    return "tie at the display's refresh" if one(n) and one(w) else ""
+
+
+def verdicts(pairs, gaps=False):
+    """(passes, words) of several (native, web) numbers of one row: the worst of them says."""
+    order = ["", "tie at the display's refresh", "within 3 %", "better"]
+    vs = [verdict(n, w, gaps) for n, w in pairs]
+    worst = min(vs, key=order.index) if vs else ""
+    return bool(worst), worst or "worse than the web"
 
 
 def web_switch(out):
@@ -1230,12 +1342,16 @@ def web_race(f034, first_screen_text):
                 step = "pan 100%"
             elif name.startswith("zoom") and "30%" in name:
                 step = "zoom from 30%"
+            if name.startswith("pen strokes") and "input to frame" in name:
+                res.setdefault(note, {})["pen input"] = {"p95": float(sc["p95"]), "max": float(sc["max"])}
+            if name.startswith("typing") and "key to paint" in name:
+                res.setdefault(note, {})["typing input"] = {"p95": float(sc["p95"]), "max": float(sc["max"])}
             if step is None:
                 continue
             p95 = sc.get("p95") if sc.get("p95") is not None else sc.get("p50", 0)
             mx = sc.get("max") if sc.get("max") is not None else sc.get("p50", 0)
             # (11-20, D-7929) one web row per step: no more "the worse of two rows" against one native run
-            res.setdefault(note, {})[step] = {"p95": float(p95), "max": float(mx)}
+            res.setdefault(note, {})[step] = {"p95": float(p95), "max": float(mx), "missed": sc.get("slow"), "n": sc.get("n")}
     m = re.search(r"first screen (\d+)", first_screen_text)
     res["first_screen_ms"] = float(m.group(1)) if m else None
     m = re.search(r"rss[^\d]*(\d+)", first_screen_text, re.I)
@@ -1244,10 +1360,12 @@ def web_race(f034, first_screen_text):
 
 
 def native_start(outs):
-    vals = {"first": [], "switch": [], "omnibar": [], "rss": [], "switch_max": [], "omnibar_max": []}
+    vals = {"first": [], "switch": [], "omnibar": [], "rss": [], "switch_max": [], "omnibar_max": [], "wswitch": [], "womnibar": [], "wswitch_max": [], "womnibar_max": []}
     for o in outs:
-        for k, pat in [("first", r"^FIRSTSCREEN: ([\d.]+)"), ("switch", r"^NOTESWITCH: .*p95=([\d.]+)"), ("omnibar", r"^OMNIBAR: .*p95=([\d.]+)"),
-                       ("switch_max", r"^NOTESWITCH: .*max=([\d.]+)"), ("omnibar_max", r"^OMNIBAR: .*max=([\d.]+)"),
+        for k, pat in [("first", r"^FIRSTSCREEN: ([\d.]+)"), ("switch", r"^NOTESWITCH: .* p95=([\d.]+)"), ("omnibar", r"^OMNIBAR: .* p95=([\d.]+)"),
+                       ("wswitch", r"^NOTESWITCH: .*wall_p95=([\d.]+)"), ("womnibar", r"^OMNIBAR: .*wall_p95=([\d.]+)"),
+                       ("wswitch_max", r"^NOTESWITCH: .*wall_max=([\d.]+)"), ("womnibar_max", r"^OMNIBAR: .*wall_max=([\d.]+)"),
+                       ("switch_max", r"^NOTESWITCH: .* max=([\d.]+)"), ("omnibar_max", r"^OMNIBAR: .* max=([\d.]+)"),
                        ("rss", r"^RSS: ([\d.]+)")]:
             m = re.search(pat, o, re.M)
             if m:
@@ -1256,130 +1374,177 @@ def native_start(outs):
     return {k: (max(v) if v else None) if k.endswith("_max") else med(v) for k, v in vals.items()}
 
 
-def race_table(web, nat, start, shown=None, machine="linux"):
-    shown = shown or {}
-    ok = True
+def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=None, opens=None):
+    """(D-8025, D-8026: the owner's ruling of 2026-11-24) (race.md's text, every judged row passes). Judged: native against
+    the web over the same span, nothing absolute; the 8.3 / 16.7 ms marks are still computed and printed on every row."""
+    shown, paced, unwarm, opens = shown or {}, paced or {}, unwarm or {}, opens or {}
+    ok = [True]
+    mac = machine == "mac"
     lines = ["# Goal 79 race: native pnote vs the web Personal Note (generated by docs/goals/79-check.py M6)", ""]
-    if machine == "mac":  # (D-7988) the Mac's half: what differs from the Linux text below
+    if mac:  # (D-7988)
         lines += [f"**The Mac (M4), 1440×900 at {MAC_DPR}×.** Web: benchmark-f034.mjs unchanged, under docs/goals/79/macgpu.mjs (the Mac's own "
-                  "Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory and the fresh-Chrome cold start by "
-                  "webmem.mjs and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on the AppKit host, Metal; "
-                  "the same steps (D-7984, D-7988); frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. No "
-                  "composited run (that column is GTK's). PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a "
-                  "lower bound of its first paint, process start to its own server sending the page (ruling D, D-7992; desktop_cold_mac.py, "
-                  "scratch HOME, database and folders).", ""]
+                  "Chrome, ANGLE on Metal: PN's Vulkan flags fall back to software on macOS, D-7986); memory, note switch, opens and the fresh-Chrome "
+                  "cold start by webmem, webswitch, webopen and webcold.mjs on macOS, in ~/omxcode-g79-web (ruling B). Native: pnote's web look on "
+                  "the AppKit host, Metal; frame work = event + draw (CPU) + AppKit's display and commit + the GPU's time. **The Mac's frames "
+                  "shown aren't measured (its screen is locked, and the AppKit host has no paced run): its frame rows say \"work only, not "
+                  "like-for-like\" and are not judged.** PN's own Mac launcher is a WKWebView window with no DevTools port: its row is a lower "
+                  "bound of its first paint, process start to its own server sending the page (D-7992).", ""]
     lines += [
-             f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR}×. "
-             "Web: benchmark-f034.mjs --gpu (Chromium with the GPU). Native: pnote's web look (PNOTE_DB) on the hidden test screen, "
-             f"the same steps through test mode. Silky = native p95 ≤ {P95} ms and max ≤ {MAX} ms, no CPU frame.", "",
-             "**What the numbers are (they are not the same unit):**",
-             "- *web*: requestAnimationFrame gaps (frame to frame) in Chromium, which can't go below one refresh, 16.7 ms at 60 Hz; "
-             "undo and redo are \"to the frame after\"; open is one open to the first settled frame (its p50 stands for p95 and max): a page "
-             "load in a new browser context of an already-running Chromium (benchmark-f034's open row).",
-             "- *native work*: each frame's own work: the event, the app's update, the redraw, the GPU time, GTK's paint and a display "
-             "round trip (the GTK host's framebench). The canvas is handed to the compositor (graphics offload), so GTK never "
-             "composites it and presentation is not in this number.",
-             "- *native shown*: the same steps with GTK compositing the canvas (MOJOUI_OFFLOAD=0): that run's work and, per frame, "
-             "the paint's end to the compositor presenting it (wp_presentation as GTK reads it). A native frame is on screen after "
-             "its work plus its shown time; read the web column against that sum, not against the work alone.",
-             "- *open*: native, cold: the note's row read from the file and its JSON Canvas opened each time (nothing kept), "
-             "progressively (mojoui.canvasload, D-7944), its board's raster tiles dropped first and the first timed open coming from "
-             "another note (D-7951); and once more as the process's very first open of it (PNOTE_FIRST). Every frame counts its draw, "
-             "its GPU time, its own paint and GTK's raster when GTK composited it (D-7953). (D-7956, D-7958) A canvas whose settled view "
-             "was kept on disk (mojoui.viewsnap: same document revision, skin, zoom, view, size, GPU and build) opens from it: the first frame "
-             "shows those tiles, the note is read and skimmed on a job thread, the view's objects come in by slices, then the kept tiles "
-             "become the board's tiles. The first-open row says which path it took and how many cold opens used it; the open without a kept "
-             "view (the very first open of a note, and MOJOUI_SNAP=0) is printed after the table, not judged. Judged by D-7946: (a) the first frame, "
-             "showing the chrome and the visible board, within 8.3 ms (its max over the cold opens and the first open); (b) every frame "
-             "after it until the board is complete silky, and the frame showing a press made during the open (the app finishes the "
-             "load first, D-7952); (c) "
-             "complete (wall clock, to the frame that shows it) sooner than the web's open; (d) tests/test_canvasload (a pan and an "
-             "edit during the open) passes: " + ("yes" if OPEN_TEST_OK[0] else "NO") + ". A reopen of a canvas kept parsed at the "
-             "revision the file still holds is printed after the table, not judged.", "",
-             "| note | step | web p95 / max ms | native work p95 / max ms | native composited: work p95 / max · shown p95 / max (n) | |",
-             "|---|---|---|---|---|---|"]
+        f"Same machine, same notes (PN's own generators, stored through the web app's API: seedrace.mjs), 1440×900 at {LINUX_DPR if not mac else MAC_DPR}×. "
+        "Web: benchmark-f034.mjs --gpu (Chromium with the GPU), webopen.mjs, webswitch.mjs. Native: pnote's web look (PNOTE_DB)"
+        + (" on the hidden test screen" if not mac else "") + ", the same steps through test mode.", "",
+        "**How it is judged** (the owner, 2026-11-24: \"yandong have a bar,  it sjust need better than web (sind its antive) if tis very close its "
+        "ok\"; the main session's reading, not the owner's words: no absolute ms bar decides; a row passes when native is better than the web on "
+        "the same machine, and *very close* is within 3 %). A frame that both show in one refresh at 60 Hz is \"a tie at the display's refresh\" "
+        "and passes. Still required: no canvas frame drawn on the CPU; tests/test_canvasload (a pan and an edit during an open): "
+        + ("passes." if OPEN_TEST_OK[0] else "**FAILS.**") + " The silky marks (p95 ≤ 8.3 ms, max ≤ 16.7 ms of work) are printed on every row, as information.", "",
+        "**What is compared:**",
+        "- *Frames* (pan, zoom, drags, pen, typing, the frames of an open): the gap from one frame to the next. Web: requestAnimationFrame gaps "
+        "(every refresh, whether or not the picture changed). Native: from one frame's paint to the next one's, every frame showing a new "
+        "picture, the next gesture given once the last is painted, nothing measured inside the frames (MOJOUI_BENCH_PACED). p95, max and missed "
+        "frames (gaps over 20 ms, benchmark-f034's own \"slow\"), over the same number of gestures. Neither side has the compositor's presentation "
+        "time: the hidden screen reports none (\"shown: not measured\" in every earlier race), and a page can't read it.",
+        "- *Latency* (opens, a press during one, undo, redo, note switch, omnibar): from the event to the frame that shows it painted by the app's "
+        "thread and handed on. Web: a requestAnimationFrame, then a task after it; from the input event's own timestamp, undo and redo from the call "
+        "(as benchmark-f034 times them). Native: to GTK's after-paint; undo and redo from the key event, the note switch and omnibar from the app's "
+        "own step (no pointer event in front: the one difference left, in native's favour by its hit test).",
+        "- *Opens*: the same note opened inside the running app from another note, first time in the process (native: nothing kept, the note "
+        "parsed; and a new process opening it from the view the last one kept) and again. Web: webopen.mjs, the click to the frame after its canvas "
+        "settled; native: the open request to the frame that completes the board. benchmark-f034's own open row (a page load in a new browser "
+        "context) is printed, not compared: it loads the app too.",
+        "- *Not warmed*: pnote readies glyphs and the next zoom's and undo's pictures while nothing happens (D-8002, D-8019). The paced race is run once "
+        "more with that off (MOJOUI_SCENEWARM=0, MOJOUI_GLYPHWARM=0) and judged against the web as well; the start-up rows are the first start's, "
+        "nothing readied.",
+        "- *native work* (beside): each frame's own work: event, update, redraw, GPU time, GTK's paint and a display round trip, in a run of its own.", "",
+        "| note | row | web p95 / max (missed) | native p95 / max (missed) | verdict | native work p95 / max | silky marks (information) |",
+        "|---|---|---|---|---|---|---|"]
+
+    def mark(p95, mx):
+        return "≤ 8.3 and ≤ 16.7" if p95 <= P95 and mx <= MAX else "over: " + ", ".join([x for x in ("p95 > 8.3" if p95 > P95 else "", "max > 16.7" if mx > MAX else "") if x])
+
+    def add(note, label, w, n, work=None, gaps=False, extra="", need=True, missed=None):
+        """One judged row: w and n are (p95, max) or None; missed: (web's, native's) or None."""
+        if mac and n is None:
+            ok[0] = False
+            said = "work only, not like-for-like"
+        elif w is None or n is None:
+            ok[0] = False
+            said = "✗ not measured: " + ("the web" if w is None else "native")
+        else:
+            good, said = verdicts(list(zip(n, w)), gaps)
+            if good and missed and missed[1] > missed[0]:
+                good, said = False, f"more missed frames ({missed[1]:.0f} against {missed[0]:.0f})"
+            if good and not need:
+                good, said = False, extra or "CPU frames"
+            ok[0] = ok[0] and good
+            said = ("✓ " if good else "✗ ") + said
+        f = lambda v, m: (f"{v[0]} / {v[1]}" + (f" ({m:.0f})" if m is not None else "")) if v else "—"
+        lines.append(f"| {note} | {label} | {f(w, missed[0] if missed else None)} | {f(n, missed[1] if missed else None)} | {said} | "
+                     f"{f'{work[0]} / {work[1]}' if work else '—'} | {mark(*work) if work else ''} |")
+
+    pair = lambda d, a="p95", b="max": (d[a], d[b]) if d and a in d and b in d else None
     for note in RACE_NOTES:
-        for step in RACE_STEPS:
-            w = web.get(note, {}).get(step)
-            n = nat.get(note, {}).get(step)
-            v = shown.get(note, {}).get(step)
-            good = bool(w and n and n["p95"] < w["p95"] and n["max"] < w["max"] and n["p95"] <= P95 and n["max"] <= MAX and n.get("cpu", 0) == 0)
-            first = nat.get(note, {}).get("first open")
-            if step == "open" and n and first:  # (D-7951) the process's first open counts in (a) as one more cold open
-                n = dict(n, p95=max(n["p95"], first["p95"]), max=max(n["max"], first["max"]))
-            if step == "open" and n:
-                # (D-7946, set by the main session as contract author: stricter than one latency) (a) the first frame after
-                # the open request, showing the chrome and the visible board, within 8.3 ms (its max over the cold opens);
-                # (b) every frame during the open silky (p95 ≤ 8.3, max ≤ 16.7); (c) complete sooner than the web's open;
-                # (d) a gesture or edit during the open behaves (tests/test_canvasload, run by m6)
-                press_ok = n.get("press_n", 0) > 0 and n["press_p95"] <= P95 and 0 <= n["press_max"] <= MAX  # (review 2: a press during the open)
-                good = bool(w and n["max"] <= P95 and n.get("cpu", 0) == 0 and "complete_max" in n and n["during_p95"] <= P95
-                            and n["during_max"] <= MAX and press_ok and n["complete_max"] < w["p95"] and OPEN_TEST_OK[0])
-            ok = ok and good
-            vis = (f"{v['p95']} / {v['max']} · " + (f"{v['shown_p95']} / {v['shown_max']} ({v['shown_n']})" if v.get("shown_n", 0) > 0 else "shown: not measured")) if v else "—"
-            if step == "open" and n and "complete_max" in n:
-                si = SNAPINFO.get(note, {})
-                fo = (f" (the process's first open: {first['max']}, " + ("from the kept view" if first.get("snap") else "parsed, no kept view") + ")") if first else " (the process's first open: not measured)"
-                cold_ = si.get("cold")
-                fo += f"; the kept view shown in {cold_[0]} of {cold_[1]} cold opens" if cold_ else ""
-                lines.append(f"| {note} | open (cold): first frame{fo} | {f'{w['p95']} / {w['max']}' if w else '—'} | {n['p95']} / {n['max']} | {vis} | {'✓' if n['max'] <= P95 else '✗'} |")
-                lines.append(f"| {note} | open: frames during (n {n['during_n']}) | — | {n['during_p95']} / {n['during_max']} | | {'✓' if n['during_p95'] <= P95 and n['during_max'] <= MAX else '✗'} |")
-                pn_ = n.get("press_n", 0)
-                lines.append(f"| {note} | open: a press during it, the frame that shows it (n {pn_}) | — | {n.get('press_p95', '—')} / {n.get('press_max', '—')} | | {'✓' if pn_ > 0 and n['press_p95'] <= P95 and 0 <= n['press_max'] <= MAX else '✗'} |")
-                lines.append(f"| {note} | open: complete (wall) | {f'{w['p95']}' if w else '—'} | {n['complete_p50']} / {n['complete_max']} | | {'✓' if w and n['complete_max'] < w['p95'] else '✗'} |")
-                continue
-            lines.append(f"| {note} | {step} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['p95']} / {n['max']}' if n else '—'} | {vis} | {'✓' if good else '✗'} |")
-    for note in RACE_NOTES:  # (D-7958) the open without the kept view, beside the judged rows: not judged
+        wn = web.get(note, {})
+        pn = paced.get(note, {})
+        un = unwarm.get(note, {})
+        wo = wn.get("web open first")
+        for run_, label in (("A", "the first open ever (nothing kept: parsed)"), ("B", "a new process's first open, from the view the last one kept")):
+            o = opens.get(note, {}).get(run_, {})
+            if run_ == "B" and o and not o.get("snap"):
+                label += " (NO kept view was used)"
+            wk = SNAPINFO.get(note, {}).get(run_, {}).get("open")
+            work = pair(wk) if wk else None
+            add(note, label + ": its first frame", pair(wo), pair(o, "lat_p95", "lat_max"), work)
+            add(note, label + ": complete", pair(wo), (o["complete_max"], o["complete_max"]) if "complete_max" in o else None)
+        o = pn.get("open", {})
+        wk = nat.get(note, {}).get("open")
         si = SNAPINFO.get(note, {})
-        a_ = si.get("A", {}).get("open")
-        off = si.get("off")
-        if a_:
-            lines.append(f"| {note} | the process's first open ever, no kept view on disk (parsed; not judged) | — | {a_['p95']} / {a_['max']} | | |")
-        if off and "complete_max" in off:
-            lines.append(f"| {note} | open (cold) with the kept view off (MOJOUI_SNAP=0; not judged): first frame · during · press · complete | — | "
-                         f"{off['max']} · {off['during_p95']} / {off['during_max']} · {off.get('press_p95', '—')} / {off.get('press_max', '—')} · {off['complete_max']} | | |")
+        add(note, "open again (cold: the row read each time): its first frame", pair(wn.get("web open again")), pair(o, "lat_p95", "lat_max"), pair(wk) if wk else None,
+            need=OPEN_TEST_OK[0], extra="tests/test_canvasload fails")
+        add(note, "open again: complete", pair(wn.get("web open again")), pair(o, "complete_p95", "complete_max"))
+        add(note, "open again: the frames while it comes in (gaps)", pair(wn.get("web open gaps")), pair(o, "gap_p95", "gap_max") if o.get("gap_n") else None,
+            pair(wk, "during_p95", "during_max") if wk else None, gaps=True)
+        add(note, "a press during an open", pair(wn.get("web open press")), pair(o, "press_lat_p95", "press_lat_max") if o.get("press_lat_n") else None,
+            pair(wk, "press_p95", "press_max") if wk and wk.get("press_n") else None)
+        for step in RACE_STEPS[1:]:
+            w = wn.get(step)
+            wk = nat.get(note, {}).get(step)
+            work = pair(wk) if wk else None
+            cpu = (wk or {}).get("cpu", 0) == 0
+            for d, label in ((pn, step), (un, step + ", not warmed")):
+                n = d.get(step)
+                if step in ("undo", "redo"):
+                    add(note, label + " (latency)", pair(w), pair(n, "lat_p95", "lat_max"), work if d is pn else None, need=cpu)
+                else:
+                    missed = (w["missed"], n["gap_over20"]) if w and n and w.get("missed") is not None and "gap_over20" in n else None
+                    add(note, label + " (frames)", pair(w), pair(n, "gap_p95", "gap_max"), work if d is pn else None, gaps=True, need=cpu, missed=missed)
+
+    lines += ["", "**Beside, not judged:**", "", "| note | what | web | native |", "|---|---|---|---|"]
     for note in RACE_NOTES:
+        wn, pn, si = web.get(note, {}), paced.get(note, {}), SNAPINFO.get(note, {})
+        if "open" in wn:
+            lines.append(f"| {note} | benchmark-f034's open (a page load in a new context) | {wn['open']['p95']} | |")
+        for k, label in (("pen", "pen: input to frame p95 / max"), ("typing", "typing: key to paint (web: 8 ms steps, at least 16) p95 / max")):
+            w, n = wn.get(k + " input"), pn.get(k, {})
+            lines.append(f"| {note} | {label} | {f'{w['p95']} / {w['max']}' if w else '—'} | {f'{n['lat_p95']} / {n['lat_max']}' if 'lat_p95' in n else '—'} |")
+        cold_ = si.get("cold")
+        if cold_:
+            lines.append(f"| {note} | cold opens that showed the kept view | | {cold_[0]} of {cold_[1]} |")
+        for k, label in (("A", "work: the first open ever, first frame · frames during p95 / max · complete"), ("B", "work: a new process's first open from the kept view"),):
+            o = si.get(k, {}).get("open")
+            if o:
+                lines.append(f"| {note} | {label} | | {o['max']} · {o.get('during_p95', '—')} / {o.get('during_max', '—')} · {o.get('complete_max', '—')} |")
+        off = si.get("off")
+        if off and "complete_max" in off:
+            lines.append(f"| {note} | work: cold open with the kept view off (MOJOUI_SNAP=0): first frame · during · press · complete | | "
+                         f"{off['max']} · {off['during_p95']} / {off['during_max']} · {off.get('press_p95', '—')} / {off.get('press_max', '—')} · {off['complete_max']} |")
         kept = nat.get(note, {}).get("open (kept)")
         if kept:
-            lines.append(f"| {note} | open again, kept parsed (not judged) | — | {kept['p95']} / {kept['max']} | | |")
-    lines += ["", "| | web | native | |", "|---|---|---|---|"]
+            lines.append(f"| {note} | work: open again, kept parsed | | {kept['p95']} / {kept['max']} |")
+        for step in RACE_STEPS:
+            v = shown.get(note, {}).get(step)
+            if v:
+                lines.append(f"| {note} | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): {step} p95 / max · paint to presented | | {v['p95']} / {v['max']} · "
+                             + (f"{v['shown_p95']} / {v['shown_max']} ({v['shown_n']:.0f})" if v.get("shown_n", 0) > 0 else "not measured") + " |")
+
+    lines += ["", "| | web | native | verdict |", "|---|---|---|---|"]
     n = start.get("first")
     desk_label = "cold start: Personal Note's desktop launcher (server + Chromium app window)"
-    if machine == "mac":  # (D-7992, ruling D)
+    if mac:  # (D-7992, ruling D)
         wm = web.get("cold_desktop_window_ms")
         desk_label = ("cold start: Personal Note's Mac launcher (pywebview), a LOWER BOUND of its first paint: its process's start to its "
                       "own server sending the page (D-7992)" + (f"; its window on screen at {wm} ms" if wm else ""))
-    for wk, label in [("cold_desktop_ms", desk_label),
-                      ("cold_chromium_ms", "cold start: a fresh Chromium process on the built app")]:
-        w = web.get(wk)
-        good = bool(w and n and n < w)
-        ok = ok and good
-        lines.append(f"| {label} | {w if w else 'not measured'} ms | {n if n else '—'} ms | {'✓' if good else '✗'} |")
-    lines.append(f"| warm page load in a running Chromium (PN's benchmark-first-screen; not judged) | {web.get('first_screen_ms') or '—'} ms | {n if n else '—'} ms | |")
-    w, nr = web.get("rss_mb"), start.get("rss")
-    good = bool(w and nr and nr < w)
-    ok = ok and good
-    lines.append(f"| RSS after opening all three kinds | {w if w else '—'} MB | {nr if nr else '—'} MB | {'✓' if good else '✗'} |")
-    for k in ["switch", "omnibar"]:  # (D-8001: raced and silky, as every step: faster than the web's p95 and max, p95 ≤ 8.3, max ≤ 16.7)
-        n, nm = start.get(k), start.get(k + "_max")
-        w, wm = web.get(k), web.get(k + "_max")
-        good = bool(n is not None and nm is not None and w and wm and n < w and nm < wm and n <= P95 and nm <= MAX)
-        ok = ok and good
-        lines.append(f"| {'note switch' if k == 'switch' else 'omnibar open'} p95 / max (5 runs of 5; p95 the median run's, max the worst) | "
-                     f"{f'{w} / {wm}' if w else 'not measured'} ms | {f'{n} / {nm}' if n is not None else '—'} ms | {'✓' if good else '✗'} |")
+
+    def line(label, w, n, unit, judged=True):
+        good, said = verdicts([(n, w)] if not isinstance(n, tuple) else list(zip(n, w or (None, None)))) if n is not None and w is not None else (False, "not measured")
+        if mac and unit == "ms":
+            judged, said = False, said + " (work only: the screen is locked; not judged)"
+            ok[0] = False
+        if judged:
+            ok[0] = ok[0] and good
+            said = ("✓ " if good else "✗ ") + said
+        f = lambda v: "not measured" if v is None else (f"{v[0]} / {v[1]} {unit}" if isinstance(v, tuple) else f"{v} {unit}")
+        lines.append(f"| {label} | {f(w)} | {f(n)} | {said} |")
+
+    line(desk_label, web.get("cold_desktop_ms"), n, "ms")
+    line("cold start: a fresh Chromium process on the built app", web.get("cold_chromium_ms"), n, "ms")
+    lines.append(f"| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | {web.get('first_screen_ms') or '—'} ms | {n if n else '—'} ms | |")
+    line("RSS after opening all three kinds", web.get("rss_mb"), start.get("rss"), "MB")
+    two = lambda d, k: (d.get(k), d.get(k + "_max")) if d.get(k) is not None and d.get(k + "_max") is not None else None
     sec = start.get("second") or {}
-    if sec.get("switch") is not None:
-        lines.append(f"| the app's second start (glyphs of the first readied at idle, mojoui.glyphwarm, D-8002; not judged): note switch · omnibar p95 | — | "
-                     f"{sec['switch']} · {sec['omnibar']} ms | |")
+    for k in ["switch", "omnibar"]:  # (D-8001; D-8026: from the step to the frame painted, as the web's to the frame after)
+        what = "note switch" if k == "switch" else "omnibar open"
+        line(f"{what} p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst)", two(web, k), two(start, "w" + k), "ms")
+        line(f"{what} p95 / max, the second start (the first one's glyphs readied, D-8002)", two(web, k), two(sec, "w" + k), "ms")
+        lines.append(f"| {what}: native work p95 / max (first start · second), beside | | {start.get(k)} / {start.get(k + '_max')} · {sec.get(k)} / {sec.get(k + '_max')} ms | "
+                     f"{mark(start[k], start[k + '_max']) if start.get(k) is not None and start.get(k + '_max') is not None else ''} |")
     lines += ["", "Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the "
               "title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools "
               "port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment "
               "before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: "
-              "FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. The warm 168-ish ms is PN's own "
-              "benchmark-first-screen.mjs in an already-running Chromium: printed, not judged. Note switch and omnibar (D-8001): native, the "
-              "step's event, view, draw and GPU time (the host's app_step_bench); web, docs/goals/79/webswitch.mjs: the input event's "
-              "timestamp to the frame after the new title (or the search panel) shows, in Chromium with the GPU: a fresh page per run."]
-    return "\n".join(lines) + "\n", ok
+              "FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. Each side's 'quiet' rule: no run starts "
+              "while scripts/gpu-free says another job has the machine (Linux), or while the Mac's load is 3 or more; a run that did is void and run again."]
+    return "\n".join(lines) + "\n", ok[0]
 
 
 # ---------------------------------------------------------------- the Mac
@@ -1425,6 +1590,16 @@ def mac_quiet(what, limit=3.0, wait=600):
             print("  MAC " + line, flush=True)
             return load < limit
         time.sleep(15)
+
+
+def mac_web(tag, cmd, timeout, tries=3):
+    """(review 3, B4) A web run on the Mac under the native runs' rule: started only on a quiet machine, else void and
+    tried again (3×). (the CompletedProcess, '') or (None, why)."""
+    for _ in range(tries):
+        if mac_quiet(tag):
+            return mac_sh(cmd, timeout), ""
+        MAC_LOAD.append(f"{tag}: VOID (not quiet), run again")
+    return None, f"{tag}: the Mac was never quiet"
 
 
 def mac_measured(tag, steps, env, data, tries=3):

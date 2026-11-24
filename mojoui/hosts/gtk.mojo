@@ -5206,8 +5206,11 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     # a GPU 2D canvas's GPU work is counted in draw_ms: its frames timed on the GPU (time-elapsed queries, read after
     # the frame's raster below, which syncs the GPU) and the last one's (the frame draw_ms is the CPU time of) added; MOJOUI_GPU2D_BENCH_WAIT=1: instead each frame
     # blocks until the GPU is done (that also counts whatever the GPU ran before it, e.g. GTK's last paint)
-    var g2d_timed = host[].g2d != 0 and host[].g2d_state == 1 and getenv("MOJOUI_GPU2D_BENCH_WAIT") != "1"
-    host[].g2d_wait = host[].g2d != 0 and not g2d_timed
+    var paced = getenv("MOJOUI_BENCH_PACED") == "1"  # (goal 79: frames shown: one gesture per display frame and nothing of this
+    # measurement inside it: no GPU queries, no display round trip, no raster. Printed: gap_* (from one shown frame's paint
+    # to the next one's: a page's requestAnimationFrame gaps) and lat_* (the gesture to its frame painted and handed over))
+    var g2d_timed = host[].g2d != 0 and host[].g2d_state == 1 and getenv("MOJOUI_GPU2D_BENCH_WAIT") != "1" and not paced
+    host[].g2d_wait = host[].g2d != 0 and not g2d_timed and not paced
     if g2d_timed:
         host[].gpu2d()[].gl.timing = True
     var gpus = List[Float64]()
@@ -5218,7 +5221,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var dropped0 = host[].canvases[ci].ahead_dropped
     var missed_suspended = 0  # (missed frames while the window was suspended: hidden, another workspace)
     var ring_full0 = host[].gpu2d()[].gl.full if host[].g2d != 0 else 0
-    var no_raster = getenv("MOJOUI_BENCH_RASTER") == "0"  # (diagnosis only: the raster check skipped, to see what it costs the rest)
+    var gaps = List[Float64]()
+    var lats = List[Float64]()
+    var last_start = -1  # (µs) the last shown frame's paint start; -1: none to measure from
+    var no_raster = paced or getenv("MOJOUI_BENCH_RASTER") == "0"  # (diagnosis only: the raster check skipped, to see what it costs the rest)
     var offloaded = 0  # timed frames GTK showed through its subsurface (graphics offload, read from GTK's own state)
     var refused0 = host[].canvases[ci].offload_refused
     var fenced0 = host[].canvases[ci].offload_fenced  # (D-7575: dmabuf frames handed only after our fence signalled, and
@@ -5291,6 +5297,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var rasters = List[Float64]()
     var during = List[Float64]()  # (open, D-7944) the frames after an open's first, while it is still coming in
     var completes = List[Float64]()  # (open) request → the frame that completes it (ms, wall clock)
+    var press_lats = List[Float64]()  # (paced) a press during the open to its frame painted (wall)
     var presses = List[Float64]()  # (openpress) the frame showing a press made during the open
     var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
     var shown_wait = List[Int]()  # (frame counter, paint end µs) pairs whose presentation time hasn't come back yet
@@ -5408,6 +5415,12 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 if surf != 0 and (Int(external_call["gdk_toplevel_get_state", c_int](surf)) & (1 << 16)) != 0:
                     missed_suspended += 1  # (GDK_TOPLEVEL_STATE_SUSPENDED: the compositor isn't showing the window)
             continue
+        if paced:
+            var start_us = host[].paint_end_us[shown_in % 64] - Int(host[].paint_ring[shown_in % 64] * 1000)
+            if last_start >= 0 and what != "open" and what != "openpress":
+                gaps.append(Float64(start_us - last_start) / 1000.0)
+            last_start = start_us
+            lats.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
         var dm = host[].canvases[ci].bench_draw_ms
         scenes.append(host[].canvases[ci].bench_scene_ms)
         batches.append(host[].canvases[ci].bench_batch_ms)
@@ -5421,7 +5434,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         if was_offloaded:
             offloaded += 1
         var ts = perf_counter_ns()  # (a round trip to the display: with cairo on X11 the X server draws after the paint returns)
-        external_call["gdk_display_sync", NoneType](display)
+        if not paced:
+            external_call["gdk_display_sync", NoneType](display)
         var sm = Float64(Int(perf_counter_ns()) - Int(ts)) / 1e6
         # and the canvas's picture rendered whole by the same renderer, synchronously (on Xvfb the paint phase measured
         # ~0 ms with 1,000 strokes on screen: GTK redraws only damage, and cairo on X11 queues; this is the full cost)
@@ -5479,6 +5493,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
             var inframe_seen = host[].canvases[ci].bench_inframe_ms
             var press_draw = -1  # (openpress) the draw that shows the press, and the press's own event time
             var press_ev = 0.0
+            var press_ns = 0  # (paced: when the press was made, until the paint after its draw)
             while perf_counter_ns() < guard:
                 if what == "openpress" and press_draw < 0 and len(host[].canvases[ci].draw_log) >= 1:
                     var sp = host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:openspot")
@@ -5488,6 +5503,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                         host[].canvas_send(ci, PRESS, sp[0], sp[1], 0, 0, 1, host_addr)
                         host[].canvas_send(ci, RELEASE, sp[0], sp[1], 0, 0, 1, host_addr)
                         press_ev = Float64(Int(perf_counter_ns()) - Int(tp)) / 1e6
+                        press_ns = Int(tp)
                 if done_at < 0 and host[].rt.app.bench(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
                     done_at = host[].paints_done
                     if len(frame_paint) == 0 and len(host[].canvases[ci].draw_log) == 0 and press_draw < 0:
@@ -5501,6 +5517,10 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                         frame_gpu.append(max(g, 0.0) if q == drawn1 - 1 else 0.0)
                 if host[].paints_done != pd_seen:
                     pd_seen = host[].paints_done
+                    if paced:  # (the frames shown while it comes in: gaps from the open's own frame on)
+                        var start_us = host[].paint_end_us[(pd_seen - 1) % 64] - Int(host[].paint_ring[(pd_seen - 1) % 64] * 1000)
+                        gaps.append(Float64(start_us - last_start) / 1000.0)
+                        last_start = start_us
                     var inf = host[].canvases[ci].bench_inframe_ms  # (a draw inside the paint is the draw's, not the paint's)
                     var pm_ = max(host[].paint_ring[(pd_seen - 1) % 64] - (inf - inframe_seen), 0.0)
                     inframe_seen = inf
@@ -5509,12 +5529,16 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                         raster_once(host[].canvases[ci].widget, renderer)
                         pm_ += Float64(Int(perf_counter_ns()) - Int(tr_)) / 1e6
                     frame_paint.append(pm_)
+                    if paced and press_ns > 0 and len(host[].canvases[ci].draw_log) > press_draw:
+                        press_lats.append(Float64(Int(perf_counter_ns()) - press_ns) / 1e6)
+                        press_ns = 0
                     last_done = perf_counter_ns()
                     if done_at >= 0 and pd_seen > done_at:
                         break
             host[].canvases[ci].draw_logging = False
             var fts = perf_counter_ns()
-            external_call["gdk_display_sync", NoneType](display)
+            if not paced:
+                external_call["gdk_display_sync", NoneType](display)
             var fsm = Float64(Int(perf_counter_ns()) - Int(fts)) / 1e6
             for q in range(len(host[].canvases[ci].draw_log)):
                 var work = host[].canvases[ci].draw_log[q] + (frame_gpu[q] if q < len(frame_gpu) else 0.0) + (frame_paint[q] if q < len(frame_paint) else pct(frame_paint, 0.5)) + fsm
@@ -5568,7 +5592,16 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     if what == "open" or what == "openpress":
         counts += " press_n=" + String(len(presses)) + " press_p95=" + one_decimal(Float32(pct(presses, 0.95))) + " press_max=" + one_decimal(Float32(pct(presses, 1.0)))
         counts += " during_n=" + String(len(during)) + " during_p95=" + one_decimal(Float32(pct(during, 0.95))) + " during_max=" + one_decimal(Float32(pct(during, 1.0)))
+        counts += " complete_p95=" + one_decimal(Float32(pct(completes, 0.95)))
         counts += " complete_p50=" + one_decimal(Float32(pct(completes, 0.5))) + " complete_max=" + one_decimal(Float32(pct(completes, 1.0)))
+    if paced:
+        var over = 0
+        for g in gaps:
+            if g > 20.0:  # (benchmark-f034's own "slow": a gap over 20 ms)
+                over += 1
+        counts += " gap_n=" + String(len(gaps)) + " gap_p50=" + one_decimal(Float32(pct(gaps, 0.5))) + " gap_p95=" + one_decimal(Float32(pct(gaps, 0.95))) + " gap_max=" + one_decimal(Float32(pct(gaps, 1.0))) + " gap_over20=" + String(over)
+        counts += " lat_p95=" + one_decimal(Float32(pct(lats, 0.95))) + " lat_max=" + one_decimal(Float32(pct(lats, 1.0)))
+        counts += " press_lat_n=" + String(len(press_lats)) + " press_lat_p95=" + one_decimal(Float32(pct(press_lats, 0.95))) + " press_lat_max=" + one_decimal(Float32(pct(press_lats, 1.0)))
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
           + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
@@ -5627,7 +5660,13 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     var style = host[].rt.shown.nodes[host[].canvases[ci].node].style
     bench_wait[A](host_addr, ci, 500_000_000)
     var times = List[Float64]()  # the work: the app's step and view, plus the canvas's draw of the frame that shows it
-    var walls = List[Float64]()  # to that frame's hand-off (includes waiting for the frame clock)
+    var walls = List[Float64]()  # to that frame painted (includes waiting for the frame clock): the page's "frame after"
+    if not host[].paint_timed:
+        var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+        if clock != 0:
+            connect(clock, "before-paint", on_before_paint[A], host_addr)
+            connect(clock, "after-paint", on_after_paint[A], host_addr)
+            host[].paint_timed = True
     for _ in range(n):
         var hands0 = host[].canvases[ci].hands
         var t0 = perf_counter_ns()
@@ -5639,8 +5678,12 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
         while host[].canvases[ci].hands == hands0 and perf_counter_ns() < by:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
         if host[].canvases[ci].hands != hands0:
+            var dms = host[].canvases[ci].draw_ms  # (that frame's own draw)
+            var shown_in = host[].canvases[ci].shown_frame if host[].canvases[ci].shown_frame >= 0 else host[].paints_done
+            while host[].paint_timed and host[].paints_done <= shown_in and perf_counter_ns() < by:
+                _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
             walls.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
-            times.append(ev + host[].canvases[ci].draw_ms)
+            times.append(ev + dms)
             if getenv("MOJOUI_TRACE_FRAMES") == "1":
                 print("TRACE: " + label + " step: event " + String(round(ev, 2)) + " draw " + String(round(host[].canvases[ci].draw_ms, 2)), flush=True)
         settle()
@@ -5652,7 +5695,7 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     var p95 = srt[min(k - 1, Int(Float64(k) * 0.95))] if k > 0 else 0.0
     var mx = srt[k - 1] if k > 0 else 0.0
     var wall95 = walls[min(len(walls) - 1, Int(Float64(len(walls)) * 0.95))] if len(walls) > 0 else 0.0
-    print(label + ": n=" + String(k) + " wall_p95=" + String(round(wall95, 2)) + " p50=" + String(round(p50, 2)) + " p95=" + String(round(p95, 2))
+    print(label + ": n=" + String(k) + " wall_p95=" + String(round(wall95, 2)) + " wall_max=" + String(round(walls[len(walls) - 1] if len(walls) > 0 else 0.0, 2)) + " p50=" + String(round(p50, 2)) + " p95=" + String(round(p95, 2))
           + " max=" + String(round(mx, 2)), flush=True)
 
 

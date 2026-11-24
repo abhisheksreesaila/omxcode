@@ -1,10 +1,12 @@
-// Goal 79 M6 (continuation 17): the web Personal Note's note switch and omnibar, measured as the native rows are: five runs,
+// Goal 79 M6 (continuation 17): the web Personal Note's note switch and omnibar, over the span the native rows have: five runs,
 // each a fresh page (a fresh process natively), five note switches walking the sidebar's list and five omnibar opens
 // (Ctrl/⌘+K); each run's p95 of five is its worst, the number is the median over the runs, as native_start takes it.
 // A step runs from the input event's own timestamp to the frame after the change shows (a requestAnimationFrame, then a
 // task after it: that frame's script, style, layout and paint are done): the new note's title in the title island; the
-// search panel open. Generous to the web: a note's content may still be coming in (the settled time of a canvas is
-// printed beside, not judged). Personal Note's own dist build and API, a scratch copy of the reference's database.
+// search panel open. A note's content may still be coming in on both sides (the settled
+// time of a canvas is printed beside; webopen.mjs and the race's open rows judge complete opens). The native number runs to
+// GTK's after-paint of the frame that shows it (app_step_bench's wall time); its step starts in the app, after the pointer
+// event's hit test, where this one starts at the input event's own timestamp: the one difference left (race.md says so). Personal Note's own dist build and API, a scratch copy of the reference's database.
 //   node <mojo-ui>/docs/goals/79/webswitch.mjs <pn.db> [--gpu] [--dpr=N]     (from ~/Projects/personalnotev2; on macOS the
 // Mac's own Chrome with ANGLE on Metal, as webmem.mjs)
 import fs from 'node:fs'
