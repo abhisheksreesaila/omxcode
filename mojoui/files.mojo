@@ -6,7 +6,7 @@ from std.os.path import getsize, isfile
 from std.sys import CompilationTarget
 from std.os import listdir, stat
 from mojoui.shared import environment, make_dir, arguments, serial
-from mojoui.libc import chmod, unlink, rename, open_append, write_fd, close, getpid, clock_gettime, flock
+from mojoui.libc import chmod, unlink, rename, open_append, open_read, fsync, write_fd, close, getpid, clock_gettime, flock
 
 
 def file_name(path: String) -> String:
@@ -238,7 +238,8 @@ def media_path_ok(path: String, own: List[String]) -> Bool:
 
 struct FileLock(Movable):
     """A file only its holder has (flock): held until release(), this value's end or the process's, however it ends. Says
-    "someone is alive" to other processes, and to other holders in this one."""
+    "someone is alive" to other processes, and to other holders in this one. What is held is the file that has the name:
+    one removed and made again between opening and locking isn't (a token written into it and read back by name)."""
 
     var fd: Int
     var path: String
@@ -252,12 +253,26 @@ struct FileLock(Movable):
             _ = close(self.fd)
 
     def take(mut self, path: String) -> Bool:
-        """Made if missing (0600) and taken, not waited for. False: another holds it, or the file system has no locks."""
+        """Made if missing (0600) and taken, not waited for. False: another holds it, the file system has no locks, or the
+        file was removed meanwhile (ask again)."""
         self.release()
+        if environment("MOJOUI_NO_FLOCK", "") == "1":  # (tests: a file system without locks)
+            return False
         var fd = open_append(path)
         if fd < 0:
             return False
         if flock(fd, 2 | 4) != 0:
+            _ = close(fd)
+            return False
+        var token = String(getpid()) + "-" + String(serial()) + "-" + String(_now_ns()) + "\n"
+        _ = write_fd(fd, Int(token.unsafe_ptr()), token.byte_length())
+        var same = False
+        try:
+            with open(path, "r") as f:
+                same = f.read().endswith(token)
+        except:
+            pass
+        if not same:
             _ = close(fd)
             return False
         self.fd = fd
@@ -272,6 +287,28 @@ struct FileLock(Movable):
             _ = close(self.fd)
         self.fd = -1
         self.path = ""
+
+
+def _now_ns() -> Int:
+    var ts: List[Int] = [0, 0]
+    _ = clock_gettime(0, Int(ts.unsafe_ptr()))
+    return ts[0] * 1_000_000_000 + ts[1]
+
+
+def reach_disk(path: String) -> Bool:
+    """The file's bytes and its name are on the disk itself, whatever happens to the power next (slow: milliseconds; never on
+    the UI thread)."""
+    var fd = open_read(path)
+    if fd < 0:
+        return False
+    var ok = fsync(fd) == 0
+    _ = close(fd)
+    var slash = path.rfind("/")
+    var dir = open_read(String(path[byte=0:slash]) if slash > 0 else String("."))
+    if dir >= 0:
+        ok = fsync(dir) == 0 and ok
+        _ = close(dir)
+    return ok
 
 
 def private_dir(dir: String) -> Bool:

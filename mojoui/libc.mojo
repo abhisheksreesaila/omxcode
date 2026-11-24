@@ -327,6 +327,14 @@ def flock(fd: Int, op: Int) -> Int:
     return Int(Pointer(to=f).unsafe_bitcast[def(c_int, c_int) thin abi("C") -> c_int]()[](c_int(fd), c_int(op)))
 
 
+def fsync(fd: Int) -> Int:
+    """What was written to it reaches the disk itself (F_FULLFSYNC on a Mac, where fsync stops at the drive's cache)."""
+    if CompilationTarget.is_macos() and fcntl(fd, 51, 0) == 0:
+        return 0
+    var f = _sym("fsync")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int) thin abi("C") -> c_int]()[](c_int(fd)))
+
+
 def write_fd(fd: Int, addr: Int, n: Int) -> Int:
     var f = _sym("write")
     return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))

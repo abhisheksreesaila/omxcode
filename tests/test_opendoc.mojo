@@ -88,6 +88,13 @@ def failed_boards() raises:
     assert_true(text_hash("") != 0 and text_hash("a") != text_hash("b") and text_hash("12345678") != text_hash("12345679"), "fingerprints")
 
 
+def file_of(o: SaveOutbox, id: Int) -> String:
+    for k in range(len(o.files)):
+        if o.files[k].id == id:
+            return o.files[k].path
+    return ""
+
+
 def outbox() raises:
     var dir = getenv("TMPDIR", "/tmp") + "/mojoui-outbox"
     assert_true(private_dir(dir))
@@ -97,7 +104,7 @@ def outbox() raises:
         o.drop(id)
     assert_true(o.put(Unsaved(3, "page", 7, "{\"markdown\":\"" + "x" + "\"}", "x", "database is locked", False)), "on disk")
     assert_true(o.put(Unsaved(4, "canvas", 2, big, "b", "Resource revision does not match", True)))
-    assert_equal(Int(stat(o.path(3)).st_mode) & 0o777, 0o600)
+    assert_equal(Int(stat(file_of(o, 3)).st_mode) & 0o777, 0o600)
     var again = SaveOutbox(dir, "s1")  # (the next start)
     again.load()
     assert_equal(len(again.items), 2)
@@ -135,12 +142,12 @@ def two_windows() raises:
     var c = SaveOutbox(dir, "s")
     c.load()
     assert_equal(len(c.items), 0, "a lives: its file isn't another's to take")
-    with open(a.path(5), "r") as f:
+    with open(file_of(a, 5), "r") as f:
         assert_true("a's words" in f.read(), "nor to remove")
     assert_true(b.put(Unsaved(5, "page", 4, "b's again", "", "locked", False)))
     assert_true(b.put(Unsaved(6, "page", 1, "b's other", "", "locked", False)))
     b.drop(77)
-    var bp = b.path(6)
+    var bp = file_of(b, 6)
     _ = a^  # (both end, however they end)
     _ = b^
     with open(dir + "/unsaved-s-1.p1-gone.json", "w") as f:
@@ -150,6 +157,7 @@ def two_windows() raises:
     var d = SaveOutbox(dir, "s")
     d.load()
     assert_true(d.find(6) >= 0 and d.find(8) >= 0, "the gone ones' edits are found")
+    assert_true(file_exists(file_of(d, 8)) and file_exists(file_of(d, 6)), "taken over: their files stay")
     assert_true(d.items[d.find(5)].content == "b's again" and len(d.extras) == 1 and d.extras[0].content == "a's words", "both versions")
     var e = SaveOutbox(dir, "s")
     e.load()

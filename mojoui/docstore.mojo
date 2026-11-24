@@ -15,8 +15,10 @@
 
 from mojoui.sqlite import Database, Statement
 from mojoui.json import Json, json_string
-from mojoui.files import private_write, FileLock
-from mojoui.libc import unlink, usleep, getpid, kill, rename
+from mojoui.files import private_write, FileLock, file_name, reach_disk
+from mojoui.libc import unlink, usleep, getpid, kill
+from mojoui.uijobs import start_ui_job
+from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 from mojoui.shared import new_key
 from std.memory import ArcPointer
 from std.os import listdir, getenv
@@ -383,10 +385,14 @@ struct Unsaved(Copyable, Movable):
         self.conflict = conflict
 
 
-def unsaved_text(u: Unsaved) -> String:
-    """A held save as its file has it (SaveOutbox.put, RowSaver while a locked file keeps it waiting)."""
+def unsaved_text(u: Unsaved, over: List[String] = List[String]()) -> String:
+    """A held save as its file has it (SaveOutbox, RowSaver while a locked file keeps it waiting). over: the names of the files
+    it stands for."""
+    var names = String("")
+    for n in over:
+        names += ("," if names != "" else "") + json_string(n)
     return ('{"id":' + String(u.id) + ',"kind":' + json_string(u.kind) + ',"revision":' + String(u.revision) + ',"conflict":' + ("true" if u.conflict else "false")
-            + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"content":' + json_string(u.content) + "}")
+            + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"over":[' + names + '],"content":' + json_string(u.content) + "}")
 
 
 def _stage(name: String):
@@ -396,25 +402,75 @@ def _stage(name: String):
         _ = usleep(20_000_000)
 
 
-struct SaveOutbox(Movable):
-    """(review 3, SHOULD 7; review 4, MUST 1) Saves that failed or met a conflict, held until they land or the person drops
-    them: in memory, and as files (0600, in a 0700 folder of the app's) written at once, so a switch, a quit or a crash
-    loses nothing. One per document: a later failed save of it takes the place of the earlier. `space` names the store the
-    ids belong to (two databases share no file).
+struct HeldFile(Copyable, Movable):
+    """A file of an outbox: whose document, its number, where."""
+    var id: Int
+    var seq: Int
+    var path: String
+    var job: Bool  # a save's thread may still write it: it stays listed until that save is over
 
-    Several windows or processes share the folder. Each outbox's files carry its own name (`owner`), it alone removes them,
-    and while it lives it holds a lock file of that name. load() takes over the files of owners that are gone (their lock can
-    be taken); the living ones' are left alone. Two held versions of one document: one is `items`', the other in `extras`
-    (what the app makes a document of its own from, then extra_done())."""
+    def __init__(out self, id: Int, seq: Int, path: String, job: Bool = False):
+        self.id = id
+        self.seq = seq
+        self.path = path
+        self.job = job
+
+
+struct HeldVersion(Copyable, Movable):
+    """A held version of a document found at a start: what it says, and every file of the owner that held it, for that
+    document (its earlier versions)."""
+    var held: Unsaved
+    var owner: String
+    var seq: Int
+    var path: String  # its file (files: the earlier ones' too)
+    var files: List[String]
+
+    def __init__(out self, var held: Unsaved, owner: String, seq: Int, path: String):
+        self.held = held^
+        self.owner = owner
+        self.seq = seq
+        self.path = path
+        self.files = List[String]()
+
+
+struct SaveOutbox(Movable):
+    """(review 3, SHOULD 7; review 4, MUST 1; review 5, MUST 2) Saves that failed, met a conflict or wait for a locked file, held
+    until they land or the person drops them: in memory, and as files (0600, in a 0700 folder of the app's), so a switch, a
+    quit, a crash or the power going loses nothing. `space` names the store the ids belong to. Windows and processes share
+    the folder.
+
+    Its invariants (tests/test_outboxmodel.mojo holds random windows, saves, kills at every step and take-overs to them):
+     1. A file is written once, under a name nobody used (document, number, owner), in one step, and never written to,
+        renamed or copied again. A later version is a new file.
+     2. A file goes only when what it holds has landed, or a later version by the same window, or one that took it over, is
+        already on the disk, or the person dropped it. That later file names the ones it stands for ("over"), so a crash
+        between its writing and their removal doesn't bring them back.
+     3. Only the window that owns a file, by its own name or by having taken it over, removes it. A window owns a name while it
+        holds that name's lock file; the kernel lets go when it ends, however it ends. To take over is to hold the lock:
+        nothing on disk changes, so a kill in the middle of a take-over leaves everything as it was for the next start.
+        Where files can't be locked, an owner is gone when its process is.
+     4. Of one window and one document the highest number is the newest, and holds all its earlier ones. Of two windows both
+        are kept: the one at the higher revision (the later, of equals) is `items`', each other one is in `extras`, for the
+        app to make a document of its own from; then extra_done().
+     5. A file that can't be read is left alone and hides no other.
+
+    What isn't promised: words typed since the last save was asked for (the app's own delay), and, if the power goes, since
+    the last file reached the disk itself (`syncs`: a thread's work, some milliseconds behind)."""
 
     var dir: String
     var space: String
     var owner: String
     var lock: FileLock
     var claimed: String  # the folder `owner` is claimed in
+    var seq: Int  # the last number given
     var items: List[Unsaved]
+    var files: List[HeldFile]  # the files that stand for items, and those a save's own thread may write
     var extras: List[Unsaved]
-    var extra_files: List[String]
+    var extra_files: List[List[String]]
+    var taken: List[ArcPointer[FileLock]]  # the gone owners' locks: theirs are ours while this lives
+    var syncs: List[String]  # files to reach the disk itself
+    var syncer: Optional[Job[Int]]
+    var fault: Int  # (tests) the disk's steps left before this window "dies": from then on nothing of it happens (-1: none)
 
     def __init__(out self, dir: String = "", space: String = ""):
         self.dir = dir
@@ -422,18 +478,38 @@ struct SaveOutbox(Movable):
         self.owner = ""
         self.lock = FileLock()
         self.claimed = ""
+        self.seq = 0
         self.items = List[Unsaved]()
+        self.files = List[HeldFile]()
         self.extras = List[Unsaved]()
-        self.extra_files = List[String]()
+        self.extra_files = List[List[String]]()
+        self.taken = List[ArcPointer[FileLock]]()
+        self.syncs = List[String]()
+        self.syncer = None
+        self.fault = -1
 
     def __del__(deinit self):
-        if len(self.items) == 0 and len(self.extras) == 0 and self.lock.held():  # (nothing of it left: its name neither)
-            _ = unlink(self.lock.path)
+        if len(self.items) == 0 and len(self.files) == 0 and len(self.extras) == 0 and self.lock.held() and self.fault != 0:
+            _ = unlink(self.lock.path)  # (nothing of it left: its name neither)
+
+    # ------------------------------------------------ the disk
+
+    def _step(mut self) -> Bool:
+        """(tests) One more step of the disk's; False: this window is dead."""
+        if self.fault == 0:
+            return False
+        if self.fault > 0:
+            self.fault -= 1
+        return True
+
+    def _remove(mut self, path: String):
+        if self._step():
+            _ = unlink(path)
 
     def claim(mut self):
         """This outbox's own name in its folder, and the lock that says it lives. Where files can't be locked the name says
         the process instead ("n<pid>-…")."""
-        if self.dir == "" or self.claimed == self.dir:
+        if self.dir == "" or self.claimed == self.dir or not self._step():
             return
         self.claimed = self.dir
         for _ in range(8):  # (another start may look at a lock file in the instant between its making and its taking)
@@ -446,12 +522,62 @@ struct SaveOutbox(Movable):
     def lock_path(self, owner: String) -> String:
         return self.dir + "/unsaved-" + self.space + "." + owner + ".lock"
 
-    def path(mut self, id: Int) -> String:
-        """This outbox's file for document `id` ("": it has no folder)."""
-        if self.dir == "":
-            return ""
+    def _new_file(mut self, id: Int) -> HeldFile:
+        """The next file of document `id` (its path "" when there is no folder)."""
         self.claim()
-        return self.dir + "/unsaved-" + self.space + "-" + String(id) + "." + self.owner + ".json"
+        self.seq += 1
+        return HeldFile(id, self.seq, (self.dir + "/unsaved-" + self.space + "-" + String(id) + "-" + String(self.seq) + "." + self.owner + ".json") if self.dir != "" else String(""))
+
+    def _store(mut self, u: Unsaved, jobs: Bool) -> Int:
+        """A file with `u`, in place of the ones it had (jobs: those of a save's thread too, which is over); its number (0: it
+        couldn't be written, the ones it had stay)."""
+        if self.dir == "":
+            return 0
+        var f = self._new_file(u.id)
+        var over = List[String]()
+        for k in range(len(self.files)):
+            if self.files[k].id == u.id:
+                over.append(file_name(self.files[k].path))
+        if not self._step() or not private_write(f.path, unsaved_text(u, over)):
+            return 0
+        var seq = f.seq
+        self._sync(f.path)
+        self._clear(u.id, 0, jobs)
+        self.files.append(f^)
+        return seq
+
+    def _clear(mut self, id: Int, upto: Int, jobs: Bool = True):
+        """Document `id`'s files go (upto > 0: only its own up to that number, and the ones taken over; jobs off: not those a
+        save's thread may still write)."""
+        for k in range(len(self.files) - 1, -1, -1):
+            if self.files[k].id == id and (upto == 0 or self.files[k].seq <= upto) and (jobs or not self.files[k].job):
+                self._remove(self.files.pop(k).path)
+
+    def _sync(mut self, path: String):
+        self.syncs.append(path)
+        self.sync(False)
+
+    def sync(mut self, wait: Bool):
+        """The files written reach the disk itself, on a thread (wait: before this returns; a window closing)."""
+        while True:
+            if self.syncer:
+                if self.syncer.value().poll() == JOB_RUNNING:
+                    if not wait:
+                        return
+                    _ = usleep(100)
+                    continue
+                var done = self.syncer.take()
+                try:
+                    _ = done.result()
+                except:
+                    pass
+            if len(self.syncs) == 0:
+                return
+            var paths = List[String]()
+            swap(paths, self.syncs)
+            self.syncer = start_ui_job(DiskJob(paths^))
+
+    # ------------------------------------------------ what is held
 
     def find(self, id: Int) -> Int:
         for i in range(len(self.items)):
@@ -461,61 +587,67 @@ struct SaveOutbox(Movable):
 
     def put(mut self, var u: Unsaved) -> Bool:
         """Held; True when it is on disk too."""
+        var ok = self._store(u, True) > 0
         var i = self.find(u.id)
-        var text = unsaved_text(u)
-        var id = u.id
         if i >= 0:
             self.items[i] = u^
         else:
             self.items.append(u^)
-        if self.dir == "":
-            return False
-        return private_write(self.path(id), text)
+        return ok
 
-    def spill(mut self, u: Unsaved) -> Bool:
-        """A save that waits its turn behind one a locked file holds up: on disk meanwhile (until unspill; a start after a crash
-        takes it over any earlier version of the same document). True: it is."""
-        return self.dir != "" and private_write(self.spill_path(u.id), unsaved_text(u))
+    def spill(mut self, u: Unsaved) -> Int:
+        """A save that waits its turn behind one a locked file holds up: on disk meanwhile; its number (0: it isn't)."""
+        return self._store(u, False)
 
-    def spill_path(mut self, id: Int) -> String:
-        self.claim()
-        return self.dir + "/unsaved-" + self.space + "-" + String(id) + "q." + self.owner + ".json"
+    def job_file(mut self, id: Int) -> HeldFile:
+        """A file a save's own thread may write its edits to while it waits for a locked file (RowSaver): nobody else writes
+        there. It goes with the document's others, or when the save lands (landed)."""
+        var f = self._new_file(id)
+        f.job = True
+        if f.path != "":
+            self.files.append(f.copy())
+        return f^
 
-    def unspill(mut self, id: Int):
-        if self.dir != "" and self.claimed == self.dir:
-            _ = unlink(self.spill_path(id))
+    def landed(mut self, id: Int, upto: Int):
+        """A save of it landed, a newer one is on its way: what stood for versions up to number `upto` goes."""
+        var i = self.find(id)
+        if i >= 0:
+            _ = self.items.pop(i)
+        self._clear(id, upto)
 
     def drop(mut self, id: Int):
         """It landed (or the person gave it up)."""
         var i = self.find(id)
         if i >= 0:
             _ = self.items.pop(i)
-        if self.dir != "" and self.claimed == self.dir:
-            _ = unlink(self.path(id))
+        self._clear(id, 0)
 
     def extra_done(mut self, i: Int):
         """extras[i] is a document of its own now."""
         _ = self.extras.pop(i)
-        _ = unlink(self.extra_files.pop(i))
+        for path in self.extra_files.pop(i):
+            self._remove(path)
+
+    # ------------------------------------------------ a start
 
     def gone(self, owner: String, mut lock: FileLock) -> Bool:
         """Whether `owner` is no more (its lock is then ours, in `lock`)."""
-        if owner == "":  # (a file from before owners)
-            return True
         if owner.startswith("n"):
             var dash = owner.find("-")
             try:
-                return kill(Int(String(owner[byte = 1 : max(dash, 1)])), 0) != 0
+                var pid = Int(String(owner[byte = 1 : max(dash, 1)]))
+                return pid != getpid() and kill(pid, 0) != 0
             except:
                 return False
         return lock.take(self.lock_path(owner))
 
     def load(mut self):
-        """What earlier sessions left: the files of owners that are gone, now this outbox's. One that can't be read stays where
-        it is and hides no other."""
+        """What earlier sessions left: the versions of owners that are gone, theirs to this outbox now."""
         if self.dir == "":
             return
         self.claim()
+        if not self._step():
+            return
         var names = List[String]()
         try:
             for name in listdir(self.dir):
@@ -523,33 +655,45 @@ struct SaveOutbox(Movable):
         except e:
             print("SaveOutbox: " + self.dir + ": " + String(e), flush=True)
             return
-        sort(names)
-        var start = "unsaved-" + self.space + "-"
-        var whose = List[String]()  # (each item's owner)
-        var asked = List[String]()  # the owners asked after, and whether each is gone
-        var answer = List[Bool]()
-        var locks = List[ArcPointer[FileLock]]()
+        var head = "unsaved-" + self.space + "-"
+        var locks = "unsaved-" + self.space + "."
+        # whose names are there, and which of them are gone (their locks held from here on)
+        var owners = Dict[String, Bool]()
         for n in names:
-            if not n.startswith(start) or not n.endswith(".json"):
+            var owner: String
+            if n.startswith(head) and n.endswith(".json"):
+                owner = _owner_of(n)
+            elif n.startswith(locks) and n.endswith(".lock"):
+                owner = String(n[byte = locks.byte_length() : n.byte_length() - 5])
+            else:
                 continue
-            var stem = String(n[byte = start.byte_length() : n.byte_length() - 5])  # <id>[x<k>][.<owner>]
-            var dot = stem.find(".")
-            var owner = String(stem[byte = dot + 1 :]) if dot >= 0 else String("")
-            if owner == self.owner:
+            if owner == self.owner or owner in owners:
                 continue
-            var at = -1
-            for k in range(len(asked)):
-                if asked[k] == owner:
-                    at = k
-            if at < 0:
-                var lock = ArcPointer(FileLock())
-                at = len(asked)
-                asked.append(owner)
-                answer.append(self.gone(owner, lock[]))
-                locks.append(lock^)
-            if not answer[at]:
+            var lock = ArcPointer(FileLock())
+            var is_gone = self.gone(owner, lock[])
+            owners[owner] = is_gone
+            if is_gone and lock[].held():
+                self.taken.append(lock^)
+        # (the folder again: an owner found gone may have written its last file since it was read; none of theirs is now)
+        names.clear()
+        try:
+            for name in listdir(self.dir):
+                names.append(String(name))
+        except:
+            return
+        var found = List[HeldVersion]()
+        var over = List[String]()  # what a later file stands for
+        var left = Dict[String, Bool]()  # the gone owners that have files
+        for n in names:
+            if not n.startswith(head) or not n.endswith(".json"):
                 continue
+            var owner = _owner_of(n)
+            if owner not in owners or not owners.get(owner, False):
+                continue
+            left[owner] = True
             var full = self.dir + "/" + n
+            if self._has(full):
+                continue
             try:
                 var t: String
                 with open(full, "r") as f:
@@ -559,49 +703,100 @@ struct SaveOutbox(Movable):
                                 j.text(j.get(0, "body")), j.text(j.get(0, "why")), j.flag(j.get(0, "conflict")))
                 if u.id < 0 or u.content == "":
                     continue
-                var have = self.find(u.id)
-                if have < 0:
-                    if rename(full, self.path(u.id)) == 0:
-                        self.items.append(u^)
-                        whose.append(owner)
-                    continue
-                var mine = self.path(u.id)
-                if owner != "" and have < len(whose) and whose[have] == owner and stem[byte=0:dot].endswith("q"):  # (the same window's later version)
-                    if rename(full, mine) == 0:
-                        self.items[have] = u^
-                    continue
-                var spare = String(mine[byte = 0 : mine.find(".", mine.rfind("/"))]) + "x" + new_key("e") + "." + self.owner + ".json"
-                if u.revision > self.items[have].revision:  # (the later one is the document's, the earlier the spare)
-                    if rename(mine, spare) == 0 and rename(full, mine) == 0:
-                        swap(u, self.items[have])
-                        self.extras.append(u^)
-                        self.extra_files.append(spare)
-                elif rename(full, spare) == 0:
-                    self.extras.append(u^)
-                    self.extra_files.append(spare)
+                for k in range(j.size(j.get(0, "over"))):
+                    over.append(j.text(j.at(j.get(0, "over"), k)))
+                var seq = _seq_of(n)
+                # (invariant 4: of one window, the highest number; its earlier files with it)
+                var at = -1
+                for k in range(len(found)):
+                    if found[k].owner == owner and found[k].held.id == u.id:
+                        at = k
+                if at < 0:
+                    found.append(HeldVersion(u^, owner, seq, full))
+                    at = len(found) - 1
+                elif seq > found[at].seq:
+                    found[at].held = u^
+                    found[at].seq = seq
+                    found[at].path = full
+                found[at].files.append(full)
             except e:
                 print("SaveOutbox: " + full + ": " + String(e), flush=True)
-        for n in names:  # (the names of owners that ended with nothing held: a process's end runs no destructor)
-            var head = "unsaved-" + self.space + "."
-            if n.startswith(head) and n.endswith(".lock"):
-                var owner = String(n[byte = head.byte_length() : n.byte_length() - 5])
-                if owner != self.owner and owner not in asked:
-                    var lock = ArcPointer(FileLock())
-                    asked.append(owner)
-                    answer.append(self.gone(owner, lock[]))
-                    locks.append(lock^)
-        for k in range(len(asked)):  # (a gone owner's name goes with its last file)
-            if not answer[k] or asked[k] == "":
+        for k in range(len(found) - 1, -1, -1):  # (invariant 2: a later file of another window stands for these)
+            if file_name(found[k].path) in over:
+                for path in found[k].files:
+                    self._remove(path)
+                _ = found.pop(k)
+        for k in range(len(found)):  # (invariant 4: the newest of a window holds its earlier ones)
+            for q in range(len(found[k].files) - 1, -1, -1):
+                if found[k].files[q] != found[k].path:
+                    self._remove(found[k].files.pop(q))
+        for k in range(len(found)):
+            var have = self.find(found[k].held.id)
+            if have < 0:
+                self.items.append(found[k].held.copy())
+                for path in found[k].files:
+                    self.files.append(HeldFile(found[k].held.id, 0, path))
                 continue
-            var left = False
-            try:
-                for name in listdir(self.dir):
-                    if String(name).endswith("." + asked[k] + ".json"):
-                        left = True
-            except:
-                left = True
-            if not left:
-                _ = unlink(self.lock_path(asked[k]))
+            var mine = List[String]()
+            if found[k].held.revision > self.items[have].revision:  # (invariant 4: the later one is the document's)
+                for q in range(len(self.files) - 1, -1, -1):
+                    if self.files[q].id == found[k].held.id:
+                        mine.append(self.files.pop(q).path)
+                self.extras.append(self.items[have].copy())
+                self.extra_files.append(mine^)
+                self.items[have] = found[k].held.copy()
+                for path in found[k].files:
+                    self.files.append(HeldFile(found[k].held.id, 0, path))
+            else:
+                self.extras.append(found[k].held.copy())
+                self.extra_files.append(found[k].files.copy())
+        # (a gone owner's name goes with its last file)
+        for e in owners.items():
+            if e.value and not left.get(e.key, False):
+                self._remove(self.lock_path(e.key))
+
+    def _has(self, path: String) -> Bool:
+        """A file this outbox has already (load() a second time)."""
+        for k in range(len(self.files)):
+            if self.files[k].path == path:
+                return True
+        for k in range(len(self.extra_files)):
+            if path in self.extra_files[k]:
+                return True
+        return False
+
+
+struct DiskJob(JobBody):
+    """Files reaching the disk itself (files.reach_disk), on a thread; how many did."""
+    comptime Out = Int
+    var paths: List[String]
+
+    def __init__(out self, var paths: List[String]):
+        self.paths = paths^
+
+    def run(mut self, ctl: JobCtl) raises -> Int:
+        var n = 0
+        for p in self.paths:
+            n += 1 if reach_disk(p) else 0
+        return n
+
+
+def _owner_of(name: String) -> String:
+    """A held file's owner, from its name ("" for one from before owners): unsaved-<space>-<id>-<number>.<owner>.json"""
+    var stem = String(name[byte = 0 : name.byte_length() - 5])
+    var dot = stem.rfind(".")
+    return String(stem[byte = dot + 1 :]) if dot >= 0 else String("")
+
+
+def _seq_of(name: String) -> Int:
+    """Its number (0 when it has none)."""
+    var dot = name.find(".")
+    var stem = String(name[byte = 0 : dot if dot >= 0 else name.byte_length()])
+    var dash = stem.rfind("-")
+    try:
+        return Int(String(stem[byte = dash + 1 :])) if stem.count("-") >= 3 else 0
+    except:
+        return 0
 
 
 struct KeptDocs[T: Movable & Deinitable](Movable):

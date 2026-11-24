@@ -339,6 +339,7 @@ struct Written(Copyable, Movable):
     var drafted: Bool  # it holds words still being written: no kept view is of it
     var at_us: Int
     var spilled: Bool  # on disk while it waits its turn
+    var upto: Int  # the number of its held file, once it is being written: earlier ones go when it lands
 
 
 struct WebShell(Movable):
@@ -1891,6 +1892,7 @@ struct WebShell(Movable):
         var before = self.save_state
         if self.saving():
             self.land_save(False)
+        self.outbox.sync(False)
         if self.saver.due(clock_us()):  # (one still being written doesn't hold the next up: a locked file could for a minute)
             self.save_later()
         self.spill_waiting()
@@ -1902,7 +1904,7 @@ struct WebShell(Movable):
             if not self.written[k].spilled and clock_us() - self.written[k].at_us > 300_000:
                 var i = self.note_index(self.written[k].id)
                 var u = Unsaved(self.written[k].id, self.written[k].kind, self.notes[i].revision if i >= 0 else 0, self.written[k].content, self.written[k].body, "database is locked", False)
-                self.written[k].spilled = self.outbox.spill(u)
+                self.written[k].spilled = self.outbox.spill(u) > 0
 
     def close(mut self):
         """The app closing: the held delete and the pending save are made."""
@@ -1961,7 +1963,7 @@ struct WebShell(Movable):
         for k in range(len(self.written) - 1, 0 if self.writer.busy() else -1, -1):
             if self.written[k].id == id:
                 _ = self.written.pop(k)
-        self.written.append(Written(id, self.notes[i].kind, content, body, version, grid_note(self.cols, self.rows), self.drafted, clock_us(), False))
+        self.written.append(Written(id, self.notes[i].kind, content, body, version, grid_note(self.cols, self.rows), self.drafted, clock_us(), False, 0))
         self.start_save()
 
     def start_save(mut self):
@@ -1971,7 +1973,9 @@ struct WebShell(Movable):
             var i = self.note_index(w.id)
             if i >= 0:
                 var held = Unsaved(w.id, w.kind, self.notes[i].revision, w.content, w.body, "", False)
-                self.writer.start(self.db_path, self.row_save(i, w.content, w.body), held^, self.outbox.path(w.id) if self.outbox.dir != "" else String(""))
+                var f = self.outbox.job_file(w.id)
+                self.written[0].upto = f.seq
+                self.writer.start(self.db_path, self.row_save(i, w.content, w.body), held^, f.path)
                 return
             _ = self.written.pop(0)
             self.rescue(w.id, w.kind, "", w.content, w.body)  # (the note isn't in the list any more: deleted elsewhere)
@@ -2017,7 +2021,6 @@ struct WebShell(Movable):
                     rest = self.written.pop(q)
                 var at = self.note_index(rest.id)
                 self.hold(Unsaved(rest.id, rest.kind, self.notes[at].revision if at >= 0 else 0, rest.content, rest.body, "database is locked", False))
-                self.outbox.unspill(rest.id)
                 continue
             self.start_save()
             var got = self.writer.done(wait)
@@ -2038,7 +2041,7 @@ struct WebShell(Movable):
             elif r.status == CONFLICT and row_revision(self.dbs[0], "notes", "id", w.id, "revision") < 0:  # (deleted in another app while it was written)
                 self.rescue(w.id, w.kind, String(self.notes[i].title), w.content, w.body)
             else:
-                self.saved_note(i, r, w.content, w.body)
+                self.saved_note(i, r, w.content, w.body, w.upto)
                 if r.status == SAVED and w.kind == "canvas" and self.current == w.id and self.doc.may_edit():
                     self.board.edit().mark_saved_at(w.version)  # (edits since are the next save's)
                     self.content_hash = DRAFTED if w.drafted else got.value().hash
@@ -2132,6 +2135,7 @@ struct WebShell(Movable):
             var at = self.outbox.find(id)
             if at < 0 or self.outbox.put(self.outbox.items[at].copy()):
                 self.unheld(id)
+        self.outbox.sync(True)  # (what is held reaches the disk itself)
         if len(self.at_risk) == 0 or clock_us() < self.closing_until:
             return True
         self.closing_until = clock_us() + 15_000_000
@@ -2265,16 +2269,17 @@ struct WebShell(Movable):
                    [int_arg(id), text_arg(content)])
         return s^
 
-    def saved_note(mut self, i: Int, r: SaveResult, content: String, body: String):
+    def saved_note(mut self, i: Int, r: SaveResult, content: String, body: String, upto: Int = 0):
         """What a save came to: the note's record and outbox."""
         var id = self.notes[i].id
-        if self.queued_at(id) < 0:
-            self.outbox.unspill(id)
         if r.status == SAVED:
             if id == self.current:
                 self.doc.saved(r.revision)
                 self.open_hash = text_hash(content)
-            self.outbox.drop(id)
+            if self.queued_at(id) >= 0:
+                self.outbox.landed(id, upto)
+            else:
+                self.outbox.drop(id)
             self.unheld(id)
             self.notes[i].bytes = content.byte_length()
         else:
