@@ -1,3 +1,4 @@
+# The nine looks of M2/M3 drawn on the CPU (no GPU), for cpu_looks.py. Build to build/wrap/looks with -I . -I vendor -I examples/pnote, on a copy of build/g79/ref/pn.db at build/wrap/shots.db, PNOTE_NOW="2026-11-20 10:00:00".
 from std.os import setenv
 from mojoui.canvas import Surface, rgba
 from mojoui.scene import Scene, SurfacePainter
