@@ -243,7 +243,25 @@ def test_scroll() raises:
     assert_equal(p.scroll, 0)
 
 
+def test_styles() raises:
+    var p = PageSheet()
+    p.set_markdown("a ~~gone~~ and [words](http://x.y) end\n```py\nx = **1**\n```\n**b**")
+    _ = drawn(p)
+    var joined = String("")
+    for ref s in p.laid[0].segs:
+        joined += s.text
+    assert_equal(joined, p.ed.paras[0])
+    assert_true(p.laid[0].segs[2].text == "gone" and p.laid[0].segs[2].strike and not p.laid[0].segs[4].strike, "struck")
+    assert_true(p.laid[0].segs[6].text == "words" and p.laid[0].segs[6].color != p.laid[0].segs[4].color, "a link's words")
+    assert_true(len(p.laid[2].segs) == 1 and p.laid[2].segs[0].style.family == "Geist Mono" and p.laid[4].segs[1].text == "b", "code is code, what follows isn't")
+    p.ed.move_to(Pos(1, 0), False)
+    p.insert("x")  # (no fence any more: the line after the other fence is code now)
+    _ = drawn(p)
+    assert_true(len(p.laid[2].segs) > 1 and len(p.laid[4].segs) == 1, "followed at once")
+
+
 def main() raises:
+    test_styles()
     test_wraps()
     test_caret_moves()
     test_selection_and_clipboard()

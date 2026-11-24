@@ -31,6 +31,7 @@ comptime PAGE_INK: UInt32 = 0xFF161B1F  # #1f1b16
 comptime PAGE_MUTED: UInt32 = 0xFF57636B  # #6b6357
 comptime PAGE_LINE: UInt32 = 0xFFCDDBE2  # #e2dbcd
 comptime PAGE_SELECTION: UInt32 = 0x2EE06F2F  # rgba(47, 111, 224, .18)
+comptime PAGE_ACCENT: UInt32 = 0xFFE06F2F  # #2f6fe0
 comptime PAGE_FAINT: UInt32 = 0xFF889AA3  # #a39a88
 comptime PAGE_MARKUP: UInt32 = 0xFFA6B2B9  # #b9b2a6
 comptime TEXT_FACE = "Literata"
@@ -55,12 +56,19 @@ struct InkStep(Copyable, Movable):
     var gone_at: List[Int]
 
 
-@fieldwise_init
 struct Seg(Copyable, Movable):
     var text: String
     var style: TextStyle
     var color: UInt32
     var lh: Float64  # the line-height its inline box asks for
+    var strike: Bool  # struck through
+
+    def __init__(out self, text: String, style: TextStyle, color: UInt32, lh: Float64, strike: Bool = False):
+        self.text = text
+        self.style = style.copy()
+        self.color = color
+        self.lh = lh
+        self.strike = strike
 
 
 @fieldwise_init
@@ -80,8 +88,10 @@ struct ParaLay(Copyable, Movable):
     var segs: List[Seg]
     var lines: List[VLine]
     var height: Float64
+    var code: Bool  # inside a fenced block
 
     def __init__(out self):
+        self.code = False
         self.text = ""
         self.width = -1
         self.segs = List[Seg]()
@@ -96,6 +106,8 @@ struct PageSheet(Movable):
     var goal_x: Float64  # up and down keep this x (-1: the caret's)
     var laid: List[ParaLay]
     var tops: List[Float64]  # where the last draw put each paragraph (layout px)
+    var code: List[Bool]  # per paragraph: inside a ``` block (or its fence), of the text's version `code_of`
+    var code_of: Int
     var content_h: Float64  # the desk's content and the room it has, at the last draw
     var view_h: Float64
     var view_top: Float64
@@ -126,6 +138,8 @@ struct PageSheet(Movable):
         self.goal_x = -1
         self.laid = List[ParaLay]()
         self.tops = List[Float64]()
+        self.code = List[Bool]()
+        self.code_of = -1
         self.content_h = 0
         self.view_h = 0
         self.view_top = 0
@@ -330,10 +344,20 @@ struct PageSheet(Movable):
             self.laid.append(ParaLay())
         while len(self.laid) > len(self.ed.paras):
             _ = self.laid.pop()
-        if self.laid[i].width == self.text_w and self.laid[i].text == words:
+        if self.code_of != self.ed.version:
+            self.code_of = self.ed.version
+            self.code.clear()
+            var inside = False
+            for ref l in self.ed.paras:
+                var fence = String(l.strip()).startswith("```")
+                self.code.append(inside or fence)
+                if fence:
+                    inside = not inside
+        if self.laid[i].width == self.text_w and self.laid[i].text == words and self.laid[i].code == self.code[i]:
             return self.laid[i].height
         var pl = ParaLay()
-        pl.segs = self.segments(words)
+        pl.code = self.code[i]
+        pl.segs = self.code_segments(words) if self.code[i] else self.segments(words)
         pl.width = self.text_w
         var cuts = self.wrap(words, pl.segs)
         var y = 0.0
@@ -362,7 +386,7 @@ struct PageSheet(Movable):
             var x0 = max(a - off, 0)
             var x1 = min(b - off, n)
             if x1 > x0 or (n == 0 and off >= a and off <= b):
-                out.append(Seg(String(s.text[byte=x0:x1]), s.style, s.color, s.lh))
+                out.append(Seg(String(s.text[byte=x0:x1]), s.style, s.color, s.lh, s.strike))
             off += n
         return out^
 
@@ -779,6 +803,13 @@ struct PageSheet(Movable):
     def backspace(mut self):
         _ = self.key("Backspace", 0, now_ms())
 
+    def code_segments(self, line: String) -> List[Seg]:
+        """A line of a fenced block: its fence in the markup colour, its code in the mono face."""
+        var mono = TextStyle(MONO_FACE, 400, False, BODY * 0.9)
+        if String(line.strip()).startswith("```"):
+            return [Seg(line, TextStyle(TEXT_FACE, 400, False, BODY), PAGE_MARKUP, BODY * 1.65)]
+        return [Seg(line, mono, PAGE_INK, BODY * 1.65)]
+
     def segments(self, line: String) -> List[Seg]:
         """A Markdown line as styled pieces (headings, list and quote marks, bold, italic, inline code)."""
         var out = List[Seg]()
@@ -840,6 +871,29 @@ struct PageSheet(Movable):
                     out.append(Seg(String(line[byte=i + 1:close]), it, base_color, lh))
                     out.append(Seg("*", it, PAGE_MARKUP, lh))
                     i = close + 1
+                    start = i
+                    continue
+            if b[i] == 126 and i + 1 < n and b[i + 1] == 126:  # ~~struck~~
+                var close = line.find("~~", i + 2)
+                if close > i + 2:
+                    if i > start:
+                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
+                    out.append(Seg("~~", base, PAGE_MARKUP, lh, True))
+                    out.append(Seg(String(line[byte=i + 2:close]), base, base_color, lh, True))
+                    out.append(Seg("~~", base, PAGE_MARKUP, lh, True))
+                    i = close + 2
+                    start = i
+                    continue
+            if b[i] == 91:  # [words](address)
+                var close = line.find("](", i + 1)
+                var end = line.find(")", close + 2) if close > i else -1
+                if close > i and end > close:
+                    if i > start:
+                        out.append(Seg(String(line[byte=start:i]), base, base_color, lh))
+                    out.append(Seg("[", base, PAGE_MARKUP, lh))
+                    out.append(Seg(String(line[byte=i + 1:close]), base, PAGE_ACCENT, lh))
+                    out.append(Seg(String(line[byte=close:end + 1]), base, PAGE_MARKUP, lh))
+                    i = end + 1
                     start = i
                     continue
             if b[i] == 96:
@@ -982,7 +1036,10 @@ struct PageSheet(Movable):
                 var x = tx
                 for ref s in self.part(segs, l.start, l.end):
                     p.run(s.style, s.text, x, base, s.color, ALIGN_LEFT)
-                    x += measure(s.style, s.text)
+                    var sw = measure(s.style, s.text)
+                    if s.strike:
+                        p.rect(x, base - s.style.size * 0.26, sw, 1, s.color, 0)
+                    x += sw
                 if pre_at >= 0 and caret.para == para:  # (the composition, underlined as input methods show it)
                     var a = max(pre_at, l.start)
                     var e = min(pre_at + self.preedit.byte_length(), l.end)

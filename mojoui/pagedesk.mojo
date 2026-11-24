@@ -20,7 +20,7 @@ from mojoui.viewsnap import snap_read, ViewSnap, SnapKey, renderer_id, build_id
 from mojoui.skin import Skin, Shadow, with_alpha
 from mojoui.fonttext import TextStyle, measure, baseline_in
 from mojoui.ink import Stroke
-from mojoui.objectlayer import CH_ADD, CH_MOVE, CH_TEXT, CH_DELETE
+from mojoui.objectlayer import CH_ADD, CH_MOVE, CH_TEXT, CH_DELETE, CH_RESIZE, CH_ROTATE, H_ROTATE
 from mojoui.wordsedit import WordsEdit
 from mojoui.textedit import now_ms
 from mojoui.notesshell import Boxes, draw_shadows
@@ -843,6 +843,7 @@ comptime T_CONNECT = 3
 comptime T_ERASE = 5
 comptime T_WORDS = 6  # a selection in the words being written
 comptime T_BOX = 7  # a marquee
+comptime T_HANDLE = 8  # a corner of the selected box, or its knob
 comptime ERASER_RADIUS = 13.0
 comptime T_PAN = 4  # the hand tool moving the view
 
@@ -938,6 +939,8 @@ struct BoardTools(Movable):
     var shape_w: Float64
     var shape_h: Float64
     var shape_radius: Float64
+    var handles: List[Float64]  # where the one selected box's corners and knob were last drawn (screen): handle, x, y each
+    var handle: Int
     var before_press: List[Int]  # the selection before the last press (a Shift+click adds to it)
     var erased: Bool  # the eraser's drag has erased something
     var box_x0: Float64  # a marquee's start (page px)
@@ -978,6 +981,8 @@ struct BoardTools(Movable):
         self.shape_radius = 28
         self.erased = False
         self.before_press = List[Int]()
+        self.handles = List[Float64]()
+        self.handle = -1
         self.box_x0 = 0
         self.box_y0 = 0
 
@@ -1092,7 +1097,7 @@ struct BoardTools(Movable):
         # (a tap comes after its press: a drag the press began never happened)
         if self.drag == T_MOVE:
             layer.end_gesture()
-        if self.drag == T_ERASE:
+        if self.drag == T_ERASE or self.drag == T_HANDLE:
             layer.end_gesture()
         self.drag = T_NONE
         self.drag_from = -1
@@ -1167,6 +1172,14 @@ struct BoardTools(Movable):
             self.words.press(pt[0] - b[0], pt[1] - b[1], b[3], False)
             self.drag = T_WORDS
             return True
+        if self.tool == "select" and len(layer.selected) == 1 and self.editing == -1:
+            for k in range(0, len(self.handles), 3):
+                if abs(sx - self.handles[k + 1]) <= 9 and abs(sy - self.handles[k + 2]) <= 9:
+                    self.handle = Int(self.handles[k])
+                    layer.begin_gesture(CH_ROTATE if self.handle == H_ROTATE else CH_RESIZE)
+                    self.drag = T_HANDLE
+                    self.moved = False
+                    return True
         if self.tool == "select":
             var id = layer.hit_test(pt[0], pt[1], 2)
             if id < 0:  # (on the page: a marquee)
@@ -1221,6 +1234,12 @@ struct BoardTools(Movable):
         elif self.drag == T_WORDS:
             var b = self.words_box(layer)
             self.words.drag(pt[0] - b[0], pt[1] - b[1], b[3])
+        elif self.drag == T_HANDLE:
+            self.moved = True
+            if self.handle == H_ROTATE:
+                layer.rotate_towards(pt[0], pt[1])
+            else:
+                layer.resize_handle(self.handle, pt[0], pt[1])
         elif self.drag == T_ERASE:
             # (along the way from the last point, half a radius at a time: a fast drag leaves no gaps)
             var dx = pt[0] - self.last_x
@@ -1246,6 +1265,10 @@ struct BoardTools(Movable):
         if kind == T_MOVE:
             layer.end_gesture()
             self.changed = True
+            return True
+        if kind == T_HANDLE:
+            layer.end_gesture()
+            self.changed = self.changed or self.moved
             return True
         if kind == T_WORDS:
             self.words.release()
@@ -1484,6 +1507,7 @@ struct BoardTools(Movable):
                 rel.append(q[0] - a[0])
                 rel.append(q[1] - a[1])
             polyline(p, a[0], a[1], rel, self.wet.width * v.scale, self.wet.color)
+        self.handles.clear()
         for id in layer.selected:
             var q = layer.index(id)
             if q < 0 or layer.objs[q].kind == CONNECTOR:
@@ -1499,5 +1523,11 @@ struct BoardTools(Movable):
             p.rect(tl[0] + w - lw / 2, tl[1] - lw / 2, lw, h + lw, SELECT_BLUE, 0)
             for c in range(4):
                 p.circle(tl[0] + (w if c % 2 == 1 else 0.0), tl[1] + (h if c >= 2 else 0.0), 5.5, SELECT_BLUE)
+                self.handles.append(Float64([0, 2, 6, 4][c]))
+                self.handles.append(tl[0] + (w if c % 2 == 1 else 0.0))
+                self.handles.append(tl[1] + (h if c >= 2 else 0.0))
+            self.handles.append(Float64(H_ROTATE))
+            self.handles.append(tl[0] + w / 2)
+            self.handles.append(tl[1] - 28)
             p.circle(tl[0] + w / 2, tl[1] - 28, 6.5, SELECT_BLUE)
             p.circle(tl[0] + w / 2, tl[1] - 28, 5, 0xFFFFFFFF)

@@ -241,7 +241,35 @@ def lines_breaks() raises:
             assert_true(at == k, "line of " + String(l.para) + ":" + String(byte) + " is " + String(at) + " not " + String(k))
 
 
+def handles() raises:
+    var b = Board()
+    var r = b.l.add_rect(200, 200, 100, 60, 0xFF0000FF)
+    b.tool("select")
+    b.click(250, 230)
+    _ = b.paint()
+    assert_equal(len(b.t.handles), 15)
+    b.t.changed = False
+    b.drag(300, 260, 360, 300)  # the bottom right corner
+    var q = b.l.index(r)
+    assert_true(abs(b.l.objs[q].w - 160) < 0.01 and abs(b.l.objs[q].h - 100) < 0.01 and b.l.objs[q].x == 200 and b.t.changed, "resized from its other corner")
+    _ = b.paint()
+    b.drag(200, 200, 220, 210)
+    assert_true(abs(b.l.objs[q].x - 220) < 0.01 and abs(b.l.objs[q].w - 140) < 0.01, "and from the top left")
+    _ = b.key("z", 2)
+    _ = b.key("z", 2)
+    assert_true(b.l.objs[q].w == 100 and b.l.objs[q].h == 60, "a step each")
+    _ = b.paint()
+    b.drag(250, 200 - 28, 250 + 200, 230)  # the knob, to the right
+    assert_true(abs(b.l.objs[q].rot - 1.5707963) < 0.01, "turned: " + String(b.l.objs[q].rot))
+    _ = b.key("z", 2)
+    b.t.changed = False
+    _ = b.paint()
+    b.click(300, 260)  # a click on a handle moves nothing
+    assert_true(b.l.objs[q].w == 100 and not b.t.changed, "nothing")
+
+
 def main() raises:
+    handles()
     selection()
     making()
     erasing()

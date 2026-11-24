@@ -9,7 +9,7 @@ from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string
 from mojoui.skin import Skin, mix, with_alpha
-from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, pn_actions
+from pnlook import pn_warm_styles, pn_names, pn_panel, pn_skin_cards, skin_named, canvas_dock_items, canvas_more_items, ink_colors, pn_actions
 from mojoui.notesshell import (
     Boxes, NotesPanel, PanelNote, PanelNotebook, draw_desk, draw_round_button, draw_title_island, draw_shadows, text_normal,
 )
@@ -42,7 +42,7 @@ from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
 from mojoui.graphemes import typed_text
 from mojoui.files import private_dir, private_write, file_exists
-from mojoui.notesshell import draw_problem, draw_pill_button, draw_toast, PropsCard, PropsRow
+from mojoui.notesshell import draw_problem, draw_pill_button, draw_dock_flyout, draw_ink_options, draw_toast, PropsCard, PropsRow
 from mojoui.libc import unlink
 from mojoui.docstore import OpenDoc, SaveOutbox, Unsaved
 from mojoui.canvasload import text_hash
@@ -326,6 +326,8 @@ struct WebShell(Movable):
     var gone_at: Int
     var props_open: Bool
     var props: PropsCard
+    var flyout: Bool  # the canvas dock's more tools, or its colours and widths, are open
+    var ink_options: Bool
     var known_seq: Int  # the notes file's change feed, as last seen (-1: not yet)
     var clip: String  # what was copied last, and how many times something was
     var clip_version: Int
@@ -418,6 +420,8 @@ struct WebShell(Movable):
         self.bench_note = -1
         self.doubled_us = -1_000_000
         self.known_seq = -1
+        self.flyout = False
+        self.ink_options = False
         self.clip = ""
         self.clip_version = 0
         self.words_clips = 0
@@ -874,13 +878,26 @@ struct WebShell(Movable):
                 self.boxes.add("#paper", left, 0, w - left, h)
                 self.boxes.add("#leafer-host", left, 0, w - left, h)
                 self.boxes.add("#note-input", left, 0, w - left, h)
-                var items = canvas_dock_items(hexc("#20201e"))
+                var items = canvas_dock_items(self.tools.pen_color)
                 var active = self.dock_name()
                 if active == "#dock-more":  # (a tool from the flyout shows in its place)
                     items[8].icon = "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9"
                 draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, active, k, self.sk, "#dock-canvas")
                 if len(self.board.layer.selected) > 0 and self.tools.editing == -1:
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
+                var dock_y = 72 + (h - 144 - dock_height(items)) / 2
+                if self.flyout:
+                    draw_dock_flyout(p, self.boxes, w - 72 - 18, dock_y + dock_height(items) - 190, canvas_more_items(), active if self.tools.tool != "highlight" else String("[Highlighter]"), k, self.sk)
+                elif self.ink_options:
+                    var pen = self.tools.tool == "pen"
+                    var marker = self.tools.tool == "highlight"
+                    var widths = List[Float64]()
+                    if pen:
+                        widths = [1.0, 3.0, 6.0, 10.0]
+                    elif marker:
+                        widths = [10.0, 20.0, 32.0, 48.0]
+                    draw_ink_options(p, self.boxes, w - 72 - 18, dock_y + 150, "Colors" if len(widths) == 0 else "Colors and widths", ink_colors(), self.tools.pen_color, widths,
+                                     self.tools.pen_width if pen else self.tools.marker_width, self.sk)
                 draw_history_island(p, self.boxes, left + 16, h - 16 - 48, k, self.sk)
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk)
             if n.kind == "page" and not n.secure and not self.doc.is_failed():
@@ -2003,7 +2020,7 @@ struct WebShell(Movable):
         """The pointer went down (a drag may follow)."""
         self.title_focus = False  # (a click moves the focus: the ring goes)
         if self.on_canvas():
-            if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button"]) != "":
+            if self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button", "#dock-flyout", "#ink-options-popover"]) != "":
                 return False  # (the chrome: nothing of the board read, an open keeps coming in)
             if self.tools.tool == "hand":  # (the hand only moves the view)
                 return self.tools.press(x, y, self.board.layer, self.view)
@@ -2151,6 +2168,33 @@ struct WebShell(Movable):
         var hit = self.boxes.hit_any(x, y, ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]", "#undo", "#redo",
                                             "#zoom-in", "#zoom-out", "#zoom-fit", "#zoom-value", "#dock-more", "#ink-options-trigger", "#voice-button",
                                             "#selection-bar", "[Canvas tools]", "#history-island", "#zoom-control"])
+        var more = self.boxes.hit_any(x, y, ["[Hand]", "[Highlighter]", "[Connect]", "ink-color:", "ink-width:", "#dock-flyout", "#ink-options-popover"])
+        if more != "":
+            if more == "[Hand]" or more == "[Highlighter]" or more == "[Connect]":
+                self.tools.set_tool("hand" if more == "[Hand]" else ("highlight" if more == "[Highlighter]" else "connect"), self.board.layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
+                self.flyout = False
+            elif more.startswith("ink-color:") or more.startswith("ink-width:"):
+                try:
+                    var n = Int(String(more[byte=10:]))
+                    if more.startswith("ink-color:"):
+                        var c = ink_colors()[n]
+                        self.tools.pen_color = c
+                        self.tools.text_color = c
+                        self.tools.line_color = c
+                        self.tools.marker_color = (c & 0xFFFFFF) | 0x55000000
+                    elif self.tools.tool == "highlight":
+                        self.tools.marker_width = [10.0, 20.0, 32.0, 48.0][n]
+                    else:
+                        self.tools.pen_width = [1.0, 3.0, 6.0, 10.0][n]
+                except:
+                    pass
+            return True
+        if hit == "#dock-more" or hit == "#ink-options-trigger":
+            self.flyout = not self.flyout if hit == "#dock-more" else False
+            self.ink_options = not self.ink_options if hit == "#ink-options-trigger" else False
+            return True
+        self.flyout = False
+        self.ink_options = False
         if hit.startswith("#selection-bar"):
             if not self.editable():
                 return False

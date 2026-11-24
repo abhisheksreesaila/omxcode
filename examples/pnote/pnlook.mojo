@@ -45,6 +45,10 @@ def pn_names(mut b: Boxes):
     b.alias("panel.row:", "row:{}")
     b.alias("panel.group-icon:", "[Icon and colour of {}]")
     b.alias("panel.group-row:", ".nav-row:{}")
+    b.alias("flyout", "#dock-flyout")
+    b.alias("ink-options", "#ink-options-popover")
+    b.alias("ink-color:", "ink-color:")
+    b.alias("ink-width:", "ink-width:")
     b.alias("dock", "[Canvas tools]")
     b.alias("dock.divider", ".dock-divider")
     b.alias("dock.tool:", "[{}]")
@@ -186,6 +190,23 @@ def canvas_dock_items(ink: UInt32) -> List[DockItem]:
     out.append(DockItem("#dock-more", "plus", DOCK_TOOL, 0))
     out.append(DockItem("#voice-divider", "", DOCK_DIVIDER, 0))
     out.append(DockItem("#voice-button", "rect x=9 y=3 width=6 height=11 rx=3|path d=M5.5 11a6.5 6.5 0 0013 0M12 17.5V21", DOCK_ACCENT, 0))
+    return out^
+
+
+def canvas_more_items() -> List[DockItem]:
+    """The dock's + : the tools it keeps out of sight."""
+    var out = List[DockItem]()
+    out.append(DockItem("[Hand]", "hand", DOCK_TOOL, 0))
+    out.append(DockItem("[Highlighter]", "path d=M9 15l-3 5h6l1-2|path d=M9 15l8-11 4 3-8 11z", DOCK_TOOL, 0))
+    out.append(DockItem("[Connect]", "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9", DOCK_TOOL, 0))
+    return out^
+
+
+def ink_colors() -> List[UInt32]:
+    """main.js INK_COLORS."""
+    var out = List[UInt32]()
+    for c in ["#20201e", "#5f6368", "#d14b3f", "#e56b5d", "#df8437", "#d0a12e", "#3a7d5a", "#4f9c78", "#1c70a8", "#2d91a8", "#76669a", "#b45f8c"]:
+        out.append(hexc(String(c)))
     return out^
 
 

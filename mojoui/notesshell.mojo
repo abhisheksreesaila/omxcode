@@ -959,6 +959,48 @@ def draw_dock[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, items
             by += 2
 
 
+def draw_dock_flyout[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, items: List[DockItem], active: String, k: Float64, sk: Skin):
+    """More tools beside a dock: its 44 px buttons in a row, the row's right end at `right` (the web's .dock-flyout)."""
+    var w = Float64(len(items)) * 46 - 2 + 14
+    var x = right - w
+    draw_lifted(p, x, y, w, 58, sk.radius, sk.shadow2, sk.panel)
+    bx.add("flyout", x, y, w, 58)
+    for i in range(len(items)):
+        var bxx = x + 7 + Float64(i) * 46
+        if items[i].name == active:
+            p.circle(bxx + 22, y + 29, 22, sk.ink)
+        draw_icon(p, items[i].icon, bxx + 12, y + 19, 20, k, sk.panel if items[i].name == active else sk.ink_soft, 1.7)
+        bx.add(items[i].name, bxx, y + 7, 44, 44)
+
+
+def draw_ink_options[P: Painter](mut p: P, mut bx: Boxes, right: Float64, y: Float64, title: String, colors: List[UInt32], active: UInt32, widths: List[Float64], width: Float64, sk: Skin):
+    """Colours (six across) and stroke widths beside a dock. Boxes: "ink-options", "ink-color:<i>", "ink-width:<i>"."""
+    var rows = Float64((len(colors) + 5) // 6)
+    var w = 266.0
+    var h = 12 + 26 + 8 + rows * 40 + (48.0 if len(widths) > 0 else 0.0) + 8
+    var x = right - w
+    draw_lifted(p, x, y, w, h, 14, sk.shadow2, sk.panel)
+    bx.add("ink-options", x, y, w, h)
+    var tst = TextStyle(UI, 600, False, 12)
+    text_at(p, tst, title, x + 14, y + 12, 26, sk.ui_muted)
+    for i in range(len(colors)):
+        var cx = x + 14 + 20 + Float64(i % 6) * 40 - 1
+        var cy = y + 46 + 18 + Float64(i // 6) * 40
+        if colors[i] == active:
+            p.circle(cx, cy, 16, sk.ink)
+            p.circle(cx, cy, 14, sk.panel)
+        p.circle(cx, cy, 12, colors[i])
+        bx.add("ink-color:" + String(i), cx - 18, cy - 18, 36, 36)
+    var wy = y + 46 + rows * 40
+    for i in range(len(widths)):
+        var bxx = x + 12 + Float64(i) * 61
+        if widths[i] == width:
+            p.rect(bxx, wy, 58, 40, sk.hover, 10)
+        var t = min(widths[i], 20.0)
+        p.rect(bxx + 12, wy + 20 - t / 2, 34, t, sk.ink, t / 2)
+        bx.add("ink-width:" + String(i), bxx, wy, 58, 40)
+
+
 def draw_history_island[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, k: Float64, sk: Skin):
     """Undo and redo in a pill (the web's .history-island: 48 tall, padded 0 6, 44 px buttons 2 apart)."""
     draw_lifted(p, x, y, 104, 48, 24, sk.shadow2, sk.panel)
