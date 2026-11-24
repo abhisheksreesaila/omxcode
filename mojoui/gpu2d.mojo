@@ -552,6 +552,28 @@ def _glyphs(mut out: List[Float32], face: Face, ox: Int, oy: Int, text: String, 
         pen += g.advance * s
 
 
+def opening_fill(f: Frame2D, li: Int, tx: Float64, ty: Float64, tk: Float64, w: Int, h: Int) -> Int:
+    """(goal 80) The quad that fills the whole w × h canvas before anything else in layer li (a Scene's opening fill, at the
+    layer's transform this frame): its index in f.quads, or -1. A backend clears to its colour instead of drawing it."""
+    if li >= len(f.layers) or f.layers[li].runs == 0:
+        return -1
+    var run = f.runs[f.layers[li].first_run]
+    if run.pipe != PIPE_QUAD or run.blend != BLEND_REPLACE or run.count <= 0:
+        return -1
+    var q = run.first * QUAD_FLOATS
+    if Int(f.quads[q + 5]) != SHAPE_BOX or f.quads[q + 4] != 0 or f.quads[q + 6] != 0:
+        return -1
+    if f.quads[q + 12] > -NO_CLIP / 2 or f.quads[q + 13] > -NO_CLIP / 2 or f.quads[q + 14] < NO_CLIP / 2 or f.quads[q + 15] < NO_CLIP / 2:
+        return -1
+    var x0 = Float64(f.quads[q]) * tk + tx
+    var y0 = Float64(f.quads[q + 1]) * tk + ty
+    var x1 = x0 + Float64(f.quads[q + 2]) * tk
+    var y1 = y0 + Float64(f.quads[q + 3]) * tk
+    if x0 > 0.01 or y0 > 0.01 or x1 < Float64(w) - 0.01 or y1 < Float64(h) - 0.01:
+        return -1
+    return run.first
+
+
 def build_batches(scene: Scene, atlas: GlyphAtlas, font: Font, cull: Bool = True) -> Frame2D:
     """The scene as GPU work (see the top of this file)."""
     var f = Frame2D()

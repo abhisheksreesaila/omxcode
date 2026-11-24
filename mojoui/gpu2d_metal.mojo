@@ -33,7 +33,7 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from std.os import getenv
 from mojoui.scene import Scene, OP_TEXT, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
-from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS
+from mojoui.gpu2d import layer_traits, GlyphAtlas, Frame2D, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_POLY, POLY_FLOATS, BLEND_REPLACE, BLEND_OVER, glyph_pages, DYN_ROWS, opening_fill
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_tiles import Tiles, TilePlan, TileDraw, TILE, TILE_TEX, TILE_MIN_OPS, _pack
 from mojoui.viewsnap import snap_read, set_renderer_id, fnv, rle_decode, snapshots_expected
@@ -223,8 +223,10 @@ vertex VOut glyph_v(uint vid [[vertex_id]], uint iid [[instance_id]], device con
     float base = d[13] * u.k + u.t.y;
     float lean_top = slant * (base - top);
     float lean_bottom = slant * (base - top - gh * sc);
-    float x0 = left + min(lean_bottom, 0.0) - 2.0, x1 = left + gw * sc + max(lean_top, 0.0) + 2.0;
-    float y0 = top - 2.0, y1 = top + gh * sc + 2.0;
+    // (goal 80: a sample lies within a quarter pixel of the pixel's centre, so no pixel further than that from the box is
+    // covered: half a pixel of room, not two, which on small text was half again the pixels)
+    float x0 = left + min(lean_bottom, 0.0) - 0.5, x1 = left + gw * sc + max(lean_top, 0.0) + 0.5;
+    float y0 = top - 0.5, y1 = top + gh * sc + 0.5;
     float2 c = corner(vid);
     VOut o;
     o.pos = ndc(float2(mix(x0, x1, c.x), mix(y0, y1, c.y)), u);
@@ -241,7 +243,9 @@ inline float bilinear(texture2d<float, access::read> a, float x, float y) {
     float fx0 = floor(x - 0.5), fy0 = floor(y - 0.5);
     int x0 = int(fx0), y0 = int(fy0);
     float fx = x - 0.5 - fx0, fy = y - 0.5 - fy0;
-    float p = texel(a, x0, y0), q = texel(a, x0 + 1, y0), r = texel(a, x0, y0 + 1), s = texel(a, x0 + 1, y0 + 1);
+    float p = texel(a, x0, y0);
+    if (fx < 0.0005 && fy < 0.0005) return p;  // (goal 80: text at its own size, on whole pixels: one read, not four)
+    float q = texel(a, x0 + 1, y0), r = texel(a, x0, y0 + 1), s = texel(a, x0 + 1, y0 + 1);
     return (p * (1.0 - fx) + q * fx) * (1.0 - fy) + (r * (1.0 - fx) + s * fx) * fy;
 }
 
@@ -568,6 +572,8 @@ struct Metal2D(Movable):
     var slept_ms: Float64  # how long this thread has slept waiting for the GPU (drain, complete_oldest) so far
     var wait_log: List[Float64]  # each sleep over 0.05 ms, 4 numbers: 0 complete / 1 drain, slept, commit → start, GPU ms
     var done_block: Int  # the completed handler each frame committed without waiting gets (notify), 0: none
+    var skip_fill: Bool  # (goal 80) this pass cleared to the opening fill's colour: _draw_layer leaves that quad out, once
+    var opening: List[Float64]  # the colour the pass clears to
     var drawn_groups: Int  # polygon groups drawn (on the canvas) since the last pass began
     # classes and selectors of the per-frame calls
     var c_rpd: Int
@@ -645,6 +651,8 @@ struct Metal2D(Movable):
         self.frames = 0
         self.gpu_ms = 0
         self.drawn_groups = 0
+        self.skip_fill = False
+        self.opening = [0.0, 0.0, 0.0, 0.0]
         self.wake_buf = 0
         self.last_commit_ns = 0
         self.woken = 0
@@ -882,6 +890,10 @@ struct Metal2D(Movable):
         plan_polys(frame, self.whole_plan)
         upload_frame(self.device, self.f, self.s_contents, self.memcpy, frame, self.whole)
         upload_plan(self.device, self.f, self.s_contents, self.memcpy, self.whole_plan, self.whole)
+        if len(frame.layers) > 0:
+            self._open_with(frame, 0, frame.layers[0].dx, frame.layers[0].dy, frame.layers[0].k, w, h)
+        else:
+            self._open_with(frame, 0, 0, 0, 1, w, h)
         var pool = pool_push()
         var cb = 0
         var enc = self._begin_pass(tex, w, h, cb)
@@ -910,6 +922,15 @@ struct Metal2D(Movable):
         var tex = _send(self.f, drawable, self.s_texture) if drawable != 0 else self.target_for(io, w, h)
         if tex == 0 or not self._acc_target(w, h):
             return False
+        self.skip_fill = False
+        self.opening = [0.0, 0.0, 0.0, 0.0]
+        for i in range(n):  # (the first thing drawn: kept tiles have no fill)
+            if i < len(tiled) and tiled[i]:
+                break
+            if len(layers[i].frame.runs) > 0:
+                if len(layers[i].frame.layers) == 1:
+                    self._open_with(layers[i].frame, 0, layers[i].dx, layers[i].dy, layers[i].k, w, h)
+                break
         var pool = pool_push()
         var cb = 0
         var enc = self._begin_pass(tex, w, h, cb)
@@ -928,6 +949,15 @@ struct Metal2D(Movable):
                 self._draw_layer(enc, L.frame, L.plan, li, L.dx, L.dy, L.k)
         return self._finish(pool, cb, enc, drawable, wait)
 
+    def _open_with(mut self, frame: Frame2D, li: Int, tx: Float64, ty: Float64, tk: Float64, w: Int, h: Int):
+        """(goal 80) The pass about to begin clears to the opening fill of frame's layer li (gpu2d.opening_fill) and leaves
+        its quad out; no such fill: to nothing, as before. On a tile-based GPU the clear is nearly free; the quad shaded
+        every pixel (the M4: 0.1 ms of a 0.2 ms text frame at 1800×1280)."""
+        var i = opening_fill(frame, li, tx, ty, tk, w, h)
+        self.skip_fill = i >= 0
+        for c in range(4):
+            self.opening[c] = Float64(frame.quads[i * 16 + 8 + c]) if i >= 0 else 0.0
+
     def _begin_pass(mut self, tex: Int, w: Int, h: Int, mut cb: Int) -> Int:
         """One render pass: the picture (`tex`) cleared and stored, the accumulator cleared (and never stored); its encoder."""
         var f = self.f
@@ -937,7 +967,7 @@ struct Metal2D(Movable):
         _send[NoneType](f, ca, self.s_set_texture, tex)
         _send[NoneType](f, ca, self.s_set_load, 2)  # Clear
         _send[NoneType](f, ca, self.s_set_store, 1)  # Store
-        _send[NoneType](f, ca, self.s_set_clear_color, Float64(0), Float64(0), Float64(0), Float64(0))  # (four doubles: d0–d3)
+        _send[NoneType](f, ca, self.s_set_clear_color, self.opening[0], self.opening[1], self.opening[2], self.opening[3])  # (four doubles: d0–d3)
         var cacc = _send(f, cas, self.s_at_index, 1)
         _send[NoneType](f, cacc, self.s_set_texture, self.acc)
         _send[NoneType](f, cacc, self.s_set_load, 2)  # Clear (to 0)
@@ -1224,6 +1254,14 @@ struct Metal2D(Movable):
                     self._use(enc, self.p_t_cover if self.tile_mode else self.p_cover)
                     _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, plan.groups[b + 3], plan.groups[b + 2])
                 continue
+            var first = run.first
+            var count = run.count
+            if self.skip_fill and not self.tile_mode and ri == layer.first_run:  # (the pass cleared to it)
+                self.skip_fill = False
+                first += 1
+                count -= 1
+                if count == 0:
+                    continue
             var pipe: Int
             if run.pipe == PIPE_QUAD:
                 pipe = self.p_quad_replace if run.blend == BLEND_REPLACE else (self.p_t_quad_over if self.tile_mode else self.p_quad_over)
@@ -1232,7 +1270,7 @@ struct Metal2D(Movable):
             else:
                 pipe = (self.p_t_image_over if self.tile_mode else self.p_image_over) if run.blend == BLEND_OVER else self.p_image
             self._use(enc, pipe)
-            _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, run.count, run.first)
+            _send[NoneType](f, enc, self.s_draw_inst, PRIM_STRIP, 0, 4, count, first)
         _ = len(self.uniform)
 
     def sync_pages(mut self):

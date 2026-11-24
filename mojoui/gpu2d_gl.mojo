@@ -43,7 +43,7 @@ from mojoui.present import fcall, dl_open, dl_sym, c_text
 from mojoui.text import Font
 from mojoui.scene import Scene, OP_TEXT, OP_RUN, OP_FILL, OP_IMAGE, OP_CLIP, OP_UNCLIP
 from mojoui.gpu2d import (glyph_pages, DYN_ROWS, layer_traits, Frame2D, GlyphAtlas, fill_batches, fill_layers, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
-                          IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP)
+                          IMAGE_FLOATS, POLY_FLOATS, BLEND_OVER, BLEND_REPLACE, NO_CLIP, opening_fill)
 from mojoui.gpu2d_merge import merge_runs, append_frame
 from mojoui.gpu2d_dmabuf import DmabufExport
 from mojoui.gpu2d_tiles import TILE_MIN_OPS, Tiles, TilePlan, TileDraw, TileRead, TILE, TILE_TEX, _pack
@@ -794,6 +794,8 @@ struct GL2D(Movable):
     var pages_version: Int  # the GlyphPages version last uploaded into the atlas's dynamic rows (goal 79)
     var img_tex: List[Int]
     var img_hash: List[UInt64]  # (goal 80) each image texture's pixels' hash: unchanged pixels aren't sent again
+    var skip_fill: Bool  # (goal 80) this frame cleared to the opening fill's colour: layer() leaves that quad out, once
+    var opening: List[Float32]  # the colour begin() clears to
     var tex_uploads: Int  # (goal 80, always on) texture uploads, the bytes they sent, buffer stores (re)allocated and
     var tex_upload_bytes: Int  # render targets allocated, since the context started: a frame's waste is the difference
     var buf_allocs: Int  # (tests/test_gpu2d_waste)
@@ -913,6 +915,8 @@ struct GL2D(Movable):
         self.atlas_dyn = 0
         self.img_tex = List[Int]()
         self.img_hash = List[UInt64]()
+        self.skip_fill = False
+        self.opening = [0.0, 0.0, 0.0, 0.0]
         self.tex_uploads = 0
         self.tex_upload_bytes = 0
         self.buf_allocs = 0
@@ -1607,10 +1611,21 @@ struct GL2D(Movable):
         transparent black first. Leaves the context's state at GL's defaults for what it touched (no program, vertex
         array, framebuffer, blend, stencil or scissor). (begin + layer + end, with everything uploaded.)"""
         self.sync_pages()
+        self.open_with(frame, 0, w, h)
         if not self.begin(tex, w, h):
             return False
         self.layer(frame, 0, True)
         return self.end(tex, w, h)
+
+    def open_with(mut self, frame: Frame2D, li: Int, w: Int, h: Int):
+        """(goal 80) The frame about to begin clears to the opening fill of `frame`'s layer li, the first thing drawn
+        (gpu2d.opening_fill), and leaves its quad out; no such fill: to transparent black."""
+        var i = -1
+        if li >= 0 and li < len(frame.layers):
+            i = opening_fill(frame, li, frame.layers[li].dx, frame.layers[li].dy, frame.layers[li].k, w, h)
+        self.skip_fill = i >= 0
+        for c in range(4):
+            self.opening[c] = frame.quads[i * QUAD_FLOATS + 8 + c] if i >= 0 else 0
 
     def begin(mut self, tex: Int, w: Int, h: Int) -> Bool:
         """Starts a frame into tex (w × h): the target bound and cleared. Then layer() for each cached layer, then end()."""
@@ -1655,7 +1670,7 @@ struct GL2D(Movable):
         fcall[NoneType](self.f(F_DISABLE), c_uint(GL_DITHER))
         fcall[NoneType](self.f(F_COLOR_MASK), UInt8(1), UInt8(1), UInt8(1), UInt8(1))
         fcall[NoneType](self.f(F_STENCIL_MASK), c_uint(0xFF))
-        fcall[NoneType](self.f(F_CLEAR_COLOR), Float32(0), Float32(0), Float32(0), Float32(0))
+        fcall[NoneType](self.f(F_CLEAR_COLOR), self.opening[0], self.opening[1], self.opening[2], self.opening[3])
         fcall[NoneType](self.f(F_CLEAR_STENCIL), c_int(0))
         fcall[NoneType](self.f(F_CLEAR), c_uint(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
         fcall[NoneType](self.f(F_BLEND_FUNC_SEPARATE), c_uint(GL_SRC_ALPHA), c_uint(GL_ONE_MINUS_SRC_ALPHA), c_uint(GL_ZERO), c_uint(GL_ONE))
@@ -1687,6 +1702,12 @@ struct GL2D(Movable):
                 var run = frame.runs[ri]
                 if run.count <= 0:
                     continue
+                if self.skip_fill and ri == layer.first_run and run.pipe == PIPE_QUAD:  # (the frame cleared to it)
+                    self.skip_fill = False
+                    run.first += 1
+                    run.count -= 1
+                    if run.count == 0:
+                        continue
                 if run.blend != self.cur_blend:
                     self.cur_blend = run.blend
                     fcall[NoneType](self.f(F_ENABLE if run.blend == BLEND_OVER else F_DISABLE), c_uint(GL_BLEND))
@@ -2970,6 +2991,10 @@ struct GPU2D(Movable):
         var tq0 = perf_counter_ns()
         self.gl.sync_pages()
         var tq1 = perf_counter_ns()
+        if n > 0 and not tiled[0] and len(self.frames[0].layers) == 1:
+            self.gl.open_with(self.frames[0], 0, w, h)
+        else:
+            self.gl.open_with(Frame2D(), -1, w, h)
         if not self.gl.begin(self.gl.tex[slot], w, h):
             self.gl.ok = False
             self.built = 0

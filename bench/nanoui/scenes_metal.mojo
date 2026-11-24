@@ -12,6 +12,7 @@ from mojoui.gpu2d import GlyphAtlas, Frame2D, fill_batches
 from mojoui.gpu2d_merge import merge_runs
 from mojoui.gpu2d_metal import Metal2D, read_iosurface
 from mojoui.hosts.apple_canvas import io_surface
+from mojoui.hosts.objc import msg, cls
 from mojoui.png import encode_png
 from bench.nanoui.scenes import build, Held, PW, PH, WARMUP, FRAMES, REPEAT, median, p95, r3
 
@@ -29,7 +30,16 @@ def main() raises:
     if not mtl.ok:
         raise Error("no Metal: " + mtl.why)
     var held = Held(font)
-    var io = io_surface(PW, PH)
+    # drawn into a private (GPU-only) texture, as the rival's harness does (its newTarget); a window's is an IOSurface
+    var io = 1
+    if getenv("HC_TARGET") != "iosurface":
+        var td = msg(cls("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", 80, PW, PH, 0)
+        _ = msg(td, "setUsage:", 5)
+        _ = msg(td, "setStorageMode:", 2)  # Private
+        mtl.targets.append(io)
+        mtl.target_tex.append(msg(mtl.device, "newTextureWithDescriptor:", td))
+    else:
+        io = io_surface(PW, PH)
     for n in names:
         var best = List[Float64]()
         var ops = 0
@@ -69,6 +79,13 @@ def main() raises:
               + ', "gpu_p95": ' + r3(best[3]) + ', "instances": ' + String(ops) + "}", flush=True)
         var shot = getenv("HC_SHOT")
         if shot != "":
-            var px = read_iosurface(io, PW, PH)
+            var see = io_surface(PW, PH)
+            var b2 = Frame2D()
+            var f2 = Frame2D()
+            var last = build(n, WARMUP + FRAMES - 1, held, font)
+            fill_batches(b2, last, atlas, font)
+            merge_runs(b2, f2)
+            _ = mtl.render(f2, see, PW, PH)
+            var px = read_iosurface(see, PW, PH)
             with open(shot + "/omx-metal-" + n + ".png", "w") as fh:
                 fh.write_bytes(encode_png(px, PW, PH))

@@ -5,6 +5,7 @@
 # environment is another checkout's, used read-only (MAC_ENV_DIR). MAC_SSH (user@host), MAC_SSH_KEY.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [ -z "${OMX_MAC_LOCKED:-}" ]; then exec env OMX_MAC_LOCKED=1 flock -w 5400 "$HOME/.cache/omx-mac.lock" "$0" "$@"; fi  # (the Mac is shared: one batch at a time)
 host=${MAC_SSH:?set MAC_SSH=user@host}; key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}; envd=${MAC_ENV_DIR:-omxcode-g54}
 ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=15 "$host")
 tar -czf build/g80/mac-src.tar.gz --exclude=__pycache__ mojoui themes vendor fonts tests bench

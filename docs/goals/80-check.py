@@ -39,6 +39,7 @@ HELD = ["whiteboard", "canvas", "mindmap", "document", "table"]
 
 # ---- the bars, from GOAL.md ----
 SPEEDUP_MIN = 4.0     # M5: median threaded speed-up over the race scenes
+TIE_MAX = 1.03        # M6, M7: a race cell vs the rival's (the owner, 2026-11-23: "3% is good enough", D-8025; was 1.0)
 HELD_MAX = 1.05       # M6: each held-out scene's frame CPU and GPU medians vs its baseline
 RIVAL_WORDS = r"nanoui|hillclimb|boxes|dashboard"  # M6: may not appear more often in mojoui/ than at BASE_REV
 
@@ -345,8 +346,8 @@ def m6():
     lost = []
     for s in RACE:
         for k in ("frame_med", "frame_p95", "gpu_med", "gpu_p95", "raster_med"):
-            if o[s][k] > n[s][k]:
-                lost.append(f"{s} {k} {o[s][k]} > {n[s][k]}")
+            if o[s][k] > n[s][k] * TIE_MAX:
+                lost.append(f"{s} {k} {o[s][k]} > {TIE_MAX}× {n[s][k]}")
     base = json.loads((DOCS / "baseline.json").read_text())["scenes"]
     for s in HELD:
         for k in ("frame_med", "gpu_med"):
@@ -382,14 +383,18 @@ def m7():
     if r.returncode != 0:
         return "FAIL", "mac race: " + tail(r.stdout + r.stderr, 400)
     nan, omx = {}, {}
-    for line in r.stdout.splitlines():
-        if line.startswith("NANOUI RESULT "):
-            d = json.loads(line[14:]); nan[d["scene"]] = d
-        if line.startswith("OMX RESULT "):
-            d = json.loads(line[11:]); omx[d["scene"]] = d
+    for line in r.stdout.splitlines():  # ("k NANOUI RESULT {…}": run k; each side's lowest of each metric, as M6)
+        for side, tag in ((nan, "NANOUI RESULT "), (omx, "OMX RESULT ")):
+            i = line.find(tag)
+            if i >= 0:
+                d = json.loads(line[i + len(tag):])
+                have = side.setdefault(d["scene"], d)
+                for k in d:
+                    if k != "scene":
+                        have[k] = min(have[k], d[k])
     if any(s not in nan or s not in omx for s in RACE):
         return "FAIL", "mac race lacks scenes: " + tail(r.stdout, 300)
-    lost = [f"{s} {k} {omx[s][k]} > {nan[s][k]}" for s in RACE for k in ("frame_med", "frame_p95", "gpu_med", "gpu_p95") if omx[s][k] > nan[s][k]]
+    lost = [f"{s} {k} {omx[s][k]} > {nan[s][k]}" for s in RACE for k in ("frame_med", "frame_p95", "gpu_med", "gpu_p95") if omx[s][k] > nan[s][k] * TIE_MAX]
     if "gpu2d metal: ok" not in r.stdout or "metal shadow: ok" not in r.stdout:
         lost.append("test_gpu2d_metal (with the shadow cases) did not pass on the M4")
     if lost:
