@@ -606,8 +606,11 @@ struct WebShell(Movable):
         self.doc.begin(id)
         self.current = id
         self.panel.active = id
+        var folds = len(self.panel.open_books)
         self.panel.reveal(id)  # (its row where it can be seen: the web's revealNotebook)
         self.panel.select_book(self.notes[i].notebook if i >= 0 else 0)
+        if len(self.panel.open_books) != folds:
+            self.remember_folds()
         self.save_state = ""
         self.save_detail = ""
         self.look.keep_path = ""  # (D-7956: the note's own file below, a canvas only)
@@ -1289,6 +1292,7 @@ struct WebShell(Movable):
             self.set_sidebar(True)
             self.panel.reveal_book(id)
             self.panel.select_book(id)
+            self.remember_folds()
         elif kind == 3:
             self.create("canvas", String(self.omni.query.strip()), self.panel.selected)
         else:
@@ -1550,6 +1554,7 @@ struct WebShell(Movable):
             return
         self.panel.notebooks.insert(0, PanelNotebook(made.id, name, hexc("#B86B4B"), shelf, notebook_icon(name), 0))
         self.panel.select_book(made.id)
+        self.remember_folds()
 
     def move_note(mut self, notebook: Int):
         """The open note filed into a notebook (0: the Inbox)."""
@@ -1575,6 +1580,7 @@ struct WebShell(Movable):
         self.notes.insert(0, rec^)
         self.list_notes()
         self.panel.select_book(notebook)
+        self.remember_folds()
 
     def file_at(mut self, id: Int, notebook: Int):
         """A note dragged onto a notebook (0: the Inbox)."""

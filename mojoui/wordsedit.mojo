@@ -107,7 +107,18 @@ struct WordsEdit(Movable):
         if not self.centered:
             return 0
         var l = self.lines[k]
-        return (self.width - measure(self.style, String(self.ed.paras[l.para][byte=l.start:l.end]))) / 2
+        return max(0.0, (self.width - measure(self.style, String(self.ed.paras[l.para][byte=l.start:l.end]))) / 2)  # (a line too long starts at the left)
+
+    def follow(mut self, scroll: Float64, row: Float64) -> Float64:
+        """How far sideways the box is scrolled (px of its own) so the caret shows, starting from `scroll`."""
+        var wide = 0.0
+        self.lay()
+        for k in range(len(self.lines)):
+            var l = self.lines[k]
+            wide = max(wide, measure(self.style, String(self.ed.paras[l.para][byte=l.start:l.end])) + 2)
+        var c = self.caret_at(row)[0]
+        var s = min(max(scroll, c + 2 - self.width), c)
+        return min(max(s, 0.0), max(0.0, wide - self.width))
 
     def x_of(mut self, p: Pos, k: Int) -> Float64:
         var l = self.lines[k]

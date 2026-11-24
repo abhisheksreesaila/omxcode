@@ -533,6 +533,12 @@ def selected() raises:
     assert_true(s.panel.selected == b and b in s.panel.open_books, "a notebook just made")
     s.delete_book(b)
     assert_equal(s.panel.selected, 0, "and deleted")
+    s.panel.open_books = List[Int]()
+    s.remember_folds()
+    s.open(filed)
+    s.close()
+    var t = WebShell(DB, "paper")
+    assert_true(1 in t.panel.open_books, "a notebook opened by its note stays open after a restart")
 
 
 def place(s: WebShell, kind: Int, id: Int) raises -> Tuple[Float64, Float64]:

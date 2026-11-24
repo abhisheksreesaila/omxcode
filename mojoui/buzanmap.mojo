@@ -81,6 +81,7 @@ struct BuzanMap(Movable):
     var selected: Int
     var editing: Int  # the idea whose words are being written (-1: none)
     var pen: WordsEdit  # its words, in the box over it (the web's .mindmap-node-editor)
+    var pen_scroll: Float64  # how far the writing box is scrolled sideways (map units)
     var edit_text: String  # what it says now
     var edit_all: Bool  # its words are all selected (typing replaces them), as the web's editor opens
     var edit_caret: Tuple[Float64, Float64, Float64, Float64]  # where its caret was drawn (an input method's window), x -1: nowhere
@@ -103,6 +104,7 @@ struct BuzanMap(Movable):
         self.selected = 0
         self.editing = -1
         self.pen = WordsEdit()
+        self.pen_scroll = 0
         self.edit_text = ""
         self.edit_all = False
         self.edit_caret = (-1.0, 0.0, 0.0, 0.0)
@@ -314,6 +316,7 @@ struct BuzanMap(Movable):
         self.pen.wrap = False
         self.pen.begin(own, self.edit_style(i), b[2] - 20)
         self.pen.ed.select_all()
+        self.pen_scroll = 0
         self._edited()
 
     def _edited(mut self):
@@ -374,7 +377,7 @@ struct BuzanMap(Movable):
         var py = y - (v[2] + b[1] * v[0])
         self.pen.lay()
         var step = self.line_step(self.editing)
-        return ((px - 10) / v[0], (py - 2 - (bh - Float64(len(self.pen.lines)) * step * v[0]) / 2) / v[0], px >= 0 and py >= 0 and px <= bw and py <= bh)
+        return ((px - 10) / v[0] + self.pen_scroll, (py - 2 - (bh - Float64(len(self.pen.lines)) * step * v[0]) / 2) / v[0], px >= 0 and py >= 0 and px <= bw and py <= bh)
 
     def edit_press(mut self, x: Float64, y: Float64, w: Float64, h: Float64, extend: Bool, word: Bool) -> Bool:
         """Down in the box of the idea being written: the caret there, or the word (a double click). False: not in it."""
@@ -633,11 +636,13 @@ struct BuzanMap(Movable):
             var step = self.line_step(i)
             var top = ey0 + 2 + (eh - Float64(len(self.pen.lines)) * step * zoom) / 2
             var m = line_metrics(self.pen.style)
+            self.pen_scroll = self.pen.follow(self.pen_scroll, step)
+            var px0 = ex0 + 10 - self.pen_scroll * zoom
             p.push_clip(ex0 + 2, ey0 + 2, ew - 4, eh - 4)
-            self.pen.paint(p, ex0 + 10, top, step, (step - Float64(m.ascent + m.descent)) / 2 + Float64(m.ascent), zoom, LABEL, True)
+            self.pen.paint(p, px0, top, step, (step - Float64(m.ascent + m.descent)) / 2 + Float64(m.ascent), zoom, LABEL, True)
             p.pop_clip()
             var c = self.pen.caret_at(step)
-            self.edit_caret = (ex0 + 10 + c[0] * zoom, top + c[1] * zoom, 1.5, step * zoom)
+            self.edit_caret = (px0 + c[0] * zoom, top + c[1] * zoom, 1.5, step * zoom)
         p.pop_clip()
 
 

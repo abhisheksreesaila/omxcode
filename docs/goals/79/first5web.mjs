@@ -63,7 +63,7 @@ const word = await page.evaluate(() => { const w = document.createTreeWalker(doc
 console.log('     rects of "line":', JSON.stringify(await page.evaluate(() => { const w = document.createTreeWalker(document.querySelector('.cm-content'), NodeFilter.SHOW_TEXT); const out = []; while (w.nextNode()) if (/line [345] /.test(w.currentNode.data)) { const r = document.createRange(); r.setStart(w.currentNode, 0); r.setEnd(w.currentNode, 1); const b = r.getBoundingClientRect(); out.push([w.currentNode.data, b.top, b.height]) } return out })), 'paper', JSON.stringify(await page.evaluate(() => { const b = document.querySelector('.page-paper').getBoundingClientRect(); return [b.left, b.top] })), 'g', await page.evaluate(() => document.querySelector('.page-mark').getAttribute('transform')))
 check(mark && word && mark[0] < word[0] + 10 && mark[1] < word[1] + word[3] + 8 && mark[1] + mark[3] > word[1], `on its line: ${JSON.stringify(word)}`)
 const map = await of((x) => x.noteType === 'mindmap')
-check(map.content.nodes.map((x) => x.text).sort().join() === 'Ana,Central idea,People,Places é', 'the map')
+check(map.content.nodes.map((x) => x.text).sort().join() === 'Ana,People,Places é,The plan for the summer trip to Goa', 'the map')
 const canvas = await of((x) => x.noteType === 'canvas' && JSON.stringify(x.content).includes('sticky words'))
 check(JSON.stringify(canvas.content).includes('second é line'), 'the canvas')
 const found = await get('/search?q=tickets')

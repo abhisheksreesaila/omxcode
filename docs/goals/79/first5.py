@@ -236,6 +236,19 @@ def fresh():
     m = json.loads(rows("SELECT content FROM notes WHERE note_type = 'mindmap'")[0][0])
     check(sorted(n["text"] for n in m["nodes"]) == ["Ana", "Central idea", "People", "Places é"], f"the map saved: {[n['text'] for n in m['nodes']]}")
     shot(a, "34-map-fit")
+    # its words written in the box: the centre, a long one, the caret moved, a word picked with the pointer
+    x, y, w, h = a.boxes()["[Central idea]"]
+    a.click(x + w / 2, y + h / 2, n=2, wait=0.6)
+    shot(a, "34b-map-writing")
+    a.type("A plan for the summer trip to Goa")
+    a.key("Home", wait=0.1)
+    a.key("Delete", wait=0.1)
+    a.type("The")
+    shot(a, "34c-map-caret")
+    a.key("Enter", wait=1.0)
+    m = json.loads(rows("SELECT content FROM notes WHERE note_type = 'mindmap'")[0][0])
+    check(m["nodes"][0]["text"] == "The plan for the summer trip to Goa", f"the centre rewritten: {m['nodes'][0]['text']}")
+    shot(a, "34d-map-centre")
     # a new notebook, a row dragged on it
     b = a.boxes()
     sx, sy, sw, sh = b[".sec-head@2"]
