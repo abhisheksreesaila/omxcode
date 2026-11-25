@@ -2,8 +2,8 @@
 # Packages a built example as an app someone else can run (the owner checks them by hand).
 #   scripts/package.sh omxplorer linux   dist/omxplorer-linux-x86_64.tar.gz: the binary, its fonts, the Mojo runtime
 #                                        libraries it loads (found by RUNPATH at $ORIGIN/lib), an icon and install.sh
-#                                        (~/.local/share/omxplorer plus a launcher entry). Needs GTK 4 and, for the GPU
-#                                        path, NVIDIA's driver on the machine.
+#                                        (~/.local/lib/omxplorer plus a launcher entry; never a folder an app keeps a
+#                                        person's data in: review 6). Needs GTK 4 and, for the GPU path, NVIDIA's driver.
 #   scripts/package.sh omxplorer mac     dist/omxplorer-mac-arm64.zip: the AppKit app with its icon, ad-hoc signed again.
 # Any gallery app packages the same way (goal 53: every gallery card links its downloads): scripts/package.sh sketch linux.
 # Build first (scripts/build.sh <example> linux|mac); this only copies, patches and zips.
@@ -51,10 +51,13 @@ icon_png() {  # icon_png <size> <out.png>
 if [[ "$WHAT" == "linux" ]]; then
   bin="build/$APP/linux/$APP"; [[ -x "$bin" ]] || { echo "build it first: scripts/build.sh $APP linux"; exit 1; }
   [[ -x "$bin.bin" ]] && bin="$bin.bin"  # (widgets: $EX is the launcher script, $EX.bin the app)
-  out="dist/$EX-linux-x86_64"; rm -rf "$out"; mkdir -p "$out/lib"
+  out="dist/$EX-linux-x86_64"; rm -rf "$out"; mkdir -p "$out/lib"  # (made by this script, nobody runs the app there)
   # the build folder as it runs (binary, fonts, a web view's assets), less the build's own notes; widgets.webkitgtk names
   # a folder on this machine only
-  (cd "build/$APP/linux" && find . -mindepth 1 -maxdepth 1 ! -name app.sha256 ! -name '*.webkitgtk' -exec cp -r {} "$OLDPWD/$out/" \;)
+  # (by name: what else lies in a build folder, an older build kept to compare, isn't the app's)
+  names=("$APP" "$APP.bin" fonts webview)
+  if [[ -f "examples/$APP/companions" ]]; then while read -r c _; do [[ -n "$c" ]] && names+=("$c"); done < <(grep -v '^#' "examples/$APP/companions"); fi
+  for n in "${names[@]}"; do [[ -e "build/$APP/linux/$n" ]] && cp -r "build/$APP/linux/$n" "$out/"; done
   if [[ "$APP" != "$EX" ]]; then
     suffix=""; if [[ "$bin" == *.bin ]]; then suffix=".bin"; fi
     mv "$out/$(basename "$bin")" "$out/$EX$suffix"; bin="${bin%/*}/$EX$suffix"
@@ -99,7 +102,8 @@ exec "$here/saas-server"
 RUN
     chmod +x "$out/run-server.sh"
   fi
-  mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; cp linux/licenses/NOTICE.txt "$out/"
+  mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; sed "s/omxplorer/$EX/g; s#github.com/abhisheksreesaila/$EX#github.com/abhisheksreesaila/omxplorer#g" linux/licenses/NOTICE.txt > "$out/NOTICE.txt"
+  for d in "$out"/fonts/*/; do [[ -f "$d/OFL.txt" ]] && cp "$d/OFL.txt" "$out/licenses/OFL-$(basename "$d").txt"; done
   cp LICENSE "$out/LICENSE.txt"
   if [[ "$EX" == saas ]]; then cat >> "$out/NOTICE.txt" <<'NOTE'
 
@@ -110,45 +114,20 @@ libgcc_s (GPL-3.0 with the GCC Runtime Library Exception); Flare's shims (libfla
 NOTE
   fi
   icon_png 256 "$out/$EX.png"
-  cat > "$out/install.sh" <<EOF
-#!/usr/bin/env bash
-# Installs $EX for this user: ~/.local/share/$EX, a launcher entry, and ~/.local/bin/$EX. Remove with: $EX-uninstall
-set -euo pipefail
-here="\$(cd "\$(dirname "\$0")" && pwd)"
-dest="\$HOME/.local/share/$EX"
-rm -rf "\$dest"; mkdir -p "\$dest" "\$HOME/.local/bin" "\$HOME/.local/share/applications" "\$HOME/.local/share/icons/hicolor/256x256/apps"
-cp -r "\$here"/. "\$dest/"; rm -f "\$dest/install.sh"  # (the licences travel with the libraries)
-cp "\$here/$EX.png" "\$HOME/.local/share/icons/hicolor/256x256/apps/$EX.png"
-ln -sf "\$dest/$EX" "\$HOME/.local/bin/$EX"
-if [ -x "\$dest/omxc" ]; then ln -sf "\$dest/omxc" "\$HOME/.local/bin/omxc"; fi  # (omxconsole's command line for agents, D-6502)
-cat > "\$HOME/.local/share/applications/$EX.desktop" <<DESK
-[Desktop Entry]
-Type=Application
-Name=$EX
-Comment=$COMMENT
-Exec=\$dest/$EX %f
-Icon=$EX
-Terminal=false
-Categories=$CATS
-MimeType=$MIME
-DESK
-cat > "\$HOME/.local/bin/$EX-uninstall" <<UN
-#!/usr/bin/env bash
-rm -rf "\$dest" "\$HOME/.local/bin/$EX" "\$HOME/.local/share/applications/$EX.desktop" "\$HOME/.local/share/icons/hicolor/256x256/apps/$EX.png" "\$HOME/.local/bin/$EX-uninstall"
-[ "\\\$(readlink "\$HOME/.local/bin/omxc")" != "\$dest/omxc" ] || rm -f "\$HOME/.local/bin/omxc"
-echo "$EX removed"
-UN
-chmod +x "\$HOME/.local/bin/$EX-uninstall"
-echo "Installed. Open it from your app launcher, or run: $EX"
-EOF
+  # install.sh: the program in a folder that holds the program and nothing else, a manifest of what it put there, and
+  # nothing ever removed that isn't in a manifest it wrote (review 6, P1: the one before removed ~/.local/share/<app>, where
+  # pnote keeps a person's notes). scripts/install_test.sh proves it in a scratch HOME.
+  sed -e "s|@EX@|$EX|g" -e "s|@COMMENT@|$COMMENT|g" -e "s|@CATS@|$CATS|g" -e "s|@MIME@|$MIME|g" linux/install.sh.in > "$out/install.sh"
   chmod +x "$out/install.sh"
   cat > "$out/README.txt" <<EOF
 $EX for Linux (x86_64)
 Run it here:   $RUN
 ${NOTE:+$NOTE
-}Install it:    ./install.sh     (launcher entry + ~/.local/bin/$EX; remove with $EX-uninstall)
+}Install it:    ./install.sh     (the program in ~/.local/lib/$EX, a launcher entry, ~/.local/bin/$EX)
+Update it:     the newer package's ./install.sh
+Remove it:     $EX-uninstall    (the program only: what you made with it stays where it is)
 Built for a recent Linux with GTK 4 and libadwaita$(readelf -d "$bin" 2>/dev/null | grep -q webkit || [[ "$EX" == widgets ]] && echo ", plus WebKitGTK 6.0") (Ubuntu 24.04 or Fedora 40 should do; not yet tried on either).
-Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries).
+Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries); licenses/OFL-*.txt (the fonts, SIL OFL 1.1).
 EOF
   rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
   echo "$out.tar.gz ($(du -h "$out.tar.gz" | cut -f1))"
@@ -169,8 +148,21 @@ elif [[ "$WHAT" == "mac" ]]; then
          -e "s#<key>CFBundlePackageType</key>#<key>CFBundleIconFile</key><string>$EX</string>\n\t<key>CFBundlePackageType</key>#" "$plist" && rm -f "$plist.orig"  # (-i.orig: BSD sed on a Mac too)
   rm -rf "$stage/$EX.app/Contents/_CodeSignature"
   if command -v codesign >/dev/null; then codesign --force --sign - "$stage/$EX.app"; else rcodesign sign "$stage/$EX.app" >/dev/null; fi
+  cat > "$stage/README.txt" <<EOF
+$EX for Mac (Apple silicon, macOS 14 or newer)
+Unzip it, drag $EX.app into Applications, open it.
+The first start: this app is signed for this Mac only (ad-hoc), not notarized by Apple, so macOS refuses a double click on a
+downloaded copy ("Apple could not verify…"). Open System Settings > Privacy & Security, scroll down to "$EX was blocked" and
+press Open Anyway; it asks once. (Or, in Terminal: xattr -d com.apple.quarantine /Applications/$EX.app)
+${NOTE:+$NOTE
+}Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries); licenses/ (Modular's, and the fonts' SIL OFL 1.1).
+EOF
+  cp LICENSE "$stage/LICENSE.txt"
+  sed "s/omxplorer/$EX/g; s#github.com/abhisheksreesaila/$EX#github.com/abhisheksreesaila/omxplorer#g" apple/licenses/NOTICE.txt > "$stage/NOTICE.txt"
+  mkdir -p "$stage/licenses"; cp apple/licenses/MODULAR-*.txt "$stage/licenses/" 2>/dev/null || true
+  for d in "$stage/$EX.app/Contents/Resources/fonts"/*/; do [[ -f "$d/OFL.txt" ]] && cp "$d/OFL.txt" "$stage/licenses/OFL-$(basename "$d").txt"; done
   zip_out="dist/$EX-mac-arm64.zip"; rm -f "$zip_out"
-  (cd "$stage" && zip -qry "../$(basename "$zip_out")" "$EX.app")
+  (cd "$stage" && zip -qry "../$(basename "$zip_out")" "$EX.app" README.txt LICENSE.txt NOTICE.txt licenses)
   echo "$zip_out ($(du -h "$zip_out" | cut -f1))"
 else
   echo "linux or mac"; exit 1

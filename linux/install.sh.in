@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Installs @EX@ for this user: the program in ~/.local/lib/@EX@ (nothing else is kept there), a launcher entry and
+# ~/.local/bin/@EX@. Running a newer package's install.sh updates it. Remove with: @EX@-uninstall
+# What you make with @EX@ is never touched: only files this script wrote (its own list, .manifest) are ever replaced or removed.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+dest="$HOME/.local/lib/@EX@"
+bin="$HOME/.local/bin"
+desk="$HOME/.local/share/applications/@EX@.desktop"
+icon="$HOME/.local/share/icons/hicolor/256x256/apps/@EX@.png"
+manifest="$dest/.manifest"
+say() { echo "install: $*"; }
+
+[ "$here" != "$dest" ] || { say "this is the installed copy"; exit 1; }
+if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then say "$dest is in the way (not a folder of this program's): nothing was changed"; exit 1; fi
+# what this package holds, one relative path a line
+files="$(cd "$here" && find . -type f ! -path ./install.sh ! -name .manifest -printf '%P\n' | LC_ALL=C sort)"
+[ -n "$files" ] || { say "this package is empty"; exit 1; }
+# a file of this program's name there that no manifest of ours lists is somebody else's: stop before anything is changed
+mine="$( [ -f "$manifest" ] && cat "$manifest" || true)"
+while IFS= read -r f; do
+  if [ -e "$dest/$f" ] && ! grep -qxF -- "$f" <<< "$mine"; then say "$dest/$f isn't this program's: nothing was changed"; exit 1; fi
+done <<< "$files"
+
+# the new one in, file by file (each whole or not at all), then the list, then what only the old one had goes
+mkdir -p "$dest" "$bin" "$(dirname "$desk")" "$(dirname "$icon")"
+printf '%s\n%s\n' "$mine" "$files" | grep -v '^$' | LC_ALL=C sort -u > "$manifest.new"; mv -f "$manifest.new" "$manifest"  # (both, while it changes over)
+while IFS= read -r f; do
+  mkdir -p "$(dirname "$dest/$f")"
+  cp -p -- "$here/$f" "$dest/$f.installing"; mv -f -- "$dest/$f.installing" "$dest/$f"
+done <<< "$files"
+while IFS= read -r f; do
+  case "$f" in ''|/*|..|../*|*/../*|*/..) continue ;; esac  # (a manifest names files under $dest only)
+  if ! grep -qxF -- "$f" <<< "$files"; then rm -f -- "$dest/$f"; d="$(dirname "$f")"; while [ "$d" != . ]; do rmdir -- "$dest/$d" 2>/dev/null || break; d="$(dirname "$d")"; done; fi
+done <<< "$mine"
+printf '%s\n' "$files" > "$manifest.new"; mv -f "$manifest.new" "$manifest"
+
+cp -p "$here/@EX@.png" "$icon"
+ln -sfn "$dest/@EX@" "$bin/@EX@"
+if [ -x "$dest/omxc" ]; then ln -sfn "$dest/omxc" "$bin/omxc"; fi  # (omxconsole's command line for agents, D-6502)
+cat > "$desk" <<DESK
+[Desktop Entry]
+Type=Application
+Name=@EX@
+Comment=@COMMENT@
+Exec=$dest/@EX@ %f
+Icon=@EX@
+Terminal=false
+Categories=@CATS@
+MimeType=@MIME@
+DESK
+cat > "$bin/@EX@-uninstall" <<'UN'
+#!/usr/bin/env bash
+# Removes the program @EX@ (the files its installer listed). What you made with it stays.
+set -euo pipefail
+dest="$HOME/.local/lib/@EX@"; bin="$HOME/.local/bin"
+desk="$HOME/.local/share/applications/@EX@.desktop"; icon="$HOME/.local/share/icons/hicolor/256x256/apps/@EX@.png"
+for n in @EX@ omxc; do [ "$(readlink "$bin/$n" 2>/dev/null || true)" != "$dest/$n" ] || rm -f "$bin/$n"; done
+if grep -qsF "Exec=$dest/@EX@" "$desk"; then rm -f "$desk" "$icon"; fi
+if [ -f "$dest/.manifest" ]; then
+  while IFS= read -r f; do
+    case "$f" in ''|/*|..|../*|*/../*|*/..) continue ;; esac
+    rm -f -- "$dest/$f"; d="$(dirname "$f")"
+    while [ "$d" != . ]; do rmdir -- "$dest/$d" 2>/dev/null || break; d="$(dirname "$d")"; done
+  done < "$dest/.manifest"
+  rm -f -- "$dest/.manifest"
+  rmdir -- "$dest" 2>/dev/null || echo "$dest holds files that aren't the program's: left there"
+fi
+rm -f "$bin/@EX@-uninstall"
+echo "@EX@ removed. What you made with it is where it was."
+UN
+chmod +x "$bin/@EX@-uninstall"
+
+# an install of before lived in ~/.local/share/@EX@, where the app may keep what you made: only files that are byte for byte this
+# package's own are taken out of it (they are the program's, whoever put them there); everything else stays
+old="$HOME/.local/share/@EX@"
+if [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ]; then
+  while IFS= read -r f; do
+    if [ -f "$old/$f" ] && [ ! -L "$old/$f" ] && cmp -s -- "$here/$f" "$old/$f"; then
+      rm -f -- "$old/$f"; d="$(dirname "$f")"
+      while [ "$d" != . ]; do rmdir -- "$old/$d" 2>/dev/null || break; d="$(dirname "$d")"; done
+    fi
+  done <<< "$files"
+  if [ -f "$old/@EX@" ]; then say "an older program is still in $old (its own files, beside what you made): the one that starts now is in $dest"; fi
+fi
+say "done. Open it from your app launcher, or run: @EX@"

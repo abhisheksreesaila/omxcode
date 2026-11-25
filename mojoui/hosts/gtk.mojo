@@ -15,6 +15,7 @@ from std.os import setenv as os_setenv
 from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
+from mojoui.graphemes import typed_text
 from mojoui.view import (
     CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL, HOVER, IME_COMMIT, IME_PREEDIT, PASTE,
@@ -489,6 +490,7 @@ struct GtkCanvas(Copyable, Movable):
     var secondary: Int  # GtkGestureClick for the right button (SECONDARY: a context menu)
     var keys: Int  # GtkEventControllerKey (the canvas takes focus when pressed)
     var im: Int  # its GtkIMMulticontext (keys go through the input method first; goal 79)
+    var im_on: Bool  # it has the keyboard: words are being written there (App.takes_text) and the canvas is focused
     var test_preedit: String  # (tests: imepreedit:) the preedit the next preedit-changed reports
     var test_preedit_on: Bool
     var im_x: Int  # the candidate window's rect last given to the input method (points)
@@ -599,6 +601,7 @@ struct GtkCanvas(Copyable, Movable):
         self.secondary = 0
         self.keys = 0
         self.im = 0
+        self.im_on = False
         self.test_preedit = ""
         self.test_preedit_on = False
         self.im_x = -1
@@ -1780,11 +1783,17 @@ struct GtkHost[A: App](Movable):
                 connect_any(keys, "key-pressed", on_key_pressed[Self.A], self_addr)
                 connect_any(keys, "key-released", on_key_released[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](w, keys)
-                # (goal 79) keys go through the system's input method first: commits and preedits come back as text
+                # (goal 79) while words are being written (App.takes_text) keys go through the system's input method first:
+                # commits and preedits come back as text. It isn't the controller's own (on_key_pressed offers it the key):
+                # it would take the letters of every app (review 6, M2)
                 var im = external_call["gtk_im_multicontext_new", Int]()
                 set_index(im, ci)
                 external_call["gtk_im_context_set_client_widget", NoneType](im, w)
-                external_call["gtk_event_controller_key_set_im_context", NoneType](keys, im)
+                var focus = external_call["gtk_event_controller_focus_new", Int]()
+                set_index(focus, ci)
+                connect_any(focus, "enter", on_canvas_focus[Self.A], self_addr)
+                connect_any(focus, "leave", on_canvas_unfocus[Self.A], self_addr)
+                external_call["gtk_widget_add_controller", NoneType](w, focus)
                 connect_any(im, "commit", on_im_commit[Self.A], self_addr)
                 connect_any(im, "preedit-changed", on_im_preedit[Self.A], self_addr)
                 c.im = im
@@ -2850,7 +2859,39 @@ struct GtkHost[A: App](Movable):
                 var icon = String("mojoui-app-logo")
                 external_call["gtk_window_set_icon_name", NoneType](self.window, icon.as_c_string_span())  # (the window's icon, where the desktop shows one)
 
+    def im_wanted(self, ci: Int) -> Bool:
+        """Words are being written on canvas ci (App.takes_text): its keys are the input method's first."""
+        ref c = self.canvases[ci]
+        return c.im != 0 and c.node >= 0 and c.node < len(self.rt.shown.nodes) and self.rt.shown.nodes[c.node].kind == CANVAS and self.rt.app.takes_text(self.rt.shown.nodes[c.node].style)
+
+    def im_focus(mut self, ci: Int, on: Bool):
+        if self.canvases[ci].im == 0 or self.canvases[ci].im_on == on:
+            return
+        self.canvases[ci].im_on = on
+        if on:
+            external_call["gtk_im_context_focus_in", NoneType](self.canvases[ci].im)
+        else:
+            external_call["gtk_im_context_reset", NoneType](self.canvases[ci].im)
+            external_call["gtk_im_context_focus_out", NoneType](self.canvases[ci].im)
+
+    def im_follow(mut self):
+        """Each canvas's input method is on while words are being written there and the canvas has the keyboard."""
+        for ci in range(len(self.canvases)):
+            if self.canvases[ci].im != 0:
+                self.im_focus(ci, self.im_wanted(ci) and external_call["gtk_widget_has_focus", c_int](self.canvases[ci].widget) != 0)
+
+    def im_key(mut self, ci: Int, controller: Int) -> Bool:
+        """The key event the controller is handling, offered to the input method where words are being written: True, it took it."""
+        if not self.im_wanted(ci):
+            return False
+        var event = external_call["gtk_event_controller_get_current_event", Int](controller)
+        if event == 0:
+            return False
+        self.im_focus(ci, True)
+        return external_call["gtk_im_context_filter_keypress", c_int](self.canvases[ci].im, event) != 0
+
     def apply(mut self, d: Diff, self_addr: Int):
+        self.im_follow()  # (every event comes through here: whether words are being written may have changed)
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.send_commands(self_addr)  # (and the widget commands it asked for go to their pages)
         self.apply_design(self_addr)
@@ -6255,17 +6296,19 @@ def holds_keyboard(w: Int) -> Bool:
 
 
 def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
-    if busy():
-        return c_int(0)
     var host = host_at[A](host_addr)
     var ci = get_index(keys)
     if ci < 0 or ci >= len(host[].canvases):
+        return c_int(0)
+    if host[].im_key(ci, keys):
+        return c_int(1)
+    if busy():
         return c_int(0)
     var s = Int(state)
     var mods = (SHIFT if (s & 1) != 0 else 0) + (CTRL if (s & 4) != 0 else 0) + (ALT if (s & 8) != 0 else 0)
     var name = key_name(Int(keyval))
     host[].canvas_key(ci, name, mods, host_addr)
-    if (mods & CTRL) != 0 and (name == "v" or name == "V"):  # (goal 79) a paste: the system clipboard's text, read for the canvas
+    if (mods & CTRL) != 0 and (name == "v" or name == "V") and ci < len(host[].canvases) and host[].canvases[ci].node < len(host[].rt.shown.nodes) and host[].rt.app.takes_paste(host[].rt.shown.nodes[host[].canvases[ci].node].style):  # (goal 79) a paste: the system clipboard's text, read for the canvas
         var display = external_call["gdk_display_get_default", Int]()
         external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], (host_addr << 10) | ci)
     im_place[A](host_addr, ci)
@@ -6275,13 +6318,26 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
 
 def on_key_released[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C"):
     """A modifier came up (mojoui.doubletap): KEY named KeyUp:Control_L …; other keys' releases aren't sent."""
-    if busy():
-        return
     var host = host_at[A](host_addr)
     var ci = get_index(keys)
+    if ci >= 0 and ci < len(host[].canvases) and host[].im_key(ci, keys):
+        return
+    if busy() or not host[].rt.app.hears_key_ups():
+        return
     var name = key_name(Int(keyval))
     if ci >= 0 and ci < len(host[].canvases) and (name.startswith("Control_") or name.startswith("Meta_") or name.startswith("Alt_") or name.startswith("Shift_") or name.startswith("Super_")):
         host[].canvas_key(ci, "KeyUp:" + name, 0, host_addr)
+
+
+def on_canvas_focus[A: App](ctl: Int, host_addr: Int) abi("C"):
+    host_at[A](host_addr)[].im_follow()
+
+
+def on_canvas_unfocus[A: App](ctl: Int, host_addr: Int) abi("C"):
+    var host = host_at[A](host_addr)
+    var ci = get_index(ctl)
+    if ci >= 0 and ci < len(host[].canvases):
+        host[].im_focus(ci, False)
 
 
 def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
@@ -8022,7 +8078,12 @@ def run_step[A: App](host_addr: Int, step: String):
                 for k in range(len(host[].canvases)):  # (the canvas list is rebuilt when the screen's shape changes)
                     if host[].canvases[k].node == node:
                         cs = k
-                if host[].canvases[cs].keys != 0:
+                if host[].im_wanted(cs) and state & 12 == 0 and typed_text(p):  # (as a real key goes: through the input method where words are being written, and only there)
+                    var commit = String("commit")
+                    var ch = p
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[cs].im, commit.as_c_string_span(), ch.as_c_string_span())
+                    _ = ch
+                elif host[].canvases[cs].keys != 0:
                     external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[cs].keys, signal.as_c_string_span(),
                         c_uint(gdk_keyval(p)), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
             _ = len(handled)

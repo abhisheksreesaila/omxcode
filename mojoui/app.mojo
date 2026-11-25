@@ -145,9 +145,20 @@ trait App(Movable, Deinitable):
         return (-1.0, 0.0, 0.0, 0.0)
 
     def takes_text(self, canvas: Int) -> Bool:
-        """True (the default): what is typed on Canvas `canvas` is text (IME_COMMIT). False: no words are being written there
-        now, so a letter typed is a key (KEY, as a tool's shortcut): the system's input method would take it as text."""
-        return True
+        """True: words are being written on Canvas `canvas` now: what is typed goes through the system's input method and comes
+        as text (IME_COMMIT, IME_PREEDIT). False (the default): every key pressed is a KEY, its character its name: a shortcut,
+        a cell's first letter (review 6, M2: an input method on every canvas took the letters from every app but one)."""
+        return False
+
+    def takes_paste(self, canvas: Int) -> Bool:
+        """True: Ctrl+V / Cmd+V on Canvas `canvas` also brings the system clipboard's text (PASTE, after its KEY). The default:
+        the KEY alone."""
+        return False
+
+    def hears_key_ups(self) -> Bool:
+        """True: a modifier let go comes as a KEY of its own ("KeyUp:Control_L"; mojoui.doubletap), and on a Mac pressed
+        ("Meta_L"), as GTK sends it. The default: no."""
+        return False
 
     def hovers(self) -> Bool:
         """True: the app's Canvases get HOVER gestures as the pointer moves over them with no button held (it draws hover

@@ -364,7 +364,13 @@ struct Main(App):
         return (-1.0, 0.0, 0.0, 0.0)
 
     def takes_text(self, canvas: Int) -> Bool:
-        return len(self.web) == 0 or self.web[0].takes_text()
+        return len(self.web) > 0 and self.web[0].takes_text()
+
+    def takes_paste(self, canvas: Int) -> Bool:
+        return len(self.web) > 0
+
+    def hears_key_ups(self) -> Bool:
+        return len(self.web) > 0
 
     def window_size(self) -> Tuple[Int, Int]:
         if len(self.web) > 0:

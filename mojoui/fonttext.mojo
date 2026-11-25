@@ -322,6 +322,7 @@ struct FontEngine(Movable):
     var emoji_face: Int
     var images: List[GlyphImage]
     var widths: Dict[String, Float64]  # (D-8007) measure()'s: widths by (style, text)
+    var said_none: Bool
     var shapings: Int  # runs shaped so far (the caches answering keeps it still)
     var runs: Dict[String, Run]  # shaped runs by (style, text): text redrawn each frame is shaped once (D-7916)
     var image_of: Dict[Int, Int]
@@ -396,6 +397,7 @@ struct FontEngine(Movable):
         self.emoji_face = -2
         self.images = List[GlyphImage]()
         self.widths = Dict[String, Float64]()
+        self.said_none = False
         self.shapings = 0
         self.runs = Dict[String, Run]()
         self.image_of = Dict[Int, Int]()
@@ -490,7 +492,8 @@ struct FontEngine(Movable):
         for row in _registry():
             var path = dir + "/" + row[2]
             var f = _Face(path, 0, row[0], row[1] == "italic", Int(atol(row[3])))
-            _ = self._open_face(f^)
+            if self._open_face(f^) < 0:
+                missing_font(path, row[0])
         return True
 
     def _open(self, dlopen: Int, name: String) -> Int:
@@ -787,7 +790,12 @@ struct FontEngine(Movable):
         var primary = self.pick(st.family, st.weight, st.italic)
         if primary < 0:
             primary = self.pick("Geist", st.weight, st.italic)
+        if primary < 0:  # (no face of ours is here: the system's, words in another shape rather than none)
+            primary = self.system_face(0x61, False)
         if primary < 0:
+            if not self.said_none:
+                self.said_none = True
+                print("fonttext: no font at all, not even the system's: no words can be drawn", flush=True)
             return run^
         var pinst = self.inst(primary, st.weight, st.size)
         ref pf = self.faces[primary]
@@ -1025,7 +1033,8 @@ struct FontEngine(Movable):
         var dir = fonts_dir()
         for row in _registry():
             var path = dir + "/" + row[2]
-            _ = self._mac_open_face(_Face(path, 0, row[0], row[1] == "italic", Int(atol(row[3]))))
+            if self._mac_open_face(_Face(path, 0, row[0], row[1] == "italic", Int(atol(row[3])))) < 0:
+                missing_font(path, row[0])
         return True
 
     def _cfstr(self, s: String) -> Int:
@@ -1543,6 +1552,10 @@ def _exe_dir() -> String:
 def _exists(path: String) -> Bool:
     var p = path
     return external_call["access", c_int](p.as_c_string_span().ptr(), c_int(0)) == 0
+
+
+def missing_font(path: String, family: String):
+    print("fonttext: the font " + path + " isn't there: " + family + " is drawn in another face", flush=True)
 
 
 def fonts_dir() -> String:

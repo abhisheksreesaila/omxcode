@@ -11,6 +11,7 @@ from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
 from mojoui.browser import open_url as browser_open_url
+from mojoui.graphemes import typed_text
 from mojoui.view import FIELD_SECRET, IME_COMMIT, IME_PREEDIT, PASTE, HOVER
 from mojoui.shared import put_shared, get_shared
 
@@ -3047,6 +3048,10 @@ struct AppKitHost[A: App](Movable):
             return (-1.0, 0.0, 0.0, 0.0)
         return self.rt.app.caret(self.rt.shown.nodes[node].style)
 
+    def takes_text(self, node: Int) -> Bool:
+        """Words are being written on canvas `node` (App.takes_text): its keys are the input method's first."""
+        return node >= 0 and node < len(self.rt.shown.nodes) and self.rt.shown.nodes[node].kind == CANVAS and self.rt.app.takes_text(self.rt.shown.nodes[node].style)
+
     def ime_preedit(mut self, node: Int, text: String, self_addr: Int):
         """The composition on canvas `node` is now `text` ("": over): IME_PREEDIT with the caret, as GTK's preedit."""
         self.ime_text = text
@@ -3073,7 +3078,7 @@ struct AppKitHost[A: App](Movable):
         self.gpu_input(node)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
-        if (mods & 2) != 0 and (name == "v" or name == "V"):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
+        if (mods & 2) != 0 and (name == "v" or name == "V") and node < len(self.rt.shown.nodes) and self.rt.app.takes_paste(self.rt.shown.nodes[node].style):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
             var text = from_ns(msg(paste_board(), "stringForType:", ns_string("public.utf8-plain-text")))
             if text != "":
                 var d2 = self.rt.text_event(node, PASTE, text)
@@ -4054,7 +4059,7 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
         return
     # (D-7979) a text caret on this canvas: the keystroke goes to the input context first (an input method composes or
     # inserts text through the NSTextInputClient methods; keys it doesn't take come back as doCommandBySelector:)
-    if get_shared(SLOT_MAC_IME) != 0 and mods & 2 == 0 and host[].ime_caret(t[1])[0] >= 0:
+    if get_shared(SLOT_MAC_IME) != 0 and mods & 2 == 0 and host[].takes_text(t[1]) and host[].ime_caret(t[1])[0] >= 0:
         host[].ime_key = name
         host[].ime_mods = mods
         var took = shim_call2("mojoui_ime_key", view, event)
@@ -4069,7 +4074,7 @@ def on_canvas_flags[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     came up."""
     var t = from_tag(view)
     var host = host_at[A](t[0])
-    if t[1] >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[t[1]].size != 1:
+    if t[1] >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[t[1]].size != 1 or not host[].rt.app.hears_key_ups():
         return
     var code = Int(msg(event, "keyCode")) & 0xFFFF
     var flags = msg(event, "modifierFlags")
@@ -4548,10 +4553,14 @@ def web_key(name: String) -> String:
 
 
 def canvas_key_step[A: App](host_addr: Int, which: String, name: String, mods: Int):
-    """One KEY on the canvas tagged `which`, as keyDown: sends it (the canvas looked up again: a key may rebuild)."""
+    """One key on the canvas tagged `which`, as keyDown: sends it (the canvas looked up again: a key may rebuild): where words are
+    being written what it types is the input method's, text; else a KEY."""
     var host = host_at[A](host_addr)
     var node = canvas_node_at(host[], which)
     if node < 0:
+        return
+    if host[].takes_text(node) and mods & 6 == 0 and typed_text(name) and host[].ime_caret(node)[0] >= 0 and get_shared(SLOT_MAC_IME) != 0:
+        host[].ime_commit(node, name, host_addr)
         return
     host[].canvas_key(node, name, mods, host_addr)
 
