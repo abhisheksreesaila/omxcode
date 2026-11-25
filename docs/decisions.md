@@ -2107,3 +2107,6 @@ Known: if an app's Comment or Categories change between two releases, the old re
 
 ## D-8095: a race refuses while anything of ours runs (ours; review 8, S2)
 `ours_running()` looks at /proc for programs under the worktree and for servers told of its files, and M6 doesn't start beside one. The harness's web side runs in a group of its own with a free port, ends on signals, and its server ends with it by the kernel (setpriv --pdeathsig).
+
+## D-8096: modes are listed, an old layout is taken apart whole or not at all, nobody installs for another (ours; review 9; with D-8093)
+files.sha256 is "sha256  mode path" (644 or 755) and the installer sets the mode it lists. The layout of before is taken apart only when its installer's own uninstaller was there, word for word, and every file of it on this package's list is that file; otherwise it is left and said. Under sudo, or with a HOME the runner doesn't own, the installer stops (root in its own HOME, and sudo -u, go on). Not covered: a SIGKILL while it is taken apart leaves the rest of the old program, as before.

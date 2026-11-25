@@ -1066,6 +1066,8 @@ struct WebShell(Movable):
                 self.words_at = self.tools.words_caret(self.board.layer, self.view)
             p.begin_layer("chrome")
             p.layer_transform(0, 0, k)
+        if i < 0 and self.problem != "":  # (no notes file: said here, not only in the log; review 9)
+            draw_problem(p, self.boxes, left, 0, w - left, h, "Your notes can’t be opened", self.db_path + " (" + self.problem.replace(self.db_path, "the file") + "). Nothing has been changed, and nothing written now would be kept. Close the app, see that this is a notes file and that its folder can be written to, and start it again.", "", "", self.sk)
         if i >= 0 and self.notes[i].secure:  # (the web's cover sits in the workspace, under the islands and the panel)
             draw_locked_cover(p, self.boxes, left, 0, w - left, h, self.notes[i].title, "Locked note", "Secure note · not in the native app yet", k, self.sk)
         if self.sidebar:
@@ -1814,7 +1816,7 @@ struct WebShell(Movable):
                     if place.caret != place.anchor:
                         self.tools.words.ed.move_to(self.tools.words.ed.place(place_after(place.text, now, place.caret)), True)
                     return
-            if place.text == "" and place.key == "":  # (a new text begun, no words in it yet)
+            if String(place.text.strip()) == "":  # (a new text begun, no words in it yet; or all of its words deleted and saved: nothing in the file to be found by, review 9)
                 self.tools.begin_text(place.x, place.y)
         elif self.notes[i].kind == "mindmap":
             self.map.cam = place.cam

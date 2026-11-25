@@ -17,7 +17,7 @@ package() {  # package <dir> <version> <extra file…>
   sed -e "s|@EX@|app|g" -e "s|@COMMENT@|An app|g" -e "s|@CATS@|Utility;|g" -e "s|@MIME@||g" -e "s|@DATA@|.apphome/files|g" "$T" > "$1/install.sh"; chmod +x "$1/install.sh"
   relist "$1"
 }
-relist() { (cd "$1" && find . -type f ! -path ./install.sh ! -path ./files.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do echo "$(sha256sum < "$f" | cut -d' ' -f1)  $f"; done) > "$W/list"; mv "$W/list" "$1/files.sha256"; }
+relist() { (cd "$1" && find . -type f ! -path ./install.sh ! -path ./files.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do m=644; [ ! -x "$f" ] || m=755; echo "$(sha256sum < "$f" | cut -d' ' -f1)  $m $f"; done) > "$W/list"; mv "$W/list" "$1/files.sha256"; }
 home() {  # home <case> [its folder's name]
   CASE="$1"; export HOME="$W/home ${2:-}-${1// /_}"; case "$HOME" in "$W"/*) ;; *) exit 9 ;; esac
   [ -n "${2:-}" ] || export HOME="$W/home-${1// /_}"
@@ -135,7 +135,7 @@ home "a file of the package is a link"; cp -r "$W/v1" "$HOME/pkg"; mv "$HOME/pkg
 home "no list in the package"; cp -r "$W/v1" "$HOME/pkg"; rm "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "files.sha256"
 for l in '../x' 'lib/../../x' './x' 'lib//x' '~/x' '.manifest' "$W/abs"; do  # (each there, with its very sha256: only the way it is written is wrong)
   home "list names $l"; export HOME="$W/list-$RANDOM$RANDOM"; mkdir -p "$HOME/.local/share/app"; cp -r "$W/v1" "$HOME/pkg"; mkdir -p "$HOME/pkg/~"; for x in "$HOME/x" "$HOME/pkg/x" "$HOME/pkg/lib/x" "$HOME/pkg/~/x" "$HOME/pkg/.manifest" "$W/abs"; do echo x > "$x"; done
-  printf '%s  %s\n' "$(echo x | sha256sum | cut -d' ' -f1)" "$l" >> "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package"
+  printf '%s  644 %s\n' "$(echo x | sha256sum | cut -d' ' -f1)" "$l" >> "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package"
 done
 
 # ---------- what can't be written (review 8): nothing half done
@@ -147,16 +147,31 @@ home "a folder of the program can't be written"; ok "$W/v1/install.sh"; chmod 55
 home "a program file that can't be read"; ok "$W/v1/install.sh"; chmod 000 "$P/README.txt"; ! "$W/v2/install.sh" > "$W/log" 2>&1 && grep -q "nothing was changed" "$W/log" || fail "$(cat "$W/log")"; chmod 644 "$P/README.txt"
 home "U applications and bin are the person's links"; mkdir -p "$HOME/dot/apps" "$HOME/dot/bin"; ln -s "$HOME/dot/apps" "$HOME/.local/share/applications"; ln -s "$HOME/dot/bin" "$B"; echo q > "$HOME/dot/bin/mytool"; ok "$W/v1/install.sh"; ok "$B/app-uninstall"; [ "$(cat "$HOME/dot/bin/mytool")" = q ] && [ -L "$B" ] || fail "their folders"
 
+# ---------- modes, and whose HOME it is (review 9)
+home "A the package lost its modes (exFAT, a cloud folder)"; cp -r "$W/v1" "$HOME/pkg"; chmod 666 "$HOME/pkg/app" "$HOME/pkg/README.txt" "$HOME/pkg/install.sh"; printf '#!/bin/sh\nexec bash "%s/pkg/install.sh"\n' "$HOME" > "$HOME/i"; chmod +x "$HOME/i"; ok "$HOME/i"; [ "$("$B/app")" = "app 1 " ] && [ "$(stat -c %a "$P/app" "$P/README.txt" "$P/.manifest" "$B/app-uninstall" | tr '\n' ' ')" = "755 644 644 755 " ] || fail "modes: $(stat -c '%a %n' "$P/app" "$P/README.txt" "$P/.manifest" "$B/app-uninstall")"
+home "A over a working one that lost its mode"; ok "$W/v1/install.sh"; chmod 644 "$P/app"; ok "$W/v1/install.sh"; [ "$("$B/app")" = "app 1 " ] || fail "can't be started"
+home "a list without modes"; cp -r "$W/v1" "$HOME/pkg"; sed -i 's/  [67][54][54] /  /' "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package's list isn't one"
+home "a list with a mode of its own"; cp -r "$W/v1" "$HOME/pkg"; sed -i 's/  755 /  4755 /' "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package's list isn't one"
+home "HOME isn't its own"; ! HOME=/usr "$W/v1/install.sh" > "$W/log" 2>&1 && grep -q "HOME (/usr) isn't yours" "$W/log" && grep -q "nothing was changed" "$W/log" || fail "$(cat "$W/log")"
+home "sudo"; before="$(picture)"; if unshare -r true 2> /dev/null; then ! SUDO_USER=somebody unshare -r "$W/v1/install.sh" > "$W/log" 2>&1 && grep -q "without sudo" "$W/log" && grep -q "nothing was changed" "$W/log" && [ "$(picture)" = "$before" ] || fail "$(cat "$W/log")"; SUDO_USER=root ok unshare -r "$W/v1/install.sh"; else echo "    (no user namespace here: sudo not run)"; fi
+home "another user's, sudo -u"; SUDO_USER=somebody ok "$W/v1/install.sh"
+
 # ---------- the layout of before
 home "old layout, the same version"; old_layout "$W/v1"; ok "$W/v1/install.sh"
 [ "$(readlink "$B/app")" = "$P/app" ] && [ ! -e "$HOME/.local/share/app/app" ] && [ ! -e "$HOME/.local/share/app/lib" ] && ! grep -q 'rm -rf' "$B/app-uninstall" || fail "the program"
 ok "$B/app-uninstall"
 home "old layout, another version"; old_layout "$W/v1"; ok "$W/v2/install.sh"
 [ "$("$B/app")" = "app 2 " ] && [ "$("$HOME/.local/share/app/app")" = "app 1 " ] && grep -q "older program is still in" "$W/log" && [ "$(cat "$I")" = "icon 2" ] || fail "the program"
+home "old layout, one file of it changed: all or nothing"; old_layout "$W/v1"; echo "my readme" > "$HOME/.local/share/app/README.txt"; ok "$W/v1/install.sh"; [ -f "$HOME/.local/share/app/lib/a.so" ] && [ "$("$HOME/.local/share/app/app")" = "app 1 " ] && grep -q "older program is still in" "$W/log" || fail "taken apart"
+home "old layout, some of it gone already (cut short before)"; old_layout "$W/v1"; rm "$HOME/.local/share/app/lib/a.so"; ok "$W/v1/install.sh"; [ ! -e "$HOME/.local/share/app/app" ] || fail "still there"
+home "H a program kept there that no installer put there"; cp -r "$W/v1/." "$HOME/.local/share/app/"; mkdir -p "$(dirname "$D")"; printf '[Desktop Entry]\nType=Application\nName=My notes\nExec=%s\n' "$HOME/.local/share/app/app" > "$(dirname "$D")/mynotes.desktop"
+before="$(cd "$HOME/.local/share/app" && find . -type f -exec sha256sum {} + | sort)"; ok "$W/v1/install.sh"; [ "$(cd "$HOME/.local/share/app" && find . -type f -exec sha256sum {} + | sort)" = "$before" ] && [ "$("$HOME/.local/share/app/app")" = "app 1 " ] || fail "taken apart"; grep -qF "a program is in $HOME/.local/share/app too" "$W/log" || fail "not said: $(cat "$W/log")"
+ok "$B/app-uninstall"; [ "$(cd "$HOME/.local/share/app" && find . -type f -exec sha256sum {} + | sort)" = "$before" ] || fail "uninstall took it apart"
+home "H2 the same, another version"; cp -r "$W/v1/." "$HOME/.local/share/app/"; before="$(cd "$HOME/.local/share/app" && find . -type f -exec sha256sum {} + | sort)"; ok "$W/v2/install.sh"; [ "$(cd "$HOME/.local/share/app" && find . -type f -exec sha256sum {} + | sort)" = "$before" ] || fail "taken apart"
 home "old layout, a linked folder in it"; old_layout "$W/v1"; mkdir "$HOME/mylib"; echo lib > "$HOME/mylib/a.so"; rm -r "${HOME:?}/.local/share/app/lib"; ln -s "$HOME/mylib" "$HOME/.local/share/app/lib"; ok "$W/v1/install.sh"; [ -f "$HOME/mylib/a.so" ] || fail "removed through the link"
 home "old layout, its uninstaller edited"; old_layout "$W/v1"; echo "echo mine" >> "$B/app-uninstall"; refuses "$W/v1/install.sh" "$B/app-uninstall"
 home "old layout, a foreign icon"; old_layout "$W/v1"; echo "my icon" > "$I"; leaves "$W/v2/install.sh" "$I" 2
-home "old layout, its launcher entry edited"; old_layout "$W/v1"; echo "Keywords=mine" >> "$D"; ok "$W/v1/install.sh"; grep -q Keywords=mine "$D" || fail "the entry"; [ "$("$HOME/.local/share/app/app")" = "app 1 " ] || fail "what it starts is gone"
+home "old layout, its launcher entry edited"; old_layout "$W/v1"; echo "Keywords=mine" >> "$D"; ok "$W/v1/install.sh"; grep -q Keywords=mine "$D" || fail "the entry"; grep -q "the launcher entry may start it" "$W/log" && ! grep -q "starts now" "$W/log" && ! grep -q "app launcher" "$W/log" || fail "says what isn't so: $(cat "$W/log")"; [ "$("$HOME/.local/share/app/app")" = "app 1 " ] || fail "what it starts is gone"
 
 # ---------- the machine
 home "no find"; mkdir "$HOME/nognu"; printf '#!/bin/sh\nexit 1\n' > "$HOME/nognu/find"; chmod +x "$HOME/nognu/find"

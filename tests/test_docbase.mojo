@@ -668,6 +668,69 @@ def untouched() raises:
     print("   a caret that only stands there holds no change back: canvas, page, map")
 
 
+def emptied() raises:
+    """(review 9, S1) A text's words saved, all deleted, saved: the caret stands there with nothing in the file to be found by. The
+    other app's change shows and the caret goes on standing there: letters are words, not tools."""
+    for existing in [False, True]:
+        for before in [False, True]:  # (another new text stood at the same place before)
+            fresh()
+            var s = WebShell(DB, "paper")
+            s.create("canvas", "C")
+            var c = s.current
+            s.tools.begin_text(120, 120)
+            _ = s.text_in("commit", "hello")
+            _ = s.key("Escape", 0)
+            s.flush()
+            if before:
+                s.tools.begin_text(400, 600)
+                _ = s.text_in("commit", "third")
+                _ = s.key("Escape", 0)
+                s.flush()
+            s.tools.begin_text(400, 600)
+            _ = s.text_in("commit", "draft words")
+            if existing:
+                _ = s.key("Escape", 0)
+                let_save(s)
+                var last = len(s.board.edit().objs) - 1
+                s.tools.begin_words(s.board.edit(), s.board.edit().objs[last].id)
+            let_save(s)
+            _ = s.refresh()
+            assert_true("draft words" in row_text(c))
+            _ = s.key("a", 2)
+            _ = s.key("Backspace", 0)
+            let_save(s)
+            assert_true("draft" not in row_text(c) and s.tools.editing != -1, "emptied: " + row_text(c))
+            for k in range(2):  # (twice: the caret that was put back is put back again)
+                add_there(c, "w" + String(k))
+                assert_true(s.refresh() and "w" + String(k) in row_text(c), "the other's change is read")
+                assert_true(s.tools.editing != -1, "emptied: the caret goes on standing there, look " + String(k) + (" (an old text)" if existing else " (a new text)"))
+            var tool = s.tools.tool
+            for k in ["e", "n", "d"]:  # (a key writes its letter; with no caret it picks a tool)
+                _ = s.key(k, 0)
+            assert_true(s.tools.tool == tool, "emptied: a letter is no tool key: " + s.tools.tool)
+            _ = s.text_in("commit", "again")
+            let_save(s)
+            var row = row_text(c)
+            assert_true(s.save_state == "" and "endagain" in row and "w1" in row and row.find("endagain") == row.rfind("endagain"), "emptied: and what is typed then is saved, once: " + row)
+            assert_true(("third" in row) == before, "emptied: the other text as it was: " + row)
+            s.close()
+            _ = s^
+    print("   a text emptied and saved keeps its caret when the other app writes: new and old texts")
+
+
+def no_folder() raises:
+    """A notes file that can't be opened says so in the window."""
+    var s = WebShell("/proc/nowhere/pnote/notes.db", "paper")
+    var sc = Scene(1200, 800, 1.0)
+    s.paint(sc, 1200, 800, 1.0)
+    var at = s.boxes.find(".open-problem")
+    assert_true(at >= 0, "a notes file that can't be opened: nothing said in the window")
+    _ = s.tap(600, 400, 0)
+    s.paint(sc, 1200, 800, 1.0)
+    assert_true(s.boxes.find(".open-problem") >= 0 and s.boxes.find("#open-retry") < 0, "still said; no button that does nothing")
+    s.close()
+
+
 def places() raises:
     """A place in a text as bytes and back, and where it is in another program's version of the text."""
     var e = TextEdit()
@@ -699,6 +762,8 @@ def main() raises:
         other_files()
         backup()
         untouched()
+        emptied()
+        no_folder()
     var args = argv()
     var seeds = Int(String(args[1])) if len(args) > 1 else 40
     var first = Int(String(args[2])) if len(args) > 2 else 1

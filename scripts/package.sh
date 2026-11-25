@@ -142,10 +142,10 @@ Built for a recent Linux with GTK 4 and libadwaita$(readelf -d "$bin" 2>/dev/nul
 Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries); licenses/OFL-*.txt (the fonts, SIL OFL 1.1).
 EOF
   work_list="$(mktemp)"
-  # what is in it, and its sha256: what install.sh installs, and nothing else (review 8). No name a person's things are kept under
+  # what is in it, its sha256 and its mode: what install.sh installs, and nothing else (review 8). No name a person's things are kept under
   if (cd "$out" && find . \( -name '*.db' -o -name '*.db-*' -o -name '*-wal' -o -name '*-shm' -o -name '*.sqlite*' -o -name unsaved -o -name snaps -o -type l \)) | grep .; then echo "not to be packaged"; exit 1; fi
-  (cd "$out" && find . -type f ! -path ./install.sh ! -path ./files.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do echo "$(sha256sum < "$f" | cut -d' ' -f1)  $f"; done) > "$work_list"; mv "$work_list" "$out/files.sha256"
-  rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
+  (cd "$out" && find . -type f ! -path ./install.sh ! -path ./files.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do m=644; [[ ! -x "$f" ]] || m=755; echo "$(sha256sum < "$f" | cut -d' ' -f1)  $m $f"; done) > "$work_list"; mv "$work_list" "$out/files.sha256"; chmod 644 "$out/files.sha256"
+  rm -f "$out.tar.gz"; tar --owner=0 --group=0 --numeric-owner -C dist -czf "$out.tar.gz" "$(basename "$out")"
   echo "$out.tar.gz ($(du -h "$out.tar.gz" | cut -f1))"
 elif [[ "$WHAT" == "mac" ]]; then
   app="build/$APP/mac/$NAME.app"; [[ -d "$app" ]] || { echo "build it first: scripts/build.sh $APP mac"; exit 1; }
@@ -162,7 +162,7 @@ elif [[ "$WHAT" == "mac" ]]; then
   sed -i.orig -e "s#<key>CFBundleName</key><string>[^<]*</string>#<key>CFBundleName</key><string>$EX</string>#" \
          -e "s#<key>CFBundleDisplayName</key><string>[^<]*</string>#<key>CFBundleDisplayName</key><string>$EX</string>#" \
          -e "s#<key>CFBundlePackageType</key>#<key>CFBundleIconFile</key><string>$EX</string>\n\t<key>CFBundlePackageType</key>#" "$plist" && rm -f "$plist.orig"  # (-i.orig: BSD sed on a Mac too)
-  for f in "$stage/$EX.app/Contents/Resources/Licenses/NOTICE.txt" "$stage/$EX.app/Contents/Resources/NOTICE.txt"; do [[ ! -f "$f" ]] || notice apple/licenses/NOTICE.txt "$EX.app" > "$f"; done
+  for f in "$stage/$EX.app/Contents/Resources/Licenses/NOTICE.txt" "$stage/$EX.app/Contents/Resources/NOTICE.txt"; do [[ ! -f "$f" ]] || { notice apple/licenses/NOTICE.txt "$EX.app"; printf '\nThe fonts in %s.app/Contents/Resources/fonts are under the SIL Open Font License 1.1: LICENSE-*.txt and */OFL.txt beside them.\n' "$EX"; } > "$f"; done
   cp mojoui/hosts/static/fonts/LICENSE-*.txt "$stage/$EX.app/Contents/Resources/fonts/" 2>/dev/null || true
   rm -rf "$stage/$EX.app/Contents/_CodeSignature"
   if command -v codesign >/dev/null; then codesign --force --sign - "$stage/$EX.app"; else rcodesign sign "$stage/$EX.app" >/dev/null; fi

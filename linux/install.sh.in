@@ -14,6 +14,8 @@ say() { echo "install: $*" >&2; }
 stop() { say "$*"; say "nothing was changed"; exit 1; }
 for c in sed grep sort cmp cp mv ln mkdir rmdir rm readlink dirname basename sha256sum mktemp cat chmod; do command -v "$c" > /dev/null 2>&1 || stop "this needs the command '$c'"; done
 case "$HOME" in /*) ;; *) stop "HOME isn't a folder's full path" ;; esac
+[ "$EUID" != 0 ] || [ -z "${SUDO_USER:-}" ] || [ "$SUDO_USER" = root ] || stop "run this without sudo: it installs for the person who runs it"
+[ -O "$HOME" ] || stop "HOME ($HOME) isn't yours: run this without sudo, as the person it is for"
 case "$HOME" in *$'\n'*) stop "HOME has a line break in it" ;; esac
 here="$(cd -P "$(dirname "$0")" && pwd -P)"
 dest="$HOME/.local/lib/@EX@"
@@ -70,20 +72,21 @@ old_uninstaller() {  # what the installer of before wrote, word for word (1: wit
 
 # ---------- this package: the files the packager listed, each as listed
 [ -f "$here/files.sha256" ] && [ ! -L "$here/files.sha256" ] || stop "this package has no list of its files (files.sha256)"
-new="$(cat "$here/files.sha256")"
-[ -n "$new" ] || stop "this package's list is empty"
-files=""
-while IFS= read -r l; do
-  s="${l%%  *}"; f="${l#*  }"
+listing="$(cat "$here/files.sha256")"
+[ -n "$listing" ] || stop "this package's list is empty"
+files=""; modes=""; new=""
+while IFS= read -r l; do  # (<sha256>  <mode> <path>)
+  s="${l%%  *}"; f="${l#*  }"; m="${f%% *}"; f="${f#* }"
   case "$s" in *[!0-9a-f]*|'') stop "this package's list isn't one: $l" ;; esac
+  case "$m" in 644|755) ;; *) stop "this package's list isn't one: $l" ;; esac
   [ "${#s}" = 64 ] && plain "$f" || stop "this package's list isn't one: $l"
   ! kept "$f" || stop "this package lists $f, a name @EX@ keeps what you make under"
   [ "$f" != .manifest ] && [ "$f" != files.sha256 ] && [ "$f" != install.sh ] || stop "this package lists $f"
   ! linked "$here" "$f" && [ ! -L "$here/$f" ] && [ -f "$here/$f" ] || stop "this package isn't whole: $f isn't there"
   [ "$(sum "$here/$f")" = "$s" ] || stop "this package isn't whole: $f isn't what the packager put there"
-  files="$files$f"$'\n'
-done <<< "$new"
-files="${files%$'\n'}"
+  files="$files$f"$'\n'; modes="$modes$m $f"$'\n'; new="$new$s  $f"$'\n'
+done <<< "$listing"
+files="${files%$'\n'}"; modes="${modes%$'\n'}"; new="${new%$'\n'}"; pack="$new"  # (as a list in .manifest has it, without the modes)
 grep -qxF "@EX@" <<< "$files" && grep -qxF "@EX@.png" <<< "$files" || stop "this package isn't whole"
 
 # ---------- everything is looked at; nothing is changed until all of it is in order
@@ -165,9 +168,11 @@ if there "$HOME/$icon"; then
   if [ -L "$HOME/$icon" ] || [ ! -f "$HOME/$icon" ]; then put_icon=0
   elif ! ours "$HOME/$icon" "~/$icon" && ! cmp -s -- "$here/@EX@.png" "$HOME/$icon" && { [ -L "$old/@EX@.png" ] || [ ! -f "$old/@EX@" ] || ! cmp -s -- "$old/@EX@.png" "$HOME/$icon"; }; then put_icon=0; fi
 fi
+by_old=0  # (an installer of before put the program of the old layout there: its uninstaller is there, word for word)
 if there "$HOME/$un"; then
   [ ! -L "$HOME/$un" ] && [ -f "$HOME/$un" ] || stop "$HOME/$un isn't this program's"
-  ours "$HOME/$un" "~/$un" || cmp -s -- "$work/un" "$HOME/$un" || cmp -s -- <(old_uninstaller 1) "$HOME/$un" || cmp -s -- <(old_uninstaller 0) "$HOME/$un" || stop "$HOME/$un isn't this program's"
+  if cmp -s -- <(old_uninstaller 1) "$HOME/$un" || cmp -s -- <(old_uninstaller 0) "$HOME/$un"; then by_old=1; fi
+  [ "$by_old" = 1 ] || ours "$HOME/$un" "~/$un" || cmp -s -- "$work/un" "$HOME/$un" || stop "$HOME/$un isn't this program's"
 fi
 
 # ---------- in order: the new one in, file by file (each whole or not at all), by its list
@@ -175,12 +180,12 @@ fi
 [ "$put_icon" = 0 ] || new="$new"$'\n'"$(sum "$here/@EX@.png")  ~/$icon"
 new="$new"$'\n'"$(sum "$work/un")  ~/$un"
 mkdir -p "$dest" "$bin" "$HOME/$(dirname "$desk")" "$HOME/$(dirname "$icon")"
-put() { half="$(mktemp "$2.XXXXXX")"; cp -p -- "$1" "$half"; mv -f -- "$half" "$2"; half=""; }  # (a file of a new name, renamed over: never written into, nor through a link)
-printf '%s\n%s\n' "$mine" "$new" | grep -v '^$' | LC_ALL=C sort -u > "$work/list"; put "$work/list" "$manifest"  # (both lists while it changes over: cut short, the next run and the uninstaller know all of it)
-while IFS= read -r f; do mkdir -p "$(dirname "$dest/$f")"; put "$here/$f" "$dest/$f"; done <<< "$files"
-if [ "$put_icon" = 1 ]; then put "$here/@EX@.png" "$HOME/$icon"; else say "$HOME/$icon isn't what this program's installer wrote: it is left as it is"; fi
-if [ "$put_desk" = 1 ]; then put "$work/desk" "$HOME/$desk"; else say "$HOME/$desk isn't what this program's installer wrote: it is left as it is (the program is $dest/@EX@)"; fi
-put "$work/un" "$HOME/$un"
+put() { half="$(mktemp "$2.XXXXXX")"; cp -p -- "$1" "$half"; chmod "$3" -- "$half"; mv -f -- "$half" "$2"; half=""; }  # (a file of a new name, renamed over: never written into, nor through a link)
+printf '%s\n%s\n' "$mine" "$new" | grep -v '^$' | LC_ALL=C sort -u > "$work/list"; put "$work/list" "$manifest" 644  # (both lists while it changes over: cut short, the next run and the uninstaller know all of it)
+while IFS= read -r l; do m="${l%% *}"; f="${l#* }"; mkdir -p "$(dirname "$dest/$f")"; put "$here/$f" "$dest/$f" "$m"; done <<< "$modes"  # (a mode as listed: a copy over exFAT or a cloud folder has none)
+if [ "$put_icon" = 1 ]; then put "$here/@EX@.png" "$HOME/$icon" 644; else say "$HOME/$icon isn't what this program's installer wrote: it is left as it is"; fi
+if [ "$put_desk" = 1 ]; then put "$work/desk" "$HOME/$desk" 644; else say "$HOME/$desk isn't what this program's installer wrote: it is left as it is (the program is $dest/@EX@)"; fi
+put "$work/un" "$HOME/$un" 755
 for n in @EX@ omxc; do if grep -qxF "$n" <<< "$files"; then ln -sfn -- "$dest/$n" "$bin/$n"; fi; done  # (omxc: omxconsole's command line for agents, D-6502)
 # what only the one before had goes: in its list, and still as it was written
 while IFS= read -r l; do
@@ -191,19 +196,30 @@ while IFS= read -r l; do
     d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
   fi
 done <<< "$mine"
-printf '%s\n' "$new" > "$work/list"; put "$work/list" "$manifest"
+printf '%s\n' "$new" > "$work/list"; put "$work/list" "$manifest" 644
 
-# the layout of before: only files that are byte for byte on this package's list are taken out of it; everything else stays. Not when
-# a launcher entry that was left may start it there
-if [ "$put_desk" = 1 ] && [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ]; then
+# the layout of before: taken apart only when an installer put it there (its uninstaller was there) and every file of it that is on this
+# package's list is byte for byte that one: all of them or none. Everything else stays. Not when a launcher entry that was left may
+# start it there
+same_there() { plain "$1" && ! kept "$1" && [ -f "$old/$1" ] && [ ! -L "$old/$1" ] && ! linked "$old" "$1" && [ "$(sum "$old/$1" 2>/dev/null || true)" = "$2" ]; }
+apart="$by_old"; [ "$put_desk" = 1 ] && [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ] || apart=0
+if [ "$apart" = 1 ]; then
   while IFS= read -r l; do
     s="${l%%  *}"; f="${l#*  }"
-    if ! plain "$f" || kept "$f" || [ ! -f "$old/$f" ] || [ -L "$old/$f" ] || linked "$old" "$f"; then continue; fi
-    if [ "$(sum "$old/$f" 2>/dev/null || true)" = "$s" ]; then
+    if there "$old/$f" && ! same_there "$f" "$s"; then apart=0; fi
+  done <<< "$pack"
+fi
+if [ "$apart" = 1 ]; then
+  while IFS= read -r l; do
+    s="${l%%  *}"; f="${l#*  }"
+    if same_there "$f" "$s"; then
       rm -f -- "${old:?}/${f:?}"
       d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${old:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
     fi
-  done < "$here/files.sha256"
+  done <<< "$pack"
 fi
-if [ -f "$old/@EX@" ] && [ ! -L "$old" ]; then say "an older program is still in $old (its own files, beside what you made): the one that starts now is in $dest"; fi
-say "done. Open it from your app launcher, or run: @EX@"
+if [ -f "$old/@EX@" ] && [ ! -L "$old" ]; then
+  was="a program is in $old too"; [ "$by_old" = 0 ] || was="an older program is still in $old"
+  if [ "$put_desk" = 1 ]; then say "$was (left as it is): your app launcher and $bin/@EX@ start the one in $dest"; else say "$was (left as it is): the launcher entry may start it; $bin/@EX@ starts the one in $dest"; fi
+fi
+if [ "$put_desk" = 1 ]; then say "done. Open it from your app launcher, or run: @EX@"; else say "done. Run: @EX@"; fi

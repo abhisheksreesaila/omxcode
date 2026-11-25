@@ -1356,7 +1356,7 @@ def draw_pill_button[P: Painter](mut p: P, mut bx: Boxes, name: String, cx: Floa
 
 def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w: Float64, h: Float64, title: String, detail: String, action: String, name: String,
                              sk: Skin):
-    """In place of a document that couldn't be opened: what happened, why (wrapped), and a button."""
+    """In place of a document that couldn't be opened: what happened, why (wrapped), and a button ("": none)."""
     var cw = min(420.0, w - 48)
     var ts = TextStyle(UI, 600, False, 16)
     var ds = TextStyle(UI, 400, False, 13)
@@ -1370,7 +1370,7 @@ def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w:
         else:
             line = trial
     lines.append(line)
-    var ch = 24 + 22 + 10 + 20 * Float64(len(lines)) + 16 + 32 + 24
+    var ch = 24 + 22 + 10 + 20 * Float64(len(lines)) + (16 + 32.0 if action != "" else 0.0) + 24
     var cx = x + (w - cw) / 2
     var cy = y + (h - ch) / 2
     draw_lifted(p, cx, cy, cw, ch, 16, sk.shadow2, sk.panel)
@@ -1378,4 +1378,5 @@ def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w:
     text_at(p, ts, title, cx + 24, cy + 24, 22, sk.ink)
     for n in range(len(lines)):
         text_at(p, ds, lines[n], cx + 24, cy + 24 + 22 + 10 + 20 * Float64(n), 20, sk.ui_muted)
-    draw_pill_button(p, bx, name, cx + 24 + 60, cy + ch - 24 - 32, action, sk)
+    if action != "":
+        draw_pill_button(p, bx, name, cx + 24 + 60, cy + ch - 24 - 32, action, sk)

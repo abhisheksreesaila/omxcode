@@ -1,7 +1,7 @@
 """pnote's Linux download as a person gets it (review 6, P1 and P2): unpacked outside the checkout, an empty HOME, real input on a
 headless X server. Its words are drawn as the checkout's are; installed, updated and removed, the notes stay; without its fonts
 it says so and draws in the system's.   pixi run python -B scripts/package_test.py      (after scripts/build.sh pnote linux)"""
-import os, re, shutil, sqlite3, subprocess, sys, tempfile, time
+import os, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -100,6 +100,10 @@ q2 = subprocess.run([str(K / ".local/bin/pnote-uninstall")], env=dict(os.environ
 note(q.returncode == 0 and q2.returncode == 0 and WORDS in notes(K), "installed from elsewhere and removed: the notes there")
 man = (P / "files.sha256").read_text().splitlines()
 note(len(man) == sum(1 for x in P.rglob("*") if x.is_file()) - 2 and not [l for l in man if l.endswith((".db", "install.sh"))], f"the packager's list names every file of the program ({len(man)}) and nothing else")
+note(all(l.split("  ", 1)[1].split(" ", 1)[0] == ("755" if os.access(P / l.split(" ", 3)[3], os.X_OK) else "644") for l in man) and any("  755 pnote" in l for l in man), "with their modes")
+with tarfile.open(tar) as t:
+    ms = t.getmembers()
+note(not [m.name for m in ms if m.uid or m.gid or m.uname or m.gname] and [m.mode for m in ms if m.name.endswith("/files.sha256")] == [0o644], "its headers name nobody; anyone can read its list")
 nt = (P / "NOTICE.txt").read_text()
 note(all((P / "lib" / x).exists() for x in re.findall(r"^  (lib\w+\.so)", nt, re.M)) and ("zstd" in nt) == bool(list((P / "lib").glob("libzstd*"))), "its NOTICE names the libraries it carries, no others")
 

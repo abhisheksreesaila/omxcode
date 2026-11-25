@@ -23,7 +23,7 @@ def package(d, v):
         s = s.replace(f"@{k}@", x)
     (d / "install.sh").write_text(s)
     (d / "install.sh").chmod(0o755)
-    (d / "files.sha256").write_text("".join(f"{sha((d / f).read_bytes())}  {f}\n" for f in sorted(files)))
+    (d / "files.sha256").write_text("".join(f"{sha((d / f).read_bytes())}  {755 if f == 'app' else 644} {f}\n" for f in sorted(files)))
 
 
 for v in (1, 2, 3):
@@ -83,6 +83,10 @@ class World:
         e = self.real(".local/share/applications/app.desktop")
         e.write_text(f"[Desktop Entry]\nType=Application\nName=app\nComment=An app\nExec={o}/app %f\nIcon=app\nTerminal=false\nCategories=Utility;\nMimeType=\n")
         shutil.copy(o / "app.png", self.real(".local/share/icons/hicolor/256x256/apps/app.png"))
+        u = b / "app-uninstall"
+        if self.r.random() < 0.7 and not u.exists():  # (as the installer of before wrote it; without it nobody's installer put that program there)
+            u.write_text(f'#!/usr/bin/env bash\nrm -rf "{o}" "{b}/app" "{e}" "{self.h}/.local/share/icons/hicolor/256x256/apps/app.png" "{u}"\n[ "$(readlink "{b}/omxc")" != "{o}/omxc" ] || rm -f "{b}/omxc"\necho "app removed"\n')
+            u.chmod(0o755)
 
     PLACES = [".local/bin/app", ".local/bin/app-uninstall", ".local/bin/omxc", ".local/bin/other", ".local/share/applications/app.desktop", ".local/share/applications/mine.desktop",
               ".local/share/icons/hicolor/256x256/apps/app.png", ".local/lib/app/app", ".local/lib/app/README.txt", ".local/lib/app/mine.txt", ".local/lib/app/notes.db", ".local/lib/app/lib/a.so",
