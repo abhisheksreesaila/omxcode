@@ -339,6 +339,15 @@ struct Database(Copyable, Movable):
         """SQLite's message for the last thing that failed on this connection."""
         return _c_text(_fn[_F_PP](self.lib.errmsg)(self.db))
 
+    def durable(self, whole_drive: Bool = False) raises:
+        """A commit on this connection is on the disk when it returns: kept through a power cut (PRAGMA synchronous = FULL; in
+        WAL mode the log is synced at every commit). Said, not left to the library: Python's own SQLite is built that way, and
+        Apple's is built with NORMAL in WAL, which may lose the last commits. whole_drive: on a Mac the drive's own cache is
+        flushed too (fullfsync; slower, not for a UI thread; nothing on Linux)."""
+        self.exec("PRAGMA synchronous = FULL")
+        if whole_drive:
+            self.exec("PRAGMA fullfsync = 1; PRAGMA checkpoint_fullfsync = 1")
+
     def map_reads(self, max_bytes: Int = 1 << 30) raises:
         """Reads through a memory map of the file (PRAGMA mmap_size): a big row (a 12 MB document) is copied from the
         mapped pages instead of a read() per 4 KB page (Personal Note's stress canvas: 10 → ~3 ms). Writes unchanged.

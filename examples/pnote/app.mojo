@@ -95,7 +95,8 @@ def kind_of(name: String) -> Int:
 
 def open_db(path: String) raises -> Database:
     var db = Database(path)
-    db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL")
+    db.exec("PRAGMA journal_mode=WAL")
+    db.durable()
     db.exec("""CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
           body TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL DEFAULT 0);
         CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body, content='notes', content_rowid='id');

@@ -66,6 +66,7 @@ struct RowSaveJob(JobBody):
             var r: SaveResult
             try:
                 var db = Database(self.path, busy_ms=TRY_MS)  # (a connection belongs to one thread)
+                db.durable(whole_drive=True)  # (what it says is saved is)
                 r = save_row(db, self.save)
             except e:
                 r = SaveResult(FAILED, self.save.expected, "", String(e))

@@ -566,6 +566,7 @@ struct WebShell(Movable):
         self.props = PropsCard()
         try:
             self.dbs.append(Database(db_path))
+            self.dbs[0].durable()  # (as Personal Note's own is)
             make_notes_file(self.dbs[0])  # (an empty file: Personal Note's tables; one that has them is left as it is)
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
