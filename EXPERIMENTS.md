@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-25: goal 79, continuation 26 (review round 8)
+- **Setup.** Review 8 in hand (1 must, 4 should); the Mac locked.
+- **Worked.** An installer that installs a list and removes only what the list and the content both prove: 43 mutants, 60 random HOMEs. Words a save took hold no change back. Linux M0–M6 at one commit (60 of 60). Both packages from it.
+- **Broke / fixed.** Run from the notes' own folder the old installer took notes.db for the program's and deleted it. A server of mine outlived its harness through a race that claimed nothing was running; the race looks now.
+- **Means.** What belongs to a program is what its packager listed, not what stands in the folder. A claim ("nothing of ours runs") is a check, not a sentence.
+- **Next.** Review 9; the Mac unlocked; the backup push; the merge.
+
 ## 2026-11-25: goal 79, continuation 25 (review round 7)
 - **Setup.** Review 7 in hand (1 must, 3 should); the Mac locked.
 - **Worked.** An installer that proves each file is its own before it touches any; 42 scratch HOMEs, 28 mutants. A caret nobody touched holds no change back. Linux M0–M6 at one commit (60 of 60). Both packages from it.

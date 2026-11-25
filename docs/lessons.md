@@ -108,3 +108,5 @@ One line per rule that prevents a mistake that happened.
 - Nothing we ship removes a folder: only files on a list it wrote itself (install_test.sh).
 - A test's children get PR_SET_PDEATHSIG (headless.with_parent): atexit doesn't run in a crash. Before a race, list our own processes.
 - After a kill, wait for the process before looking at what it left.
+- A claim in a report that can be checked by a program is checked by one (M6 refuses while anything of ours runs; it was said in words twice and wrong twice).
+- A program's files are the packager's list, not the folder it was run from; a removal needs the list and the content, and data is refused even when listed (install_test, install_property).

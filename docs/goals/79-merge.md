@@ -1,4 +1,4 @@
-# Merging goals 79, 80 and 81 with main: the plan (continuation 24; nothing is merged)
+# Merging goals 79, 80 and 81 with main: the plan (continuations 24–26; nothing is merged)
 
 Read only: `git merge-tree` of the branches as they stood on 2026-11-25, 00:40. Branches:
 
@@ -48,7 +48,7 @@ Goal 80 needs no step of its own: it comes with 81.
 
 Also from 79, for main's apps: `App.takes_text` is False unless an app says words are being written (review 6, M2). Main's own text canvases (omxome, any TextEdit on a Canvas since 11-16) get KEYs as they do today; one that wants an input method says so. PASTE and KeyUp are asked for too.
 
-**Re-check after step 2:** everything of step 1 again (the race too: main changed Board and the hosts); main's `scripts/check` for goals 73, 76, 77, 78 (omxplorer's autocomplete, ribbon, free canvas, omxome's Stage); tests/realkeys.py with main's apps in it; the packages of omxplorer and omxome installed, updated and removed in a scratch HOME **over their released versions** (install_test's old layout, with the real tarballs: the new installer takes ~/.local/bin/<app> for its own when it links into ~/.local/lib/<app> or the old ~/.local/share/<app>, the launcher entry by its Exec in either, the icon and the old uninstaller by their bytes; a released version whose files differ from these is refused by name, and nothing is changed: try every released version once); the Mac's and Android's builds.
+**Re-check after step 2:** everything of step 1 again (the race too: main changed Board and the hosts); main's `scripts/check` for goals 73, 76, 77, 78 (omxplorer's autocomplete, ribbon, free canvas, omxome's Stage); tests/realkeys.py with main's apps in it; the packages of omxplorer and omxome installed, updated and removed in a scratch HOME **over their released versions** (install_test's old layout, with the real tarballs: since continuation 26 (D-8093) it removes an old-layout file only when its bytes are in this package's list or a known one, leaves a launcher entry whose text isn't one we wrote (a release whose Comment or Categories changed: left and said, so check the entry by hand), and refuses when run from the program's, the old layout's or the data folder; each app states its data folder in scripts/package.sh: new apps add theirs; try every released version once); the Mac's and Android's builds.
 
 ## Step 3: into main
 Fast-forward by the owner. Then, one at a time: pnote's download, omxplorer's, omxome's, each installed from its real file and looked at.

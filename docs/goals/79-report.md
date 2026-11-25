@@ -23,6 +23,48 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 26 (2026-11-25, 07:20–10:20): review round 8 fixed
+
+**The judged code is e3ee284c** (later commits: the race's table, documents).
+
+| | Linux (RTX 3090, both windows visible, 1.6×, 60 Hz) | Mac (M4, locked) |
+|---|---|---|
+| M0–M5 | PASS, 08:06–08:17 | M1, M5 halves PASS |
+| M6 | **PASS, 60 ✓ 0 ✗** (08:27–08:43, ten idle minutes before, raced once; the new check found nothing of ours running) | **BLOCKED: locked, not raced** |
+| M7 | — | nine looks PASS (.987–.998) |
+| KEYS, PACKAGE, BUILDS | PASS; PASS (43 installer mutants noticed, 60 random HOMEs); 45 of 45 | KEYS PASS |
+| Tests | 20, docbase 200 seeds, wordsafe 60 | 18 |
+| Kills | outboxkill 100 with locks, 100 without: 0 bad; savekill 40; diskorder | — |
+| Real use | first5 ×4, real24; both open ten minutes (seed 97): 245 words, 189 in the file and 56 held and said (48 conflicts), **0 lost**; 32 deletions, none back; a caret holds nothing back (nine rounds, 0.7–2.3 s) | — |
+
+| Package (from this code) | bytes | sha256 |
+|---|---|---|
+| pnote-linux-x86_64.tar.gz (the very file package_test.py passed on) | 8,784,674 | cbb4fb52f4f94d516d2875e2a765001a2fad66ee63a47b31a0d8c0600c9e5faa |
+| pnote-mac-arm64.zip (built on the Mac; not opened by hand) | 8,247,406 | 72b68c81335d5a4366d41c409e2cfab6aca91d6938ad0bfffb256f0d8fb0ffb7 |
+
+### Findings
+| Finding | State | Proof |
+|---|---|---|
+| MUST M1 run from the notes' folder, the installer deletes the notes | the packager writes files.sha256; install.sh installs exactly those, verified; refuses before any change when here, dest, the old layout's folder or the data folder are one another or inside (by inode, parents walked); removes a file only when it is on a list it wrote **and** its content matches, never data (*.db, *-wal, *-shm, unsaved, snaps, the app's data folder), even if listed (D-8093) | install_test.sh K, K2, K3, L, M, M2, O, U, V, X, Y, Z and more; 43 mutants noticed; install_property.py, 60 random HOMEs, 1,800 steps; package_test runs the package kept as the notes' folder. The real old packages on this disk (saas, globe, omxplorer, omxconsole), then the new one, then removed: data kept |
+| SHOULD an edited launcher entry | left as it is, nothing written there, said (the old program's files then stay too) | M, M2 |
+| SHOULD S1 words saved with the caret there hold changes back | measured against what the last save took (D-8094). On the way: a page's caret landed one letter early at a paragraph's end when the page was read again (last round's code), fixed | test_docbase; bothopen: untouched, then typed and saved with the caret left there, twice, on all three kinds; typing goes on, no conflict |
+| SHOULD S2 uvicorn 2874674 | mine (folder, command, start, port), stopped 07:30; servers end with the harness on any signal (PR_SET_PDEATHSIG, process group, a free port); M6 refuses while anything of ours runs (D-8095) | bothopen killed with -9 leaves nothing; judge_test |
+| SHOULD S4 font licences | Inter, JetBrains Mono and Geist texts in the Mac zip and in the app | unzip -l |
+| NITs | Linux: the first unwritable place is found before anything is changed; a manifest that is a folder, a tampered list with ~/ paths: refused. NOTICE names this app and only the libraries carried. Draw mode and pen colour stay on a reread | install_test Z, O, V, X; package_test; test_docbase |
+| "Run it here" from the data folder | the README says any folder but ~/.local/share/pnote and ~/.config/pnote; pnote itself doesn't steer away: started there it only writes its own notes.db beside the program, and no installer touches that any more | package_test |
+
+### To say plainly
+- **My report of continuation 25 was wrong**: it said nothing of ours was left running in the 05:09 race. uvicorn 2874674 was alive through it (and from 04:34 to 07:30), and later bothopen runs talked to it instead of their own server (same file, words landed). About 9 s of CPU in three hours; this round's race, with the check, replaces that one.
+- The first mutant run missed 7 of the new installer's mutants: cases added for five, two mutants' own text was wrong and fixed.
+- An edit of mine touched the race's .mjs files too; reverted, only webside.mjs and first5web.mjs changed (how their server ends).
+- The property test runs steps in random order but its kill is a SIGKILL of install.sh, not a power cut.
+
+### For the reviewer
+Changed tests and proofs: 79-check.py M6 refuses (ours_running); judge_test covers it; bothopen's caret rounds (one became three); webside.mjs, first5web.mjs, xdrive, real24 end their servers; install_test, install_mutants (28 to 43), package_test extended; install_test's old layout now writes the desktop entry the old installer really wrote. No threshold changed.
+**Risk, most first.** (1) install.sh, rewritten again: a release whose launcher text changed is left and said, not updated; (2) S1's comparison in `unsaved()`, all three kinds; (3) `place()` at a paragraph's end; (4) the check's list of "ours" is by folder: a process of ours started from elsewhere isn't seen.
+**Left.** Half files under other names after a SIGKILL of the installer (harmless). A text deleted elsewhere with a caret in it ends the caret. GLib doesn't start a program whose path has a percent sign. dist/*.unsafe is the old package, git-ignored: the owner can delete it.
+**Not done:** the Mac's M6 (unlocked, about 40 minutes). ibus and Wayland text-input not run. Gap 81 not wired in.
+
 ## Continuation 25 (2026-11-25, 04:13–07:10): review round 7 fixed
 
 **The judged code is 8fe3d198** (later commits: the race's table, tests/outboxkill.py, documents).
@@ -30,7 +72,7 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 | | Linux (RTX 3090, both windows visible, 1.6×, 60 Hz) | Mac (M4, locked) |
 |---|---|---|
 | M0–M5 | PASS, 04:48–04:59 | M1, M5 halves PASS |
-| M6 | **PASS, 60 ✓ 0 ✗** (05:09–05:25, ten idle minutes before, raced once, nothing of ours left running; 34 logs, all its own) | **BLOCKED: locked, not raced** |
+| M6 | **PASS, 60 ✓ 0 ✗** (05:09–05:25, ten idle minutes before, raced once; "nothing of ours left running" was wrong: uvicorn 2874674 was, see continuation 26; 34 logs, all its own) | **BLOCKED: locked, not raced** |
 | M7 | — | nine looks PASS (.987–.998) |
 | KEYS, PACKAGE, BUILDS | PASS; PASS (28 installer mutants noticed); 45 of 45 | KEYS PASS |
 | Tests | 20, docbase 200 seeds, wordsafe 60 | 18 |
