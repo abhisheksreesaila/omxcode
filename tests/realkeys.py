@@ -154,16 +154,21 @@ def player():
     r.close()
 
 
+GRID = (300, 400)
+
+
 def omxplorer():
     csv = W / "t.csv"
     csv.write_text("name,amount\n" + "".join(f"row{k},{k * 3}\n" for k in range(50)))
     r = Run("omxplorer", OMX_OPEN=str(csv))
     time.sleep(5)
+    r.a.click(1120, 763, wait=4)  # (Create table)
     s0 = r.shot()
-    r.a.click(640, 420, wait=0.6)
-    r.a.type("z")
-    time.sleep(0.6)
+    r.a.click(*GRID, wait=0.8)
     s1 = r.shot()
+    r.a.type("z")
+    time.sleep(0.8)
+    s2 = r.shot()
     note("z" in r.keys(), f"omxplorer: a letter over its grid is a KEY: {r.keys()[:6]}")
     r.close()
 

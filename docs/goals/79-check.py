@@ -2105,7 +2105,58 @@ def builds():
     return "PASS", f"{n} builds: mojoui whole, every example on Linux"
 
 
-CHECKS = {"BUILDS": builds, "M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}
+def package():
+    """(review 6, P1 and P2) The Linux download as a person gets it, and its installer against notes that must stay."""
+    err = build_linux()
+    if err:
+        return "FAIL", err
+    r = run(["scripts/install_test.sh"], 300)
+    q = run(["pixi", "run", "python", "-B", "scripts/package_test.py"], 900)
+    if r.returncode or "install_test: ok" not in r.stdout or q.returncode or "package: ok" not in q.stdout:
+        return "FAIL", tail(r.stdout + r.stderr + q.stdout + q.stderr)[:900]
+    return "PASS", "the installer touches nothing it didn't write; the package draws its words from a scratch folder, installed, updated, removed; without its fonts in the system's"
+
+
+def keys():
+    """(review 6, M2) A real keyboard and pointer in six apps on Linux (XTEST), and the Mac's own key events (CGEvent → keyDown:) in two."""
+    for ex in ["kit", "workbook", "sketch", "media", "omxplorer", "pnote"]:
+        r = run(["scripts/build.sh", ex, "linux"], 1800)
+        if r.returncode:
+            return "FAIL", f"{ex}: {tail(r.stdout + r.stderr)}"
+    r = run(["pixi", "run", "python", "-B", "tests/realkeys.py"], 600)
+    if r.returncode or "realkeys: ok" not in r.stdout:
+        return "FAIL", "Linux: " + "; ".join(l for l in r.stdout.splitlines() if l.startswith("BAD"))[:800]
+    if m := mac_reachable():
+        return "BLOCKED", f"Linux PASS (six apps); Mac BLOCKED ({m})"
+    probs = []
+    sf = OUT / "mac-realkeys.steps"
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    sf.write_text("\n".join(["wait:1500", "realkeys:canvas=ab1", "realkey:canvas=Space", "realkey:canvas=ArrowDown", "wait:300", "quit"]) + "\n")
+    r = run(["scripts/mac-ssh", "kit", str(sf)], 1800, env=dict(os.environ, MAC_SSH=MAC_SSH))
+    rep = ROOT / ((r.stdout + r.stderr).strip().splitlines() or ["none"])[-1]
+    dumps = [p.read_text() for p in sorted(rep.glob("0*.txt"))] if rep.exists() else []
+    for want in ["Key 1", "Key  ", "Key ArrowDown"]:
+        if not any(f"Text '{want}'" in d for d in dumps):
+            probs.append(f"Mac: kit doesn't say {want!r}")
+    ref = REF / "pn.db"
+    if make_ref():
+        probs.append("no reference notes")
+    else:
+        os.environ["MAC_FETCH"] = "pn.db pn.db-wal pn.db-shm"
+        out_mac, e = mac_run("realkeys", ["wait:1500", "key:desk=ctrl+k", "wait:400", "realkeys:desk=Weekly review", "wait:500", "realkey:desk=Enter", "wait:900",
+                                          "key:desk=ctrl+End", "realkeys:desk= hé q1 t", "wait:2500"], {"PNOTE_DB": "{data}/pn.db", "PNOTE_SKIN": "paper"}, [ref])
+        os.environ.pop("MAC_FETCH", None)
+        rep = next(iter(sorted((ROOT / "build/mac-ssh").glob("pnote-*"))[-1:]), None)
+        dbm = next(iter(rep.rglob("pn.db")), None) if rep else None
+        md = page_markdown(dbm, "Weekly review") if dbm else None
+        if e or md is None or " hé q1 t" not in md:
+            probs.append(f"Mac: pnote's page after real keys: {e or (md or '')[-60:]!r}")
+    if probs:
+        return "FAIL", "; ".join(probs)
+    return "PASS", "Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote"
+
+
+CHECKS = {"BUILDS": builds, "KEYS": keys, "PACKAGE": package, "M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(CHECKS)
