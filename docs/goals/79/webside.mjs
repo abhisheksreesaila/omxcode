@@ -40,6 +40,14 @@ const ops = {
     if (f.content.nodes.length === before) return 'not there'
     const r = await fetch(`http://127.0.0.1:${port}/api/notes/${note.id}`, { method: 'PUT', headers: H, body: JSON.stringify({ ...f, expectedRevision: f.revision }) })
     return r.status },
+  // the same, a word added to the first words there are
+  async append([title, word]) {
+    const note = (await all()).find((n) => n.title === title); if (!note) return 'no note ' + title
+    const f = await get(`/notes/${note.id}`)
+    if (f.noteType === 'page') f.content.markdown = (f.content.markdown || '') + ' ' + word
+    else { const n = f.content.nodes.find((n) => typeof n.text === 'string' && n.text !== ''); if (!n) return 'no words'; n.text += ' ' + word }
+    const r = await fetch(`http://127.0.0.1:${port}/api/notes/${note.id}`, { method: 'PUT', headers: H, body: JSON.stringify(f) })
+    return r.status },
   async wait([ms]) { await page.waitForTimeout(Number(ms)); return 'ok' },
   async shot([f]) { await page.screenshot({ path: f }); return f },
   async title() { return await page.locator('#island-title').textContent() },

@@ -43,11 +43,12 @@ Goal 80 needs no step of its own: it comes with 81.
 | hosts/gtk.mojo (2) | the motion controller's widget: 79 puts it on the snap box (`pw`), main on the picture (`w`), plus main's cursor names | `pw`, with main's leave signal and cursors |
 | app.mojo (1) | an import line | both |
 | hosts/appkit.mojo, web | merge by themselves; main's AppKit hover and 79's are two ways | one (main's message), checked by hand |
+| GOAL.md, docs/lessons.md | each branch's own goal; two lists of lessons | main's GOAL.md (79's is in docs/goals); both lists of lessons, in order of date |
 | scripts/components.py, docs/* | tables and logs | both sides' rows; `components.py` run again |
 
 Also from 79, for main's apps: `App.takes_text` is False unless an app says words are being written (review 6, M2). Main's own text canvases (omxome, any TextEdit on a Canvas since 11-16) get KEYs as they do today; one that wants an input method says so. PASTE and KeyUp are asked for too.
 
-**Re-check after step 2:** everything of step 1 again (the race too: main changed Board and the hosts); main's `scripts/check` for goals 73, 76, 77, 78 (omxplorer's autocomplete, ribbon, free canvas, omxome's Stage); tests/realkeys.py with main's apps in it; the packages of omxplorer and omxome installed, updated and removed in a scratch HOME **over their released versions** (install_test's old layout, with the real tarballs); the Mac's and Android's builds.
+**Re-check after step 2:** everything of step 1 again (the race too: main changed Board and the hosts); main's `scripts/check` for goals 73, 76, 77, 78 (omxplorer's autocomplete, ribbon, free canvas, omxome's Stage); tests/realkeys.py with main's apps in it; the packages of omxplorer and omxome installed, updated and removed in a scratch HOME **over their released versions** (install_test's old layout, with the real tarballs: the new installer takes ~/.local/bin/<app> for its own when it links into ~/.local/lib/<app> or the old ~/.local/share/<app>, the launcher entry by its Exec in either, the icon and the old uninstaller by their bytes; a released version whose files differ from these is refused by name, and nothing is changed: try every released version once); the Mac's and Android's builds.
 
 ## Step 3: into main
 Fast-forward by the owner. Then, one at a time: pnote's download, omxplorer's, omxome's, each installed from its real file and looked at.

@@ -209,7 +209,60 @@ def stay_deleted():
     return bad
 
 
-bad_cuts = stay_deleted()
+def caret_holds_nothing_back():
+    """(review 7, SHOULD 2) A note open here with a caret nobody has touched, no Escape pressed: another app's change shows within the
+    feed's time (2 s; 4 allowed), and what is then typed, where the caret stood, is saved with no clash. Canvas, page, map."""
+    bad = []
+    for kind, title in [("canvas", "Caretboard"), ("page", "Caretpage"), ("mindmap", "Caretmap")]:
+        web("make", kind, title)
+    web("reload")
+    a = start()
+    shown = W / "shots"
+
+    def ink(name, box=(60, 80, 1080, 720)):
+        from PIL import Image
+        import numpy as np
+        a.shot(shown / f"{name}.png")
+        x0, y0, x1, y1 = box
+        return np.asarray(Image.open(shown / f"{name}.png").convert("L")).astype(int)[y0:y1, x0:x1]
+
+    def open_(t):
+        focus(a)
+        a.key("k", "Ctrl", wait=0.5)
+        a.type(t, wait=0.6)
+        a.key("Enter", wait=1.2)
+
+    for n, (title, kind) in enumerate([("Caretboard", "canvas"), ("Caretpage", "page"), ("Caretmap", "map")]):
+        open_(title)
+        if kind != "map":
+            a.type("start", wait=3.0)
+        open_("Beta")
+        open_(title)  # (opened afresh: its caret by itself; a map: its centre)
+        a.move(1190, 790)
+        time.sleep(0.8)
+        p0 = ink(f"caret{n}-0")
+        st = web("append", title, f"API{n}WORD")
+        t0 = time.time()
+        moved = 0
+        while time.time() - t0 < 4.0 and moved < 40:
+            time.sleep(0.3)
+            moved = int((abs(ink(f"caret{n}-1") - p0) > 60).sum())
+        if st != 200 or moved < 40:
+            bad.append(f"{title}: the other app's word ({st}) isn't on the screen after {time.time() - t0:.1f} s ({moved} px)")
+        took = time.time() - t0
+        if kind != "map":
+            a.type(f" mine{n}", wait=4.0)
+            t = rows(f"SELECT content FROM notes WHERE title = '{title}'")[0][0]
+            if f"mine{n}" not in t or f"API{n}WORD" not in t or "#save-copy" in a.boxes() or held() != "":
+                bad.append(f"{title}: typed afterwards: {t[:200]!r} held {held()[:120]!r}")
+        print(f"  {title}: another app's change on the screen after {took:.1f} s, the caret untouched", flush=True)
+    if a.close() != 0:
+        bad.append("native didn't close")
+    print("  a caret holds nothing back:", "ok" if not bad else bad, flush=True)
+    return bad
+
+
+bad_cuts = caret_holds_nothing_back() + stay_deleted()
 a = start()
 n_at, w_at, n, nat_ops, web_ops, restarts = "", "", 0, 0, 0, 0
 shots = 0
