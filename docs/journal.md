@@ -1838,3 +1838,8 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - 01:25–01:37 real24.py: what had only windowless tests, in the real app. Found: the web's picture names begin with "media/" (its echo of a drawing reopened the note here), fixed with a note read again keeping its tool (D-8088). The Mac package with its README.
 - 01:38–02:18 M0–M5 PASS, idle, M6 Linux PASS 60 ✓ 0 ✗ at 4e54f3c0 (Mac locked). 02:18–03:45 at the same code: 19 tests, docbase 200, wordsafe 60, outboxkill 2 × 100, savekill 40, diskorder, walks, real24, both open ten minutes (seed 71: 259 of 259, 26 deletions, none back), KEYS and PACKAGE PASS, BUILDS 45, 18 Mac tests, M5 half, M7 looks. mac-unlocked --probe: refused (locked).
 - docs/goals/79-merge.md: the plan; nothing merged.
+
+## 2026-11-25 goal 79 (continuation 25) — review round 7
+- 04:13 from 2afbcd8e. Leftovers found and stopped (pid 1032420 pnote, 1032418 and 1033231 Xvfb :90, :91; mine, real24's crashed first runs of 01:24–01:25; idle during the 02:01 race). Harness children now die with it.
+- 04:17–04:47 I1 (install.sh.in rewritten: list with sha256, everything proven first; 42 homes, 28 mutants), SHOULD 1–3, NITs; a composition clicked away is committed (the web's answer measured first); test_pnnotes adapted (the caret stays).
+- 04:48–05:25 M0–M5 PASS, M6 Linux PASS 60 ✓ 0 ✗ at 8fe3d198, Mac locked. 05:25–07:02 tests, kills, walks, both open (262 of 262, 33 deletions), KEYS, PACKAGE, BUILDS, the Mac's tests, M5, M7 looks, both packages. outboxkill without locks: 1 bad of 100, the harness's (looked before the killed process had ended; measured 4 of 32,800), fixed, 400 seeds clean.

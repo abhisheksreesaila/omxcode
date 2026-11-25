@@ -23,6 +23,46 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 25 (2026-11-25, 04:13–07:10): review round 7 fixed
+
+**The judged code is 8fe3d198** (later commits: the race's table, tests/outboxkill.py, documents).
+
+| | Linux (RTX 3090, both windows visible, 1.6×, 60 Hz) | Mac (M4, locked) |
+|---|---|---|
+| M0–M5 | PASS, 04:48–04:59 | M1, M5 halves PASS |
+| M6 | **PASS, 60 ✓ 0 ✗** (05:09–05:25, ten idle minutes before, raced once, nothing of ours left running; 34 logs, all its own) | **BLOCKED: locked, not raced** |
+| M7 | — | nine looks PASS (.987–.998) |
+| KEYS, PACKAGE, BUILDS | PASS; PASS (28 installer mutants noticed); 45 of 45 | KEYS PASS |
+| Tests | 20, docbase 200 seeds, wordsafe 60 | 18 |
+| Kills | outboxkill 100 with locks; without: 1 bad of 100 in the run, **the harness's** (below), then 400 with it fixed: 0; savekill 40; diskorder | — |
+| Real use | first5 ×4, real24, both open ten minutes (seed 83): 262 of 262 words, 33 deletions, none back, a caret holds nothing back | — |
+
+| Package (from this code) | bytes | sha256 |
+|---|---|---|
+| pnote-linux-x86_64.tar.gz (the very file package_test.py passed on) | 8,784,442 | f4d7624f3e0b553bc30cfc429b44b653cb48c1ad0e8c57320ea5e34257c45023 |
+| pnote-mac-arm64.zip (built on the Mac; signature checked there; not opened by hand) | 8,239,858 | 62603f31020487a17a5a8f43af665205ced1f17461c4ad483161f57804c8f92d |
+
+### Findings
+| Finding | State | Proof |
+|---|---|---|
+| MUST I1 the installer touches things of its names | all looked at before anything is changed: absent or proven its own (D-8089); never through a link; icon, launcher entry and uninstaller in the list with their sha256 | install_test.sh: one HOME a case (42), a refusal names the file and leaves the HOME byte for byte; `--mutants`: 28, each noticed, the both-lists ones too |
+| SHOULD 3 a linked folder in the program's | refused; the uninstaller and the update don't go through one | install_test.sh |
+| NITs Exec, lost list, bin/app a folder, GNU find | quoted (desktop-file-validate, and GLib starts it from odd HOMEs), says what to do, refused, not needed | install_test.sh. A percent sign in the path: GLib itself doesn't find it |
+| SHOULD 1 held edits and a restored backup | measured against the row whatever its revision (D-8091) | test_docbase `backup`, both ways |
+| SHOULD 2 a caret that begins by itself | only typed words, a composition or a new idea hold a change back, and it shows when they are over; caret, selection, map view stay (D-8090). Pages had a like trap: the caret jumped to the end | test_docbase `untouched` (canvas, page, map); bothopen, no Escape: on the screen in 1.5, 1.5 and 2.3 s; the build before fails there |
+| NITs: torn space note; candidate window; composition clicked away; stale race logs | fixed; placed before each key; committed, as the web does (run in Chromium); put aside, not deleted | test_docbase; fcitx5 pinyin in a scratch session: committed once |
+| Merge plan | the old layout's link rule, GOAL.md, lessons.md | 79-merge.md |
+
+### To say plainly
+- **Leftovers of mine were alive during the 02:01 race at 4e54f3c0** (continuation 24's): one pnote (real24's first try, which crashed) and Xvfb :90 and :91, from 01:24:54 and 01:25:17 to 04:13, idle. Proven mine by /proc (working folder, program, start time, its scratch OMX_DATA), stopped, nothing else touched. This round's race replaces that one. The harness's children now end with it however it ends.
+- **outboxkill without locks said one version was lost, twice in some 900 seeds.** It killed a process in the middle of a write and looked at the folder before the process had ended; a write that lands in between stands for the older version without the harness knowing. Measured: 4 of 32,800 kills, and in every one of them the old or the new version was there. It waits now; 400 seeds since, none. The first failing seeds themselves weren't reproduced (500 runs of seed 12).
+- The installer's removal lines were rewritten when Claude Code's removal check refused the first form (variables that could be empty); its own rewrite is what is in the file.
+
+### For the reviewer
+Changed tests: test_pnnotes presses End after another app's change (the caret no longer jumps to the page's end); outboxkill waits; bothopen gained `caret_holds_nothing_back`; PACKAGE runs the mutants; package_test reads the installer's words from stderr too.
+**Risk, most first.** `refresh` while a person types (`behind`, `written_on`): a change waits for the next tick of the feed. `write_at` finds an object made here and not saved yet by its place and text. AppKit's press during a composition (built, KEYS ran; no input method composed on the Mac). ibus and Wayland text-input still not run. The installer's proofs against real released versions (none here to try: 79-merge.md says to). An installed copy of continuation 24's package (never given to anyone) has no sha256 in its list: refused by name.
+**Not done:** the Mac's M6 (unlocked, about 40 minutes). Gap 81 not wired in.
+
 ## Continuation 24 (2026-11-24 23:37 – 11-25 03:50): review round 6 fixed
 
 **The judged commit is 4e54f3c0** on both machines (later commits: the race's table and documents).

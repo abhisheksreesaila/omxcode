@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-25: goal 79, continuation 25 (review round 7)
+- **Setup.** Review 7 in hand (1 must, 3 should); the Mac locked.
+- **Worked.** An installer that proves each file is its own before it touches any; 42 scratch HOMEs, 28 mutants. A caret nobody touched holds no change back. Linux M0–M6 at one commit (60 of 60). Both packages from it.
+- **Broke / fixed.** A harness that looked before a killed process had ended said a version was lost; its children outlived it for three hours.
+- **Means.** A test's own races are measured like the program's. A child process ends with its parent by the kernel, not by atexit.
+- **Next.** Review 8; the Mac unlocked; the backup push; the merge.
+
 ## 2026-11-25: goal 79, continuation 24 (review round 6)
 - **Setup.** Review 6 in hand; the Mac locked; one heavy thing at a time.
 - **Worked.** Asking "what does this write take out of the row, and who deleted it?" after every write found what "is my word still there" couldn't. A real keyboard in six apps. An installer held to a list of what it wrote. Linux M0–M6 at one commit again (60 of 60).

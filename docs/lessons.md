@@ -106,3 +106,5 @@ One line per rule that prevents a mistake that happened.
 - A fix for another program's behaviour is proven with that program's real output, not with what we think it writes (the web's picture names begin with media/: a test with bare hashes passed for a day, and the idle web made us read the note again under a person's pen). A run that prints "0 times" of the thing it should exercise hasn't tested it.
 - A default in App is every app's: a new method's default keeps every other app as it was, and one check runs two apps that don't know of it with a real keyboard (KEYS).
 - Nothing we ship removes a folder: only files on a list it wrote itself (install_test.sh).
+- A test's children get PR_SET_PDEATHSIG (headless.with_parent): atexit doesn't run in a crash. Before a race, list our own processes.
+- After a kill, wait for the process before looking at what it left.
