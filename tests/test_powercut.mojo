@@ -89,19 +89,19 @@ struct Disk(Movable):
                 _ = names.pop(a)
             names[String(w[1][byte = cut + 1 :])] = w[2]
 
-    def cut(self, mut r: Rng, dir: String) raises:
-        """The folder as the power going now may leave it."""
+    def cut(self, mut r: Rng, dir: String, crash: Bool) raises:
+        """The folder as the power going now may leave it (crash: as the program dying now leaves it, its lock file gone too)."""
         for n in listdir(dir):
             _ = unlink(dir + "/" + String(n))
-        var names = self.sure.copy()
+        var names = self.now.copy() if crash else self.sure.copy()
         var how = r.next(3)  # in the order they were made up to some point | any of them | all
         var upto = r.next(len(self.waits) + 1)
-        for k in range(len(self.waits)):
+        for k in range(len(self.waits) if not crash else 0):
             if how == 2 or (how == 0 and k < upto) or (how == 1 and r.next(2) == 0):
                 self.apply(names, self.waits[k])
         for e in names.items():
             var t = self.text[e.value]
-            if not self.synced[e.value]:
+            if not self.synced[e.value] and not crash:
                 var n = t.byte_length()
                 var k = r.next(5)
                 if k == 0:
@@ -177,18 +177,21 @@ def run(seed: Int, dir: String, after: String) raises -> Int:
     for c in range(len(ops) + 1):
         var d = Disk()
         var need = List[Int](length=DOCS, fill=0)  # the last settled version of each document
+        var kept = List[Int](length=DOCS, fill=0)  # the last one written of each
         var of = Dict[String, Int]()
         var renamed = Dict[String, Bool]()
         for q in range(c):
             for e in dropped:
                 if e[1] == q:
                     need[e[0]] = 0
+                    kept[e[0]] = 0
             ref op = ops[q]
             d.do(op)
             var name = file_name(settled_name(op.a))
             if op.kind == "write":
                 var at = op.b.find('"content":"') + 11
                 of[name] = version_of(String(op.b[byte = at :]))
+                kept[docs[of[name]]] = of[name]
             elif op.kind == "rename":
                 renamed[name] = True
             elif op.kind == "dir" and name in renamed:
@@ -197,7 +200,11 @@ def run(seed: Int, dir: String, after: String) raises -> Int:
         for e in dropped:
             if e[1] == c:
                 need[e[0]] = 0
-        d.cut(r, after)
+                kept[e[0]] = 0
+        var crash = r.next(5) == 0
+        if crash:
+            need = kept.copy()
+        d.cut(r, after, crash)
         var start = SaveOutbox(after, "m")
         start.disk.inline = True
         start.load()
