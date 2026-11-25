@@ -438,6 +438,8 @@ def another_app() raises:
     assert_true(s.refresh(), "seen")
     assert_equal(s.page.markdown(), "mine and theirs")
     assert_true(s.notes[0].title == "Made there" and s.current == id and s.doc.may_edit(), "its new note listed; the open note still open")
+    assert_equal(s.page.ed.offset(s.page.ed.caret), 4)  # (the caret stays at its words, "mine"; it used to jump to the page's end: D-8090)
+    _ = s.key("End", 2)
     typed(s, "!")
     s.flush()
     assert_equal(s.save_state, "")  # (on the new revision)
