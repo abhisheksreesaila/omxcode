@@ -1,6 +1,7 @@
 # What an app provides, and the platform-independent loop every host runs.
 
-from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY, PRESS, RELEASE
+from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY, PRESS, RELEASE, IME_COMMIT
+from mojoui.graphemes import next_grapheme
 from mojoui.look import resolve_layout
 from mojoui.diff import Diff, diff
 from mojoui.canvas import Surface
@@ -142,6 +143,11 @@ trait App(Movable, Deinitable):
         """Where the text caret is on Canvas `canvas` (x, y, w, h in points; x < 0: none): the host places the input
         method's candidate window there (goal 79). The default: none."""
         return (-1.0, 0.0, 0.0, 0.0)
+
+    def takes_text(self, canvas: Int) -> Bool:
+        """True (the default): what is typed on Canvas `canvas` is text (IME_COMMIT). False: no words are being written there
+        now, so a letter typed is a key (KEY, as a tool's shortcut): the system's input method would take it as text."""
+        return True
 
     def hovers(self) -> Bool:
         """True: the app's Canvases get HOVER gestures as the pointer moves over them with no button held (it draws hover
@@ -676,6 +682,13 @@ struct Runtime[A: App](Movable):
         if n.kind != CANVAS or n.msg == 0:
             return Diff(False, [])
         return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom, pressure=pressure))
+
+    def commit(mut self, node: Int, text: String) -> Diff:
+        """The input method's committed text on canvas `node`: IME_COMMIT, or, where no words are being written (App.takes_text),
+        the key its one character is."""
+        if node >= 0 and node < len(self.shown.nodes) and text != "" and next_grapheme(text, 0) == text.byte_length() and not self.app.takes_text(self.shown.nodes[node].style):
+            return self.key(node, text, 0)
+        return self.text_event(node, IME_COMMIT, text)
 
     def queue_pan(mut self, node: Int, p: PanPoint):
         """A drag's point on canvas `node` (a mouse sends up to 1,000 a second): kept for take_pans. Whatever else happens first

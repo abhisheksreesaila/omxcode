@@ -7,7 +7,6 @@ O=build/all
 mkdir -p $O
 one() {
   EX=$1
-  source scripts/mxlink.sh 2>/dev/null || true
   LINK=()
   if grep -qx omxcore "examples/$EX/needs" 2>/dev/null; then source scripts/mxlink.sh; fi
   if nice -n 15 pixi run mojo build -I "examples/$EX" -I . -I vendor hosts/linux_main.mojo -o "$O/$EX.bin" -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 \

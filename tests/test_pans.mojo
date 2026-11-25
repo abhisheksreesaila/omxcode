@@ -1,17 +1,21 @@
 # Runtime.queue_pan and take_pans (D-8063): a drag's points since the last frame all reach the app, in order, and the screen is worked out once.
 #   pixi run mojo run -I . tests/test_pans.mojo
 from std.testing import assert_equal, assert_true
-from mojoui import App, Event, View, Canvas, VStack, Text, PAN
+from mojoui import App, Event, View, Canvas, VStack, Text, PAN, KEY, IME_COMMIT
 from mojoui.app import Runtime, PanPoint
 
 
 struct Pen(App):
+    var writing: Bool
+    var got: List[String]
     var xs: List[Float64]
     var ps: List[Float64]
     var travelled: Float64
     var order: List[String]
 
     def __init__(out self):
+        self.writing = False
+        self.got = List[String]()
         self.xs = List[Float64]()
         self.ps = List[Float64]()
         self.travelled = 0
@@ -31,6 +35,13 @@ struct Pen(App):
             self.order.append("pan")
         else:
             self.order.append("other")
+            if event.number == KEY:
+                self.got.append("key " + event.text)
+            elif event.number == IME_COMMIT:
+                self.got.append("text " + event.text)
+
+    def takes_text(self, canvas: Int) -> Bool:
+        return self.writing
 
 
 def main() raises:
@@ -63,4 +74,11 @@ def main() raises:
     rt.queue_pan(999, PanPoint(0, 0, 0, 0, 0))
     _ = rt.take_pans()
     assert_equal(len(rt.app.xs), 43)
+    # what an input method commits: a key where no words are being written, text where they are
+    _ = rt.commit(node, "t")
+    _ = rt.commit(node, "é")
+    _ = rt.commit(node, "漢字")
+    rt.app.writing = True
+    _ = rt.commit(node, "t")
+    assert_equal(" | ".join(rt.app.got), "key z | key t | key é | text 漢字 | text t")
     print("pans: ok")

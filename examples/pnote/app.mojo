@@ -362,6 +362,9 @@ struct Main(App):
             return self.web[0].caret()
         return (-1.0, 0.0, 0.0, 0.0)
 
+    def takes_text(self, canvas: Int) -> Bool:
+        return len(self.web) == 0 or self.web[0].takes_text()
+
     def window_size(self) -> Tuple[Int, Int]:
         if len(self.web) > 0:
             return (1440, 900)

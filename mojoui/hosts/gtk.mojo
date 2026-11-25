@@ -6292,7 +6292,7 @@ def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
         return
     var t = c_str(text)
     host[].canvases[ci].test_preedit_on = False
-    var d = host[].rt.text_event(host[].canvases[ci].node, IME_COMMIT, t)
+    var d = host[].rt.commit(host[].canvases[ci].node, t)
     host[].apply(d, host_addr)
     var d2 = host[].rt.text_event(host[].canvases[ci].node, IME_PREEDIT, "")
     host[].apply(d2, host_addr)

@@ -3062,7 +3062,7 @@ struct AppKitHost[A: App](Movable):
         var had = self.ime_text != ""
         self.ime_text = ""
         self.ime_node = -1
-        var d = self.rt.text_event(node, IME_COMMIT, text)
+        var d = self.rt.commit(node, text)
         self.apply(d, self_addr)
         if had:
             var d2 = self.rt.text_event(node, IME_PREEDIT, "")

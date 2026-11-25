@@ -2583,6 +2583,17 @@ struct WebShell(Movable):
         self.say(words)
         self.toast_until = clock_us() + 900_000
 
+    def takes_text(self) -> Bool:
+        """Words are being written somewhere; else a letter is a key (a canvas's tools, a map's shortcuts)."""
+        if self.emoji.open or self.searching or (self.panel.naming >= 0 and self.sidebar) or (self.card_open and self.card.editing):
+            return True
+        var i = self.note_index(self.current)
+        if i < 0 or self.card_open or self.settings_open:
+            return False
+        if self.notes[i].kind == "page":
+            return not self.page.draw_mode
+        return (self.notes[i].kind == "canvas" and self.tools.editing != -1) or (self.notes[i].kind == "mindmap" and self.map.editing >= 0)
+
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
         self.taps.interrupt()
