@@ -123,6 +123,9 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 80 | A new canvas text wasn't saved until it was finished | within 2 s | S | **built** (D-8065) |
 | 81 | Right-to-left words: the caret, a press and the selection are on the wrong side (measured from the left) | right | M | open |
 | 82 | Markdown in a canvas text being written again shows as drawn, its caret by the raw words | raw while written | S | open |
+| 83 | The canvas's tool letters (t, p, s…) did nothing from a real keyboard on Linux: the input method ate them | pick the tool | S | **built** (App.takes_text; continuation 23) |
+| 84 | Ink stayed where it was when the paper grew left or up | moves with its paper | S | **built** (Obj.move, one shift for every kind; review 5) |
+| 85 | An idea being written in a map isn't in the file until Enter (words on a page are within 2 s) | (the web's are on Enter or blur) | S | open |
 
-**Still open, by size (continuation 21).** M: 25 (the web has none of its own), 36, 39, 51, rest of 14 and 50, 81, 82, and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 55.
+**Still open, by size (continuation 23).** M: 25 (the web has none of its own), 36, 39, 51, rest of 14 and 50, 81, 82; S: 85; and the parts marked "not" above. L (not started, as told): 13, 15, 16, 29, 40, 41, 45, 49, 56. S: 55.
 **Seen:** driven with real input on a headless display, drawn by the CPU (docs/goals/79/first5.py, pictures build/g79/first5-*.png), and the same notes file read and edited by the web app and read back. **Not seen on a GPU's screen**, nor by a person. Also: CPU tests (test_pageedit, test_pageink, test_pnnotes, test_pnstore, test_boardedit, test_mapedit, test_wordsedit's cases in test_boardedit) and, for the fixture's ten screens, draw operations identical to c761a99f's (86,180 lines compared), but for a quote's `>` (its colour) and inline code's ticks (their face), both moved to what the reference picture shows. The look of the new pieces (properties card, toast, flyout, colours, namer) is ours from the web's CSS, not measured against it.

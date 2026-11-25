@@ -209,9 +209,9 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Modifier double tap (a modifier pressed twice alone within a time)` | `mojoui/doubletap.mojo` | Canvas: keys (focus on press) | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ | pnote |
 | `Paper that grows (how many pages a board's content needs after an edit, a drag, typing; a page on the left or top moves the frame and its undo)` | `mojoui/pagegrow.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Frame watch (pictures a second as the screen shows them, counted apart from the bench; MOJOUI_FRAME_WATCH=1 on AppKit)` | `mojoui/hosts/framewatch.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `Open document gate and save outbox (a document that wasn't read whole is never edited, saved or kept; edits that couldn't be written are held on disk until they land; review 3)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `Open document gate and save outbox (held edits by window, its invariants in the docstring; a document that wasn't read whole is never edited, saved or kept; edits that couldn't be written are held on disk until they land; review 3)` | `mojoui/docstore.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Canvas document (a JSON Canvas board that keeps what it was read with: unedited nodes, edges and members are written back as their own text; the progressive open)` | `mojoui/canvassource.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
-| `JSON patch (members of a JSON text changed in place, every other byte kept)` | `mojoui/jsonpatch.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
+| `JSON edits in place (members of a JSON text changed, every other byte kept)` | `mojoui/jsonedit.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Private files (0600 in a 0700 folder, in place in one step, leftovers cleaned, a cache folder held to a size)` | `mojoui/files.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Kept views (a tiled layer's last picture on disk, shown as the document opens; read ahead on a job thread)` | `mojoui/viewsnap.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
 | `Glyph warm-up (the glyphs drawn last time, readied on idle ticks)` | `mojoui/glyphwarm.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | pnote |
