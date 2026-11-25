@@ -88,7 +88,9 @@ def failed_boards() raises:
     assert_true(text_hash("") != 0 and text_hash("a") != text_hash("b") and text_hash("12345678") != text_hash("12345679"), "fingerprints")
 
 
-def file_of(o: SaveOutbox, id: Int) -> String:
+def file_of(mut o: SaveOutbox, id: Int) -> String:
+    """Its file, settled (a thread of the outbox's renames it; with a name it had a moment ago the test raced that thread)."""
+    o.sync(True)
     for k in range(len(o.files)):
         if o.files[k].id == id:
             return o.files[k].path
