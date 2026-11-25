@@ -82,7 +82,7 @@ run(P / "pnote", "before-install", H)  # ("run it here" first, as the README say
 e = dict(os.environ, HOME=str(H))
 for step in ["install", "the same again (an update)"]:
     q = subprocess.run([str(P / "install.sh")], env=e, capture_output=True, text=True)
-    note(q.returncode == 0 and WORDS in notes(H), f"{step}: the notes are there ({q.stdout.strip().splitlines()[-1] if q.stdout else q.stderr})")
+    note(q.returncode == 0 and WORDS in notes(H), f"{step}: the notes are there ({(q.stdout + q.stderr).strip().splitlines()[-1]})")
 got, log, rc = run(H / ".local/bin/pnote", "installed", H, False)
 note("fonttext" not in log and ink(got) > 2000, f"installed, it draws its words ({ink(got)} dark pixels) and opens the notes")
 q = subprocess.run([str(H / ".local/bin/pnote-uninstall")], env=e, capture_output=True, text=True)

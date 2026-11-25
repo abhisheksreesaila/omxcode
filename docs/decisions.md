@@ -2084,3 +2084,15 @@ Their space is the notes file's path and its own workspace id; a moved file find
 
 ## D-8088: a note read again because another app changed it keeps its tool and begins no caret (ours)
 `begin_writing` is for a note somebody opened. Found by real24.py: the idle web's echo of a drawing made native read the note again, and the next tool letter was typed into a text.
+
+## D-8089: the installer proves what is its own, inside and out (ours; review 7, I1; replaces D-8086's rule)
+Its list (.manifest) holds a sha256 and a place for every file it wrote, the launcher entry, the icon and the uninstaller among them. Before anything is changed each target is absent, or proven its own: the list's sha256 at that place (inside: or byte for byte this package's), a link into ~/.local/lib/<app> or the old ~/.local/share/<app>, a launcher entry whose Exec is the program in either, the old layout's icon and uninstaller by their very bytes. Else it names the file and stops. No file is written through a link; a link among the folders under the program's folder stops it (a linked ~/.local/bin or ~/.local/lib itself is the person's own arrangement and is used). A new file is made beside and renamed over. Both lists are kept while it changes over. The uninstaller removes only what still has its sha256; without its list it removes nothing and says so. Exec is quoted by the Desktop Entry Specification (GLib doesn't find a program whose path has a percent sign: its fault, kept). Needs sha256sum, mktemp, cmp; GNU find no more.
+
+## D-8090: only words typed hold a refresh back (ours; review 7, SHOULD 2)
+A caret that stands in a canvas text, a page or an idea opened for renaming doesn't: the note is read again and the caret, the selection, a map's view are put back where they were (by the object's own id; in a text by what didn't change around it: textedit.place_after). Words typed and not saved, a composition, a new idea do; the change is looked at again at each tick of the feed until they have landed or were taken back.
+
+## D-8091: held edits are measured against the row whatever its revision (ours; review 7, SHOULD 1)
+At a start: other words than the base's: built on no revision (-1, a conflict until a copy is saved); the base's own words at another revision: built on that one.
+
+## D-8092: a composition clicked away from is committed (ours; the web does: run with Chromium's imeSetComposition on a page and a canvas)
+GTK: the context is reset first; what it doesn't commit itself is committed as it stood. AppKit: discardMarkedText, then the same. Run with fcitx5 pinyin in a scratch session.
