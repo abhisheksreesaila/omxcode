@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# The Mac's whole timing half in one command, for when its screen is unlocked (goal 79, continuation 21). About 35 minutes:
-# the web race there (8), pnote's work rows (6), the paced race as frames are shown (8: both notes, warm and not, first opens),
-# start-up (4), and the first frames after a pause (10, scripts/mac-firstframes). Refuses, changing nothing, when the screen is
-# locked or the app doesn't come to the front. Before: unlock the Mac, plug it in, leave it alone, nothing else running on it.
-#   MAC_SSH=user@host scripts/mac-unlocked [--probe]        → docs/goals/79/race-mac.md, build/g79/mac-firstframes-*.txt
+# The Mac's whole timing half in one command, for when its screen is unlocked (goal 79, continuation 23). About 30 minutes a
+# screen (the web in a visible window of the Mac's own Chrome 10, pnote's work rows 6, the paced race 9, start-up 4), and 10 more for
+# the first frames after a pause (MAC_FIRSTFRAMES=0 leaves them out). Every screen macOS shows windows on is raced, each with a
+# table of its own (mirrored screens are one; for two tables: System Settings → Displays → Extended, the owner's to set).
+# It refuses, changing nothing and judging nothing, when: the screen is locked; the app doesn't come to the front; the web's
+# window isn't visible, or is drawn at another scale or refresh than native's; or the Mac is busy (load 3 or more).
+# Chrome opens a window of its own for a while, with a profile of its own (~/omxcode-g79-web/tmp): the owner's isn't touched.
+# Before: unlock the Mac, plug it in, leave it alone, nothing else running on it.
+#   MAC_SSH=user@host scripts/mac-unlocked [--probe]        → docs/goals/79/race-mac.md, build/g79/race-logs/mac-*, build/g79/mac-firstframes-*.txt
 set -uo pipefail
 cd "$(dirname "$0")/.."
 : "${MAC_SSH:?set MAC_SSH=user@host}"
@@ -14,7 +18,7 @@ r=$(tail -1 build/mac-unlocked.log)
 state=$(grep -h "^BENCHSTATE" "$r/stdout.txt" 2>/dev/null | tail -1)
 echo "${state:-no BENCHSTATE: $(tail -1 build/mac-unlocked.log)}"
 case $state in
-  *"active=1 key=1 locked=0"*) echo "The Mac is unlocked and the app came to the front: measuring (about 35 minutes; leave it alone)." ;;
+  *"active=1 key=1 locked=0"*) echo "The Mac is unlocked and the app came to the front: measuring (about 30 minutes a screen, and 10; leave it alone)." ;;
   *) echo "REFUSED: the screen is locked, or the app isn't in front. Nothing was measured."; exit 2 ;;
 esac
 [ "${1:-}" = --probe ] && exit 0

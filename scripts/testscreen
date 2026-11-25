@@ -46,9 +46,21 @@ hyprctl eval "hl.monitor({ output = \"MOJOTEST\", mode = \"$mode\", position = \
 ws=$(hyprctl monitors all | awk '/^Monitor MOJOTEST /{m=1} m && /active workspace:/{print $3; exit}')
 [ -n "$ws" ] || { echo "testscreen: MOJOTEST shows no workspace" >&2; exit 1; }
 
+# The exec rule below places the windows of the process it starts, not those of a program that process starts itself (a
+# browser of a test script opened on the owner's own workspace, 2026-11-24). Their app ids: MOJOUI_TESTSCREEN_CLASSES, a
+# regex, gets a window rule of its own while this command runs (and only then); MOJOUI_TESTSCREEN_RULE adds to it (
+# 'float = true, size = "1500 1000"').
+rule="mojotest-children-$$"
+child_rule() {  # child_rule true|false
+  [ -n "${MOJOUI_TESTSCREEN_CLASSES:-}" ] || return 0
+  hyprctl eval "hl.window_rule({ name = \"$rule\", enabled = $1, match = { class = [[${MOJOUI_TESTSCREEN_CLASSES}]] }, workspace = \"$ws silent\", tag = \"+mojotest\", no_initial_focus = true${MOJOUI_TESTSCREEN_RULE:+, $MOJOUI_TESTSCREEN_RULE} })" >/dev/null
+}
+child_rule true
+
 dir=$(mktemp -d "$XDG_RUNTIME_DIR/mojotest.XXXXXX")
 chmod 700 "$dir"
 cleanup() {
+  child_rule false
   if [ -s "$dir/pid" ]; then kill "$(cat "$dir/pid")" 2>/dev/null; fi
   [ -n "${tailpid:-}" ] && kill "$tailpid" 2>/dev/null
   rm -rf "$dir"

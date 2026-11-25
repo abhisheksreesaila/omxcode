@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Everything in this repository compiles: every function of the framework (mojo package), every example's Linux app (and the
+# programs some keep beside it), four at a time, niced. One line each; exit 1 when one doesn't. (Goal 79 broke four modules of other
+# goals without knowing for days: no test of its own builds them.) About eight minutes cold.
+cd "$(dirname "$0")/.."
+O=build/all
+mkdir -p $O
+one() {
+  EX=$1
+  source scripts/mxlink.sh 2>/dev/null || true
+  LINK=()
+  if grep -qx omxcore "examples/$EX/needs" 2>/dev/null; then source scripts/mxlink.sh; fi
+  if nice -n 15 pixi run mojo build -I "examples/$EX" -I . -I vendor hosts/linux_main.mojo -o "$O/$EX.bin" -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 \
+       -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}" > "$O/$EX.log" 2>&1; then echo "OK   $EX"
+  elif nice -n 15 pixi run mojo build -I "examples/$EX" -I . -I vendor hosts/linux_main.mojo -o "$O/$EX.bin" -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 \
+       -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}" > "$O/$EX.log" 2>&1; then echo "OK   $EX (the second time: the compiler crashed once)"
+  else echo "FAIL $EX: $(grep -a 'error:' "$O/$EX.log" | grep -v undefined | head -2 | cut -c1-160 | tr '\n' ' ')"; fi
+  rm -f "$O/$EX.bin"
+}
+export -f one; export O
+bad=0
+p=$(nice -n 15 pixi run mojo package mojoui -I . -I vendor -o $O/mojoui.mojoc 2>&1 | grep -aE '^[^ ].*error:' | head -3 | cut -c1-200); rm -f $O/mojoui.mojoc
+[ -z "$p" ] && echo "OK   mojoui (every function)" || { echo "FAIL mojoui: $p"; bad=1; }
+for t in consoled_paths consoled_jupyter agui_stream agui_chunks genui; do
+  if nice -n 15 pixi run mojo build -I . -I vendor -I examples/consoled tests/test_$t.mojo -o $O/t_$t > $O/t_$t.log 2>&1; then echo "OK   tests/test_$t.mojo"; else echo "FAIL tests/test_$t.mojo"; bad=1; fi
+  rm -f $O/t_$t
+done
+ls examples | while read -r e; do
+  [ -f "examples/$e/app.mojo" ] || continue
+  if [ -f "examples/$e/platforms" ] && ! grep -qw linux "examples/$e/platforms"; then continue; fi
+  echo "$e"
+done | xargs -P 4 -I{} bash -c 'one {}' | tee $O/examples.txt
+grep -q '^FAIL' $O/examples.txt && bad=1
+exit $bad

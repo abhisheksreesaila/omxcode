@@ -5255,6 +5255,12 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var events = List[Float64]()
     var draws = List[Float64]()
     var paints = List[Float64]()
+    if getenv("MOJOUI_BENCHSTATE") == "1" or getenv("MOJOUI_BENCH_PACED") == "1":  # (what the window is drawn at, as AppKit's line: a race compares it with the web's)
+        var surf = external_call["gtk_native_get_surface", Int](host[].window) if host[].window != 0 else 0
+        var mon = external_call["gdk_display_get_monitor_at_surface", Int](external_call["gdk_display_get_default", Int](), surf) if surf != 0 else 0
+        print("BENCHSTATE: " + what + " scale=" + String(external_call["gdk_surface_get_scale", Float64](surf) if surf != 0 else 0.0)
+              + " refresh=" + String(Float64(external_call["gdk_monitor_get_refresh_rate", c_int](mon)) / 1000.0 if mon != 0 else 0.0)
+              + " size=" + String(Int(w + 0.5)) + "x" + String(Int(h + 0.5)), flush=True)
     var releases = List[Float64]()  # finish: the frames of each RELEASE, and of the gesture right after it
     var afters = List[Float64]()
     host[].nodes_built = 0

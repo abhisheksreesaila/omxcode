@@ -4226,6 +4226,36 @@ def rss_mb() -> Float64:
     return Float64(Int(buf[1])) / 1048576.0
 
 
+def place_on_screen(window: Int):
+    """(tests) MOJOUI_SCREENS=1 prints the screens there are; MOJOUI_SCREEN=<a screen's number, or part of its name> opens the
+    window in the middle of that one, as a person would drag it there."""
+    var want = env("MOJOUI_SCREEN")
+    if want == "" and env("MOJOUI_SCREENS") != "1":
+        return
+    var screens = msg(cls("NSScreen"), "screens")
+    var main = msg[CGRect](msg(screens, "objectAtIndex:", 0), "frame")
+    for i in range(msg(screens, "count")):
+        var s = msg(screens, "objectAtIndex:", i)
+        var name = from_ns(msg(s, "localizedName"))
+        var f = msg[CGRect](s, "visibleFrame")
+        var whole = msg[CGRect](s, "frame")
+        # (at: its corner as other programs count it, from the main screen's top left)
+        print("SCREEN: " + String(i) + " at=" + String(Int(whole.x)) + "," + String(Int(main.height - whole.y - whole.height)) + " size=" + String(Int(whole.width)) + "x" + String(Int(whole.height))
+              + " scale=" + String(msg[Float64](s, "backingScaleFactor")) + " refresh=" + String(msg(s, "maximumFramesPerSecond")) + " name=" + name, flush=True)
+        if want != "" and (want == String(i) or name.find(want) >= 0):
+            var w = msg[CGRect](window, "frame")
+            _ = msg(window, "setFrameOrigin:", f.x + max((f.width - w.width) / 2, 0), f.y + max((f.height - w.height) / 2, 0))
+            want = ""
+
+
+def canvas_size_text[A: App](host: AppKitHost[A]) -> String:
+    """The first canvas's size in points ("0x0": none)."""
+    if len(host.canvases) == 0:
+        return "0x0"
+    var b = msg[CGRect](host.canvases[0].view, "bounds")
+    return String(Int(b.width + 0.5)) + "x" + String(Int(b.height + 0.5))
+
+
 def print_bench_state[A: App](host_addr: Int, what: String):
     """What macOS thinks of the app while it is measured (MOJOUI_BENCHSTATE=1): is it active, is its window key, is the
     screen locked (-1: not known), is an activity held (D-8023)."""
@@ -4242,7 +4272,9 @@ def print_bench_state[A: App](host_addr: Int, what: String):
             locked = msg(v, "intValue") if v != 0 else 0
             _ = msg(d, "release")
     print("BENCHSTATE: " + what + " active=" + String(Int(msg[Int8](app, "isActive"))) + " key=" + String(Int(msg[Int8](host[].window, "isKeyWindow")) if host[].window != 0 else -1)
-          + " locked=" + String(locked) + " activity=" + String(host[].activity.mode) + (" held" if host[].activity.token != 0 else " not held"), flush=True)
+          + " locked=" + String(locked) + " scale=" + (String(msg[Float64](host[].window, "backingScaleFactor")) if host[].window != 0 else String("0"))
+          + " refresh=" + (String(msg(msg(host[].window, "screen"), "maximumFramesPerSecond")) if host[].window != 0 and msg(host[].window, "screen") != 0 else String("0"))
+          + " size=" + canvas_size_text(host[]) + " activity=" + String(host[].activity.mode) + (" held" if host[].activity.token != 0 else " not held"), flush=True)
 
 
 def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
@@ -6290,6 +6322,7 @@ def run[A: App]() -> c_int:
     host[].show(addr)
     host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")
+    place_on_screen(host[].window)
     if offscreen:
         _ = msg(host[].window, "setAlphaValue:", Float64(0))
         _ = msg(host[].window, "setIgnoresMouseEvents:", 1)

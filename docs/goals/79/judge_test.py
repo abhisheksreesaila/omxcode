@@ -89,4 +89,45 @@ assert not ok and any("undo" in l and "✗" in l for l in t.splitlines())
 for out, good in [("BENCHSTATE: undo active=1 key=1 locked=0 activity=0 not held", True), ("BENCHSTATE: a active=1 key=1 locked=1", False), ("BENCHSTATE: a active=0 key=1 locked=0", False),
                   ("BENCHSTATE: a active=1 key=1 locked=-1", False), ("", False), ("BENCHSTATE: a active=1 key=1 locked=0\nBENCHSTATE: b active=1 key=0 locked=0", False)]:
     assert c.mac_live(out) is good, out
+# (review 5, M3) the two windows alike, or nothing is judged
+S = lambda **k: {"web": k.get("web", [("f034 start", 1.6, 60.0, (1500, 913), True), ("f034 end", 1.6, 59.9, (1500, 913), True)]),
+                 "native": k.get("native", [("paced 600 pan", 1.6, 60.0, (1440, 900), True)])}
+assert c.unlike(S()) == []
+for bad, needle in [(S(web=[]), "isn't known"), (S(native=[]), "isn't known"), (S(web=[("f034 start", 2.0, 60.0, (1500, 913), True)]), "drawn at"),
+                    (S(web=[("f034 start", 1.6, 144.0, (1500, 913), True)]), "refreshes"), (S(web=[("f034 start", 1.6, 60.0, (1500, 913), False)]), "visible"),
+                    (S(web=[("f034 start", 1.6, 60.0, (1400, 913), True)]), "no 1440x900"), (S(native=[("paced pan", 1.0, 144.0, (1440, 900), True)]), "drawn at"),
+                    (S(native=[("paced pan", 1.6, 60.0, (1240, 900), True)]), "not 1440x900"), (S(native=[("paced pan", 1.6, 60.0, (1440, 900), True), ("typing: no BENCHSTATE", 0.0, 0.0, (0, 0), False)]), "BENCHSTATE")]:
+    assert any(needle in x for x in c.unlike(bad)), (needle, c.unlike(bad))
+    web, nat, start, paced, unwarm, opens = world()
+    t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=bad)
+    assert not ok and "NOT LIKE-FOR-LIKE" in t, needle
+web, nat, start, paced, unwarm, opens = world()
+t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S())
+assert ok and "The two windows" in t and "NOT LIKE" not in t
+c.STATES["web"].clear(); c.STATES["native"].clear()
+c.web_states("x", "WEBSTATE: when=start headed=1 dpr=1.6 raf=60.00 inner=1500x913 screen=2150x900 visible=visible focus=1 browser=1 renderer=y\n")
+c.native_states("x", "BENCHSTATE: pan active=1 key=1 locked=0 scale=1.6 refresh=60 size=1440x900 activity=0 not held\n")
+assert c.unlike(c.STATES) == []
+c.web_states("headless", "nothing\n")
+assert any("visible" in x for x in c.unlike(c.STATES))
+c.STATES["web"].clear(); c.STATES["native"].clear()
+# the fair rule: off, and what it would say
+assert c.FAIR_RULE is False
+R = lambda p=16.7, m=16.8, k=0: (p, m, k)
+assert c.fair_row([R()] * 5, [R(16.7, 17.0)] * 4 + [R(16.7, 40.0, 1)]) == ((16.7, 16.8), (16.7, 17.0), (0, 1))
+assert c.fair_row([R()] * 4, [R()] * 5) is None and c.fair_row([R()] * 4 + [None], [R()] * 5) is None
+c.FAIR_RULE = True
+fair = {(n, st): {"web": [R(16.7, 16.8, 1)] * 5, "warm": [R()] * 5, "notwarm": [R()] * 5} for n in c.RACE_NOTES for st in c.RACE_STEPS[1:]}
+t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S(), fair=fair)
+assert ok and "median of 5 runs" in t
+fair[("600", "undo")] = dict(fair[("600", "undo")], warm=[R(16.7, 16.8)] * 4 + [R(16.8, 25.6)])
+t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S(), fair=fair)
+assert ok  # (one run's late frame)
+fair[("600", "undo")] = dict(fair[("600", "undo")], warm=[R(16.8, 25.6)] * 3 + [R()] * 2)
+t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S(), fair=fair)
+assert not ok and any("undo" in l and "✗" in l for l in t.splitlines())  # (most runs')
+fair[("600", "undo")] = dict(fair[("600", "undo")], warm=[None] + [R()] * 4)
+t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S(), fair=fair)
+assert not ok
+c.FAIR_RULE = False
 print("judge: ok")
