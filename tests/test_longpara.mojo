@@ -197,6 +197,29 @@ def edits() raises:
     print("   a layout built on the one before is a fresh one: 2,000 edits")
 
 
+def long_words() raises:
+    """(review 5) A word longer than a line, changed far inside it: whether it fits again decides a line long before."""
+    var r = Rng(41)
+    for turn in range(60):
+        var w = 90.0 + Float64(r.next(300))
+        var s = sheet(String("  ") + ("ab " if r.next(2) == 0 else "") + String("x") * (30 + r.next(200)) + (" tail words here" if r.next(2) == 0 else ""), w)
+        _ = s.lay(0)
+        for step in range(12):
+            var n = s.ed.paras[0].byte_length()
+            var a = r.next(n + 1)
+            s.ed.move_to(Pos(0, a), False)
+            if r.next(3) > 0:
+                s.ed.move_to(Pos(0, min(n, a + r.next(120))), True)
+                _ = s.key("Delete", 0, 0)
+            else:
+                s.insert(String("y") * r.next(60) + (" " if r.next(3) == 0 else ""))
+            _ = s.lay(0)
+            var f = sheet(s.ed.paras[0], w)
+            _ = f.lay(0)
+            assert_equal(lines_text(s, 0), lines_text(f, 0), "long word, turn " + String(turn) + " step " + String(step))
+    print("   words longer than a line")
+
+
 def per_key(mut s: PageSheet, keys: Int) -> Int:
     """The slowest of `keys` keys typed in the middle, each with its layout and caret (µs)."""
     var n = s.ed.paras[0].byte_length()
@@ -253,5 +276,6 @@ def main() raises:
     graphemes()
     wrapping()
     edits()
+    long_words()
     quick()
     print("longpara: ok")

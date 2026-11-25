@@ -323,13 +323,11 @@ struct AppKitHost[A: App](Movable):
     var link_ticks: Int  # ticks the clock itself gave (a prompt tick after input isn't one)
     var link_seen: Int  # link_ticks at the last look (frameCheck:)
     var idle_from: Int  # when the canvases went idle with the clock running (ns; 0: they aren't): it stops LINGER_NS later
+    var check_due: Bool  # a look at the screen's clock is on its way
     var prompt_due: Bool  # a tick right after this event is on its way
     var common_modes: Int  # NSRunLoopCommonModes itself (Core Foundation knows it by address: a string that only reads the same is a mode of its own, never run)
     var activity: InputActivity
     var watch: FrameWatch
-    var pans: List[PanPoint]  # a drag's points since the last frame, for canvas node pan_node (queue_pan)
-    var pan_node: Int
-    var pan_addr: Int
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -433,13 +431,11 @@ struct AppKitHost[A: App](Movable):
         self.link_ticks = 0
         self.link_seen = 0
         self.idle_from = 0
+        self.check_due = False
         self.prompt_due = False
         self.common_modes = 0
         self.activity = InputActivity()
         self.watch = FrameWatch(env("MOJOUI_FRAME_WATCH") == "1")
-        self.pans = List[PanPoint]()
-        self.pan_node = -1
-        self.pan_addr = 0
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -3026,30 +3022,23 @@ struct AppKitHost[A: App](Movable):
         if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
-        self.flush_pans(self_addr)
         self.gpu_input(node)
         self.input_activity(self_addr)
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
 
     def queue_pan(mut self, node: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, pressure: Float64):
-        """A drag's point (a mouse sends up to 1,000 a second): kept until the next frame, where the app gets every one of
-        them and the screen is worked out once (D-8063). Anything else that happens comes after them."""
-        if self.pan_node != node:
-            self.flush_pans(self.pan_addr)
-        self.pan_node = node
-        self.pans.append(PanPoint(x, y, dx, dy, pressure))
+        """A drag's point: kept until the next frame, where the app gets every one of them and the screen is worked out once
+        (Runtime.queue_pan, D-8063). Anything else that happens comes after them."""
+        self.gpu_input(node)
+        self.rt.queue_pan(node, PanPoint(x, y, dx, dy, pressure))
         self.wake()
 
     def flush_pans(mut self, self_addr: Int):
-        if len(self.pans) == 0:
+        if len(self.rt.pan_points) == 0:
             return
-        var node = self.pan_node
-        var points = List[PanPoint]()
-        swap(points, self.pans)
-        self.gpu_input(node)
         self.input_activity(self_addr)
-        var d = self.rt.pans(node, points)
+        var d = self.rt.take_pans()
         self.apply(d, self_addr)
 
     def ime_caret(self, node: Int) -> Tuple[Float64, Float64, Float64, Float64]:
@@ -3081,7 +3070,6 @@ struct AppKitHost[A: App](Movable):
 
     def canvas_key(mut self, node: Int, name: String, mods: Int, self_addr: Int):
         """A KEY on canvas node `node` (keyDown, and the test steps that stand for it)."""
-        self.flush_pans(self_addr)
         self.gpu_input(node)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
@@ -3220,13 +3208,17 @@ struct AppKitHost[A: App](Movable):
         _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", t, self.common_modes)
         return t
 
-    def check_frames(self):
-        """Looks at the screen's clock again in 0.1 s (frameCheck:)."""
+    def check_frames(mut self):
+        """Looks at the screen's clock again in 0.1 s (frameCheck:); one look is on its way at a time."""
+        if self.check_due:
+            return
+        self.check_due = True
         var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes)
         _ = msg(self.canvases[0].view, "performSelector:withObject:afterDelay:inModes:", sel("frameCheck:"), 0, Float64(0.1), modes)
 
     def frames_checked(mut self):
         """0.1 s later: the screen's clock has ticked, or the timer takes its place."""
+        self.check_due = False
         if self.link == 0 or not self.link_is_screen or len(self.canvases) == 0:
             return
         self.check_frames()
@@ -4012,7 +4004,6 @@ def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     host[].canvases[k].moved = True
     host[].canvases[k].last_x = at.x
     host[].canvases[k].last_y = at.y
-    host[].pan_addr = t[0]
     host[].queue_pan(t[1], at.x, at.y, dx, dy, pen_pressure(event))
 
 

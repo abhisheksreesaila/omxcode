@@ -281,6 +281,21 @@ def _read_all(path: String, limit: Int = -1) -> List[UInt8]:
     return b^
 
 
+def bytes_sum(addr: Int, n: Int) -> Int:
+    """A fingerprint of n bytes, eight at a step (a kept view's pixels: 5 MB in about a millisecond)."""
+    var h = UInt64(0xCBF29CE484222325) ^ UInt64(n)
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var i = 0
+    while i + 8 <= n:
+        h = (h ^ p.unsafe_offset(i).unsafe_bitcast[UInt64]()[]) * 0x9E3779B97F4A7C15
+        h ^= h >> 29
+        i += 8
+    while i < n:
+        h = (h ^ UInt64(p.unsafe_offset(i)[])) * 0x100000001B3
+        i += 1
+    return Int(h >> 2)
+
+
 def snap_read(path: String, head_only: Bool = False) -> ViewSnap:
     """The snapshot at path (ok False when there is none, or it isn't one). head_only: its key and note, not its tiles
     (a small read: the app checks a snapshot would match before it waits on one)."""
@@ -296,6 +311,7 @@ def snap_read(path: String, head_only: Bool = False) -> ViewSnap:
         return out^
     var head = String(from_utf8_lossy=Span(b)[12:12 + hl])
     var tiles_n = -1
+    var sum = -1
     try:
         for line in head.split("\n"):
             var l = String(line)
@@ -324,10 +340,14 @@ def snap_read(path: String, head_only: Bool = False) -> ViewSnap:
                 out.key.h = Int(val)
             elif name == "tiles":
                 tiles_n = Int(val)
+            elif name == "sum":
+                sum = Int(val)
     except:
         return out^
     if head_only:
         out.ok = tiles_n >= 0
+        return out^
+    if sum != bytes_sum(Int(b.unsafe_ptr()) + 12 + hl, len(b) - 12 - hl):  # (a file the power went from under: not these pixels)
         return out^
     var at = 12 + hl
     for _ in range(tiles_n):
@@ -377,7 +397,7 @@ struct SnapWriter(Movable):
         self.count += 1
 
     def finish(mut self) -> Bool:
-        var head = self.key.text() + "note=" + self.note.replace("\n", " ") + "\ntiles=" + String(self.count) + "\n"
+        var head = self.key.text() + "sum=" + String(bytes_sum(Int(self.body.unsafe_ptr()), len(self.body))) + "\nnote=" + self.note.replace("\n", " ") + "\ntiles=" + String(self.count) + "\n"
         var out = List[UInt8]()
         for c in SNAP_MAGIC.as_bytes():
             out.append(c)

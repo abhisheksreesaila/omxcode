@@ -316,6 +316,8 @@ struct Runtime[A: App](Movable):
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
     var closed: Bool  # App.closing was told
     var changes: Int  # the app's state changed this many times (every update but a timer's that changed no part of the screen, resize, appearance): a host that drew a
+    var pan_msg: Int  # a drag's points not delivered yet (queue_pan), and whose message they are
+    var pan_points: List[PanPoint]
     # frame ahead of time shows it only if this hasn't moved since (D-7560)
 
     def __init__(out self, var app: Self.A):
@@ -334,6 +336,8 @@ struct Runtime[A: App](Movable):
         self.armed_at = 0
         self.closed = False
         self.changes = 0
+        self.pan_msg = 0
+        self.pan_points = List[PanPoint]()
         self.take_effects()  # (what the starting state asks for)
 
     def watch(mut self, budget_ms: Int):
@@ -357,7 +361,8 @@ struct Runtime[A: App](Movable):
             print("SLOW: " + what + " " + name + " " + ms(took) + " ms", flush=True)
 
     def _update(mut self, event: Event):
-        """update(), timed by the watchdog."""
+        """update(), timed by the watchdog, after a drag's points that came before it."""
+        self._drain_pans()
         var t0 = self._t0()
         self.changes += 1
         self.app.update(event)
@@ -672,17 +677,32 @@ struct Runtime[A: App](Movable):
             return Diff(False, [])
         return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom, pressure=pressure))
 
-    def pans(mut self, node: Int, points: List[PanPoint]) -> Diff:
-        """Every point a drag passed since the last frame, in order, each its own PAN to the app; the screen once, after
-        them."""
-        if len(points) == 0 or node < 0 or node >= len(self.shown.nodes):
+    def queue_pan(mut self, node: Int, p: PanPoint):
+        """A drag's point on canvas `node` (a mouse sends up to 1,000 a second): kept for take_pans. Whatever else happens first
+        (a key, a timer, a menu, a rebuild) finds it delivered: every event's update() comes after the points before it."""
+        if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS or self.shown.nodes[node].msg == 0:
+            return
+        if self.pan_msg != self.shown.nodes[node].msg:
+            self._drain_pans()
+        self.pan_msg = self.shown.nodes[node].msg
+        self.pan_points.append(p)
+
+    def _drain_pans(mut self):
+        """The points kept, each its own PAN to the app, in order (the screen is the caller's to work out)."""
+        if len(self.pan_points) == 0:
+            return
+        var points = List[PanPoint]()
+        swap(points, self.pan_points)
+        for p in points:
+            self._update(Event(self.pan_msg, "", PAN, p.x, p.y, p.dx, p.dy, 1, pressure=p.pressure))
+
+    def take_pans(mut self) -> Diff:
+        """Every point a drag passed since the last frame reaches the app; the screen once, after them."""
+        if len(self.pan_points) == 0:
             return Diff(False, [])
-        var last = len(points) - 1
-        if self.shown.nodes[node].kind == CANVAS and self.shown.nodes[node].msg != 0:
-            var msg = self.shown.nodes[node].msg
-            for i in range(last):
-                self._update(Event(msg, "", PAN, points[i].x, points[i].y, points[i].dx, points[i].dy, 1, pressure=points[i].pressure))
-        return self.gesture(node, PAN, points[last].x, points[last].y, points[last].dx, points[last].dy, 1, points[last].pressure)
+        self._drain_pans()
+        self.take_effects()
+        return self._refresh("pans")
 
     def key(mut self, node: Int, name: String, modifiers: Int) -> Diff:
         """A key pressed while canvas node `node` had focus: its gesture message with number = KEY,

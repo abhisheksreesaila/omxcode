@@ -553,6 +553,10 @@ struct PageSheet(Movable):
                 while at + 1 < len(had.lines) and had.lines[at].end <= head:  # (the line the change is on)
                     at += 1
                 old_lines = max(0, at - 1)
+                # (a line that ended before a word longer than a line was ended by how long that word is, however far the
+                # change in it is: only a line with another place it could have ended, before the change, is sure)
+                while old_lines > 0 and not self.sure_end(words, had.lines[old_lines].start, head - 4):
+                    old_lines -= 1
                 for c in range(1, old_lines + 1):
                     kept.append(had.lines[c].start)
                 sync_from = n - tail + 8
@@ -715,6 +719,37 @@ struct PageSheet(Movable):
                 return st.cuts.copy()
         st.cuts.append(n)
         return st.cuts.copy()
+
+    def sure_end(self, words: String, cut: Int, until: Int) -> Bool:
+        """A line that ended at `cut` ended there whatever comes after byte `until`: it was cut inside a word (as much as
+        fits), or the next place it may end comes before."""
+        var bytes = words.as_bytes()
+        var i = cut
+        var x = 0
+        var before = 0
+        var k = cut - 1
+        while k > 0 and (Int(bytes[k]) & 0xC0) == 0x80:
+            k -= 1
+        if k >= 0 and cut > 0:
+            x = decode_at(words, k)
+            if k > 0:
+                var q = k - 1
+                while q > 0 and (Int(bytes[q]) & 0xC0) == 0x80:
+                    q -= 1
+                before = decode_at(words, q)
+        while i < min(until, len(bytes)):
+            var y = decode_at(words, i)
+            var may = x != 0 and _may_break(before, x, y)
+            if i == cut and not may:
+                return True
+            if i > cut and may:
+                return True
+            before = x
+            x = y
+            i += 1
+            while i < len(bytes) and (Int(bytes[i]) & 0xC0) == 0x80:
+                i += 1
+        return False
 
     def replay(self, words: String, segs: List[Seg], starts: List[Int], mut st: WrapAt, mut unmeasured: List[Int]):
         """Every place not measured so far, in order."""
