@@ -41,7 +41,7 @@ from mojoui.emojipicker import EmojiPicker
 from mojoui.mapmarks import local_now
 from std.os import makedirs
 from mojoui.doubletap import DoubleTap, KEY_UP, tap_key
-from mojoui.docstore import KeptDocs, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT, FAILED
+from mojoui.docstore import KeptDocs, DocBase, held_space, SaveTimer, RowSave, SqlArg, save_row, SaveResult, text_arg, int_arg, clock_us, SAVED, CONFLICT, FAILED
 from pnstore import set_note_icon, make_notes_file, make_note, drop_note, file_note, make_notebook, change_notebook, drop_notebook
 from mojoui.keycaps import keycap, device_name
 from mojoui.fonttext import engine
@@ -327,6 +327,27 @@ comptime WARM_NOTES = 12  # the newest pages and maps readied ahead
 comptime WARM_NOTE_BYTES = 65536
 
 
+def workspace_of(db: Database) -> String:
+    """The notes file's own name, given when it was made ("": one without)."""
+    try:
+        var d = db.copy()
+        var q = d.prepare("SELECT workspace_id FROM workspace_state WHERE id = 1")
+        return q.text(0) if q.step() else String("")
+    except:
+        return ""
+
+
+def workspace_at(path: String) -> String:
+    """Of the notes file at `path` ("": there is none)."""
+    if not file_exists(path):
+        return ""
+    try:
+        var db = Database(path, read_only=True)
+        return workspace_of(db)
+    except:
+        return ""
+
+
 @fieldwise_init
 struct Written(Copyable, Movable):
     """A save on its way: whose it is, its kind, what it holds (kept if it can't be written), the board's version and
@@ -342,6 +363,7 @@ struct Written(Copyable, Movable):
     var spilled: Bool  # on disk while it waits its turn
     var tries: Int  # times it met a row that had moved on with the same words
     var upto: Int  # the number of its held file, once it is being written: earlier ones go when it lands
+    var base: DocBase  # the row it builds on
 
 
 struct WebShell(Movable):
@@ -392,7 +414,6 @@ struct WebShell(Movable):
     var outbox: SaveOutbox  # edits that couldn't be written, until they land
     var page_src: String  # the open page's or map's content as it was read (a save changes it in place)
     var drafted: Bool  # the last document_of() held words still being written
-    var bases: Dict[Int, String]  # the notes saved here: their text as our last save left it in the file (what a later save builds on)
     var content_hash: Int  # the open canvas's text's fingerprint (0: not read yet), and the one its kept view was kept of
     var kept_hash: Int
     var opening_rev: Int  # the revision a deferred open began at
@@ -491,7 +512,6 @@ struct WebShell(Movable):
         self.page_src = ""
         self.content_hash = 0
         self.drafted = False
-        self.bases = Dict[Int, String]()
         self.kept_hash = 0
         self.opening_rev = -1
         self.db_id = String(fnv(db_path))
@@ -501,7 +521,6 @@ struct WebShell(Movable):
             pass
         var held_in = config_dir("pnote") + "/unsaved"
         self.outbox = SaveOutbox(held_in if private_dir(held_in) else String(""), String(fnv(db_path)))
-        self.outbox.load()
         self.snap_dir = ""
         self.budget = FrameBudget(FRAME_WORK_US)
         if getenv("MOJOUI_SNAP") != "0":
@@ -568,6 +587,13 @@ struct WebShell(Movable):
             self.dbs.append(Database(db_path))
             self.dbs[0].durable()  # (as Personal Note's own is)
             make_notes_file(self.dbs[0])  # (an empty file: Personal Note's tables; one that has them is left as it is)
+            var who = workspace_of(self.dbs[0])
+            if who != "":  # (the held edits of this very notes file, wherever it was: review 6, SHOULD 1; those of builds before by its path)
+                var space = held_space(self.outbox.dir, db_path, who, workspace_at)
+                self.outbox.also = space[1].copy()
+                self.outbox.also.append(self.outbox.space)
+                self.outbox.space = space[0]
+            self.outbox.load()
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
             self.recall_folds()
@@ -683,7 +709,7 @@ struct WebShell(Movable):
             self.rows = rows
             self.view = self.opening(cols, rows)
         self.look.keep_note = grid_note(self.cols, self.rows) + ";" + String(self.content_hash)
-        self.doc.ready(self.doc.id, self.notes[i].revision)
+        self.doc.ready(self.doc.id, self.notes[i].revision, self.row_base(self.notes[i].revision, self.board.source()))
 
     def open_failed(mut self, why: String):
         """The open note couldn't be read: shown as that, with a Retry; nothing of the empty screen can be edited, kept or
@@ -720,7 +746,7 @@ struct WebShell(Movable):
         if (out_i >= 0 and self.notes[out_i].kind == "canvas" and not self.notes[out_i].secure and self.doc.may_keep(self.current) and self.outbox.find(self.current) < 0
                 and self.board.edit().unsaved() == False and self.board.keepable()):
             var moving = self.board.take()  # (the outgoing canvas, whole, kept parsed)
-            let_go(self.kept.keep_out(self.notes[out_i].id, self.notes[out_i].revision, moving^))  # (the canvas just left, kept parsed)
+            let_go(self.kept.keep_out(self.notes[out_i].id, self.notes[out_i].revision, moving^, self.doc.base.copy()))  # (the canvas just left, kept parsed)
             self.kept_pages[self.notes[out_i].id] = self.cols * 1000 + self.rows
         i = self.note_index(id)
         if trace:
@@ -744,7 +770,6 @@ struct WebShell(Movable):
         self.look.keep_note = ""
         self.kept_hash = 0
         self.content_hash = 0
-        self.forget_base(id)
         self.page_src = ""
         var was_secure = self.notes[i].secure
         var built_on = self.notes[i].revision  # (what edits still on their way build on: the row may have moved on meanwhile)
@@ -767,6 +792,7 @@ struct WebShell(Movable):
         var at = -1 if self.cold_opens or held >= 0 or queued >= 0 else self.kept.find(id, self.notes[i].revision)
         if self.notes[i].kind == "canvas" and at >= 0:
             # the file still holds the revision this canvas was parsed at: reuse it (D-7934), nothing read or parsed
+            var base = self.kept.bases[at].copy()
             self.board.set(self.kept.take(at))
             var grid = self.kept_pages.get(id, 1001)
             self.cols = grid // 1000
@@ -774,7 +800,7 @@ struct WebShell(Movable):
             self.view_set = False
             self.tools = BoardTools()
             self.sticky_look()
-            self.doc.ready(id, self.notes[i].revision)
+            self.doc.ready(id, self.notes[i].revision, base^)
             self.begin_writing(self.notes[i].bytes, True)
             return
         if self.notes[i].kind == "canvas" and self.snap_dir != "" and held < 0 and queued < 0:
@@ -809,9 +835,13 @@ struct WebShell(Movable):
                     return
         var content = String("")
         var revision = self.notes[i].revision
+        var base = self.row_base(revision, "")
         if queued >= 0:
             content = self.written[queued].content
+            base = self.written[queued].base.copy()
         elif held >= 0:
+            base = self.outbox.items[held].base.copy()
+            base.plain = undecorated
             content = self.outbox.items[held].content
             revision = self.outbox.items[held].revision
             self.notes[i].revision = revision  # (what its edits build on)
@@ -826,6 +856,7 @@ struct WebShell(Movable):
                 return
             revision = self.notes[i].revision
             swap(content, self.notes[i].content)  # (the open document holds its text; the note's copy isn't read again)
+            base.text = content
         if trace:
             print("OPEN: rows read " + String(clock_us() - t_open) + " us", flush=True)
         var kind = self.notes[i].kind
@@ -851,7 +882,7 @@ struct WebShell(Movable):
             return
         if trace:
             print("OPEN: first slice " + String(clock_us() - t_open) + " us", flush=True)
-        self.doc.ready(id, revision)
+        self.doc.ready(id, revision, base^)
         if kind == "canvas":
             self.begin_writing(canvas_bytes, canvas_words)
         elif kind == "page":
@@ -1656,58 +1687,46 @@ struct WebShell(Movable):
         """A pointer gesture is under way (a stroke, a drag, a handle, a mark)."""
         return self.tools.drag != 0 or self.page.marking() or self.map.drag >= 0
 
-    def forget_base(mut self, id: Int):
-        """Note `id` is read from the file now: what it reads is what its saves build on (unless one is still on its way)."""
-        if self.queued_at(id) < 0 and self.outbox.find(id) < 0:
-            try:
-                _ = self.bases.pop(id)
-            except:
-                pass
-
-    def set_base(mut self, id: Int, var text: String):
-        if len(self.bases) > 24:  # (a save of one left long ago meets a conflict as before)
-            var keep = Dict[Int, String]()
-            for w in self.written:
-                try:
-                    keep[w.id] = self.bases.pop(w.id)
-                except:
-                    pass
-            self.bases = keep^
-        self.bases[id] = text^
-
-    def base_text(self, id: Int) -> String:
-        """The text of note `id` the file had when ours was read or last saved ("": not known)."""
-        try:
-            if id in self.bases:
-                return self.bases[id]
-        except:
-            pass
-        if id != self.current:
-            return ""
-        if self.on_canvas():
-            return self.board.layer.src.text if self.board.layer.src.ok else String("")
-        return self.page_src
-
-    def moved_on(mut self, id: Int) -> Int:
+    def moved_on(self, id: Int, base: DocBase) -> Int:
         """A conflict that isn't one: the row's revision has moved, its words are the ones ours builds on (another app wrote it
         again as it was, put its own picture names in, filed or renamed it). The row's revision; -1: its words differ."""
-        var base = self.base_text(id)
-        if base == "":
+        if not base.known():
             return -1
         try:
-            var q = self.dbs[0].prepare("SELECT revision, content FROM notes WHERE id = ? AND secure = 0")
+            var db = self.dbs[0].copy()
+            var q = db.prepare("SELECT revision, content FROM notes WHERE id = ? AND secure = 0")
             q.bind(1, id)
-            if q.step():
-                var text = q.text(1)
-                if text == base or undecorated(text) == undecorated(base):
-                    return q.int(0)
+            if q.step() and base.same(q.text(1)):
+                return q.int(0)
         except:
             pass
         return -1
 
+    def unsaved(self, id: Int, kind: String, content: String, body: String, why: String, conflict: Bool, base: DocBase) -> Unsaved:
+        """Edits of note `id` to hold: on the row they build on, named by the note's own name (its resource id)."""
+        var b = base.copy()
+        return Unsaved(id, kind, b.revision, content, body, why, conflict, b^, self.resource(id))
+
+    def row_base(self, revision: Int, text: String) -> DocBase:
+        """A row of this notes file as a document's base: the names of the pictures the web derives don't count."""
+        return DocBase(revision, text, 0, undecorated)
+
+    def resource(self, id: Int) -> String:
+        """The note's name that never changes and no other note has ("": not in the file)."""
+        if len(self.dbs) == 0:
+            return ""
+        try:
+            var db = self.dbs[0].copy()
+            var q = db.prepare("SELECT resource_id FROM notes WHERE id = ?")
+            q.bind(1, id)
+            return q.text(0) if q.step() else String("")
+        except:
+            return ""
+
     def same_words(mut self, id: Int) -> Bool:
         """The file's text of the open document is the one read (or last saved) here."""
-        return not self.saver.pending() and self.outbox.find(id) < 0 and self.moved_on(id) >= 0
+        var base = self.doc.base.copy()
+        return not self.saver.pending() and self.outbox.find(id) < 0 and self.moved_on(id, base) >= 0
 
     def remember_folds(mut self):
         """Which shelves are folded and which notebooks open, for the next start (in this app's own settings)."""
@@ -1948,8 +1967,8 @@ struct WebShell(Movable):
         """Saves that have waited their turn a while (the file is locked): on disk too, so a crash loses none of them."""
         for k in range(1, len(self.written)):
             if not self.written[k].spilled and clock_us() - self.written[k].at_us > 300_000:
-                var i = self.note_index(self.written[k].id)
-                var u = Unsaved(self.written[k].id, self.written[k].kind, self.notes[i].revision if i >= 0 else 0, self.written[k].content, self.written[k].body, "database is locked", False)
+                ref w = self.written[k]
+                var u = self.unsaved(w.id, w.kind, w.content, w.body, "database is locked", False, w.base)
                 self.written[k].spilled = self.outbox.spill(u) > 0
 
     def close(mut self):
@@ -1984,7 +2003,7 @@ struct WebShell(Movable):
             self.queue_save(String(self.notes[i].kind))
             return
         if locked:  # (the queue just waited for the file: no second wait)
-            self.saved_note(i, SaveResult(FAILED, self.notes[i].revision, "", "database is locked"), content, body)
+            self.saved_note(i, SaveResult(FAILED, self.notes[i].revision, "", "database is locked"), content, body, self.doc.base.copy())
             return
         var kind = self.notes[i].kind
         if self.save_note(i, content, body) and kind == "canvas":
@@ -2009,7 +2028,7 @@ struct WebShell(Movable):
         for k in range(len(self.written) - 1, 0 if self.writer.busy() else -1, -1):
             if self.written[k].id == id:
                 _ = self.written.pop(k)
-        self.written.append(Written(id, self.notes[i].kind, content, body, version, grid_note(self.cols, self.rows), self.drafted, clock_us(), False, 0, 0))
+        self.written.append(Written(id, self.notes[i].kind, content, body, version, grid_note(self.cols, self.rows), self.drafted, clock_us(), False, 0, 0, self.doc.base.copy()))
         self.start_save()
 
     def start_save(mut self):
@@ -2018,10 +2037,10 @@ struct WebShell(Movable):
             var w = self.written[0].copy()
             var i = self.note_index(w.id)
             if i >= 0:
-                var held = Unsaved(w.id, w.kind, self.notes[i].revision, w.content, w.body, "", False)
+                var held = self.unsaved(w.id, w.kind, w.content, w.body, "", False, w.base)
                 var f = self.outbox.job_file(w.id)
                 self.written[0].upto = f.seq
-                self.writer.start(self.db_path, self.row_save(i, w.content, w.body), held^, f.path)
+                self.writer.start(self.db_path, self.row_save(i, w.base.revision, w.content, w.body), held^, f.path)
                 return
             _ = self.written.pop(0)
             self.rescue(w.id, w.kind, "", w.content, w.body)  # (the note isn't in the list any more: deleted elsewhere)
@@ -2035,14 +2054,13 @@ struct WebShell(Movable):
 
     def settled(self, r: SaveResult, id: Int, content: String) -> SaveResult:
         """A conflict with a row that already holds these very words isn't one (a write of ours whose outcome never came back:
-        an earlier run's, one given up on): saved, at the row's revision."""
+        an earlier run's, one given up on; written again by the web): saved, at the row's revision."""
         if r.status != CONFLICT:
             return r.copy()
         try:
-            var q = self.dbs[0].prepare("SELECT revision, updated_at FROM notes WHERE id = ? AND secure = 0 AND content = ?")
+            var q = self.dbs[0].prepare("SELECT revision, updated_at, content FROM notes WHERE id = ? AND secure = 0")
             q.bind(1, id)
-            q.bind(2, content)
-            if q.step():
+            if q.step() and self.row_base(0, content).same(q.text(2)):
                 return SaveResult(SAVED, q.int(0), q.text(1), "")
         except:
             pass
@@ -2064,9 +2082,10 @@ struct WebShell(Movable):
                 var rest = self.written.pop(0)
                 var q = self.queued_at(rest.id)
                 if q >= 0:
+                    var base = rest.base.copy()  # (the earlier one's: it didn't land)
                     rest = self.written.pop(q)
-                var at = self.note_index(rest.id)
-                self.hold(Unsaved(rest.id, rest.kind, self.notes[at].revision if at >= 0 else 0, rest.content, rest.body, "database is locked", False))
+                    rest.base = base^
+                self.hold(self.unsaved(rest.id, rest.kind, rest.content, rest.body, "database is locked", False, rest.base))
                 continue
             self.start_save()
             var got = self.writer.done(wait)
@@ -2078,9 +2097,10 @@ struct WebShell(Movable):
             var r = self.settled(got.value().result, w.id, w.content)
             if r.status == CONFLICT and w.tries < 5:  # (the row moved on but for its words: on top of it)
                 var at = self.note_index(w.id)
-                var rev = self.moved_on(w.id) if at >= 0 else -1
+                var rev = self.moved_on(w.id, w.base) if at >= 0 else -1
                 if rev >= 0:
                     self.rebased(at, rev)
+                    w.base.revision = rev
                     w.tries += 1
                     self.written.insert(0, w^)
                     self.start_save()
@@ -2090,7 +2110,9 @@ struct WebShell(Movable):
             if r.status != SAVED:  # (what is held is the newest there is of it)
                 var k = self.queued_at(w.id)
                 if k >= 0:
+                    var base = w.base.copy()  # (what the file has is still what the first of them builds on)
                     w = self.written.pop(k)
+                    w.base = base^
             var i = self.note_index(w.id)
             if i < 0:
                 if r.status != SAVED:
@@ -2098,13 +2120,15 @@ struct WebShell(Movable):
             elif r.status == CONFLICT and row_revision(self.dbs[0], "notes", "id", w.id, "revision") < 0:  # (deleted in another app while it was written)
                 self.rescue(w.id, w.kind, String(self.notes[i].title), w.content, w.body)
             else:
-                self.saved_note(i, r, w.content, w.body, w.upto)
+                self.saved_note(i, r, w.content, w.body, w.base, w.upto)
                 if r.status == SAVED and w.kind == "canvas" and self.current == w.id and self.doc.may_edit():
                     self.board.edit().mark_saved_at(w.version)  # (edits since are the next save's)
                     self.content_hash = DRAFTED if w.drafted else got.value().hash
                     self.look.keep_note = w.grid + ";" + String(self.content_hash)
-                if r.status == SAVED:
-                    self.set_base(w.id, w.content)
+                if r.status == SAVED:  # (the next of it builds on this one)
+                    for k in range(len(self.written)):
+                        if self.written[k].id == w.id:
+                            self.written[k].base = w.base.moved(r.revision, w.content)
             if not wait:
                 self.start_save()
                 return locked
@@ -2128,7 +2152,7 @@ struct WebShell(Movable):
         var name = (title if title != "" else String("Recovered note")) + " (my copy)"
         var made = make_note(self.dbs[0], kind, name, 0, content, body)
         if made.id == 0:  # (held on disk instead, tried again at the next start)
-            self.hold(Unsaved(id, kind, 0, content, body, made.message, True))
+            self.hold(self.unsaved(id, kind, content, body, made.message, True, DocBase(0)))
             return
         self.outbox.drop(id)
         self.unheld(id)
@@ -2211,11 +2235,24 @@ struct WebShell(Movable):
             if i < 0:
                 self.rescue(u.id, u.kind, "", u.content, u.body)
                 continue
+            if u.of != "" and u.of != self.resource(u.id):  # (another note has its number now, in a file put back from a backup)
+                self.rescue(u.id, u.kind, "", u.content, u.body)
+                continue
             try:
-                var q = self.dbs[0].prepare("SELECT content FROM notes WHERE id = ? AND secure = 0")
+                var q = self.dbs[0].prepare("SELECT content, revision FROM notes WHERE id = ? AND secure = 0")
                 q.bind(1, u.id)
-                if q.step() and q.text(0) == u.content:
+                if not q.step():
+                    continue
+                var base = u.base.copy()
+                base.plain = undecorated
+                if self.row_base(0, u.content).same(q.text(0)):
                     self.outbox.drop(u.id)
+                elif base.known() and q.int(1) == u.revision and not base.same(q.text(0)):  # (a copy of the file that went its own way: its revision is only the same number)
+                    var k = self.outbox.find(u.id)
+                    self.outbox.items[k].revision = -1
+                    self.outbox.items[k].base.revision = -1
+                    self.outbox.items[k].conflict = True
+                    self.outbox.items[k].why = "This note was changed in another copy of the notes file."
             except:
                 pass
         while len(self.outbox.extras) > 0:  # (two windows held edits of one note: the other's are a note of their own)
@@ -2240,7 +2277,7 @@ struct WebShell(Movable):
             var content = String("")
             var body = String("")
             if self.document(i, content, body):
-                self.hold(Unsaved(self.notes[i].id, kind, self.doc.revision, content, body, "This note was locked in another app.", True))
+                self.hold(self.unsaved(self.notes[i].id, kind, content, body, "This note was locked in another app.", True, self.doc.base))
                 self.save_state = "Couldn’t save"
                 self.save_detail = "This note was locked in another app. Save a copy to keep your edits."
             return -1
@@ -2305,16 +2342,16 @@ struct WebShell(Movable):
         if self.notes[i].secure or len(self.dbs) == 0:
             print("PNOTE SAVE: refused (secure note " + String(id) + ")", flush=True)
             return False
-        var r = self.settled(save_row(self.dbs[0], self.row_save(i, content, body)), id, content)
+        var base = self.doc.base.copy()
+        var r = self.settled(save_row(self.dbs[0], self.row_save(i, base.revision, content, body)), id, content)
         for _ in range(5):
-            var rev = self.moved_on(id) if r.status == CONFLICT else -1
+            var rev = self.moved_on(id, base) if r.status == CONFLICT else -1
             if rev < 0:
                 break
             self.rebased(i, rev)
-            r = self.settled(save_row(self.dbs[0], self.row_save(i, content, body)), id, content)
-        if r.status == SAVED:
-            self.set_base(id, content)
-        self.saved_note(i, r, content, body)
+            base.revision = rev
+            r = self.settled(save_row(self.dbs[0], self.row_save(i, base.revision, content, body)), id, content)
+        self.saved_note(i, r, content, body, base)
         return r.status == SAVED
 
     def rebased(mut self, i: Int, revision: Int):
@@ -2324,10 +2361,10 @@ struct WebShell(Movable):
         if self.notes[i].id == self.current and self.doc.may_edit():
             self.doc.saved(revision)
 
-    def row_save(self, i: Int, content: String, body: String) -> RowSave:
+    def row_save(self, i: Int, revision: Int, content: String, body: String) -> RowSave:
         """The transaction that saves a note's new content (save_note, or RowSaver on its thread)."""
         var id = self.notes[i].id
-        var s = RowSave("notes", "id", id, "revision", self.notes[i].revision)
+        var s = RowSave("notes", "id", id, "revision", revision)
         s.set("content", text_arg(content))
         s.stamp("updated_at")
         s.read_back("updated_at")
@@ -2343,12 +2380,12 @@ struct WebShell(Movable):
                    [int_arg(id), text_arg(content)])
         return s^
 
-    def saved_note(mut self, i: Int, r: SaveResult, content: String, body: String, upto: Int = 0):
+    def saved_note(mut self, i: Int, r: SaveResult, content: String, body: String, base: DocBase, upto: Int = 0):
         """What a save came to: the note's record and outbox."""
         var id = self.notes[i].id
         if r.status == SAVED:
             if id == self.current:
-                self.doc.saved(r.revision)
+                self.doc.landed(r.revision, content)
             if self.queued_at(id) >= 0:
                 self.outbox.landed(id, upto)
             else:
@@ -2356,7 +2393,7 @@ struct WebShell(Movable):
             self.unheld(id)
             self.notes[i].bytes = content.byte_length()
         else:
-            self.hold(Unsaved(id, self.notes[i].kind, self.notes[i].revision, content, body, r.message, r.status == CONFLICT))
+            self.hold(self.unsaved(id, self.notes[i].kind, content, body, r.message, r.status == CONFLICT, base))
         self.landed(i, r.status, r.revision, r.value, r.message)
 
     def landed(mut self, i: Int, status: Int, revision: Int, stamp: String, message: String):

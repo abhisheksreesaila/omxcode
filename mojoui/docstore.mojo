@@ -306,6 +306,54 @@ comptime DOC_READY = 2  # read whole: may be edited and saved
 comptime DOC_FAILED = 3  # couldn't be read: shown as such, never edited, never saved, never kept
 
 
+comptime Plain = def(String) thin -> String
+
+
+def as_it_is(text: String) -> String:
+    return text
+
+
+struct DocBase(Copyable, Movable):
+    """(review 6, M1) What a save builds on: the row as this window last knew it, its revision and its text. It belongs to the
+    open document and goes with it: read with it, replaced by every save that lands, kept with a kept parse, carried by a save
+    on its way and by held edits. A row that moved on with this very text (`plain`: the text without what doesn't count) is not
+    a conflict; one with any other text is, also one that went back to what it once was. `sum` stands for the text when only
+    that is left (a held edit of an earlier run); 0: not known."""
+    var revision: Int
+    var text: String
+    var sum: Int
+    var plain: Plain
+
+    def __init__(out self, revision: Int = -1, text: String = "", sum: Int = 0, plain: Plain = as_it_is):
+        self.revision = revision
+        self.text = text
+        self.sum = sum
+        self.plain = plain
+
+    def known(self) -> Bool:
+        return self.text != "" or self.sum != 0
+
+    def same(self, text: String) -> Bool:
+        """Whether a row holding `text` is the row this is."""
+        if self.text != "":
+            return text == self.text or self.plain(text) == self.plain(self.text)
+        return self.sum != 0 and _sum(self.plain(text)) == self.sum
+
+    def kept_sum(self) -> Int:
+        """The sum a held edit's file keeps of it (a big text: milliseconds; asked where the file is written)."""
+        return _sum(self.plain(self.text)) if self.text != "" else self.sum
+
+    def moved(self, revision: Int, text: String) -> DocBase:
+        """The row after a save of `text` landed."""
+        return DocBase(revision, text, 0, self.plain)
+
+
+def _sum(text: String) -> Int:
+    var n = bytes_sum(Int(text.unsafe_ptr()), text.byte_length())
+    _ = text.byte_length()
+    return max(n, 1)
+
+
 struct OpenDoc(Copyable, Movable):
     """(review 3, MUST 3) Which document is open and whether it was read: the one gate between a screen and its row. An app
     begins an open, says ready or failed, and asks may_save before every write and may_keep before keeping a parse: a
@@ -318,25 +366,31 @@ struct OpenDoc(Copyable, Movable):
     var id: Int
     var state: Int
     var revision: Int  # the row's revision the screen was read at (or last saved)
+    var base: DocBase  # the row as it was then
     var problem: String
 
     def __init__(out self):
         self.id = -1
         self.state = DOC_NONE
         self.revision = -1
+        self.base = DocBase()
         self.problem = ""
 
     def begin(mut self, id: Int):
         self.id = id
         self.state = DOC_LOADING
         self.revision = -1
+        self.base = DocBase()
         self.problem = ""
 
-    def ready(mut self, id: Int, revision: Int):
-        """Read whole, at this revision (an answer for another document, or after a failure, changes nothing)."""
+    def ready(mut self, id: Int, revision: Int, var base: DocBase = DocBase()):
+        """Read whole, at this revision (an answer for another document, or after a failure, changes nothing); base: the row
+        its saves build on."""
         if id == self.id and self.state == DOC_LOADING:
             self.state = DOC_READY
             self.revision = revision
+            self.base = base^
+            self.base.revision = revision
 
     def failed(mut self, id: Int, why: String):
         if id == self.id:
@@ -344,8 +398,16 @@ struct OpenDoc(Copyable, Movable):
             self.problem = why if why != "" else String("It couldn't be read.")
 
     def saved(mut self, revision: Int):
+        """The row is at this revision, its text the one it was (renamed, filed, written again as it was)."""
         if self.state == DOC_READY:
             self.revision = revision
+            self.base.revision = revision
+
+    def landed(mut self, revision: Int, text: String):
+        """A save of it landed: the row holds `text`."""
+        if self.state == DOC_READY:
+            self.revision = revision
+            self.base = self.base.moved(revision, text)
 
     def loading(self) -> Bool:
         return self.state == DOC_LOADING
@@ -374,8 +436,12 @@ struct Unsaved(Copyable, Movable):
     var body: String
     var why: String
     var conflict: Bool
+    var base: DocBase  # the row it builds on (its file keeps the sum)
+    var of: String  # whose edits: the document's own name that never changes ("": not known), so that another one with its number isn't taken for it
 
-    def __init__(out self, id: Int, kind: String, revision: Int, content: String, body: String, why: String, conflict: Bool):
+    def __init__(out self, id: Int, kind: String, revision: Int, content: String, body: String, why: String, conflict: Bool, var base: DocBase = DocBase(), of: String = ""):
+        self.base = base^
+        self.of = of
         self.id = id
         self.kind = kind
         self.revision = revision
@@ -392,7 +458,7 @@ def unsaved_text(u: Unsaved, over: List[String] = List[String]()) -> String:
     for n in over:
         names += ("," if names != "" else "") + json_string(n)
     var t = ('{"id":' + String(u.id) + ',"kind":' + json_string(u.kind) + ',"revision":' + String(u.revision) + ',"conflict":' + ("true" if u.conflict else "false")
-             + ',"why":' + json_string(u.why) + ',"body":' + json_string(u.body) + ',"over":[' + names + '],"content":' + json_string(u.content))
+             + ',"why":' + json_string(u.why) + (',"of":' + json_string(u.of) if u.of != "" else String("")) + (',"base":' + String(u.base.kept_sum()) if u.base.known() else String("")) + ',"body":' + json_string(u.body) + ',"over":[' + names + '],"content":' + json_string(u.content))
     return t + SUM_MARK + String(bytes_sum(Int(t.unsafe_ptr()), t.byte_length())) + "}"
 
 
@@ -457,6 +523,35 @@ struct Settle(Copyable, Movable):
     def __init__(out self, path: String, var olds: List[String]):
         self.path = path
         self.olds = olds^
+
+
+def held_space(dir: String, path: String, identity: String, identity_of: def(String) thin -> String) -> Tuple[String, List[String]]:
+    """SaveOutbox's `space` of the store at `path`, which says it is `identity` ("": it doesn't say), and the names it had at
+    places it has left (`also`): so a file put in its place isn't given its edits, and it finds them again after it was moved.
+    A note of each is kept in `dir` (space-….json). identity_of: what the store at a path says it is now ("" when there is none)."""
+    var head = path + "|" + identity if identity != "" else path
+    var space = String(_sum(head))
+    var also = List[String]()
+    if dir == "" or identity == "":
+        return (space, also^)
+    var own = dir + "/space-" + space + ".json"
+    if not file_exists(own):
+        _ = private_write(own, '{"path":' + json_string(path) + ',"identity":' + json_string(identity) + "}", durable=True)
+    try:
+        for name in listdir(dir):
+            var n = String(name)
+            if not n.startswith("space-") or not n.endswith(".json") or n == "space-" + space + ".json":
+                continue
+            var t: String
+            with open(dir + "/" + n, "r") as f:
+                t = f.read()
+            var j = Json.parse(t)
+            var was = j.text(j.get(0, "path"))
+            if j.text(j.get(0, "identity")) == identity and was != path and identity_of(was) != identity:  # (it isn't there any more: this is it)
+                also.append(String(n[byte = 6 : n.byte_length() - 5]))
+    except e:
+        print("held_space: " + String(e), flush=True)
+    return (space, also^)
 
 
 struct DiskOp(Copyable, Movable):
@@ -545,8 +640,8 @@ def settled_name(path: String) -> String:
 struct SaveOutbox(Movable):
     """(review 3, SHOULD 7; review 4, MUST 1; review 5, MUST 2) Saves that failed, met a conflict or wait for a locked file, held
     until they land or the person drops them: in memory, and as files (0600, in a 0700 folder of the app's), so a switch, a
-    quit, a crash or the power going loses nothing. `space` names the store the ids belong to. Windows and processes share
-    the folder.
+    quit, a crash or the power going loses nothing. `space` names the store the ids belong to; `also`, the names it had (a file
+    that was moved), whose held edits load() takes too. Windows and processes share the folder.
 
     Its invariants (tests/test_outboxmodel.mojo holds random windows, saves, kills at every step and take-overs to them):
      1. A file is written once, under a name nobody used (document, number, owner), in one step, and never written to again.
@@ -570,6 +665,7 @@ struct SaveOutbox(Movable):
 
     var dir: String
     var space: String
+    var also: List[String]
     var owner: String
     var lock: FileLock
     var claimed: String  # the folder `owner` is claimed in
@@ -587,6 +683,7 @@ struct SaveOutbox(Movable):
     def __init__(out self, dir: String = "", space: String = ""):
         self.dir = dir
         self.space = space
+        self.also = List[String]()
         self.owner = ""
         self.lock = FileLock()
         self.claimed = ""
@@ -622,8 +719,8 @@ struct SaveOutbox(Movable):
         _ = unlink(self.lock_path(self.owner))
         self.owner = "n" + String(getpid()) + "-" + new_key("k")
 
-    def lock_path(self, owner: String) -> String:
-        return self.dir + "/unsaved-" + self.space + "." + owner + ".lock"
+    def lock_path(self, owner: String, space: String = "") -> String:
+        return self.dir + "/unsaved-" + (space if space != "" else self.space) + "." + owner + ".lock"
 
     def _new_file(mut self, id: Int) -> HeldFile:
         """The next file of document `id` (its path "" when there is no folder)."""
@@ -773,7 +870,16 @@ struct SaveOutbox(Movable):
 
     # ------------------------------------------------ a start
 
-    def gone(self, owner: String, mut lock: FileLock) -> Bool:
+    def space_in(self, name: String) -> String:
+        """Which of this outbox's spaces a file of the folder is of ("": none)."""
+        if name.startswith("unsaved-" + self.space + "-") or name.startswith("unsaved-" + self.space + "."):
+            return self.space
+        for s in self.also:
+            if name.startswith("unsaved-" + s + "-") or name.startswith("unsaved-" + s + "."):
+                return s
+        return ""
+
+    def gone(self, owner: String, mut lock: FileLock, space: String) -> Bool:
         """Whether `owner` is no more (its lock is then ours, in `lock`)."""
         if owner.startswith("n"):
             var dash = owner.find("-")
@@ -782,7 +888,7 @@ struct SaveOutbox(Movable):
                 return pid != getpid() and kill(pid, 0) != 0
             except:
                 return False
-        return lock.take(self.lock_path(owner))
+        return lock.take(self.lock_path(owner, space))
 
     def load(mut self):
         """What earlier sessions left: the versions of owners that are gone, theirs to this outbox now."""
@@ -798,23 +904,26 @@ struct SaveOutbox(Movable):
         except e:
             print("SaveOutbox: " + self.dir + ": " + String(e), flush=True)
             return
-        var head = "unsaved-" + self.space + "-"
-        var locks = "unsaved-" + self.space + "."
         # whose names are there, and which of them are gone (their locks held from here on)
         var owners = Dict[String, Bool]()
         for n in names:
+            var space = self.space_in(n)
+            if space == "":
+                continue
+            var head = "unsaved-" + space
             var owner: String
-            if n.startswith(head) and n.endswith(".json"):
+            if n.startswith(head + "-") and n.endswith(".json"):
                 owner = _owner_of(settled_name(n))
-            elif n.startswith(locks) and n.endswith(".lock"):
-                owner = String(n[byte = locks.byte_length() : n.byte_length() - 5])
+            elif n.startswith(head + ".") and n.endswith(".lock"):
+                owner = String(n[byte = head.byte_length() + 1 : n.byte_length() - 5])
             else:
                 continue
-            if owner == self.owner or owner in owners:
+            var whose = space + "." + owner
+            if owner == self.owner or whose in owners:
                 continue
             var lock = ArcPointer(FileLock())
-            var is_gone = self.gone(owner, lock[])
-            owners[owner] = is_gone
+            var is_gone = self.gone(owner, lock[], space)
+            owners[whose] = is_gone
             if is_gone and lock[].held():
                 self.taken.append(lock^)
         # (the folder again: an owner found gone may have written its last file since it was read; none of theirs is now)
@@ -829,10 +938,11 @@ struct SaveOutbox(Movable):
         var by = List[String]()  # (that file)
         var left = Dict[String, Bool]()  # the gone owners that have files
         for name in names:
-            if not name.startswith(head) or not name.endswith(".json"):
+            var space = self.space_in(name)
+            if space == "" or not name.startswith("unsaved-" + space + "-") or not name.endswith(".json"):
                 continue
             var n = settled_name(name)
-            var owner = _owner_of(n)
+            var owner = space + "." + _owner_of(n)
             if owner not in owners or not owners.get(owner, False):
                 continue
             left[owner] = True
@@ -848,7 +958,8 @@ struct SaveOutbox(Movable):
                     continue
                 var j = Json.parse(t)
                 var u = Unsaved(j.number(j.get(0, "id"), -1), j.text(j.get(0, "kind")), j.number(j.get(0, "revision"), -1), j.text(j.get(0, "content")),
-                                j.text(j.get(0, "body")), j.text(j.get(0, "why")), j.flag(j.get(0, "conflict")))
+                                j.text(j.get(0, "body")), j.text(j.get(0, "why")), j.flag(j.get(0, "conflict")),
+                                DocBase(j.number(j.get(0, "revision"), -1), "", j.number(j.get(0, "base"), 0)), j.text(j.get(0, "of")))
                 if u.id < 0 or u.content == "":
                     continue
                 for k in range(j.size(j.get(0, "over"))):
@@ -918,7 +1029,7 @@ struct SaveOutbox(Movable):
         for e in owners.items():
             if e.value and not left.get(e.key, False):
                 if self.disk.step():
-                    _ = unlink(self.lock_path(e.key))
+                    _ = unlink(self.dir + "/unsaved-" + e.key + ".lock")
 
     def _has(self, path: String) -> Bool:
         """A file this outbox has already (load() a second time)."""
@@ -971,11 +1082,13 @@ struct KeptDocs[T: Movable & Deinitable](Movable):
 
     var ids: List[Int]
     var revs: List[Int]
+    var bases: List[DocBase]  # (the row each was left as: kept with it)
     var docs: List[Self.T]
     var cap: Int
 
     def __init__(out self, cap: Int = 4):
         self.ids = List[Int]()
+        self.bases = List[DocBase]()
         self.revs = List[Int]()
         self.docs = List[Self.T]()
         self.cap = cap
@@ -987,8 +1100,9 @@ struct KeptDocs[T: Movable & Deinitable](Movable):
         return -1
 
     def take(mut self, at: Int) -> Self.T:
-        """Hands back kept document `at` (it leaves the store)."""
+        """Hands back kept document `at` (it leaves the store; its base is bases[at], to be taken first)."""
         _ = self.ids.pop(at)
+        _ = self.bases.pop(at)
         _ = self.revs.pop(at)
         return self.docs.pop(at)
 
@@ -996,7 +1110,7 @@ struct KeptDocs[T: Movable & Deinitable](Movable):
         """doc kept; what it replaces or pushes out is freed here (keep_out hands it back instead)."""
         _ = self.keep_out(id, revision, doc^)
 
-    def keep_out(mut self, id: Int, revision: Int, var doc: Self.T) -> List[Self.T]:
+    def keep_out(mut self, id: Int, revision: Int, var doc: Self.T, var base: DocBase = DocBase()) -> List[Self.T]:
         """doc kept; what it replaced or pushed out, for the caller to let go when it likes (mojoui.letgo: a big document's
         end takes milliseconds)."""
         var out = List[Self.T]()
@@ -1008,10 +1122,12 @@ struct KeptDocs[T: Movable & Deinitable](Movable):
             out.append(self.take(0))
         self.ids.append(id)
         self.revs.append(revision)
+        self.bases.append(base^)
         self.docs.append(doc^)
         return out^
 
     def clear(mut self):
         self.ids.clear()
         self.revs.clear()
+        self.bases.clear()
         self.docs.clear()

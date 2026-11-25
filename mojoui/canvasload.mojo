@@ -863,6 +863,7 @@ struct OpenBoard(Movable):
     var broken: Bool  # (review 3) the last open failed: the board is empty and read-only until another document is opened
     var text_hash: Int  # a fingerprint of the text an open_later() read (0: none yet)
     var problem: String  # why the last open_later() found nothing ("" when it didn't fail)
+    var back: String  # the text of an open_later() the skim couldn't open (imported whole), else ""
     var times: String  # the last open_later()'s read / skim / take on its thread, µs (MOJOUI_LOAD_TRACE prints it)
 
     def __init__(out self):
@@ -874,7 +875,14 @@ struct OpenBoard(Movable):
         self.broken = False
         self.text_hash = 0
         self.problem = ""
+        self.back = ""
         self.times = ""
+
+    def source(self) -> String:
+        """The text the board was read from, just opened (an open_later() that has landed): what its saves build on."""
+        if len(self.load) > 0:
+            return self.load[0].text
+        return self.layer.src.text if self.layer.src.ok else self.back
 
     def _fail(mut self, why: String):
         """The document couldn't be read: an empty board that nothing may edit, and why."""
@@ -963,6 +971,7 @@ struct OpenBoard(Movable):
         except e:
             got.problem = String(e)
         self.text_hash = got.hash
+        self.back = got.back
         self.times = "read " + String(got.read_us) + " skim " + String(got.skim_us) + " take " + String(got.take_us)
         if got.problem != "":
             self._fail(got.problem)
