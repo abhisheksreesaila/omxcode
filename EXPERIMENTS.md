@@ -4,6 +4,11 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-25: goal 79, continuation 27 (review round 9: PASS)
+- **Worked.** Its four SHOULDs, test first; 52 installer mutants noticed; Linux M0–M6 at one commit (60 of 60); both packages.
+- **Broke.** Both-open on seed 101: a deleted word came back. The web's own unsaved edit of the deleted object did it (5 of 5 with no native app running); the harness is as it was.
+- **Next.** The Mac unlocked; the backup push; the merge.
+
 ## 2026-11-25: goal 79, continuation 26 (review round 8)
 - **Setup.** Review 8 in hand (1 must, 4 should); the Mac locked.
 - **Worked.** An installer that installs a list and removes only what the list and the content both prove: 43 mutants, 60 random HOMEs. Words a save took hold no change back. Linux M0–M6 at one commit (60 of 60). Both packages from it.

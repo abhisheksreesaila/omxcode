@@ -1848,3 +1848,8 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - 07:20 from df3e0085. uvicorn 2874674 proven mine by /proc (cwd, command, environment, start, port 4987), stopped 07:30; harness servers die with it, M6 looks first (D-8095). Round 7's scratch homes confirmed by their names in its probes and removed.
 - 07:30–08:05 M1: list by the packager, proven twice before removal (D-8093); first mutant run missed 7, cases added, 43 noticed; property test 60 HOMEs; real old packages tried. S1 (D-8094): `unsaved()`; `place()` was one letter early at a paragraph's end (found by the new test). Font licences, NOTICE, Draw mode and pen colour.
 - 08:06–08:43 M0–M5 PASS, M6 Linux PASS 60 ✓ 0 ✗ at e3ee284c, Mac locked. 08:45–10:06 tests, kills, walks, both open (245 words, 0 lost), KEYS, PACKAGE, BUILDS, the Mac's tests, M5, M7 looks, both packages; package_test again on the final tarball.
+
+## 2026-11-25 goal 79 (continuation 27) — review round 9 (PASS)
+- 10:37 from 64254923. S1–S4 and five one-line NITs, tests first (docbase red at `emptied`, install_test at the list's form); D-8096. 52 mutants.
+- 11:09–12:33 M0–M5, M6 Linux 60 ✓ 0 ✗ at 8206e754 (Mac locked), tests, both-open, KEYS, PACKAGE, BUILDS, both packages.
+- 12:40–13:38 both-open seed 101 BAD: reproduced with a recorder, the web's late save brought the object back; control without native 5 of 5. Harness not changed; seed 103 ok.

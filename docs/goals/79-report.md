@@ -23,6 +23,37 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 27 (2026-11-25, 10:37–13:40): review round 9 (PASS), its four SHOULDs
+
+**The judged code is 8206e754** (later commits: the race's table, documents).
+
+| | Linux (RTX 3090, 1.6×, 60 Hz) | Mac (M4, locked) |
+|---|---|---|
+| M0–M5 | PASS, 11:09–11:19 | M1, M5 halves PASS |
+| M6 | **PASS, 60 ✓ 0 ✗** (11:29–11:45, ten idle minutes before, raced once) | **BLOCKED: locked, not raced** |
+| KEYS, PACKAGE, BUILDS | PASS; PASS (52 mutants noticed, 60 random HOMEs; the check's own line still says 43: a fixed text); 45 of 45 | KEYS PASS |
+| Tests | savelater, saveattack, pnshell, review4, opendoc, pnnotes, pageedit, textedit, boardedit; docbase 200 seeds | not run |
+| Both open, ten minutes | **seed 101: BAD, twice** (238 words, 0 lost; one of 28 deletions came back: the web's doing, below). Seed 103: ok (248 words, 169 in the file, 79 held and said, 0 lost; 35 deletions, none back) | — |
+
+| Package (from this code) | bytes | sha256 |
+|---|---|---|
+| pnote-linux-x86_64.tar.gz (the very file package_test.py passed on) | 8,786,395 | c60c8e6e7cadddbd72f048851caf28c56ec71d8ef804d1fdbcef759b482142dc |
+| pnote-mac-arm64.zip (built on the Mac; not opened by hand) | 8,248,112 | 78127fb21cb1e2f58a1473a3f8f1a9f971f068dd6d39829b37c188b70e6b4d03 |
+
+| Finding | State | Proof |
+|---|---|---|
+| S1 the caret after an emptied text | the caret stands where it was when the other app writes (nothing in the file to find it by) | test_docbase `emptied` (new and old texts, twice; failed before) |
+| S2 exec bits | the list is "sha256  mode path"; the installer sets the mode (D-8096) | install_test A; round 9's probe A: starts |
+| S3 an old layout nobody installed | taken apart only when its installer's own uninstaller was there and every listed file is that file: all or none; else left, said | install_test H, H2, all or nothing; round 9's probe H, H2 |
+| S4 sudo, a HOME not one's own | stops, nothing changed; root in its own HOME and sudo -u go on | install_test; round 9's sudo.sh in a user namespace |
+| NITs | the message at the end says what starts what; files.sha256 0644; tar headers 0/0; the fonts' line in the NOTICE inside the Mac app; a notes file that can't be opened is said in the window | install_test, package_test, test_docbase `no_folder`, looked at |
+
+**The both-open BAD (seed 101).** The word deleted through the API (web43q) came back. Run again with every state of the Board kept: at 168.08 s an API call deletes the object; at 168.86 the web's own late save writes the Board with it, and with three words that stood nowhere but in the web's page (it had typed web66q into the middle of that very text a second before). Native had no part in it. Without any native app at all the web does it 5 times of 5 (build/bothopenc.py). The harness counts a return by either side; **it was not changed**.
+
+**Changed tests:** install_test (12 cases, the list's new form), install_mutants (43 → 52; four rewritten for the new text), install_property (the old layout's uninstaller too), package_test (modes, headers), test_docbase (two).
+**Left (round 9's NITs, not done):** a disk that fills during an update leaves new and old files mixed (a rerun mends it); a HOME that was renamed is refused by name; a trailing slash in XDG_DATA_HOME passes the first time; ours_running doesn't see a system Xvfb or a relative path, and isn't asked again after the race; a composition given up after a save: conflict said, held; a letter typed and taken back while another app writes: "Couldn't save" though nothing differs; a SIGKILL while an old layout is taken apart leaves the rest; a text deleted elsewhere with the caret in it ends the caret. The "43 mutants" line in 79-check.py.
+**Not done:** the Mac's M6 (unlocked, about 40 minutes).
+
 ## Continuation 26 (2026-11-25, 07:20–10:20): review round 8 fixed
 
 **The judged code is e3ee284c** (later commits: the race's table, documents).
