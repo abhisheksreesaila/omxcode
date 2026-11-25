@@ -2067,3 +2067,20 @@ Personal Note: WAL, synchronous FULL (its Python's SQLite is built so, checked: 
 
 ## D-8082: right to left starts as a module of its own, nothing importing it (ours; gap 81)
 `mojoui/bidi.mojo`: the Unicode bidirectional algorithm whole, a line's order, and from each character's width the caret, a press, an arrow key and a selection. Held against Unicode's BidiCharacterTest (strict levels and order) and ICU, which Chrome uses; FriBidi, tried first, is wrong on some brackets, and ICU leaves a mark after a bracket behind (Unicode's N0 doesn't): that one pattern is left out of the ICU lines. Wiring it in means shaping by run in fonttext (HarfBuzz and CoreText), clusters' widths, and TextEdit, PageSheet's wrap and the canvas's words measuring by edges instead of from the left: every text on both machines, so it isn't done in the round whose race is already run. Between two directions the caret stands at the character that goes the paragraph's way (ours; Chrome's own choice isn't checked yet).
+
+## D-8083: the base a save builds on belongs to the open document (ours; review 6, M1)
+`DocBase` (the row's revision and text as this window last knew them) is a field of `OpenDoc`: read with the document, replaced by every save that lands, kept with a kept parse (`KeptDocs.bases`), carried by a save on its way (and passed on to the one behind it when it lands), held with held edits (their file keeps its sum). The side table (`bases`) is gone: `open()` dropped it and what remained was the text of the first read. A row that holds the base's words (without the picture names the web derives: "media/" and 64 hex digits) is built on; any other text is a conflict, also one the document once had. Texts are shared, not copied (260 ns for 16 MB).
+
+## D-8084: held edits are of one notes file (ours; review 6, SHOULD 1)
+Their space is the notes file's path and its own workspace id; a moved file finds the space it left (space-….txt notes it, taken when nothing of that id is at the old path any more). A held edit also says its note's resource id (another note with its number: a note of its own) and its base's sum (the same revision with other words, a copy that went its own way: a conflict, never written over).
+
+## D-8085: an input method only where words are written (ours; review 6, M2)
+`App.takes_text` is False by default: each key is a KEY, as before this goal. GTK's input context is no longer the key controller's own; a key is offered to it when the app says words are being written, and it has focus only then. `App.takes_paste` (PASTE after Ctrl+V) and `App.hears_key_ups` (KeyUp, the Mac's modifier KEYs) are asked for too: both had reached every app. The key steps go the same way as a real key, and `tests/realkeys.py` (XTEST) and AppKit's `realkey:` (a CGEvent handed to keyDown:) press real ones (check KEYS).
+
+## D-8086: the program in ~/.local/lib/<app>, and only listed files are ever removed (ours; review 6, P1; for every app)
+`linux/install.sh.in`: a manifest of what was put there; an update replaces and removes by it; the uninstaller too; a path out of the folder in a manifest isn't followed; a file of the program's name that no manifest lists, or a link in the way, stops it before anything is changed. From the layout of before (~/.local/share/<app>, no manifest): only files byte for byte the new package's own are taken away, the rest stays and is said. The old uninstaller is replaced. A package carries the app's files by name, its fonts with their licences, a NOTICE of its own name.
+
+## D-8087: a missing font is said, and the system's face drawn (ours; review 6, P2)
+
+## D-8088: a note read again because another app changed it keeps its tool and begins no caret (ours)
+`begin_writing` is for a note somebody opened. Found by real24.py: the idle web's echo of a drawing made native read the note again, and the next tool letter was typed into a text.

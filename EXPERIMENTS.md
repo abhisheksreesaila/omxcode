@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-25: goal 79, continuation 24 (review round 6)
+- **Setup.** Review 6 in hand; the Mac locked; one heavy thing at a time.
+- **Worked.** Asking "what does this write take out of the row, and who deleted it?" after every write found what "is my word still there" couldn't. A real keyboard in six apps. An installer held to a list of what it wrote. Linux M0–M6 at one commit again (60 of 60).
+- **Broke / fixed.** A default that fitted one app took the letters from all others. A package that drew no words anywhere but here. The web's picture names weren't what we thought.
+- **Means.** A default is every app's. Test what a person downloads, from a folder that isn't ours. "0 times" in a log is a question.
+- **Next.** The Mac unlocked; review 7; then the merge (docs/goals/79-merge.md), after a backup push the owner allows.
+
 ## 2026-11-24: goal 79, continuation 23 (review round 5; a race of two visible windows; power cuts)
 - **Setup.** Review 5 in hand; the Mac locked; the desktop stopped twice without a word (18:27 at idle, 19:09 at load 1.6).
 - **Worked.** Model tests of whole pieces (the save outbox, the whole shell, a disk that loses what wasn't synced) found in minutes what reading hadn't in days. Linux M6 PASS with the web in a visible window on the hidden output, 60 of 60.

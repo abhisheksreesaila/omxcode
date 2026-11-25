@@ -23,6 +23,50 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 24 (2026-11-24 23:37 – 11-25 03:50): review round 6 fixed
+
+**The judged commit is 4e54f3c0** on both machines (later commits: the race's table and documents).
+
+| | Linux (RTX 3090, both windows visible, 1.6×, 60 Hz) | Mac (M4, locked) |
+|---|---|---|
+| M0–M5 | PASS, 01:38–01:51 | M1, M5 halves PASS |
+| M6 | **PASS, 60 ✓ 0 ✗** (02:01–02:18; ten idle minutes before; raced once; the one-run maximum rule) | **BLOCKED: locked, not raced** |
+| M7 | — | nine looks PASS (.987–.998) |
+| KEYS (new) | PASS: six apps, a real keyboard and pointer | PASS: the system's key events in kit and pnote |
+| PACKAGE (new) | PASS | the zip built, signed and listed; not opened by hand |
+| BUILDS | 45 of 45 | — |
+| Tests | savelater saveattack pnshell review4 opendoc outboxmodel powercut pnnotes shift pageedit longpara pagesheetmodel pans bidi shadowhole twodocs_gl gpu2d_gl viewsnap docbase (200 seeds); wordsafe 60 | powercut outboxmodel opendoc savelater saveattack review4 pnshell pnnotes pageedit shift pans longpara pagesheetmodel pagegrow canvasload bidi framebudget docbase |
+| Kills | outboxkill 100 with, 100 without locks (10,382 and 10,447 versions); savekill 40; diskorder | — |
+| Real use | first5 fresh, again, web, back; real24; both open ten minutes (seed 71): 259 of 259 words, 26 deletions, none came back | — |
+
+### Findings
+| Finding | State | Proof (each fails without its fix) |
+|---|---|---|
+| M1 stale base | `DocBase` in `OpenDoc`, with the document wherever it goes | test_docbase: the reviewer's q1 and a model (two windows; another app adds, deletes, puts earlier texts back); both ways; 7 mutants, 4 in the model alone. wn5 with the real web, both ways round, in bothopen |
+| M2 the input method ate letters | `takes_text` False by default; PASTE and KeyUp asked for | KEYS: kit, workbook, sketch, player, omxplorer, pnote on X; kit and pnote on the Mac |
+| M2, other defaults | drag queue, drag end, hover, paste, modifier KEYs checked by hand in kit and sketch (a drop pixel for pixel; a kit built from before this goal drops the same); draw-ahead only touches `.gpu()` canvases, which of the examples only pnote and dictate have (dictate not run) | realkeys.py |
+| M3 the installer deletes data | ~/.local/lib/<app>, a manifest, no folder ever removed; the old tarball and folder are *.unsafe | install_test.sh (six homes); package_test.py |
+| M4 no words outside the checkout | fonts and OFL files travel; NOTICE by name; no stray builds; a Mac README; a missing font is said and the system's drawn | package_test.py: 0 pixels differ from the checkout's; without fonts, words all the same |
+| SHOULD 1 held edits of another file | the file's workspace id, the note's resource id, the base's sum | test_docbase `other_files`, 3 mutants |
+| NIT lock token on a full disk; empty lock files | device and inode, nothing written; each tried name removed | test_opendoc, outboxkill (a full disk at a start not rerun here: savekill's is while running) |
+| NIT `sync()` only in a tick | a tick goes on while something is to be settled | read |
+| NIT settled/reconcile exact text | without the picture names | test_wordsafe |
+| NIT 25 whole texts kept | gone (one, shared) | — |
+| NIT NOTICE, stale binaries, Gatekeeper README | done | package_test.py; the README's steps are from Apple's description, **not tried on a fresh Mac** |
+| NIT gesture numbers at the merge | docs/goals/79-merge.md | — |
+
+### Found by using it, not in the review
+- **The web's picture names begin with "media/"**: review 5's SHOULD 1 fix knew only bare names, so the idle web's echo of a drawing made native read the note again (undo gone, the next tool letter typed into a text). test_wordsafe had the wrong name too. Every both-open run had said "0 rows that had only moved on", and I hadn't asked why. real24 shows it working: 5 saves on top of the web's echo, no conflict, Ctrl+Z still there.
+- My own in this round, caught before any commit that was judged: the spaces' notes counted as held files; a build that read a half-written edit.
+
+Real24.py also proved, with real input, what had only windowless tests: ink with growing paper, Save a copy and Retry by hand, a file locked for a minute, a note deleted elsewhere under unsaved words, jumps in a long page, two windows.
+
+### For the reviewer
+Changed proofs and tests (none loosens a bar): bothopen gained deletions (both sides, the API) and `stay_deleted`; xdrive looks for a new window, not the largest; test_wordsafe and test_docbase use the web's real picture names; key and typekeys steps go through the input method where words are written (GTK, AppKit); test hosts print `TRACE: event key` on the Mac. `App.takes_text`'s default changed from True to False.
+
+**Risk, most first.** webshell's bases through the queue (a save behind a save that conflicts, `rest.base`). `held_space` (two copies of one file opened at once, network folders where a path can't be asked). GTK's input method focus (`im_follow`, real input methods: ibus and fcitx weren't run, only XIM's simple context and the test's own commits; Wayland text-input not run). install.sh on a distribution without GNU find's -printf. `undecorated` against web documents written before today. The README for the Mac's first start. Stress pen: one frame of 23.2 ms (the web: four, 333). Two copies of the program after an update from the old layout (said, not removed).
+**Not done:** the Mac's M6 (`MAC_SSH=bhoomijaprasad@10.0.0.74 scripts/mac-unlocked`, unlocked, about 40 minutes). Gap 81 not wired in. An old `install.sh` is still inside released downloads (79-merge.md, the owner's). Three branches exist on this disk only.
+
 ## Continuation 23 (2026-11-24, 15:00–22:55, two unlogged stops of the desktop in it): review round 5 fixed, the race like-for-like
 
 **The judged commit is d354cc76** on both machines (later commits: tables, documents, and a module nothing imports yet).
