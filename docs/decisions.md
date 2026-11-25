@@ -2096,3 +2096,14 @@ At a start: other words than the base's: built on no revision (-1, a conflict un
 
 ## D-8092: a composition clicked away from is committed (ours; the web does: run with Chromium's imeSetComposition on a page and a canvas)
 GTK: the context is reset first; what it doesn't commit itself is committed as it stood. AppKit: discardMarkedText, then the same. Run with fcitx5 pinyin in a scratch session.
+
+## D-8093: the packager lists, the installer installs that and removes only what it can prove twice (ours; review 8, M1; with D-8089)
+scripts/package.sh writes files.sha256: every file of the program and its sha256 (a name people's things are kept under, or a link, stops the packaging). install.sh installs exactly those, each checked, whatever else lies in the folder; it refuses when its own folder, ~/.local/lib/<app>, the old layout's folder and the folders the app keeps things in (~/.local/share/<app>, $XDG_DATA_HOME/<app>, ~/.config/<app>, and what the app states to the packager) are the same or inside one another, by what the folders are (-ef, walking the parents). A file is removed only when its place is on a list the installer wrote and its content is what that list says; in the old layout only when it is on this package's list by content; a database, its -wal and -shm, unsaved and snaps never, even if listed; outside the program's folder only the three files it writes. A launcher entry or icon that isn't what an installer of ours wrote is left as it is, and said (then the old layout's program stays too: the entry may start it). What can't be written is looked at first.
+Known: if an app's Comment or Categories change between two releases, the old release's untouched entry isn't recognised and is left, said.
+"Run it here": the README says from any folder but the two the app keeps things in; the app itself says nothing at its start (the notes are safe there either way, and the installer refuses with where to go instead).
+
+## D-8094: words a save took hold no change back (ours; review 8, S1; corrects D-8090)
+`WordsEdit.unsaved()`: what is written now against what the last save took (or the writing's start), not whether it could be undone. A new text a save has taken is found again by its name in the file.
+
+## D-8095: a race refuses while anything of ours runs (ours; review 8, S2)
+`ours_running()` looks at /proc for programs under the worktree and for servers told of its files, and M6 doesn't start beside one. The harness's web side runs in a group of its own with a free port, ends on signals, and its server ends with it by the kernel (setpriv --pdeathsig).

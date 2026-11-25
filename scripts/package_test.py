@@ -88,6 +88,21 @@ note("fonttext" not in log and ink(got) > 2000, f"installed, it draws its words 
 q = subprocess.run([str(H / ".local/bin/pnote-uninstall")], env=e, capture_output=True, text=True)
 note(q.returncode == 0 and WORDS in notes(H) and not (H / ".local/lib/pnote").exists() and not (H / ".local/bin/pnote").exists(), f"removed, the notes stay: {q.stdout.strip()}")
 
+# (review 8: the package's folder kept as the notes folder, run there, then installed and removed: the words were gone)
+K = W / "home-kept"
+(K / ".local/share").mkdir(parents=True)
+shutil.copytree(P, K / ".local/share/pnote")
+run(K / ".local/share/pnote/pnote", "kept", K)
+q = subprocess.run([str(K / ".local/share/pnote/install.sh")], env=dict(os.environ, HOME=str(K)), capture_output=True, text=True)
+note(q.returncode != 0 and "unpack it somewhere else" in q.stderr and WORDS in notes(K) and not (K / ".local/lib").exists(), f"the package kept where the notes are: refused, the notes there: {q.stderr.strip().splitlines()[0][:150]}")
+q = subprocess.run([str(P / "install.sh")], env=dict(os.environ, HOME=str(K)), capture_output=True, text=True)
+q2 = subprocess.run([str(K / ".local/bin/pnote-uninstall")], env=dict(os.environ, HOME=str(K)), capture_output=True, text=True)
+note(q.returncode == 0 and q2.returncode == 0 and WORDS in notes(K), "installed from elsewhere and removed: the notes there")
+man = (P / "files.sha256").read_text().splitlines()
+note(len(man) == sum(1 for x in P.rglob("*") if x.is_file()) - 2 and not [l for l in man if l.endswith((".db", "install.sh"))], f"the packager's list names every file of the program ({len(man)}) and nothing else")
+nt = (P / "NOTICE.txt").read_text()
+note(all((P / "lib" / x).exists() for x in re.findall(r"^  (lib\w+\.so)", nt, re.M)) and ("zstd" in nt) == bool(list((P / "lib").glob("libzstd*"))), "its NOTICE names the libraries it carries, no others")
+
 shutil.copytree(P, W / "nofonts")
 shutil.rmtree(W / "nofonts/fonts")
 got, log, rc = run(W / "nofonts/pnote", "nofonts", homes["nofonts"])

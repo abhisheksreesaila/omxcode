@@ -2155,13 +2155,16 @@ def package():
     if err:
         return "FAIL", err
     r = run(["scripts/install_test.sh"], 300)
-    mu = run(["scripts/install_test.sh", "--mutants"], 1800)
+    pr = run(["python3", "scripts/install_property.py", "60"], 900)
+    if pr.returncode or "install_property: ok" not in pr.stdout:
+        return "FAIL", "the installer's property: " + tail(pr.stdout + pr.stderr)[:600]
+    mu = run(["scripts/install_test.sh", "--mutants"], 2400)
     if mu.returncode or "install_mutants: ok" not in mu.stdout:
         return "FAIL", "the installer's mutants: " + tail(mu.stdout + mu.stderr)[:600]
     q = run(["pixi", "run", "python", "-B", "scripts/package_test.py"], 900)
     if r.returncode or "install_test: ok" not in r.stdout or q.returncode or "package: ok" not in q.stdout:
         return "FAIL", tail(r.stdout + r.stderr + q.stdout + q.stderr)[:900]
-    return "PASS", "the installer touches nothing it didn't write (28 mutants noticed); the package draws its words from a scratch folder, installed, updated, removed; without its fonts in the system's"
+    return "PASS", "the installer touches nothing it didn't write (43 mutants noticed; a random person's files in 60 HOMEs untouched); the package draws its words from a scratch folder, installed, updated, removed; without its fonts in the system's"
 
 
 def keys():
