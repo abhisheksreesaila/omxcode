@@ -31,6 +31,16 @@ class P:
             out.append(l.split())
 
 
+def texts_there():
+    """What every held file says (one settled or removed while this reads: the folder again)."""
+    for _ in range(200):
+        try:
+            return [f.read_text() for f in sorted(D.glob("*.json"))]
+        except FileNotFoundError:
+            pass
+    raise SystemExit("the folder never stood still")
+
+
 def run(seed):
     rnd = random.Random(seed)
     shutil.rmtree(D, ignore_errors=True)
@@ -93,7 +103,7 @@ def run(seed):
                 p.send("put", i, rnd.randrange(5), t)
                 time.sleep(rnd.random() * 0.0015)
                 p.p.kill()
-                if any(t in f.read_text() for f in D.glob("*.json")) and i in p.own:
+                if any(t in x for x in texts_there()) and i in p.own:
                     superseded.add(p.own[i])
             elif rnd.random() < 0.6:
                 p.p.kill()
@@ -107,7 +117,7 @@ def run(seed):
     p.send("load")
     out, ok = p.take()
     got(p, out)
-    files = " ".join(f.read_text() for f in D.glob("*.json"))
+    files = " ".join(texts_there())
     lost = {t for t in allt - superseded - landed - copied if f'"{t}"' not in files or t not in p.own.values()}
     p.send("quit")
     p.p.wait()
