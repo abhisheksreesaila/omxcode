@@ -17,7 +17,7 @@
 # (mojoui.history) as the removed and inserted texts, so typing a word is one undo step.
 
 from std.time import perf_counter_ns
-from mojoui.graphemes import prev_grapheme, next_grapheme, erase_start, typed_text
+from mojoui.graphemes import prev_grapheme, next_grapheme, erase_start, typed_text, safe_start
 from mojoui.text import Font, Face, REGULAR, MEDIUM, MONO, MONO_BOLD, LEFT
 from mojoui.scene import Painter
 from mojoui.history import History, Undoable
@@ -288,6 +288,24 @@ struct TextChange(Undoable):
 # ---------------------------------------------------------------- the editor
 
 
+def place_after(old: String, new: String, at: Int) -> Int:
+    """Where a place `at` bytes into `old` is in `new`, another program's version of the text: the same words on the side of it
+    that didn't change (before the first difference, or after the last), else where the change begins."""
+    var a = old.as_bytes()
+    var b = new.as_bytes()
+    var head = 0
+    while head < len(a) and head < len(b) and a[head] == b[head]:
+        head += 1
+    if at <= head:
+        return at
+    var tail = 0
+    while tail < len(a) - head and tail < len(b) - head and a[len(a) - 1 - tail] == b[len(b) - 1 - tail]:
+        tail += 1
+    if at >= len(a) - tail:
+        return at + len(b) - len(a)
+    return head
+
+
 struct TextEdit(Movable):
     var paras: List[String]
     var laid: List[Laid]
@@ -361,6 +379,24 @@ struct TextEdit(Movable):
         self.history.clear()
         self.version += 1
         self.view_version += 1
+
+    def offset(self, at: Pos) -> Int:
+        """A place as bytes from the text's start (its paragraphs joined by line breaks, as text() joins them)."""
+        var n = 0
+        for p in range(min(at.para, len(self.paras))):
+            n += self.paras[p].byte_length() + 1
+        return n + at.byte
+
+    def place(self, offset: Int) -> Pos:
+        """The place so many bytes from the text's start (the nearest there is)."""
+        var left = max(offset, 0)
+        for p in range(len(self.paras)):
+            var n = self.paras[p].byte_length()
+            if left <= n:
+                return Pos(p, safe_start(self.paras[p], left))
+            left -= n + 1
+        var last = len(self.paras) - 1
+        return Pos(last, self.paras[last].byte_length())
 
     def text(self) -> String:
         var out = String()

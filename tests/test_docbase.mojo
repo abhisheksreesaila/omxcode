@@ -494,12 +494,154 @@ def other_files() raises:
     print("   held edits: not another file's, the moved one's, not over a copy's own words")
 
 
+def backup() raises:
+    """(review 7, SHOULD 1) Held at revision 4; the file is put back from a backup at revision 2; another app writes up to
+    revision 4, other words, while native runs: a key here never writes over them. Also when the backup holds the very words
+    the held edit builds on."""
+    for same in [False, True]:
+        fresh()
+        var s = WebShell(DB, "paper")
+        s.create("page", "P")
+        var p = s.current
+        _ = s.text_in("commit", "one")
+        s.flush()
+        var early = row_text(p)
+        for k in range(2):
+            _ = s.text_in("commit", " w" + String(k))
+            s.flush()
+        var late = row_text(p)
+        var revs = Database(DB).count("SELECT revision FROM notes WHERE id = " + String(p))
+        var lock = Database(DB, busy_ms=20)
+        lock.exec("BEGIN IMMEDIATE")
+        _ = s.text_in("commit", " HELD")
+        s.flush()
+        lock.exec("ROLLBACK")
+        s.close()
+        _ = s^
+        var o = Database(DB)
+        var st = o.prepare("UPDATE notes SET content = ?, revision = ? WHERE id = ?")  # (the file put back)
+        st.bind(1, late if same else early)
+        st.bind(2, revs - 2)
+        st.bind(3, p)
+        _ = st.step()
+        var t = WebShell(DB, "paper")
+        t.open(p)
+        assert_true("HELD" in t.page.markdown(), "the held words show")
+        put(p, early.replace("one", "one THEIRS-A"))
+        put(p, early.replace("one", "one THEIRS-B"))
+        assert_equal(Database(DB).count("SELECT revision FROM notes WHERE id = " + String(p)), revs)
+        _ = t.refresh()
+        _ = t.text_in("commit", "!")
+        let_save(t)
+        assert_true("THEIRS-B" in row_text(p) and "HELD" not in row_text(p), "theirs stays (same words in the backup " + String(same) + "): " + row_text(p))
+        assert_true(t.save_state != "" and "HELD" in held(), "and ours is held and said")
+        t.close()
+    print("   a file put back from a backup")
+
+
+def add_there(id: Int, word: String) raises:
+    """The other app adds a word to a note, its change fed."""
+    var o = Database(DB)
+    o.exec("UPDATE notes SET revision = revision + 1, content = CASE note_type WHEN 'page' THEN json_set(content, '$.markdown', '" + word + " ' || json_extract(content, '$.markdown')) "
+           + "WHEN 'canvas' THEN replace(content, 'hello', 'hello " + word + "') ELSE replace(content, 'Central idea', 'Central " + word + " idea') END WHERE id = " + String(id)
+           + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
+
+
+def untouched() raises:
+    """(review 7, SHOULD 2) A caret that only stands there holds nothing back: the other app's change shows at the next look at
+    the feed, the caret stays at its words, and what is typed then is saved. Typed words hold it back; taken back, it shows."""
+    fresh()
+    var s = WebShell(DB, "paper")
+    s.create("page", "P")
+    var p = s.current
+    _ = s.text_in("commit", "alpha omega")
+    s.flush()
+    s.create("mindmap", "M")
+    var m = s.current
+    s.flush()
+    s.create("canvas", "C")
+    var c = s.current
+    s.tools.begin_text(120, 120)
+    _ = s.text_in("commit", "hello")
+    _ = s.key("Escape", 0)
+    s.flush()
+    s.close()
+    _ = s^
+    var t = WebShell(DB, "paper")
+    var sc = Scene(1440, 900, 1.0)
+    t.open(c)
+    t.paint(sc, 1440, 900, 1.0)
+    _ = t.refresh()
+    assert_true(t.tools.editing != -1, "a canvas of writing opens with a caret")
+    add_there(c, "there")
+    assert_true(t.refresh() and t.board.edit().objs[0].text == "hello there", "canvas: shows, the caret untouched: " + t.board.edit().objs[0].text)
+    assert_true(t.tools.editing != -1, "canvas: and it still stands there")
+    _ = t.text_in("commit", " mine")
+    let_save(t)
+    assert_true(t.save_state == "" and "hello mine there" in row_text(c), "canvas: what is typed then is saved where the caret stood: " + row_text(c) + t.save_state)
+    # typed words hold it back (they meet the other's when they are saved); nothing is lost, and it is said
+    _ = t.text_in("commit", " typed")
+    add_there(c, "again")
+    _ = t.refresh()
+    assert_true("again" not in t.board.edit().objs[0].text and "typed" in t.board.edit().objs[0].text, "canvas: words typed hold it back")
+    let_save(t)
+    assert_true(t.save_state != "" and "typed" in held() and "again" in row_text(c), "canvas: a clash, said and held")
+    t.save_copy()
+    # a composition begun and dropped: shows afterwards
+    t.open(c)
+    t.paint(sc, 1440, 900, 1.0)
+    if t.tools.editing == -1:
+        t.tools.begin_words(t.board.edit(), t.board.edit().objs[0].id)
+    _ = t.preedit("かん", 0, 0, 0, 0)
+    add_there(c, "third")
+    _ = t.refresh()
+    assert_true("third" not in t.board.edit().objs[0].text, "canvas: a composition holds it back")
+    _ = t.preedit("", 0, 0, 0, 0)
+    assert_true(t.refresh() and "third" in t.board.edit().objs[0].text, "canvas: and then it shows, without another change there")
+    # a new text begun, nothing in it
+    _ = t.key("Escape", 0)
+    t.tools.begin_text(300, 500)
+    add_there(c, "fourth")
+    assert_true(t.refresh() and "fourth" in t.board.edit().objs[0].text and t.tools.editing == -2, "canvas: a new text just begun")
+    _ = t.text_in("commit", "newtext")
+    _ = t.key("Escape", 0)
+    let_save(t)
+    assert_true("newtext" in row_text(c) and "fourth" in row_text(c) and t.save_state == "", "canvas: and it is made")
+    # a page: the caret stays at its words
+    t.open(p)
+    t.page.ed.move_to(Pos(0, 5), False)
+    _ = t.refresh()
+    add_there(p, "BEFORE")
+    assert_true(t.refresh() and t.page.markdown() == "BEFORE alpha omega", "page: shows: " + t.page.markdown())
+    _ = t.text_in("commit", "X")
+    let_save(t)
+    assert_true("BEFORE alphaX omega" in row_text(p) and t.save_state == "", "page: the caret stayed after its word: " + row_text(p))
+    # a map: an idea selected; one opened for renaming, nothing typed; a new idea holds it back
+    t.open(m)
+    t.paint(sc, 1440, 900, 1.0)
+    _ = t.refresh()
+    t.map.selected = 0
+    t.map.begin_edit(0)
+    add_there(m, "new")
+    assert_true(t.refresh() and "new" in t.map.topics[0].text and t.map.editing == 0, "map: shows, the idea still open: " + t.map.topics[0].text)
+    _ = t.key("Escape", 0)
+    _ = t.key("Tab", 0)
+    assert_true(t.map.editing > 0, "a new idea")
+    add_there(m, "newer")
+    _ = t.refresh()
+    assert_true("newer" not in t.map.topics[0].text and t.map.editing > 0, "map: a new idea holds it back")
+    t.close()
+    print("   a caret that only stands there holds no change back: canvas, page, map")
+
+
 def main() raises:
     _ = private_dir(DIR)
     _ = setenv("OMX_CONFIG", DIR)
     if getenv("DOCBASE_MODEL_ONLY") != "1":
         left_and_back()
         other_files()
+        backup()
+        untouched()
     var args = argv()
     var seeds = Int(String(args[1])) if len(args) > 1 else 40
     var first = Int(String(args[2])) if len(args) > 2 else 1

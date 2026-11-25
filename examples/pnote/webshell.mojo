@@ -18,7 +18,7 @@ from mojoui.pagesheet import PageSheet
 from mojoui.buzanmap import BuzanMap, draw_minimap, map_json_from
 from mojoui.omnibar import Omnibar, OmniGroup, OmniRow, OmniPill, relative_time, short_date, utc_epoch
 from mojoui.shared import environment
-from mojoui.textedit import now_ms, Pos
+from mojoui.textedit import now_ms, Pos, place_after
 from mojoui.graphemes import one_line
 from mojoui.files import write_setting, read_setting, file_exists
 from mojoui.islandcard import IslandCard, CardTile
@@ -348,6 +348,32 @@ def workspace_at(path: String) -> String:
         return ""
 
 
+struct WritingPlace(Copyable, Movable):
+    """Where a person is in a note, kept while it is read again (refresh)."""
+    var writing: Bool  # a caret stands in something's words
+    var key: String  # its own name in the document ("": a new text, not made yet)
+    var text: String
+    var caret: Int  # bytes into the text
+    var anchor: Int
+    var x: Float64
+    var y: Float64
+    var selected: List[String]
+    var cam: Tuple[Float64, Float64, Float64]
+    var pinned: Bool
+
+    def __init__(out self):
+        self.writing = False
+        self.key = ""
+        self.text = ""
+        self.caret = 0
+        self.anchor = 0
+        self.x = 0
+        self.y = 0
+        self.selected = List[String]()
+        self.cam = (1.0, 0.0, 0.0)
+        self.pinned = False
+
+
 @fieldwise_init
 struct Written(Copyable, Movable):
     """A save on its way: whose it is, its kind, what it holds (kept if it can't be written), the board's version and
@@ -411,6 +437,7 @@ struct WebShell(Movable):
     var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
     var ready_k: Float64  # the device scale they're readied for (0: not asked yet)
     var doc: OpenDoc  # (review 3) which note is open and whether it was read: what may be edited, kept and saved
+    var behind: Bool  # another app's change of the open note waits for words typed here (refresh)
     var read_again: Bool  # the open note is being read again because another app changed it (refresh)
     var outbox: SaveOutbox  # edits that couldn't be written, until they land
     var page_src: String  # the open page's or map's content as it was read (a save changes it in place)
@@ -511,6 +538,8 @@ struct WebShell(Movable):
         self.ready_k = 0
         self.doc = OpenDoc()
         self.read_again = False
+        self.behind = False
+        self.behind = False
         self.page_src = ""
         self.content_hash = 0
         self.drafted = False
@@ -1618,10 +1647,11 @@ struct WebShell(Movable):
             return False
         try:
             var seq = self.dbs[0].count("SELECT sequence FROM workspace_state WHERE id = 1")
-            if seq == self.known_seq:
+            if seq == self.known_seq and not self.behind:
                 return False
             var first = self.known_seq < 0
             self.known_seq = seq
+            self.behind = False
             if first:
                 return False
             var rows = Dict[Int, Int]()  # id → revision
@@ -1641,12 +1671,13 @@ struct WebShell(Movable):
                 rows[id] = q.int(8)
                 var rec = NoteRec(id, q.text(6), q.text(7), q.text(1), q.text(2), "", q.int(3), emoji, tint, own, q.int(8), q.int(9) != 0, q.int(10))
                 var i = self.note_index(id)
-                if i < 0 or self.notes[i].revision != rec.revision or self.notes[i].title != rec.title or self.notes[i].notebook != rec.notebook:
-                    changed = True
                 if i >= 0 and self.outbox.find(id) >= 0:  # (edits held at an older revision: they keep building on it)
                     rec.revision = self.notes[i].revision
-                if i >= 0 and id == self.current and (self.saver.pending() or self.tools.editing != -1 or self.map.editing >= 0 or self.page.marking() or self.page.preedit != ""):
-                    rec.revision = self.notes[i].revision  # (being edited: the save will meet the other's and say so)
+                if i >= 0 and id == self.current and rec.revision != self.notes[i].revision and (self.saver.pending() or self.written_on()):
+                    rec.revision = self.notes[i].revision  # (words typed here, or a composition, aren't saved yet: their save meets the other's; a caret that only stands there doesn't hold it back: review 7)
+                    self.behind = True  # (looked at again when they have landed, or were taken back)
+                if i < 0 or self.notes[i].revision != rec.revision or self.notes[i].title != rec.title or self.notes[i].notebook != rec.notebook:
+                    changed = True
                 fresh.append(rec^)
             if len(fresh) != len(self.notes):
                 changed = True
@@ -1672,6 +1703,7 @@ struct WebShell(Movable):
             elif self.doc.may_edit() and self.notes[i].revision != was and self.outbox.find(cur) < 0 and not self.notes[i].secure:
                 var scroll = self.page.scroll
                 var view = self.view
+                var place = self.writing_place()
                 self.saver.done()
                 self.save_kind = ""
                 self.current = 0  # (nothing here is unsaved: what the file holds, shown)
@@ -1685,10 +1717,104 @@ struct WebShell(Movable):
                 self.page.scroll = scroll
                 if self.notes[i].kind == "canvas" and self.view_set:
                     self.view = view
+                if self.doc.may_edit():
+                    self.write_at(place)
             print("PNOTE FEED: read again at " + String(seq), flush=True)
             return True
         except e:
             return False
+
+    def written_on(self) -> Bool:
+        """Words typed into what is being written, or a composition, that no save has yet; a new idea (it isn't in the file until
+        it is done)."""
+        if self.page.marking() or self.page.preedit != "":
+            return True
+        if self.tools.editing != -1 and (self.tools.words.ed.history.can_undo() or self.tools.words.preedit != ""):
+            return True
+        if self.map.editing >= 0:
+            ref t = self.map.topics[self.map.editing]
+            return self.map.pen.ed.history.can_undo() or self.map.pen.preedit != "" or self.doc.base.text.find('"' + t.id + '"') < 0
+        return False
+
+    def writing_place(self) -> WritingPlace:
+        """Where a person is writing (nothing typed yet) or stands in the open note, by what outlives its being read again."""
+        var out = WritingPlace()
+        var i = self.note_index(self.current)
+        if i < 0:
+            return out^
+        if self.notes[i].kind == "page":
+            out.text = self.page.ed.text()
+            out.caret = self.page.ed.offset(self.page.ed.caret)
+            out.anchor = self.page.ed.offset(self.page.ed.anchor)
+        elif self.notes[i].kind == "canvas":
+            ref layer = self.board.layer
+            for id in layer.selected:
+                var q = layer.index(id)
+                if q >= 0 and layer.objs[q].key != "":
+                    out.selected.append(layer.objs[q].key)
+            if self.tools.editing != -1:
+                out.writing = True
+                out.text = self.tools.words.text()
+                out.caret = self.tools.words.ed.offset(self.tools.words.ed.caret)
+                out.anchor = self.tools.words.ed.offset(self.tools.words.ed.anchor)
+                out.x = self.tools.edit_x
+                out.y = self.tools.edit_y
+                var q = layer.index(self.tools.editing)
+                if q >= 0:
+                    out.key = layer.objs[q].key
+                    out.x = layer.objs[q].x
+                    out.y = layer.objs[q].y
+        elif self.notes[i].kind == "mindmap":
+            out.cam = self.map.cam
+            out.pinned = self.map.pinned
+            if self.map.selected >= 0 and self.map.selected < len(self.map.topics):
+                out.key = self.map.topics[self.map.selected].id
+            if self.map.editing >= 0:
+                out.writing = True
+                out.key = self.map.topics[self.map.editing].id
+        return out^
+
+    def write_at(mut self, place: WritingPlace):
+        """The note was read again: the caret (and what was selected) where it was, as far as it is still there."""
+        var i = self.note_index(self.current)
+        if i < 0:
+            return
+        if self.notes[i].kind == "page":
+            var now = self.page.ed.text()
+            self.page.ed.move_to(self.page.ed.place(place_after(place.text, now, place.anchor)), False)
+            if place.caret != place.anchor:
+                self.page.ed.move_to(self.page.ed.place(place_after(place.text, now, place.caret)), True)
+            self.page.follow = False
+        elif self.notes[i].kind == "canvas":
+            ref layer = self.board.edit()
+            layer.selected.clear()
+            for k in place.selected:
+                for ref o in layer.objs:
+                    if o.key == k:
+                        layer.selected.append(o.id)
+            if not place.writing:
+                return
+            for q in range(len(layer.objs)):
+                ref o = layer.objs[q]
+                if (o.kind == TEXT or o.kind == STICKY) and not o.locked and (o.key == place.key if place.key != "" else (o.x == place.x and o.y == place.y and o.text == place.text and place.text != "")):
+                    var now = String(o.text)
+                    var id = o.id
+                    self.tools.begin_words(layer, id)
+                    self.tools.words.ed.move_to(self.tools.words.ed.place(place_after(place.text, now, place.anchor)), False)
+                    if place.caret != place.anchor:
+                        self.tools.words.ed.move_to(self.tools.words.ed.place(place_after(place.text, now, place.caret)), True)
+                    return
+            if place.text == "" and place.key == "":  # (a new text begun, no words in it yet)
+                self.tools.begin_text(place.x, place.y)
+        elif self.notes[i].kind == "mindmap":
+            self.map.cam = place.cam
+            self.map.pinned = place.pinned
+            for q in range(len(self.map.topics)):
+                if self.map.topics[q].id == place.key and place.key != "":
+                    self.map.selected = q
+                    if place.writing:
+                        self.map.begin_edit(q)
+                    return
 
     def hand_down(self) -> Bool:
         """A pointer gesture is under way (a stroke, a drag, a handle, a mark)."""
@@ -2254,12 +2380,17 @@ struct WebShell(Movable):
                 base.plain = undecorated
                 if self.row_base(0, u.content).same(q.text(0)):
                     self.outbox.drop(u.id)
-                elif base.known() and q.int(1) == u.revision and not base.same(q.text(0)):  # (a copy of the file that went its own way: its revision is only the same number)
+                elif base.known() and not base.same(q.text(0)):  # (another app's words, a file put back from a backup, a copy that went its own way: its revision, now or when it gets there, is only the same number)
                     var k = self.outbox.find(u.id)
                     self.outbox.items[k].revision = -1
                     self.outbox.items[k].base.revision = -1
                     self.outbox.items[k].conflict = True
-                    self.outbox.items[k].why = "This note was changed in another copy of the notes file."
+                    if q.int(1) == u.revision:
+                        self.outbox.items[k].why = "This note was changed in another copy of the notes file."
+                elif base.known() and q.int(1) != u.revision:  # (the very words it builds on, at another revision: built on there)
+                    var k = self.outbox.find(u.id)
+                    self.outbox.items[k].revision = q.int(1)
+                    self.outbox.items[k].base.revision = q.int(1)
             except:
                 pass
         while len(self.outbox.extras) > 0:  # (two windows held edits of one note: the other's are a note of their own)
