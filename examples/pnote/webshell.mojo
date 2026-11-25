@@ -1709,12 +1709,20 @@ struct WebShell(Movable):
                 self.current = 0  # (nothing here is unsaved: what the file holds, shown)
                 self.doc.begin(0)
                 var tool = self.tools.tool
+                var look = BoardTools()
+                look.look_from(self.tools)
+                var drawing = self.page.draw_mode
+                var page_tool = String(self.page.tool)
                 self.read_again = True  # (nobody opened it: the tool stays, no caret begins to write)
                 self.open(cur)
                 self.read_again = False
                 if self.notes[i].kind == "canvas" and self.tools.tool != tool and self.doc.may_edit():
                     self.tools.set_tool(tool, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
                 self.page.scroll = scroll
+                self.page.draw_mode = drawing and self.notes[i].kind == "page"
+                self.page.tool = page_tool^
+                if self.notes[i].kind == "canvas":
+                    self.tools.look_from(look)
                 if self.notes[i].kind == "canvas" and self.view_set:
                     self.view = view
                 if self.doc.may_edit():
@@ -1729,11 +1737,11 @@ struct WebShell(Movable):
         it is done)."""
         if self.page.marking() or self.page.preedit != "":
             return True
-        if self.tools.editing != -1 and (self.tools.words.ed.history.can_undo() or self.tools.words.preedit != ""):
+        if self.tools.editing != -1 and self.tools.words.unsaved():  # (what a save took isn't: the caret goes on standing there)
             return True
         if self.map.editing >= 0:
             ref t = self.map.topics[self.map.editing]
-            return self.map.pen.ed.history.can_undo() or self.map.pen.preedit != "" or self.doc.base.text.find('"' + t.id + '"') < 0
+            return self.map.pen.unsaved() or self.doc.base.text.find('"' + t.id + '"') < 0
         return False
 
     def writing_place(self) -> WritingPlace:
@@ -1764,6 +1772,8 @@ struct WebShell(Movable):
                     out.key = layer.objs[q].key
                     out.x = layer.objs[q].x
                     out.y = layer.objs[q].y
+                elif self.tools.editing == -2:  # (a new text a save has taken has its name in the file)
+                    out.key = self.tools.draft_key
         elif self.notes[i].kind == "mindmap":
             out.cam = self.map.cam
             out.pinned = self.map.pinned
@@ -2385,8 +2395,7 @@ struct WebShell(Movable):
                     self.outbox.items[k].revision = -1
                     self.outbox.items[k].base.revision = -1
                     self.outbox.items[k].conflict = True
-                    if q.int(1) == u.revision:
-                        self.outbox.items[k].why = "This note was changed in another copy of the notes file."
+                    self.outbox.items[k].why = "This note was changed in another copy of the notes file." if q.int(1) == u.revision else "Another app has changed this note since."
                 elif base.known() and q.int(1) != u.revision:  # (the very words it builds on, at another revision: built on there)
                     var k = self.outbox.find(u.id)
                     self.outbox.items[k].revision = q.int(1)
@@ -2440,6 +2449,8 @@ struct WebShell(Movable):
                 ref layer = self.board.edit()
                 self.tools.draft(layer)  # (what is being written is in it)
                 self.drafted = Bool(layer.draft)
+                if self.tools.editing != -1 and self.tools.words.preedit == "":
+                    self.tools.words.save_took()
                 content = export_json_canvas(layer, self.cols, self.rows)
                 if layer.src.ok:  # (a board read from a document keeps its text: its page grid too, unless the paper grew)
                     if layer.src.columns == 0:

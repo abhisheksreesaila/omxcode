@@ -71,6 +71,8 @@ home "own launcher entry"; mkdir -p "$(dirname "$D")"; printf '[Desktop Entry]\n
 home "own launcher entry that starts it their way"; mkdir -p "$(dirname "$D")"; printf '[Desktop Entry]\nType=Application\nName=Mine\nExec=%s /my/own/file.db\n[Desktop Action x]\nExec=/usr/bin/x\n' "$P/app" > "$D"; leaves "$W/v1/install.sh" "$D"
 home "launcher entry edited since"; ok "$W/v1/install.sh"; sed -i 's/^Name=.*/Name=My own name/' "$D"; echo "Keywords=mine" >> "$D"; leaves "$W/v2/install.sh" "$D" 2
 home "launcher entry is a link"; mkdir -p "$(dirname "$D")" "$HOME/dot"; printf '[Desktop Entry]\nExec=%s %%f\n' "$P/app" > "$HOME/dot/app.desktop"; ln -s "$HOME/dot/app.desktop" "$D"; h0="$(sha256sum < "$HOME/dot/app.desktop")"; leaves "$W/v1/install.sh" "$D"; [ "$(sha256sum < "$HOME/dot/app.desktop")" = "$h0" ] || fail "written through"
+home "launcher entry kept in dotfiles, a link in its place"; ok "$W/v1/install.sh"; mkdir "$HOME/dot"; mv "$D" "$HOME/dot/app.desktop"; ln -s "$HOME/dot/app.desktop" "$D"; h0="$(sha256sum < "$HOME/dot/app.desktop")"; leaves "$W/v1/install.sh" "$D"; [ -L "$D" ] && [ "$(sha256sum < "$HOME/dot/app.desktop")" = "$h0" ] || fail "touched"
+home "icon kept elsewhere, a link in its place"; ok "$W/v1/install.sh"; mv "$I" "$HOME/pic"; ln -s "$HOME/pic" "$I"; leaves "$W/v1/install.sh" "$I"; [ -L "$I" ] && [ -f "$HOME/pic" ] || fail "touched"
 home "own icon"; mkdir -p "$(dirname "$I")"; echo "my icon" > "$I"; leaves "$W/v1/install.sh" "$I"
 home "icon is a link"; mkdir -p "$(dirname "$I")"; echo "icon 1" > "$HOME/pic"; ln -s "$HOME/pic" "$I"; leaves "$W/v1/install.sh" "$I"; [ "$(cat "$HOME/pic")" = "icon 1" ] || fail "written through"
 home "own uninstall script"; mkdir -p "$B"; echo "mine" > "$B/app-uninstall"; refuses "$W/v1/install.sh" "$B/app-uninstall"
@@ -84,6 +86,7 @@ home "somebodys file in dest"; mkdir -p "$P"; echo "somebody's" > "$P/app"; refu
 home "a program file edited"; ok "$W/v1/install.sh"; echo "edited" > "$P/README.txt"; refuses "$W/v2/install.sh" "$P/README.txt"
 home "a program file edited then uninstall"; ok "$W/v1/install.sh"; echo "edited" > "$P/README.txt"; ok "$B/app-uninstall"; [ "$(cat "$P/README.txt")" = edited ] && [ ! -e "$P/app" ] || fail "the edited one"
 home "dest is a link"; mkdir -p "$HOME/.local/lib"; ln -s "$HOME/.local/share/app" "$P"; refuses "$W/v1/install.sh" "$P"
+home "dest is a link to a folder of the person's"; mkdir -p "$HOME/.local/lib" "$HOME/elsewhere"; ln -s "$HOME/elsewhere" "$P"; refuses "$W/v1/install.sh" "$P"
 home "a folder in dest is a link"; ok "$W/v1/install.sh"; mkdir -p "$HOME/myfonts/geist"; echo font > "$HOME/myfonts/geist/Geist[wght] x.ttf"; rm -r "${P:?}/fonts"; ln -s "$HOME/myfonts" "$P/fonts"; refuses "$W/v2/install.sh" "$P/fonts/geist"
 ok "$B/app-uninstall"; [ "$(cat "$HOME/myfonts/geist/Geist[wght] x.ttf")" = font ] && [ -L "$P/fonts" ] || fail "removed through the link"
 home "a file in dest is a link"; ok "$W/v1/install.sh"; echo lib > "$HOME/mylib"; rm "$P/lib/a.so"; ln -s "$HOME/mylib" "$P/lib/a.so"; refuses "$W/v2/install.sh" "$P/lib/a.so"; ok "$B/app-uninstall"; [ "$(cat "$HOME/mylib")" = lib ] && [ -L "$P/lib/a.so" ] || fail "the link"
@@ -120,6 +123,7 @@ home "the package inside the notes folder"; cp -r "$W/v1" "$HOME/.local/share/ap
 home "the notes folder inside the package"; cp -r "$W/v1" "$HOME/.apphome"; mkdir "$HOME/.apphome/files"; refuses "$HOME/.apphome/install.sh" "$HOME/.apphome/files"
 home "the package is the program folder"; mkdir -p "$P"; cp -r "$W/v1/." "$P/"; refuses "$P/install.sh" "$P"
 home "the package inside the program folder"; mkdir -p "$P"; cp -r "$W/v1" "$P/pkg"; refuses "$P/pkg/install.sh" "$P"
+home "the package inside what the notes folder links to"; rm -r "${HOME:?}/.local/share/app"; mkdir "$HOME/apps-app"; cp -r "$W/v1" "$HOME/apps-app/pkg"; ln -s "$HOME/apps-app" "$HOME/.local/share/app"; refuses "$HOME/apps-app/pkg/install.sh" "$HOME/.local/share/app"
 home "the package in its own data folder"; mkdir -p "$HOME/.apphome"; cp -r "$W/v1" "$HOME/.apphome/files"; refuses "$HOME/.apphome/files/install.sh" "$HOME/.apphome/files"
 home "the package in the settings folder, through a link"; mkdir -p "$HOME/.config/app"; cp -r "$W/v1" "$HOME/.config/app/pkg"; ln -s "$HOME/.config/app/pkg" "$HOME/short"; refuses "$HOME/short/install.sh" "$HOME/.config/app"
 home "notes and program in one folder"; mkdir -p "$HOME/.local/lib/app"; XDG_DATA_HOME="$HOME/.local/lib" refuses "$W/v1/install.sh" "are in one another"
@@ -129,7 +133,10 @@ home "a file of the package changed"; cp -r "$W/v1" "$HOME/pkg"; echo x >> "$HOM
 home "a file of the package gone"; cp -r "$W/v1" "$HOME/pkg"; rm "$HOME/pkg/lib/a.so"; refuses "$HOME/pkg/install.sh" "lib/a.so"
 home "a file of the package is a link"; cp -r "$W/v1" "$HOME/pkg"; mv "$HOME/pkg/lib/a.so" "$HOME/a.so"; ln -s "$HOME/a.so" "$HOME/pkg/lib/a.so"; refuses "$HOME/pkg/install.sh" "lib/a.so"
 home "no list in the package"; cp -r "$W/v1" "$HOME/pkg"; rm "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "files.sha256"
-for l in '../x' '/etc/x' 'a/../../x' './x' 'a//x' '~/x' '.manifest'; do home "list names $l"; export HOME="$W/list-$RANDOM$RANDOM"; mkdir -p "$HOME/.local/share/app"; cp -r "$W/v1" "$HOME/pkg"; printf '%064d  %s\n' 0 "$l" >> "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package"; done
+for l in '../x' 'lib/../../x' './x' 'lib//x' '~/x' '.manifest' "$W/abs"; do  # (each there, with its very sha256: only the way it is written is wrong)
+  home "list names $l"; export HOME="$W/list-$RANDOM$RANDOM"; mkdir -p "$HOME/.local/share/app"; cp -r "$W/v1" "$HOME/pkg"; mkdir -p "$HOME/pkg/~"; for x in "$HOME/x" "$HOME/pkg/x" "$HOME/pkg/lib/x" "$HOME/pkg/~/x" "$HOME/pkg/.manifest" "$W/abs"; do echo x > "$x"; done
+  printf '%s  %s\n' "$(echo x | sha256sum | cut -d' ' -f1)" "$l" >> "$HOME/pkg/files.sha256"; refuses "$HOME/pkg/install.sh" "this package"
+done
 
 # ---------- what can't be written (review 8): nothing half done
 home "V bin can't be written"; mkdir -p "$B" "$HOME/.local/lib"; chmod 555 "$B"; refuses "$W/v1/install.sh" "$B can't be written to"; chmod 755 "$B"

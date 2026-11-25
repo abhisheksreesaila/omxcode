@@ -12,7 +12,7 @@ from mojoui.libc import unlink, rename
 from mojoui.files import private_dir
 from mojoui.scene import Scene
 from mojoui.sqlite import Database
-from mojoui.textedit import Pos
+from mojoui.textedit import Pos, TextEdit, place_after
 from mojoui.docstore import clock_us
 from webshell import WebShell
 
@@ -583,6 +583,31 @@ def untouched() raises:
     _ = t.text_in("commit", " mine")
     let_save(t)
     assert_true(t.save_state == "" and "hello mine there" in row_text(c), "canvas: what is typed then is saved where the caret stood: " + row_text(c) + t.save_state)
+    # (review 8, S1) typed, saved, the caret left standing there: shows, and typing goes on
+    for k in range(3):
+        add_there(c, "w" + String(k))
+        assert_true(t.refresh() and "w" + String(k) in t.board.edit().objs[0].text and t.tools.editing != -1, "canvas: words a save took hold nothing back: " + t.board.edit().objs[0].text)
+        _ = t.text_in("commit", String(k))
+        let_save(t)
+        assert_true(t.save_state == "" and "mine" in row_text(c), "canvas: and typing goes on: " + t.save_state)
+    # a new text, its words saved while they are written, never left
+    _ = t.key("Escape", 0)
+    t.tools.begin_text(300, 800)
+    _ = t.text_in("commit", "draft")
+    let_save(t)
+    assert_true("draft" in row_text(c) and t.tools.editing == -2, "a new text is saved as it is written")
+    add_there(c, "w9")
+    assert_true(t.refresh() and "w9" in t.board.edit().objs[0].text and t.tools.editing >= 0, "canvas: a new text a save took holds nothing back")
+    _ = t.text_in("commit", "ed")
+    let_save(t)
+    assert_true("drafted" in row_text(c) and t.save_state == "" and row_text(c).find("draft") == row_text(c).rfind("draft"), "canvas: it is written on, once: " + row_text(c))
+    _ = t.key("Escape", 0)
+    let_save(t)
+    t.tools.begin_words(t.board.edit(), t.board.edit().objs[0].id)
+    # the pen's colour and a page's Draw stay when a note is read again
+    t.tools.pen_color = 0xFF112233
+    add_there(c, "w10")
+    assert_true(t.refresh() and t.tools.pen_color == 0xFF112233, "the pen's colour stays")
     # typed words hold it back (they meet the other's when they are saved); nothing is lost, and it is said
     _ = t.text_in("commit", " typed")
     add_there(c, "again")
@@ -620,6 +645,11 @@ def untouched() raises:
     _ = t.text_in("commit", "X")
     let_save(t)
     assert_true("BEFORE alphaX omega" in row_text(p) and t.save_state == "", "page: the caret stayed after its word: " + row_text(p))
+    t.page.draw_mode = True
+    t.page.tool = "highlight"
+    add_there(p, "AGAIN")
+    assert_true(t.refresh() and t.page.draw_mode and t.page.tool == "highlight", "page: Draw and its tool stay")
+    t.page.draw_mode = False
     # a map: an idea selected; one opened for renaming, nothing typed; a new idea holds it back
     t.open(m)
     t.paint(sc, 1440, 900, 1.0)
@@ -638,7 +668,30 @@ def untouched() raises:
     print("   a caret that only stands there holds no change back: canvas, page, map")
 
 
+def places() raises:
+    """A place in a text as bytes and back, and where it is in another program's version of the text."""
+    var e = TextEdit()
+    e.set_text("añb\n\nかん e")
+    var n = 0
+    for p in range(len(e.paras)):
+        var b = 0
+        while b <= e.paras[p].byte_length():
+            assert_true(e.place(e.offset(Pos(p, b))) == Pos(p, b), "place " + String(p) + ":" + String(b))
+            n += 1
+            b += 1
+            while b < e.paras[p].byte_length() and (Int(e.paras[p].as_bytes()[b]) & 0xC0) == 0x80:
+                b += 1
+    assert_true(n == 10 and e.place(-3) == Pos(0, 0) and e.place(999) == Pos(2, 8) and e.place(2) == Pos(0, 1))
+    assert_equal(place_after("one two", "one X two", 3), 3)
+    assert_equal(place_after("one two", "one X two", 7), 9)
+    assert_equal(place_after("one two", "zero one two", 4), 9)
+    assert_equal(place_after("one two", "two", 2), 0)
+    assert_equal(place_after("", "abc", 0), 0)
+    assert_equal(place_after("abc", "", 2), 0)
+
+
 def main() raises:
+    places()
     _ = private_dir(DIR)
     _ = setenv("OMX_CONFIG", DIR)
     if getenv("DOCBASE_MODEL_ONLY") != "1":

@@ -1056,6 +1056,25 @@ struct BoardTools(Movable):
         var b = self.words_box(layer)
         return px >= b[0] - 4 and px <= b[0] + b[2] and py >= b[1] and py <= b[1] + b[3] * Float64(max(len(self.words.lines), 1))
 
+    def look_from(mut self, o: BoardTools):
+        """How new things look, as `o` has it (the same board read again: the pen's colour stays)."""
+        self.text_family = o.text_family
+        self.text_size = o.text_size
+        self.text_line = o.text_line
+        self.text_color = o.text_color
+        self.sticky_fill = o.sticky_fill
+        self.sticky_ink = o.sticky_ink
+        self.sticky_family = o.sticky_family
+        self.sticky_size = o.sticky_size
+        self.sticky_weight = o.sticky_weight
+        self.sticky_line = o.sticky_line
+        self.pen_color = o.pen_color
+        self.pen_width = o.pen_width
+        self.marker_color = o.marker_color
+        self.marker_width = o.marker_width
+        self.line_color = o.line_color
+        self.shape_fill = o.shape_fill
+
     def begin_text(mut self, x_in: Float64, y: Float64):
         """A new Markdown text begun at a page point, wrapping at its page's right margin (text-ops.js writingBox); it is made
         when it has words."""

@@ -30,6 +30,7 @@ struct WordsEdit(Movable):
     var lines: List[WordsLine]
     var laid: Int  # the text's version the lines are of
     var preedit: String
+    var taken: String  # the words as they were when the writing began, or when a save last took them (save_took)
     var goal_x: Float64
     var at_end: Bool
     var centered: Bool  # each line in the middle of the width
@@ -42,10 +43,19 @@ struct WordsEdit(Movable):
         self.lines = List[WordsLine]()
         self.laid = -1
         self.preedit = ""
+        self.taken = ""
         self.goal_x = -1
         self.at_end = False
         self.centered = False
         self.wrap = True
+
+    def save_took(mut self):
+        """A save has the words as they are now."""
+        self.taken = self.ed.text()
+
+    def unsaved(self) -> Bool:
+        """Words here no save has: typed or deleted since, or being composed."""
+        return self.preedit != "" or self.ed.text() != self.taken
 
     def begin(mut self, words: String, style: TextStyle, width: Float64):
         """Starts editing: the caret at the end, nothing to undo."""
@@ -58,6 +68,7 @@ struct WordsEdit(Movable):
         self.width = width
         self.laid = -1
         self.preedit = ""
+        self.taken = self.ed.text()
         var last = len(self.ed.paras) - 1
         self.ed.move_to(Pos(last, self.ed.paras[last].byte_length()), False)
         self.ed.history.clear()
