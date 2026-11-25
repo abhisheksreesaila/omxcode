@@ -746,6 +746,7 @@ struct WebShell(Movable):
         self.forget_base(id)
         self.page_src = ""
         var was_secure = self.notes[i].secure
+        var built_on = self.notes[i].revision  # (what edits still on their way build on: the row may have moved on meanwhile)
         var why = self.read_row(i, False)
         if why != "":
             self.open_failed(why)
@@ -758,7 +759,9 @@ struct WebShell(Movable):
             self.board.layer.read_only = True
             self.map = BuzanMap()
             return
-        var queued = self.queued_at(id)  # (a save of it still on its way: that is what opens)
+        var queued = self.queued_at(id)  # (a save of it still on its way: that is what opens, on the revision it builds on; taking the row's would write over another app's words)
+        if queued >= 0:
+            self.notes[i].revision = built_on
         var held = self.outbox.find(id) if queued < 0 else -1  # (edits of it that couldn't be written: they are what opens, with why and a Retry)
         var at = -1 if self.cold_opens or held >= 0 or queued >= 0 else self.kept.find(id, self.notes[i].revision)
         if self.notes[i].kind == "canvas" and at >= 0:

@@ -193,7 +193,10 @@ def run(seed: Int) raises -> Int:
                     var word = "o" + String(seed) + "x" + String(n) + "z"
                     other.exec("UPDATE notes SET revision = revision + 1, content = json_set(content, '$." + word + "', 1) WHERE id = " + String(id)
                                + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
-                    all.append(word)
+                    if word in in_file():  # (the note may be gone in the file)
+                        all.append(word)
+                    if trace:
+                        print("  another app's", word, "in note", id, flush=True)
             except:
                 pass
         elif k < 90 and len(lock) == 0:
