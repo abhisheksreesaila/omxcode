@@ -35,6 +35,7 @@ struct Window(Movable):
 
     def __init__(out self, dir: String):
         self.box = SaveOutbox(dir, "m")
+        self.box.disk.inline = True
         self.held = List[Int](length=DOCS, fill=0)
         self.alive = True
 
@@ -87,7 +88,7 @@ def learn(mut w: Window, mut m: Model, others: List[Window], seed: Int) raises:
     while len(w.box.extras) > 0:
         var v = version_of(w.box.extras[0].content)
         w.box.extra_done(0)
-        m.fate[v] = 3 if w.box.fault != 0 else 4  # (4: killed while its file went: it is a document, and may be offered again)
+        m.fate[v] = 3 if w.box.disk.fault != 0 else 4  # (4: killed while its file went: it is a document, and may be offered again)
 
 
 def run(seed: Int, dir: String) raises -> Int:
@@ -103,28 +104,30 @@ def run(seed: Int, dir: String) raises -> Int:
             if len(ws) < 5:
                 var w = Window(dir)
                 if r.next(4) == 0:
-                    w.box.fault = r.next(14)
+                    w.box.disk.fault = r.next(14)
                 w.box.load()
-                if w.box.fault == 0:  # (killed in the middle of its start: what it had made of it is nobody's)
+                if w.box.disk.fault == 0:  # (killed in the middle of its start: what it had made of it is nobody's)
                     _ = w^
                 else:
                     learn(w, m, ws, seed)
-                    if w.box.fault == 0:
+                    if w.box.disk.fault == 0:
                         _ = w^
                     else:
-                        w.box.fault = -1
+                        w.box.disk.fault = -1
                         ws.append(w^)
             continue
         var i = r.next(len(ws))
         var id = r.next(DOCS)
         var kill = r.next(6) == 0
         if kill:
-            ws[i].box.fault = r.next(6)
+            ws[i].box.disk.fault = r.next(9)
+        for _ in range(r.next(3)):  # (its thread got round to some)
+            ws[i].box.settle_next()
         if k < 55 or (k < 70 and ws[i].held[id] == 0):
             var v = m.new()
             var u = Unsaved(id, "page", r.next(5), "v" + String(v), "", "why", r.next(2) == 0)
             var told = ws[i].box.put(u^) if r.next(3) > 0 else ws[i].box.spill(u) > 0
-            if told and ws[i].box.fault != 0:
+            if told and ws[i].box.disk.fault != 0:
                 kept += 1
                 if ws[i].held[id] > 0:
                     m.fate[ws[i].held[id]] = 2
@@ -156,7 +159,7 @@ def run(seed: Int, dir: String) raises -> Int:
                 ws[i].held[id] = 0
                 ws[i].box.drop(id)
         else:
-            ws[i].box.fault = 0 if r.next(2) == 0 else -1
+            ws[i].box.disk.fault = 0 if r.next(2) == 0 else -1
             kill = True
         if kill:
             var gone = ws.pop(i)
@@ -165,6 +168,7 @@ def run(seed: Int, dir: String) raises -> Int:
     var last = Window(dir)
     last.box.load()
     learn(last, m, ws, seed)
+    last.box.sync(True)
     var there = on_disk(dir)
     for v in range(1, len(m.fate)):
         if m.fate[v] == 0:

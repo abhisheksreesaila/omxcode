@@ -2,7 +2,7 @@
 # (one path per line in <config>/recent.txt, newest first, at most 10) and settings (key=value lines in
 # <config>/settings.txt).
 
-from std.os.path import getsize, isfile
+from std.os.path import getsize, isdir, isfile
 from std.sys import CompilationTarget
 from std.os import listdir, stat
 from mojoui.shared import environment, make_dir, arguments, serial
@@ -295,20 +295,39 @@ def _now_ns() -> Int:
     return ts[0] * 1_000_000_000 + ts[1]
 
 
-def reach_disk(path: String) -> Bool:
-    """The file's bytes and its name are on the disk itself, whatever happens to the power next (slow: milliseconds; never on
-    the UI thread)."""
+def sync_file(path: String) -> Bool:
+    """The file's bytes are on the disk itself (its name maybe not: sync_dir)."""
     var fd = open_read(path)
     if fd < 0:
         return False
     var ok = fsync(fd) == 0
-    _ = close(fd)
+    return close(fd) == 0 and ok
+
+
+def sync_dir(path: String) -> Bool:
+    """The names in the folder `path` lies in are on the disk itself: what was made, renamed and removed there."""
     var slash = path.rfind("/")
-    var dir = open_read(String(path[byte=0:slash]) if slash > 0 else String("."))
-    if dir >= 0:
-        ok = fsync(dir) == 0 and ok
-        _ = close(dir)
+    var dir = open_read(String(path[byte=0:slash]) if slash > 0 else ("/" if slash == 0 else String(".")))
+    if dir < 0:
+        return False
+    var ok = fsync(dir) == 0
+    _ = close(dir)
     return ok
+
+
+def bytes_sum(addr: Int, n: Int) -> Int:
+    """A fingerprint of n bytes, eight at a step (a kept view's pixels: 5 MB in about a millisecond)."""
+    var h = UInt64(0xCBF29CE484222325) ^ UInt64(n)
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var i = 0
+    while i + 8 <= n:
+        h = (h ^ p.unsafe_offset(i).unsafe_bitcast[UInt64]()[]) * 0x9E3779B97F4A7C15
+        h ^= h >> 29
+        i += 8
+    while i < n:
+        h = (h ^ UInt64(p.unsafe_offset(i)[])) * 0x100000001B3
+        i += 1
+    return Int(h >> 2)
 
 
 def private_dir(dir: String) -> Bool:
@@ -316,7 +335,15 @@ def private_dir(dir: String) -> Bool:
     when it can't be made or written."""
     if dir == "":
         return False
+    var made = List[String]()  # (a folder made now: its name reaches the disk too, and its parents')
+    var up = dir
+    while up != "" and up != "/" and not file_exists(up) and not isdir(up):
+        made.append(up)
+        var slash = up.rfind("/")
+        up = String(up[byte=0:slash]) if slash > 0 else String("")
     make_dir(dir)
+    for m in made:
+        _ = sync_dir(m)
     _ = chmod(dir, 0o700)
     var probe = dir + "/.probe-" + String(getpid()) + "-" + String(serial())
     if not _write_new(probe, 0, 0):
@@ -340,10 +367,12 @@ def _write_new(path: String, addr: Int, n: Int) -> Bool:
     return close(fd) == 0
 
 
-def private_write_parts(path: String, parts: List[Tuple[Int, Int]]) -> Bool:
+def private_write_parts(path: String, parts: List[Tuple[Int, Int]], durable: Bool = False) -> Bool:
     """A file made of byte runs (address, count), readable by this user alone, in place in one step or not at all: written
     under a name of its own (no two processes share one), then renamed over the old; nothing is left behind when the disk
-    is full. False when it couldn't be written (the old file stays)."""
+    is full. False when it couldn't be written (the old file stays). That holds however the process ends. durable: it holds
+    when the power goes too (its bytes reach the disk before its name does, then the name; some 15 ms, not for a UI thread);
+    without it a power cut can leave an empty file under the name."""
     var tmp = path + ".tmp-" + String(getpid()) + "-" + String(serial())
     _ = unlink(tmp)
     var ok = True
@@ -355,15 +384,16 @@ def private_write_parts(path: String, parts: List[Tuple[Int, Int]]) -> Bool:
         ok = _write_new(tmp, 0, 0)
     if ok:
         _ = chmod(tmp, 0o600)
-        ok = rename(tmp, path) == 0
+        ok = (not durable or sync_file(tmp)) and rename(tmp, path) == 0
     if not ok:
         _ = unlink(tmp)
-    return ok
+        return False
+    return not durable or sync_dir(path)
 
 
-def private_write(path: String, text: String) -> Bool:
+def private_write(path: String, text: String, durable: Bool = False) -> Bool:
     """private_write_parts of a text."""
-    var ok = private_write_parts(path, [(Int(text.unsafe_ptr()), text.byte_length())])
+    var ok = private_write_parts(path, [(Int(text.unsafe_ptr()), text.byte_length())], durable)
     _ = text.byte_length()
     return ok
 

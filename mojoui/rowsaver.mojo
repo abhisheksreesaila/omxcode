@@ -16,7 +16,7 @@
 from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 from mojoui.canvasload import text_hash
 from mojoui.docstore import RowSave, SaveResult, Unsaved, unsaved_text, save_row, clock_us, FAILED
-from mojoui.files import private_write, reach_disk
+from mojoui.files import private_write
 from mojoui.sqlite import Database
 from mojoui.uijobs import start_ui_job
 from mojoui import libc
@@ -77,7 +77,7 @@ struct RowSaveJob(JobBody):
                 return SavedRow(r, 0, spilt)
             if not spilt and self.file != "" and self.stop[] == 0:  # (told to stop: whoever told holds the edits itself)
                 self.held.why = r.message
-                spilt = private_write(self.file, unsaved_text(self.held)) and reach_disk(self.file)
+                spilt = private_write(self.file, unsaved_text(self.held), durable=True)
             if clock_us() > by or self.stop[] != 0:
                 return SavedRow(r, 0, spilt)
 

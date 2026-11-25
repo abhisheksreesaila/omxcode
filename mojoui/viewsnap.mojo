@@ -23,7 +23,7 @@ from std.memory import Pointer, bitcast
 from std.sys import argv
 from mojoui.shared import get_shared, put_shared
 from mojoui.libc import unlink
-from mojoui.files import private_dir, private_write_parts, clean_temps, keep_under
+from mojoui.files import private_dir, private_write_parts, clean_temps, keep_under, bytes_sum
 from mojoui import libc
 from mojoui.clock import now_ns
 from std.memory.alloc import alloc, Layout
@@ -281,21 +281,6 @@ def _read_all(path: String, limit: Int = -1) -> List[UInt8]:
     return b^
 
 
-def bytes_sum(addr: Int, n: Int) -> Int:
-    """A fingerprint of n bytes, eight at a step (a kept view's pixels: 5 MB in about a millisecond)."""
-    var h = UInt64(0xCBF29CE484222325) ^ UInt64(n)
-    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
-    var i = 0
-    while i + 8 <= n:
-        h = (h ^ p.unsafe_offset(i).unsafe_bitcast[UInt64]()[]) * 0x9E3779B97F4A7C15
-        h ^= h >> 29
-        i += 8
-    while i < n:
-        h = (h ^ UInt64(p.unsafe_offset(i)[])) * 0x100000001B3
-        i += 1
-    return Int(h >> 2)
-
-
 def snap_read(path: String, head_only: Bool = False) -> ViewSnap:
     """The snapshot at path (ok False when there is none, or it isn't one). head_only: its key and note, not its tiles
     (a small read: the app checks a snapshot would match before it waits on one)."""
@@ -405,7 +390,7 @@ struct SnapWriter(Movable):
         for c in head.as_bytes():
             out.append(c)
         # (in place in one step, under a name of this process's own, readable by this user alone; the folder kept under its size)
-        var ok = private_write_parts(self.path, [(Int(out.unsafe_ptr()), len(out)), (Int(self.body.unsafe_ptr()), len(self.body))])
+        var ok = private_write_parts(self.path, [(Int(out.unsafe_ptr()), len(out)), (Int(self.body.unsafe_ptr()), len(self.body))], durable=True)
         _ = len(out)
         if ok:
             var cut = self.path.rfind("/")
