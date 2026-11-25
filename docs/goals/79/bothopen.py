@@ -2,7 +2,7 @@
 (its API and page, CPU Chromium) and the real native app (real X input, CPU drawing), pages, a canvas and a map. Every word typed
 is one of its own; at the end each is in the file, or in an edit native holds and says so. Scratch files only.
    pixi run python -B docs/goals/79/bothopen.py [minutes, default 10] [seed]"""
-import json, os, random, shutil, sqlite3, subprocess, sys, threading, time
+import json, os, random, re, shutil, sqlite3, subprocess, sys, threading, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from xdrive import App, ROOT, X
@@ -60,6 +60,17 @@ def env():
     return {"OMX_DATA": str(W / "data"), "OMX_CONFIG": str(W / "cfg"), "HOME": str(W / "home"), "PNOTE_BOXES": str(W / "boxes.json")}
 
 
+def found(text):
+    """The words in a text, also one another was typed into the middle of (a click on it puts the caret there): taken out one by one."""
+    out = set()
+    for part in set(text.split('"')):
+        while m := WORD.findall(part):
+            out |= set(m)
+            part = WORD.sub("", part)
+    return out
+
+
+WORD = re.compile(r"(?:nat|web)[0-9]+q")
 ever, words, where = set(), [], {}  # words seen in the file or held, at some moment; typed; where
 
 
@@ -67,9 +78,7 @@ def watch():
     while True:
         try:
             t = "\n".join(r[0] for r in rows("SELECT content FROM notes")) + held()
-            for w in words:
-                if w not in ever and w in t:
-                    ever.add(w)
+            ever.update(found(t))
         except (sqlite3.Error, OSError):
             pass
         time.sleep(0.15)
@@ -165,8 +174,8 @@ web("press", "Escape")
 time.sleep(8)
 rc = a.close()
 web("wait", 4000)
-text = "\n".join(r[0] for r in rows("SELECT content FROM notes"))
-h = held()
+text = found("\n".join(r[0] for r in rows("SELECT content FROM notes")))
+h = found(held())
 lost = [w for w in words if w not in text and w not in h]
 only_held = [w for w in words if w not in text and w in h]
 print(f"bothopen: {MIN:g} minutes, {nat_ops} edits native, {web_ops} in the web, {restarts} restarts; closed {rc}; web errors {len(web.errors)} {web.errors[:3]}")
@@ -183,8 +192,8 @@ for t in NOTES:
     b.key("Enter", wait=0.9)
 b.shot(W / "shots/after.png")
 assert b.close() == 0
-text = "\n".join(r[0] for r in rows("SELECT content FROM notes"))
-lost2 = [w for w in words if w not in text and w not in held()]
+text = found("\n".join(r[0] for r in rows("SELECT content FROM notes")) + held())
+lost2 = [w for w in words if w not in text]
 web.p.stdin.write('["quit"]\n')
 web.p.stdin.flush()
 print("bothopen:", "ok" if not lost and not lost2 and rc == 0 else f"BAD lost {lost} after the next start {lost2}")
