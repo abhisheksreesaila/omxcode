@@ -81,6 +81,7 @@ struct World(Movable):
     var past: Dict[Int, List[String]]  # texts it has had
     var typed: List[String]  # here, anywhere
     var cut: List[String]  # deleted here
+    var gone: List[String]  # and taken out of the row by a write of ours (one on its way when it was deleted may put it there first)
     var theirs_cut: List[String]  # deleted (or put back to a text without it) there
     var seed: Int
     var log: String
@@ -92,6 +93,7 @@ struct World(Movable):
         self.past = Dict[Int, List[String]]()
         self.typed = List[String]()
         self.cut = List[String]()
+        self.gone = List[String]()
         self.theirs_cut = List[String]()
         self.seed = seed
         self.log = ""
@@ -123,6 +125,7 @@ struct World(Movable):
                     continue
                 if ours:
                     assert_true(w in self.cut, self.why("a write here took out " + w + " of note " + String(id) + ", which nobody deleted here"))
+                    self.gone.append(w)
                 elif w not in self.theirs_cut:
                     self.theirs_cut.append(w)
             for w in row.words:
@@ -131,7 +134,7 @@ struct World(Movable):
                 if ours:
                     assert_true(w in self.typed, self.why("a write here put in " + w + " of note " + String(id) + ", which isn't ours"))
                     assert_true(w not in self.theirs_cut, self.why("a write here put back " + w + " in note " + String(id) + ", which the other app had deleted"))
-                    assert_true(w not in self.cut, self.why("a write here put back " + w + " in note " + String(id) + ", which was deleted here"))
+                    assert_true(w not in self.gone, self.why("a write here put back " + w + " in note " + String(id) + ", which was deleted here"))
                 else:
                     for k in range(len(self.theirs_cut) - 1, -1, -1):
                         if self.theirs_cut[k] == w:
@@ -306,6 +309,18 @@ def run(seed: Int, steps: Int) raises -> Int:
             if word != "":
                 w.cut.append(word)
                 w.note(name + " deletes " + word + " in note " + String(s.current))
+        elif k < 43:  # (saves on their way, one behind the other: none waited for)
+            for q in range(2):
+                n += 1
+                var word = "n" + String(seed) + "x" + String(n) + "z"
+                w.typed.append(word)
+                w.note(name + " types " + word + " in note " + String(s.current) + ", its save on its way")
+                if not add_word(s, word):
+                    _ = w.typed.pop()
+                s.saver.due_us = min(s.saver.due_us, clock_us())
+                _ = s.tick()
+                if q == 0 and r.next(2) == 0:
+                    theirs(w, r, 2000 + step)
         elif k < 52:
             let_save(s)
             w.note(name + " saves: '" + s.save_state + "'")
@@ -482,8 +497,9 @@ def other_files() raises:
 def main() raises:
     _ = private_dir(DIR)
     _ = setenv("OMX_CONFIG", DIR)
-    left_and_back()
-    other_files()
+    if getenv("DOCBASE_MODEL_ONLY") != "1":
+        left_and_back()
+        other_files()
     var args = argv()
     var seeds = Int(String(args[1])) if len(args) > 1 else 40
     var first = Int(String(args[2])) if len(args) > 2 else 1
