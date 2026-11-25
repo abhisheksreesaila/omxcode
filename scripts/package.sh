@@ -41,6 +41,11 @@ Your notes are in ~/.local/share/pnote/notes.db (on a Mac: ~/Library/Application
   todo) META="A to-do list in the platform's own controls, written once in Mojo|Utility;||./$EX" ;;
   *) META="Written once in Mojo|Utility;||./$EX" ;;
 esac
+# where an app keeps what a person makes, under HOME, besides ~/.local/share/<app> and ~/.config/<app> (the installer keeps off all of them)
+case "$EX" in omxconsole) DATA=".mxc" ;; saas) DATA=".local/share/saas-data .config/omxcode" ;; omxplorer) DATA="Documents/omxplorer" ;; *) DATA="" ;; esac
+notice() {  # notice <template> <app bundle's name on a Mac>: this app's own: its name, and only the libraries it carries
+  sed -e "s/OmxplorerMojo\.app/$2/g" -e "s/omxplorer/$EX/g" "$1"
+}
 IFS='|' read -r COMMENT CATS MIME RUN <<< "$(head -1 <<< "$META")"
 NOTE="$(tail -n +2 <<< "$META")"
 
@@ -102,7 +107,13 @@ exec "$here/saas-server"
 RUN
     chmod +x "$out/run-server.sh"
   fi
-  mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; sed "s/omxplorer/$EX/g; s#github.com/abhisheksreesaila/$EX#github.com/abhisheksreesaila/omxplorer#g" linux/licenses/NOTICE.txt > "$out/NOTICE.txt"
+  mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; notice linux/licenses/NOTICE.txt - > "$out/NOTICE.txt"
+  if ! compgen -G "$out/lib/libzstd.so*" > /dev/null; then  # (the Parquet codecs: only where they are)
+    sed -i '/^It also carries two compression libraries/,/^libsnappy/d' "$out/NOTICE.txt"; rm -f "$out"/licenses/SNAPPY-COPYING.txt "$out"/licenses/ZSTD-LICENSE.txt
+  fi
+  for so in $(grep -oE '^  lib[A-Za-z]+\.so' "$out/NOTICE.txt"); do [[ -e "$out/lib/$so" ]] || sed -i "/^  $so /d" "$out/NOTICE.txt"; done
+  n=$(ls "$out"/lib/lib*Mojo*.so "$out"/lib/libKGEN*.so "$out"/lib/libAsyncRT*.so "$out"/lib/libMSupport*.so 2>/dev/null | sort -u | wc -l); words=(no one two three four five six); sed -i "s/carries four runtime libraries/carries ${words[$n]} runtime libraries/" "$out/NOTICE.txt"
+  if compgen -G "$out/fonts/*/OFL.txt" > /dev/null; then sed -i 's|^licenses/LICENSE-Inter.txt, LICENSE-Geist.txt, LICENSE-JetBrainsMono.txt\.$|licenses/LICENSE-Inter.txt, LICENSE-Geist.txt, LICENSE-JetBrainsMono.txt; so are the ones in its folders: OFL-*.txt.|' "$out/NOTICE.txt"; fi
   for d in "$out"/fonts/*/; do [[ -f "$d/OFL.txt" ]] && cp "$d/OFL.txt" "$out/licenses/OFL-$(basename "$d").txt"; done
   cp LICENSE "$out/LICENSE.txt"
   if [[ "$EX" == saas ]]; then cat >> "$out/NOTICE.txt" <<'NOTE'
@@ -117,11 +128,12 @@ NOTE
   # install.sh: the program in a folder that holds the program and nothing else, a manifest of what it put there, and
   # nothing ever removed that isn't in a manifest it wrote (review 6, P1: the one before removed ~/.local/share/<app>, where
   # pnote keeps a person's notes). scripts/install_test.sh proves it in a scratch HOME.
-  sed -e "s|@EX@|$EX|g" -e "s|@COMMENT@|$COMMENT|g" -e "s|@CATS@|$CATS|g" -e "s|@MIME@|$MIME|g" linux/install.sh.in > "$out/install.sh"
+  sed -e "s|@EX@|$EX|g" -e "s|@COMMENT@|$COMMENT|g" -e "s|@CATS@|$CATS|g" -e "s|@MIME@|$MIME|g" -e "s|@DATA@|$DATA|g" linux/install.sh.in > "$out/install.sh"
   chmod +x "$out/install.sh"
   cat > "$out/README.txt" <<EOF
 $EX for Linux (x86_64)
 Run it here:   $RUN
+               (from any folder but ~/.local/share/$EX and ~/.config/$EX: those are for what you make with it)
 ${NOTE:+$NOTE
 }Install it:    ./install.sh     (the program in ~/.local/lib/$EX, a launcher entry, ~/.local/bin/$EX)
 Update it:     the newer package's ./install.sh
@@ -129,6 +141,10 @@ Remove it:     $EX-uninstall    (the program only: what you made with it stays w
 Built for a recent Linux with GTK 4 and libadwaita$(readelf -d "$bin" 2>/dev/null | grep -q webkit || [[ "$EX" == widgets ]] && echo ", plus WebKitGTK 6.0") (Ubuntu 24.04 or Fedora 40 should do; not yet tried on either).
 Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries); licenses/OFL-*.txt (the fonts, SIL OFL 1.1).
 EOF
+  work_list="$(mktemp)"
+  # what is in it, and its sha256: what install.sh installs, and nothing else (review 8). No name a person's things are kept under
+  if (cd "$out" && find . \( -name '*.db' -o -name '*.db-*' -o -name '*-wal' -o -name '*-shm' -o -name '*.sqlite*' -o -name unsaved -o -name snaps -o -type l \)) | grep .; then echo "not to be packaged"; exit 1; fi
+  (cd "$out" && find . -type f ! -path ./install.sh ! -path ./files.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do echo "$(sha256sum < "$f" | cut -d' ' -f1)  $f"; done) > "$work_list"; mv "$work_list" "$out/files.sha256"
   rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
   echo "$out.tar.gz ($(du -h "$out.tar.gz" | cut -f1))"
 elif [[ "$WHAT" == "mac" ]]; then
@@ -146,6 +162,8 @@ elif [[ "$WHAT" == "mac" ]]; then
   sed -i.orig -e "s#<key>CFBundleName</key><string>[^<]*</string>#<key>CFBundleName</key><string>$EX</string>#" \
          -e "s#<key>CFBundleDisplayName</key><string>[^<]*</string>#<key>CFBundleDisplayName</key><string>$EX</string>#" \
          -e "s#<key>CFBundlePackageType</key>#<key>CFBundleIconFile</key><string>$EX</string>\n\t<key>CFBundlePackageType</key>#" "$plist" && rm -f "$plist.orig"  # (-i.orig: BSD sed on a Mac too)
+  for f in "$stage/$EX.app/Contents/Resources/Licenses/NOTICE.txt" "$stage/$EX.app/Contents/Resources/NOTICE.txt"; do [[ ! -f "$f" ]] || notice apple/licenses/NOTICE.txt "$EX.app" > "$f"; done
+  cp mojoui/hosts/static/fonts/LICENSE-*.txt "$stage/$EX.app/Contents/Resources/fonts/" 2>/dev/null || true
   rm -rf "$stage/$EX.app/Contents/_CodeSignature"
   if command -v codesign >/dev/null; then codesign --force --sign - "$stage/$EX.app"; else rcodesign sign "$stage/$EX.app" >/dev/null; fi
   cat > "$stage/README.txt" <<EOF
@@ -158,8 +176,9 @@ ${NOTE:+$NOTE
 }Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries); licenses/ (Modular's, and the fonts' SIL OFL 1.1).
 EOF
   cp LICENSE "$stage/LICENSE.txt"
-  sed "s/omxplorer/$EX/g; s#github.com/abhisheksreesaila/$EX#github.com/abhisheksreesaila/omxplorer#g" apple/licenses/NOTICE.txt > "$stage/NOTICE.txt"
-  mkdir -p "$stage/licenses"; cp apple/licenses/MODULAR-*.txt "$stage/licenses/" 2>/dev/null || true
+  notice apple/licenses/NOTICE.txt "$EX.app" > "$stage/NOTICE.txt"
+  printf '\nThe fonts in %s.app/Contents/Resources/fonts are under the SIL Open Font License 1.1: licenses/LICENSE-*.txt and OFL-*.txt.\n' "$EX" >> "$stage/NOTICE.txt"
+  mkdir -p "$stage/licenses"; cp apple/licenses/MODULAR-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$stage/licenses/"
   for d in "$stage/$EX.app/Contents/Resources/fonts"/*/; do [[ -f "$d/OFL.txt" ]] && cp "$d/OFL.txt" "$stage/licenses/OFL-$(basename "$d").txt"; done
   zip_out="dist/$EX-mac-arm64.zip"; rm -f "$zip_out"
   (cd "$stage" && zip -qry "../$(basename "$zip_out")" "$EX.app" README.txt LICENSE.txt NOTICE.txt licenses)

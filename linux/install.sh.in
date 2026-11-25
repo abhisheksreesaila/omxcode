@@ -2,16 +2,20 @@
 # Installs @EX@ for this user: the program in ~/.local/lib/@EX@ (nothing else is kept there), a launcher entry with its icon, and
 # ~/.local/bin/@EX@. Running a newer package's install.sh updates it. Remove with: @EX@-uninstall
 #
-# It replaces and removes only what it can prove is its own: a file whose sha256 and place are in its list (.manifest), a link into
-# the program's folder, a launcher entry that starts the program there. Anything else of these names, and any link in the way, stops
-# it before anything is changed, with the file's name. What you make with @EX@ is never touched.
+# Two rules (decisions D-8089, D-8093):
+#  - It installs the files the packager listed (files.sha256, beside this script), each as it was listed, and nothing else that lies
+#    in this folder.
+#  - It replaces or removes a file only when the place is on a list it wrote itself (.manifest) and the content is still what that
+#    list says; in the layout of before (~/.local/share/@EX@) only when it is byte for byte a file of this package's list. Never a
+#    database, nor anything an app keeps what you make in, even if listed. Never through a link.
+# Everything is looked at first. What it can't prove to be its own it names; nothing is changed then.
 set -euo pipefail
 say() { echo "install: $*" >&2; }
 stop() { say "$*"; say "nothing was changed"; exit 1; }
-for c in find sed grep sort cmp cp mv ln mkdir rmdir rm readlink dirname sha256sum mktemp; do command -v "$c" > /dev/null 2>&1 || stop "this needs the command '$c'"; done
+for c in sed grep sort cmp cp mv ln mkdir rmdir rm readlink dirname basename sha256sum mktemp cat chmod; do command -v "$c" > /dev/null 2>&1 || stop "this needs the command '$c'"; done
 case "$HOME" in /*) ;; *) stop "HOME isn't a folder's full path" ;; esac
 case "$HOME" in *$'\n'*) stop "HOME has a line break in it" ;; esac
-here="$(cd "$(dirname "$0")" && pwd)"
+here="$(cd -P "$(dirname "$0")" && pwd -P)"
 dest="$HOME/.local/lib/@EX@"
 old="$HOME/.local/share/@EX@"  # (the layout of before: the program beside what you made)
 bin="$HOME/.local/bin"
@@ -19,11 +23,34 @@ desk=".local/share/applications/@EX@.desktop"
 icon=".local/share/icons/hicolor/256x256/apps/@EX@.png"
 un=".local/bin/@EX@-uninstall"
 manifest="$dest/.manifest"
-[ "$here" != "$dest" ] || stop "this is the installed copy"
+data=("$old" "$HOME/.config/@EX@")  # where @EX@ keeps what you make and its settings
+case "${XDG_DATA_HOME:-}" in /*) data+=("$XDG_DATA_HOME/@EX@") ;; esac
+for d in @DATA@; do data+=("$HOME/$d"); done
 
 there() { [ -e "$1" ] || [ -L "$1" ]; }
 sum() { local s; s="$(sha256sum < "$1")"; echo "${s%% *}"; }
 listed() { [ -n "$mine" ] && grep -qxF -- "$1  $2" <<< "$mine"; }  # listed <sha> <path as the list has it>
+kept() {  # a name apps keep what people make under: never installed, never removed
+  case "/$1/" in */unsaved/*|*/snaps/*) return 0 ;; esac
+  case "$(basename "$1")" in *.db|*.db-*|*-wal|*-shm|*.sqlite|*.sqlite-*) return 0 ;; esac
+  return 1
+}
+plain() { case "$1" in ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*|*$'\n'*|*$'\r'*) return 1 ;; esac; return 0; }  # a path under a folder, written one way
+ours() { local s; s="$(sum "$1" 2>/dev/null)" && [ -n "$s" ] && listed "$s" "$2"; }  # the content there is what our list says
+inside() {  # <a> is <b>, or lies in it (by what the folders are, not by what they're called)
+  local p="$1"
+  [ -d "$2" ] || return 1
+  while [ ! -d "$p" ]; do [ "$p" != / ] || return 1; p="$(dirname "$p")"; done
+  p="$(cd -P "$p" && pwd -P)"
+  while :; do [ ! "$p" -ef "$2" ] || return 0; [ "$p" != / ] || return 1; p="$(dirname "$p")"; done
+}
+way() {  # the folders to <path> can be gone through or made
+  local p="$1"
+  while ! there "$p"; do p="$(dirname "$p")"; done
+  [ -e "$p" ] || stop "$p is a link to nothing"
+  [ -d "$p" ] || stop "$p is in the way: it isn't a folder"
+  [ -w "$p" ] && [ -x "$p" ] || stop "$p can't be written to"
+}
 linked() {  # a link among the folders from <root> down to <relative path>'s, the path itself left out
   local d; d="$(dirname "$2")"
   while [ "$d" != . ] && [ "$d" != / ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done
@@ -32,13 +59,8 @@ linked() {  # a link among the folders from <root> down to <relative path>'s, th
 quoted() {  # a program's path in an Exec line (Desktop Entry Specification: in double quotes, \ " ` $ escaped, that once more as a string value is, % doubled)
   printf '"%s"' "$(sed -e 's/\\/\\\\\\\\/g' -e 's/"/\\\\"/g' -e 's/`/\\\\`/g' -e 's/\$/\\\\$/g' -e 's/%/%%/g' <<< "$1")"
 }
-starts_ours() {  # a launcher entry that starts this program, in its folder or the old one
-  local l p q; l="$(grep -m1 '^Exec=' "$1" || true)"
-  for p in "$dest/@EX@" "$old/@EX@"; do
-    q="$(quoted "$p")"
-    case "$l" in "Exec=$p"|"Exec=$p "*|"Exec=$q"|"Exec=$q "*) return 0 ;; esac
-  done
-  return 1
+entry() {  # the launcher entry with this Exec
+  printf '[Desktop Entry]\nType=Application\nName=@EX@\nComment=@COMMENT@\nExec=%s %%f\nIcon=@EX@\nTerminal=false\nCategories=@CATS@\nMimeType=@MIME@\n' "$1"
 }
 old_uninstaller() {  # what the installer of before wrote, word for word (1: with its line about omxc; 0: from before that line)
   printf '#!/usr/bin/env bash\n%s "%s" "%s" "%s" "%s" "%s"\n' 'rm -rf' "$old" "$bin/@EX@" "$HOME/$desk" "$HOME/$icon" "$HOME/$un"
@@ -46,29 +68,52 @@ old_uninstaller() {  # what the installer of before wrote, word for word (1: wit
   printf 'echo "@EX@ removed"\n'
 }
 
-# ---------- everything is looked at first; nothing is changed until all of it is in order
-files="$(cd "$here" && find . -type f ! -path ./install.sh ! -path ./.manifest | sed 's|^\./||' | LC_ALL=C sort)" || stop "this package can't be read"
-[ -n "$files" ] || stop "this package is empty"
-[ -f "$here/@EX@" ] && [ -f "$here/@EX@.png" ] || stop "this package isn't whole"
-p="$HOME/.local/lib"; [ ! -e "$p" ] || [ -d "$p" ] || stop "$p is in the way: it isn't a folder"
+# ---------- this package: the files the packager listed, each as listed
+[ -f "$here/files.sha256" ] && [ ! -L "$here/files.sha256" ] || stop "this package has no list of its files (files.sha256)"
+new="$(cat "$here/files.sha256")"
+[ -n "$new" ] || stop "this package's list is empty"
+files=""
+while IFS= read -r l; do
+  s="${l%%  *}"; f="${l#*  }"
+  case "$s" in *[!0-9a-f]*|'') stop "this package's list isn't one: $l" ;; esac
+  [ "${#s}" = 64 ] && plain "$f" || stop "this package's list isn't one: $l"
+  ! kept "$f" || stop "this package lists $f, a name @EX@ keeps what you make under"
+  [ "$f" != .manifest ] && [ "$f" != files.sha256 ] && [ "$f" != install.sh ] || stop "this package lists $f"
+  ! linked "$here" "$f" && [ ! -L "$here/$f" ] && [ -f "$here/$f" ] || stop "this package isn't whole: $f isn't there"
+  [ "$(sum "$here/$f")" = "$s" ] || stop "this package isn't whole: $f isn't what the packager put there"
+  files="$files$f"$'\n'
+done <<< "$new"
+files="${files%$'\n'}"
+grep -qxF "@EX@" <<< "$files" && grep -qxF "@EX@.png" <<< "$files" || stop "this package isn't whole"
+
+# ---------- everything is looked at; nothing is changed until all of it is in order
+for d in "$dest" "${data[@]}"; do
+  ! inside "$here" "$d" || stop "this package lies in $d, which is @EX@'s own place: unpack it somewhere else and run its install.sh there"
+  ! inside "$d" "$here" || stop "$d lies in this package's folder ($here): unpack the package somewhere else and run its install.sh there"
+done
+for d in "${data[@]}"; do
+  ! inside "$dest" "$d" && ! inside "$d" "$dest" && [ "$d" != "$dest" ] || stop "$dest and $d, where @EX@ keeps what you make, are in one another"
+done
 [ ! -L "$dest" ] || stop "$dest is a link: the program isn't installed through it"
-[ ! -e "$dest" ] || [ -d "$dest" ] || stop "$dest is in the way: it isn't a folder"
-[ ! -L "$manifest" ] || stop "$manifest is a link"
-mine=""; [ ! -f "$manifest" ] || mine="$(cat "$manifest")"
+way "$dest"; way "$bin"; way "$HOME/$(dirname "$desk")"; way "$HOME/$(dirname "$icon")"
+mine=""
+if there "$manifest"; then
+  [ ! -L "$manifest" ] && [ -f "$manifest" ] && [ -r "$manifest" ] || stop "$manifest isn't this program's list"
+  mine="$(cat "$manifest")"
+fi
 while IFS= read -r f; do
   ! linked "$dest" "$f" || stop "a folder on the way to $dest/$f is a link"
-  d="$(dirname "$f")"
-  while [ "$d" != . ] && [ "$d" != / ]; do [ ! -e "$dest/$d" ] || [ -d "$dest/$d" ] || stop "$dest/$d is in the way: it isn't a folder"; d="$(dirname "$d")"; done
+  way "$dest/$(dirname "$f")"
   if there "$dest/$f"; then
     [ ! -L "$dest/$f" ] && [ -f "$dest/$f" ] || stop "$dest/$f is in the way: it isn't a file of this program's"
-    if ! cmp -s -- "$here/$f" "$dest/$f" && ! listed "$(sum "$dest/$f")" "$f"; then
+    if ! cmp -s -- "$here/$f" "$dest/$f" && ! ours "$dest/$f" "$f"; then
       [ -n "$mine" ] || stop "$dest/$f isn't this package's, and the list of what was installed there ($manifest) is gone. The folder holds only the program: move $dest away and run this again"
       stop "$dest/$f isn't what this program's installer wrote"
     fi
   fi
 done <<< "$files"
 for n in @EX@ omxc; do
-  [ -f "$here/$n" ] || continue
+  grep -qxF "$n" <<< "$files" || continue
   if there "$bin/$n"; then
     case "$(readlink "$bin/$n" || true)" in "$dest/$n"|"$old/$n") ;; *) stop "$bin/$n isn't this program's" ;; esac
   fi
@@ -76,37 +121,31 @@ done
 # (the launcher entry and the uninstaller as this package writes them)
 half=""
 work="$(mktemp -d)"; trap 'rm -f -- "${work:?}/desk" "${work:?}/un" "${work:?}/list"; rmdir -- "${work:?}"; if [ -n "$half" ]; then rm -f -- "${half:?}"; fi' EXIT
-cat > "$work/desk" <<DESK
-[Desktop Entry]
-Type=Application
-Name=@EX@
-Comment=@COMMENT@
-Exec=$(quoted "$dest/@EX@") %f
-Icon=@EX@
-Terminal=false
-Categories=@CATS@
-MimeType=@MIME@
-DESK
+entry "$(quoted "$dest/@EX@")" > "$work/desk"
 cat > "$work/un" <<'UN'
 #!/usr/bin/env bash
-# Removes the program @EX@: what its installer wrote, as its list says (place and sha256). What you made with it stays.
+# Removes the program @EX@: the files its installer wrote, each only if its place is on the installer's list and its content is
+# still what the list says. What you made with it stays, wherever it is.
 set -euo pipefail
 dest="${HOME:?}/.local/lib/@EX@"; bin="${HOME:?}/.local/bin"
 if [ ! -f "$dest/.manifest" ] || [ -L "$dest/.manifest" ] || [ -L "$dest" ]; then
   echo "the list of what was installed ($dest/.manifest) is gone: nothing was removed. $dest holds only the program." >&2; exit 1
 fi
 linked() { local d; d="$(dirname "$2")"; while [ "$d" != . ] && [ "$d" != / ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done; return 1; }
+kept() { case "/$1/" in */unsaved/*|*/snaps/*) return 0 ;; esac; case "$(basename "$1")" in *.db|*.db-*|*-wal|*-shm|*.sqlite|*.sqlite-*) return 0 ;; esac; return 1; }
 left=""
 list="$(cat "$dest/.manifest")"
 for n in @EX@ omxc; do if [ "$(readlink "$bin/$n" 2>/dev/null || true)" = "$dest/$n" ]; then rm -f -- "${bin:?}/${n:?}"; fi; done
 while IFS= read -r l; do
-  s="${l%%  *}"; f="${l#*  }"
-  case "$f" in ''|/*|..|../*|*/../*|*/..) continue ;; esac
-  root="$dest"
-  case "$f" in "~/"*) root="${HOME:?}"; f="${f#\~/}" ;; esac
-  if [ "$root" = "$dest" ] && linked "$root" "$f"; then continue; fi
+  s="${l%%  *}"; f="${l#*  }"; root="$dest"
+  case "$f" in
+    "~/.local/share/applications/@EX@.desktop"|"~/.local/share/icons/hicolor/256x256/apps/@EX@.png"|"~/.local/bin/@EX@-uninstall") root="${HOME:?}"; f="${f#\~/}" ;;
+    ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*) continue ;;
+    *) if linked "$dest" "$f"; then continue; fi ;;
+  esac
+  if kept "$f"; then continue; fi
   if [ ! -f "$root/$f" ] || [ -L "$root/$f" ]; then continue; fi
-  h="$(sha256sum < "$root/$f")"; h="${h%% *}"
+  h="$(sha256sum < "$root/$f" 2>/dev/null || true)"; h="${h%% *}"
   if [ "$h" != "$s" ]; then grep -qxF -- "$h  ${l#*  }" <<< "$list" || left="$left $root/$f"; continue; fi
   rm -f -- "${root:?}/${f:?}"
   if [ "$root" = "$dest" ]; then d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done; fi
@@ -117,52 +156,54 @@ rmdir -- "${dest:?}" 2>/dev/null || echo "$dest holds files that aren't what the
 echo "@EX@ removed. What you made with it is where it was."
 UN
 chmod 644 "$work/desk"; chmod 755 "$work/un"
-outside() {  # outside <path under HOME>: absent, in the list, or proven ours
-  local f="$HOME/$1"
-  there "$f" || return 0
-  [ ! -L "$f" ] && [ -f "$f" ] || stop "$f isn't this program's"
-  ! listed "$(sum "$f")" "~/$1" || return 0
-  case "$1" in
-    "$desk") ! starts_ours "$f" || return 0 ;;
-    "$icon") ! cmp -s -- "$here/@EX@.png" "$f" || return 0; [ -L "$old/@EX@.png" ] || ! cmp -s -- "$old/@EX@.png" "$f" || return 0 ;;
-    "$un") ! cmp -s -- "$work/un" "$f" || return 0; ! cmp -s -- <(old_uninstaller 1) "$f" || return 0; ! cmp -s -- <(old_uninstaller 0) "$f" || return 0 ;;
-  esac
-  stop "$f isn't this program's"
-}
-outside "$desk"; outside "$icon"; outside "$un"
-for p in "$bin" "$HOME/$(dirname "$desk")" "$HOME/$(dirname "$icon")"; do [ ! -e "$p" ] || [ -d "$p" ] || stop "$p is in the way: it isn't a folder"; done
+put_desk=1; put_icon=1
+if there "$HOME/$desk"; then  # (an entry changed, or made by hand, is the person's, whatever it starts)
+  if [ -L "$HOME/$desk" ] || [ ! -f "$HOME/$desk" ]; then put_desk=0
+  elif ! ours "$HOME/$desk" "~/$desk" && ! cmp -s -- "$work/desk" "$HOME/$desk" && ! cmp -s -- <(entry "$old/@EX@") "$HOME/$desk"; then put_desk=0; fi
+fi
+if there "$HOME/$icon"; then
+  if [ -L "$HOME/$icon" ] || [ ! -f "$HOME/$icon" ]; then put_icon=0
+  elif ! ours "$HOME/$icon" "~/$icon" && ! cmp -s -- "$here/@EX@.png" "$HOME/$icon" && { [ -L "$old/@EX@.png" ] || [ ! -f "$old/@EX@" ] || ! cmp -s -- "$old/@EX@.png" "$HOME/$icon"; }; then put_icon=0; fi
+fi
+if there "$HOME/$un"; then
+  [ ! -L "$HOME/$un" ] && [ -f "$HOME/$un" ] || stop "$HOME/$un isn't this program's"
+  ours "$HOME/$un" "~/$un" || cmp -s -- "$work/un" "$HOME/$un" || cmp -s -- <(old_uninstaller 1) "$HOME/$un" || cmp -s -- <(old_uninstaller 0) "$HOME/$un" || stop "$HOME/$un isn't this program's"
+fi
 
 # ---------- in order: the new one in, file by file (each whole or not at all), by its list
-new="$(while IFS= read -r f; do echo "$(sum "$here/$f")  $f"; done <<< "$files"
-       echo "$(sum "$work/desk")  ~/$desk"; echo "$(sum "$here/@EX@.png")  ~/$icon"; echo "$(sum "$work/un")  ~/$un")"
+[ "$put_desk" = 0 ] || new="$new"$'\n'"$(sum "$work/desk")  ~/$desk"
+[ "$put_icon" = 0 ] || new="$new"$'\n'"$(sum "$here/@EX@.png")  ~/$icon"
+new="$new"$'\n'"$(sum "$work/un")  ~/$un"
 mkdir -p "$dest" "$bin" "$HOME/$(dirname "$desk")" "$HOME/$(dirname "$icon")"
 put() { half="$(mktemp "$2.XXXXXX")"; cp -p -- "$1" "$half"; mv -f -- "$half" "$2"; half=""; }  # (a file of a new name, renamed over: never written into, nor through a link)
 printf '%s\n%s\n' "$mine" "$new" | grep -v '^$' | LC_ALL=C sort -u > "$work/list"; put "$work/list" "$manifest"  # (both lists while it changes over: cut short, the next run and the uninstaller know all of it)
 while IFS= read -r f; do mkdir -p "$(dirname "$dest/$f")"; put "$here/$f" "$dest/$f"; done <<< "$files"
-put "$here/@EX@.png" "$HOME/$icon"
-put "$work/desk" "$HOME/$desk"
+if [ "$put_icon" = 1 ]; then put "$here/@EX@.png" "$HOME/$icon"; else say "$HOME/$icon isn't what this program's installer wrote: it is left as it is"; fi
+if [ "$put_desk" = 1 ]; then put "$work/desk" "$HOME/$desk"; else say "$HOME/$desk isn't what this program's installer wrote: it is left as it is (the program is $dest/@EX@)"; fi
 put "$work/un" "$HOME/$un"
-for n in @EX@ omxc; do if [ -f "$here/$n" ]; then ln -sfn -- "$dest/$n" "$bin/$n"; fi; done  # (omxc: omxconsole's command line for agents, D-6502)
+for n in @EX@ omxc; do if grep -qxF "$n" <<< "$files"; then ln -sfn -- "$dest/$n" "$bin/$n"; fi; done  # (omxc: omxconsole's command line for agents, D-6502)
 # what only the one before had goes: in its list, and still as it was written
 while IFS= read -r l; do
   s="${l%%  *}"; f="${l#*  }"
-  case "$f" in ''|"~/"*|/*|..|../*|*/../*|*/..) continue ;; esac  # (a list names files under the program's folder, and the three outside)
-  if grep -qxF -- "$f" <<< "$files" || linked "$dest" "$f" || [ -L "$dest/$f" ] || [ ! -f "$dest/$f" ]; then continue; fi
-  if [ "$(sum "$dest/$f")" = "$s" ]; then
+  if ! plain "$f" || kept "$f" || grep -qxF -- "$f" <<< "$files" || linked "$dest" "$f" || [ -L "$dest/$f" ] || [ ! -f "$dest/$f" ]; then continue; fi
+  if [ "$(sum "$dest/$f" 2>/dev/null || true)" = "$s" ]; then
     rm -f -- "${dest:?}/${f:?}"
     d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
   fi
 done <<< "$mine"
 printf '%s\n' "$new" > "$work/list"; put "$work/list" "$manifest"
 
-# the layout of before: only files that are byte for byte this package's own are taken out of it; everything else stays
-if [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ]; then
-  while IFS= read -r f; do
-    if [ -f "$old/$f" ] && [ ! -L "$old/$f" ] && ! linked "$old" "$f" && cmp -s -- "$here/$f" "$old/$f"; then
+# the layout of before: only files that are byte for byte on this package's list are taken out of it; everything else stays. Not when
+# a launcher entry that was left may start it there
+if [ "$put_desk" = 1 ] && [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ]; then
+  while IFS= read -r l; do
+    s="${l%%  *}"; f="${l#*  }"
+    if ! plain "$f" || kept "$f" || [ ! -f "$old/$f" ] || [ -L "$old/$f" ] || linked "$old" "$f"; then continue; fi
+    if [ "$(sum "$old/$f" 2>/dev/null || true)" = "$s" ]; then
       rm -f -- "${old:?}/${f:?}"
       d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${old:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
     fi
-  done <<< "$files"
-  if [ -f "$old/@EX@" ]; then say "an older program is still in $old (its own files, beside what you made): the one that starts now is in $dest"; fi
+  done < "$here/files.sha256"
 fi
+if [ -f "$old/@EX@" ] && [ ! -L "$old" ]; then say "an older program is still in $old (its own files, beside what you made): the one that starts now is in $dest"; fi
 say "done. Open it from your app launcher, or run: @EX@"
