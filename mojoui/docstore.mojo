@@ -805,7 +805,7 @@ struct SaveOutbox(Movable):
         for n in names:
             var owner: String
             if n.startswith(head) and n.endswith(".json"):
-                owner = _owner_of(n)
+                owner = _owner_of(settled_name(n))
             elif n.startswith(locks) and n.endswith(".lock"):
                 owner = String(n[byte = locks.byte_length() : n.byte_length() - 5])
             else:

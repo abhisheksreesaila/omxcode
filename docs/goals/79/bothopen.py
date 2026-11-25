@@ -143,6 +143,10 @@ while time.time() < end:
             w_at = rnd.choice([t for t in NOTES if NOTES[t] != "mindmap"])
             web("open", w_at)
         w = f"web{n}q"
+        if web("title") != w_at:  # (the web didn't open it: nothing is typed, and it is said)
+            print("the web stayed on", web("title"), "instead of", w_at, flush=True)
+            w_at = ""
+            continue
         if NOTES[w_at] == "page":
             web("pageend")
             f0 = web("focus")
