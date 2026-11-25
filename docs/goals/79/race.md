@@ -15,114 +15,114 @@ Same machine, same notes (PN's own generators, stored through the web app's API:
 
 | note | row | web p95 / max (missed) | native p95 / max (missed) | verdict | native work p95 / max | silky marks (information) |
 |---|---|---|---|---|---|---|
-| 600 | the first open ever (nothing kept: parsed): its first frame | 265.2 / 265.2 | 16.8 / 16.8 | ✓ better | 21.9 / 21.9 | over: p95 > 8.3, max > 16.7 |
-| 600 | the first open ever (nothing kept: parsed): complete | 265.2 / 265.2 | 34.9 / 34.9 | ✓ better | — |  |
-| 600 | a new process's first open, from the view the last one kept: its first frame | 265.2 / 265.2 | 7.4 / 7.4 | ✓ better | 5.8 / 5.8 | ≤ 8.3 and ≤ 16.7 |
-| 600 | a new process's first open, from the view the last one kept: complete | 265.2 / 265.2 | 42.4 / 42.4 | ✓ better | — |  |
-| 600 | open again (cold: the row read each time): its first frame | 232.4 / 232.4 | 19.9 / 19.9 | ✓ better | 11.7 / 11.7 | over: p95 > 8.3 |
-| 600 | open again: complete | 232.4 / 232.4 | 50.5 / 50.5 | ✓ better | — |  |
-| 600 | open again: the frames while it comes in (gaps) | 50.0 / 83.4 | 16.7 / 16.7 | ✓ better | 3.9 / 6.2 | ≤ 8.3 and ≤ 16.7 |
-| 600 | a press during an open | 14.1 / 14.1 | 17.0 / 17.0 | ✓ tie at the display's refresh | 2.9 / 2.9 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 30% (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | 2.4 / 2.5 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 17.1 (0) | ✓ within 3 % | — |  |
-| 600 | zoom from 30% (frames) | 16.8 / 66.7 (1) | 16.7 / 18.8 (0) | ✓ better | 3.0 / 7.3 | ≤ 8.3 and ≤ 16.7 |
-| 600 | zoom from 30%, not warmed (frames) | 16.8 / 66.7 (1) | 16.7 / 17.1 (0) | ✓ better | — |  |
-| 600 | pan 100% (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | 2.4 / 4.5 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pan 100%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
-| 600 | drag one (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | 2.7 / 5.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | the first open ever (nothing kept: parsed): its first frame | 248.8 / 248.8 | 16.9 / 16.9 | ✓ better | 21.6 / 21.6 | over: p95 > 8.3, max > 16.7 |
+| 600 | the first open ever (nothing kept: parsed): complete | 248.8 / 248.8 | 35.0 / 35.0 | ✓ better | — |  |
+| 600 | a new process's first open, from the view the last one kept: its first frame | 248.8 / 248.8 | 7.5 / 7.5 | ✓ better | 5.6 / 5.6 | ≤ 8.3 and ≤ 16.7 |
+| 600 | a new process's first open, from the view the last one kept: complete | 248.8 / 248.8 | 42.5 / 42.5 | ✓ better | — |  |
+| 600 | open again (cold: the row read each time): its first frame | 232.1 / 232.1 | 19.8 / 19.8 | ✓ better | 12.8 / 12.8 | over: p95 > 8.3 |
+| 600 | open again: complete | 232.1 / 232.1 | 50.1 / 50.1 | ✓ better | — |  |
+| 600 | open again: the frames while it comes in (gaps) | 50.0 / 83.4 | 16.7 / 16.7 | ✓ better | 3.7 / 5.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | a press during an open | 14.0 / 14.0 | 15.5 / 15.5 | ✓ tie at the display's refresh | 2.7 / 2.7 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 30% (frames) | 16.7 / 16.8 (0) | 16.7 / 18.8 (0) | ✓ tie at the display's refresh | 2.3 / 4.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
+| 600 | zoom from 30% (frames) | 16.8 / 66.7 (1) | 16.7 / 16.7 (0) | ✓ better | 4.7 / 6.2 | ≤ 8.3 and ≤ 16.7 |
+| 600 | zoom from 30%, not warmed (frames) | 16.8 / 66.7 (1) | 16.7 / 16.7 (0) | ✓ better | — |  |
+| 600 | pan 100% (frames) | 16.8 / 16.8 (0) | 16.7 / 16.9 (0) | ✓ within 3 % | 2.4 / 2.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pan 100%, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
+| 600 | drag one (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | 3.2 / 5.0 | ≤ 8.3 and ≤ 16.7 |
 | 600 | drag one, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | — |  |
-| 600 | drag 40 (frames) | 16.8 / 16.8 (0) | 16.7 / 18.0 (0) | ✓ tie at the display's refresh | 3.3 / 5.2 | ≤ 8.3 and ≤ 16.7 |
-| 600 | drag 40, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 17.9 (0) | ✓ tie at the display's refresh | — |  |
-| 600 | undo (latency) | 16.7 / 16.8 | 16.8 / 16.8 | ✓ within 3 % | 4.4 / 5.5 | ≤ 8.3 and ≤ 16.7 |
-| 600 | undo, not warmed (latency) | 16.7 / 16.8 | 16.8 / 16.9 | ✓ within 3 % | — |  |
-| 600 | redo (latency) | 16.8 / 17.5 | 16.8 / 16.8 | ✓ within 3 % | 5.4 / 5.7 | ≤ 8.3 and ≤ 16.7 |
-| 600 | redo, not warmed (latency) | 16.8 / 17.5 | 16.8 / 16.8 | ✓ within 3 % | — |  |
-| 600 | pen (frames) | 16.8 / 16.8 (0) | 16.7 / 17.0 (0) | ✓ within 3 % | 2.5 / 4.6 | ≤ 8.3 and ≤ 16.7 |
-| 600 | pen, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
-| 600 | typing (frames) | 16.8 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ better | 2.5 / 4.7 | ≤ 8.3 and ≤ 16.7 |
-| 600 | typing, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
-| stress | the first open ever (nothing kept: parsed): its first frame | 1049.1 / 1049.1 | 63.4 / 63.4 | ✓ better | 74.8 / 74.8 | over: p95 > 8.3, max > 16.7 |
-| stress | the first open ever (nothing kept: parsed): complete | 1049.1 / 1049.1 | 98.6 / 98.6 | ✓ better | — |  |
-| stress | a new process's first open, from the view the last one kept: its first frame | 1049.1 / 1049.1 | 9.6 / 9.6 | ✓ better | 8.7 / 8.7 | over: p95 > 8.3 |
-| stress | a new process's first open, from the view the last one kept: complete | 1049.1 / 1049.1 | 111.5 / 111.5 | ✓ better | — |  |
-| stress | open again (cold: the row read each time): its first frame | 992.9 / 992.9 | 56.3 / 56.3 | ✓ better | 61.3 / 61.3 | over: p95 > 8.3, max > 16.7 |
-| stress | open again: complete | 992.9 / 992.9 | 90.8 / 90.8 | ✓ better | — |  |
-| stress | open again: the frames while it comes in (gaps) | 66.7 / 400.1 | 16.7 / 34.9 | ✓ better | 6.8 / 7.8 | ≤ 8.3 and ≤ 16.7 |
-| stress | a press during an open | 14.1 / 14.1 | 16.9 / 16.9 | ✓ tie at the display's refresh | 4.4 / 4.4 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 30% (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | 2.7 / 4.9 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 17.3 / 18.2 (0) | ✓ tie at the display's refresh | — |  |
-| stress | zoom from 30% (frames) | 16.8 / 50.0 (3) | 16.7 / 16.8 (0) | ✓ better | 6.3 / 10.0 | ≤ 8.3 and ≤ 16.7 |
-| stress | zoom from 30%, not warmed (frames) | 16.8 / 50.0 (3) | 16.9 / 18.8 (0) | ✓ within 3 % | — |  |
-| stress | pan 100% (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | 2.5 / 2.7 | ≤ 8.3 and ≤ 16.7 |
-| stress | pan 100%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 17.0 (0) | ✓ within 3 % | — |  |
-| stress | drag one (frames) | 16.8 / 16.8 (0) | 16.7 / 17.0 (0) | ✓ within 3 % | 4.9 / 6.0 | ≤ 8.3 and ≤ 16.7 |
-| stress | drag one, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 17.0 (0) | ✓ within 3 % | — |  |
-| stress | drag 40 (frames) | 16.7 / 66.8 (1) | 16.7 / 18.9 (0) | ✓ within 3 % | 4.7 / 8.9 | ≤ 8.3 and ≤ 16.7 |
-| stress | drag 40, not warmed (frames) | 16.7 / 66.8 (1) | 16.7 / 16.9 (0) | ✓ within 3 % | — |  |
-| stress | undo (latency) | 17.0 / 17.2 | 16.7 / 16.8 | ✓ better | 6.8 / 25.2 | over: max > 16.7 |
-| stress | undo, not warmed (latency) | 17.0 / 17.2 | 16.8 / 17.4 | ✓ within 3 % | — |  |
-| stress | redo (latency) | 17.0 / 17.5 | 16.7 / 16.8 | ✓ better | 6.8 / 8.6 | ≤ 8.3 and ≤ 16.7 |
-| stress | redo, not warmed (latency) | 17.0 / 17.5 | 17.0 / 17.0 | ✓ within 3 % | — |  |
-| stress | pen (frames) | 16.8 / 333.2 (4) | 16.7 / 23.2 (1) | ✓ better | 2.6 / 4.7 | ≤ 8.3 and ≤ 16.7 |
-| stress | pen, not warmed (frames) | 16.8 / 333.2 (4) | 16.7 / 22.4 (1) | ✓ better | — |  |
-| stress | typing (frames) | 16.8 / 200.0 (1) | 16.7 / 16.9 (0) | ✓ better | 2.5 / 2.8 | ≤ 8.3 and ≤ 16.7 |
-| stress | typing, not warmed (frames) | 16.8 / 200.0 (1) | 16.7 / 16.7 (0) | ✓ better | — |  |
-| page | typing in the middle of a 20,000-character paragraph (key to its frame) | 19.2 / 31.2 | 16.7 / 17.3 | ✓ better | — |  |
+| 600 | drag 40 (frames) | 16.8 / 16.8 (0) | 16.7 / 17.8 (0) | ✓ tie at the display's refresh | 3.1 / 5.3 | ≤ 8.3 and ≤ 16.7 |
+| 600 | drag 40, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 18.0 (0) | ✓ tie at the display's refresh | — |  |
+| 600 | undo (latency) | 17.0 / 17.4 | 16.8 / 16.8 | ✓ better | 4.3 / 5.6 | ≤ 8.3 and ≤ 16.7 |
+| 600 | undo, not warmed (latency) | 17.0 / 17.4 | 16.8 / 16.8 | ✓ better | — |  |
+| 600 | redo (latency) | 16.8 / 17.0 | 16.8 / 16.8 | ✓ within 3 % | 4.0 / 5.5 | ≤ 8.3 and ≤ 16.7 |
+| 600 | redo, not warmed (latency) | 16.8 / 17.0 | 16.8 / 17.0 | ✓ within 3 % | — |  |
+| 600 | pen (frames) | 16.8 / 16.8 (0) | 16.7 / 17.2 (0) | ✓ within 3 % | 2.5 / 4.6 | ≤ 8.3 and ≤ 16.7 |
+| 600 | pen, not warmed (frames) | 16.8 / 16.8 (0) | 16.7 / 18.8 (0) | ✓ tie at the display's refresh | — |  |
+| 600 | typing (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | 2.4 / 4.7 | ≤ 8.3 and ≤ 16.7 |
+| 600 | typing, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 17.0 (0) | ✓ within 3 % | — |  |
+| stress | the first open ever (nothing kept: parsed): its first frame | 983.0 / 983.0 | 64.0 / 64.0 | ✓ better | 77.3 / 77.3 | over: p95 > 8.3, max > 16.7 |
+| stress | the first open ever (nothing kept: parsed): complete | 983.0 / 983.0 | 115.7 / 115.7 | ✓ better | — |  |
+| stress | a new process's first open, from the view the last one kept: its first frame | 983.0 / 983.0 | 10.4 / 10.4 | ✓ better | 8.8 / 8.8 | over: p95 > 8.3 |
+| stress | a new process's first open, from the view the last one kept: complete | 983.0 / 983.0 | 112.8 / 112.8 | ✓ better | — |  |
+| stress | open again (cold: the row read each time): its first frame | 935.5 / 935.5 | 56.9 / 56.9 | ✓ better | 59.5 / 59.5 | over: p95 > 8.3, max > 16.7 |
+| stress | open again: complete | 935.5 / 935.5 | 91.4 / 91.4 | ✓ better | — |  |
+| stress | open again: the frames while it comes in (gaps) | 66.7 / 400.0 | 16.6 / 36.9 | ✓ better | 6.7 / 8.0 | ≤ 8.3 and ≤ 16.7 |
+| stress | a press during an open | 14.1 / 14.1 | 14.7 / 14.7 | ✓ tie at the display's refresh | 4.3 / 4.3 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30% (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | 2.7 / 2.9 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 30%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 18.9 (0) | ✓ tie at the display's refresh | — |  |
+| stress | zoom from 30% (frames) | 16.7 / 50.0 (3) | 16.7 / 17.2 (0) | ✓ within 3 % | 5.4 / 14.2 | ≤ 8.3 and ≤ 16.7 |
+| stress | zoom from 30%, not warmed (frames) | 16.7 / 50.0 (3) | 16.7 / 16.7 (0) | ✓ within 3 % | — |  |
+| stress | pan 100% (frames) | 16.7 / 16.8 (0) | 16.7 / 18.8 (0) | ✓ tie at the display's refresh | 2.5 / 2.6 | ≤ 8.3 and ≤ 16.7 |
+| stress | pan 100%, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
+| stress | drag one (frames) | 16.7 / 16.8 (0) | 16.7 / 16.7 (0) | ✓ within 3 % | 4.9 / 6.0 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag one, not warmed (frames) | 16.7 / 16.8 (0) | 16.7 / 16.8 (0) | ✓ within 3 % | — |  |
+| stress | drag 40 (frames) | 16.7 / 66.7 (1) | 16.7 / 16.7 (0) | ✓ within 3 % | 4.7 / 9.0 | ≤ 8.3 and ≤ 16.7 |
+| stress | drag 40, not warmed (frames) | 16.7 / 66.7 (1) | 16.7 / 17.2 (0) | ✓ within 3 % | — |  |
+| stress | undo (latency) | 17.0 / 20.8 | 16.8 / 16.8 | ✓ better | 6.9 / 24.7 | over: max > 16.7 |
+| stress | undo, not warmed (latency) | 17.0 / 20.8 | 16.8 / 16.8 | ✓ better | — |  |
+| stress | redo (latency) | 17.0 / 17.1 | 16.8 / 16.8 | ✓ better | 6.8 / 6.8 | ≤ 8.3 and ≤ 16.7 |
+| stress | redo, not warmed (latency) | 17.0 / 17.1 | 16.8 / 16.8 | ✓ better | — |  |
+| stress | pen (frames) | 16.8 / 350.1 (4) | 16.7 / 22.7 (1) | ✓ better | 2.6 / 4.8 | ≤ 8.3 and ≤ 16.7 |
+| stress | pen, not warmed (frames) | 16.8 / 350.1 (4) | 16.7 / 24.7 (1) | ✓ better | — |  |
+| stress | typing (frames) | 16.7 / 199.9 (1) | 16.7 / 16.8 (0) | ✓ within 3 % | 2.5 / 2.8 | ≤ 8.3 and ≤ 16.7 |
+| stress | typing, not warmed (frames) | 16.7 / 199.9 (1) | 16.7 / 16.7 (0) | ✓ within 3 % | — |  |
+| page | typing in the middle of a 20,000-character paragraph (key to its frame) | 32.4 / 39.8 | 16.7 / 16.8 | ✓ better | — |  |
 
 **Beside, not judged:**
 
 | note | what | web | native |
 |---|---|---|---|
-| 600 | benchmark-f034's open (a page load in a new context) | 610.0 | |
-| 600 | pen: input to frame p95 / max | 16.9 / 35.5 | 16.8 / 18.9 |
-| 600 | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 16.0 / 16.0 | 16.8 / 16.8 |
+| 600 | benchmark-f034's open (a page load in a new context) | 620.0 | |
+| 600 | pen: input to frame p95 / max | 16.9 / 36.0 | 16.8 / 18.9 |
+| 600 | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 16.0 / 16.0 | 16.8 / 16.9 |
 | 600 | cold opens that showed the kept view | | 10 of 30 |
-| 600 | work: the first open ever, first frame · frames during p95 / max · complete | | 21.9 · 6.6 / 6.6 · 35.3 |
-| 600 | work: a new process's first open from the kept view | | 5.8 · 5.9 / 5.9 · 42.1 |
-| 600 | work: cold open with the kept view off (MOJOUI_SNAP=0): first frame · during · press · complete | | 13.9 · 3.7 / 3.9 · 1.8 / 1.8 · 50.0 |
-| 600 | work: open again, kept parsed | | 4.4 / 4.4 |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): open p95 / max · paint to presented | | 12.8 / 12.8 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 30% p95 / max · paint to presented | | 5.0 / 6.5 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): zoom from 30% p95 / max · paint to presented | | 5.7 / 7.7 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 100% p95 / max · paint to presented | | 5.0 / 6.2 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag one p95 / max · paint to presented | | 5.8 / 9.7 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag 40 p95 / max · paint to presented | | 6.5 / 8.2 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): undo p95 / max · paint to presented | | 8.1 / 8.7 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): redo p95 / max · paint to presented | | 8.1 / 8.1 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pen p95 / max · paint to presented | | 5.1 / 6.2 · not measured |
-| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): typing p95 / max · paint to presented | | 5.1 / 5.2 · not measured |
-| stress | benchmark-f034's open (a page load in a new context) | 1110.0 | |
-| stress | pen: input to frame p95 / max | 22.5 / 176.1 | 16.8 / 23.3 |
+| 600 | work: the first open ever, first frame · frames during p95 / max · complete | | 21.6 · 6.6 / 6.6 · 35.1 |
+| 600 | work: a new process's first open from the kept view | | 5.6 · 5.7 / 5.7 · 42.4 |
+| 600 | work: cold open with the kept view off (MOJOUI_SNAP=0): first frame · during · press · complete | | 14.4 · 4.0 / 4.5 · 2.4 / 2.4 · 50.0 |
+| 600 | work: open again, kept parsed | | 4.2 / 4.2 |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): open p95 / max · paint to presented | | 12.9 / 12.9 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 30% p95 / max · paint to presented | | 5.0 / 6.7 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): zoom from 30% p95 / max · paint to presented | | 5.6 / 7.4 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 100% p95 / max · paint to presented | | 5.0 / 6.1 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag one p95 / max · paint to presented | | 5.8 / 11.2 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag 40 p95 / max · paint to presented | | 5.9 / 10.1 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): undo p95 / max · paint to presented | | 8.0 / 8.9 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): redo p95 / max · paint to presented | | 8.1 / 8.3 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pen p95 / max · paint to presented | | 5.1 / 7.3 · not measured |
+| 600 | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): typing p95 / max · paint to presented | | 5.2 / 7.3 · not measured |
+| stress | benchmark-f034's open (a page load in a new context) | 1098.0 | |
+| stress | pen: input to frame p95 / max | 21.9 / 62.5 | 16.8 / 22.8 |
 | stress | typing: key to paint (web: 8 ms steps, at least 16) p95 / max | 16.0 / 16.0 | 16.8 / 17.1 |
 | stress | cold opens that showed the kept view | | 10 of 30 |
-| stress | work: the first open ever, first frame · frames during p95 / max · complete | | 74.8 · 6.6 / 6.6 · 114.0 |
-| stress | work: a new process's first open from the kept view | | 8.7 · 11.5 / 11.5 · 129.3 |
-| stress | work: cold open with the kept view off (MOJOUI_SNAP=0): first frame · during · press · complete | | 62.5 · 6.7 / 8.2 · 4.9 / 4.9 · 103.9 |
-| stress | work: open again, kept parsed | | 2.9 / 2.9 |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): open p95 / max · paint to presented | | 59.7 / 59.7 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 30% p95 / max · paint to presented | | 5.6 / 7.7 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): zoom from 30% p95 / max · paint to presented | | 8.1 / 9.7 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 100% p95 / max · paint to presented | | 6.4 / 10.9 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag one p95 / max · paint to presented | | 5.6 / 10.3 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag 40 p95 / max · paint to presented | | 5.7 / 15.5 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): undo p95 / max · paint to presented | | 9.2 / 9.2 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): redo p95 / max · paint to presented | | 9.1 / 10.9 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pen p95 / max · paint to presented | | 5.5 / 7.7 · not measured |
-| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): typing p95 / max · paint to presented | | 5.5 / 6.4 · not measured |
+| stress | work: the first open ever, first frame · frames during p95 / max · complete | | 77.3 · 6.7 / 6.7 · 115.7 |
+| stress | work: a new process's first open from the kept view | | 8.8 · 9.9 / 9.9 · 112.0 |
+| stress | work: cold open with the kept view off (MOJOUI_SNAP=0): first frame · during · press · complete | | 57.4 · 6.7 / 8.4 · 4.4 / 4.4 · 102.8 |
+| stress | work: open again, kept parsed | | 4.9 / 4.9 |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): open p95 / max · paint to presented | | 60.9 / 60.9 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 30% p95 / max · paint to presented | | 5.7 / 7.8 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): zoom from 30% p95 / max · paint to presented | | 8.1 / 9.4 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pan 100% p95 / max · paint to presented | | 5.4 / 7.4 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag one p95 / max · paint to presented | | 5.8 / 10.6 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): drag 40 p95 / max · paint to presented | | 5.6 / 16.1 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): undo p95 / max · paint to presented | | 9.3 / 9.7 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): redo p95 / max · paint to presented | | 9.4 / 11.5 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): pen p95 / max · paint to presented | | 5.5 / 7.4 · not measured |
+| stress | work, GTK compositing the canvas (MOJOUI_OFFLOAD=0): typing p95 / max · paint to presented | | 5.5 / 5.8 · not measured |
 
 | | web | native | verdict |
 |---|---|---|---|
-| cold start: Personal Note's desktop launcher (server + Chromium app window) | 746.8 ms | 330.0 ms | ✓ better |
-| cold start: a fresh Chromium process on the built app | 577.6 ms | 330.0 ms | ✓ better |
-| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | 203.0 ms | 330.0 ms | |
-| RSS after opening all three kinds | 1186.8 MB | 207.0 MB | ✓ better |
-| note switch p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 57.0 / 65.8 ms | 18.58 / 21.79 ms | ✓ better |
-| note switch p95 / max, the second start (the first one's glyphs readied, D-8002) | 57.0 / 65.8 ms | 20.76 / 20.76 ms | ✓ better |
-| note switch: native work p95 / max (first start · second), beside | | 4.73 / 8.35 · 5.52 / 5.52 ms | ≤ 8.3 and ≤ 16.7 |
-| omnibar open p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 31.0 / 31.5 ms | 16.95 / 17.04 ms | ✓ better |
-| omnibar open p95 / max, the second start (the first one's glyphs readied, D-8002) | 31.0 / 31.5 ms | 16.89 / 16.89 ms | ✓ better |
-| omnibar open: native work p95 / max (first start · second), beside | | 1.36 / 1.49 · 1.37 / 1.37 ms | ≤ 8.3 and ≤ 16.7 |
+| cold start: Personal Note's desktop launcher (server + Chromium app window) | 735.5 ms | 350.0 ms | ✓ better |
+| cold start: a fresh Chromium process on the built app | 593.1 ms | 350.0 ms | ✓ better |
+| warm page load in a running Chromium (PN's benchmark-first-screen; not judged: no process starts) | 205.0 ms | 350.0 ms | |
+| RSS after opening all three kinds | 1181.1 MB | 206.3 MB | ✓ better |
+| note switch p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 55.3 / 59.1 ms | 18.48 / 18.61 ms | ✓ better |
+| note switch p95 / max, the second start (the first one's glyphs readied, D-8002) | 55.3 / 59.1 ms | 21.09 / 21.09 ms | ✓ better |
+| note switch: native work p95 / max (first start · second), beside | | 4.67 / 4.72 · 5.97 / 5.97 ms | ≤ 8.3 and ≤ 16.7 |
+| omnibar open p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst) | 30.8 / 31.7 ms | 16.98 / 17.13 ms | ✓ better |
+| omnibar open p95 / max, the second start (the first one's glyphs readied, D-8002) | 30.8 / 31.7 ms | 16.95 / 16.95 ms | ✓ better |
+| omnibar open: native work p95 / max (first start · second), beside | | 1.49 / 1.53 · 1.13 / 1.13 ms | ≤ 8.3 and ≤ 16.7 |
 
 Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the title island (#island-title) holding the note's title, painted (two animation frames after), read through Chromium's DevTools port; the desktop launcher's start is its Python process's (by /proc, as the native one), the fresh Chromium's the moment before it is spawned, its API already serving; medians of 5, scratch databases and profiles, on the hidden screen. Native: FIRSTSCREEN, the first canvas picture (title island included) handed to GTK, by /proc. Each side's 'quiet' rule: no run starts while scripts/gpu-free says another job has the machine, or while 3 or more cores' worth of work runs (Linux, /proc/stat over 2 s: the web's runs and the native ones alike, waiting up to 5 minutes), or while the Mac's load is 3 or more; a race with a run that started on a busy machine is void (BLOCKED), not judged.
 
-The machine before each of the 34 measured runs: at most 0.38 cores busy.
+The machine before each of the 34 measured runs: at most 0.37 cores busy.
