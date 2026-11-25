@@ -269,9 +269,9 @@ def echoes() raises:
     """(review 5, SHOULD 1) The web open on the same canvas writes every save of ours again: not a conflict."""
     fresh()
     var hexes = String("0123456789abcdef") * 4
-    var dec = '{"nodes":[{"id":"a","type":"file","x":1,"y":2,"width":3,"height":4,"file":"' + hexes + '.svg","pn":{"type":"ink","geometry":{}}},{"id":"b","type":"file","x":1,"y":2,"width":3,"height":4,"file":"' + hexes + '.svg","pn":{"type":"image"}}],"edges":[]}'
+    var dec = '{"nodes":[{"id":"a","type":"file","x":1,"y":2,"width":3,"height":4,"file":"media/' + hexes + '.svg","pn":{"type":"ink","geometry":{}}},{"id":"c","type":"file","file":"' + hexes + '.svg","pn":{"type":"shape"}},{"id":"b","type":"file","x":1,"y":2,"width":3,"height":4,"file":"media/' + hexes + '.svg","pn":{"type":"image"}}],"edges":[]}'
     var plain = undecorated(dec)
-    assert_true('"file":"","pn":{"type":"ink"' in plain and hexes + '.svg","pn":{"type":"image"' in plain, "an image's own file stays: " + plain)
+    assert_true('"file":"","pn":{"type":"ink"' in plain and '"file":"","pn":{"type":"shape"' in plain and "media/" + hexes + '.svg","pn":{"type":"image"' in plain, "an image's own file stays: " + plain)
     assert_equal(undecorated(plain), plain)
     var s = WebShell(DB, "paper")
     s.create("canvas", "Board")
@@ -300,7 +300,7 @@ def echoes() raises:
         _ = s.pan(600 + Float64(k) * 9, 400 + Float64(k % 3))
     _ = s.release(700, 400)
     settle(s)
-    o.exec("UPDATE notes SET revision = revision + 1, content = replace(content, '\"file\":\"\"', '\"file\":\"" + hexes + ".svg\"') WHERE id = " + String(id) + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
+    o.exec("UPDATE notes SET revision = revision + 1, content = replace(content, '\"file\":\"\"', '\"file\":\"media/" + hexes + ".svg\"') WHERE id = " + String(id) + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
     assert_true(type_word(s, "afterink"))
     _ = s.key("Escape", 0)
     settle(s)

@@ -51,6 +51,7 @@ class App:
             if k.startswith("MOJOUI_TEST") or k in ("MOJOUI_SHOT", "CUDA_VISIBLE_DEVICES"):
                 e.pop(k)
         e.update(CUDA_VISIBLE_DEVICES="", MOJOUI_GPU2D="0", LIBGL_ALWAYS_SOFTWARE="1", __GLX_VENDOR_LIBRARY_NAME="mesa", TZ="UTC")
+        self.others = set(self.children(X.XDefaultRootWindow(self.d)))  # (windows that were there: another App's)
         self.p = subprocess.Popen(["nice", "-n", "15", "taskset", "-c", "0-3", *os.environ.get("XBIN", str(ROOT / "build/pnote/linux/pnote")).split()], env=e, stdout=open(log, "w"), stderr=subprocess.STDOUT)
         self.spare = 8
         self.mapped = {}
@@ -80,6 +81,8 @@ class App:
     def find(self):
         best = None
         for w in self.children(X.XDefaultRootWindow(self.d)):
+            if w in self.others:
+                continue
             g = self.geometry(w)
             if g[2] > 300 and g[3] > 300 and (best is None or g[2] > self.geometry(best)[2]):
                 best = w

@@ -74,8 +74,8 @@ struct CanvasSource(Copyable, Movable):
 
 
 def undecorated(text: String) -> String:
-    """The document without the names of the pictures an app derives from its own objects ("file": 64 hex digits and .svg, of a
-    node that isn't an image): what a person made, the same before and after a web app has put them in. Text without any
+    """The document without the names of the pictures an app derives from its own objects ("file": "media/", 64 hex digits and
+    .svg, of a node that isn't an image): what a person made, the same before and after a web app has put them in. Text without any
     comes back as it is."""
     var key = String('"file":')
     var b = text.as_bytes()
@@ -91,22 +91,28 @@ def undecorated(text: String) -> String:
         while q < n and (b[q] == 32 or b[q] == 10 or b[q] == 13 or b[q] == 9):
             q += 1
         i = q
-        if q + 70 > n or b[q] != 34:
+        if q >= n or b[q] != 34:
+            continue
+        var h = q + 1  # (where the name's digits begin)
+        if h + 6 <= n and b[h] == 109 and b[h + 1] == 101 and b[h + 2] == 100 and b[h + 3] == 105 and b[h + 4] == 97 and b[h + 5] == 47:  # media/
+            h += 6
+        if h + 69 > n:
             continue
         var hexes = True
-        for k in range(q + 1, q + 65):
+        for k in range(h, h + 64):
             var c = Int(b[k])
             if not (48 <= c <= 57 or 97 <= c <= 102):
                 hexes = False
                 break
-        if not hexes or String(text[byte = q + 65 : q + 70]) != '.svg"':
+        if not hexes or String(text[byte = h + 64 : h + 69]) != '.svg"':
             continue
         # (whose node it is: its pn's type comes right after it, as both apps write it; an image's file is the person's)
-        var rest = String(text[byte = q + 70 : min(n, q + 70 + 40)])
+        var end = h + 69
+        var rest = String(text[byte = end : min(n, end + 40)])
         if rest.replace(" ", "").startswith(',"pn":{"type":"image"') or not rest.replace(" ", "").startswith(',"pn":{"type":'):
             continue
         out += String(text[byte=at:q]) + '""'
-        at = q + 70
+        at = end
         i = at
     if at == 0:
         return text

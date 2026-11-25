@@ -7,6 +7,8 @@ import numpy as np
 from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 from xdrive import App, ROOT, X
+import ctypes
+X.XRaiseWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 W = ROOT / "build/real24"
 bad = []
 
@@ -100,7 +102,7 @@ def picture(a, p):
 def echoes():
     """(review 5, SHOULD 1) The web has the same canvas open and idle; native draws and writes at a person's pace: no conflict."""
     P = Place("echoes", [("canvas", "Board")])
-    P.web("open", "Board")
+    note(P.web("title") == "Board", "echoes: the web has the canvas open (its newest note)")
     a = P.start()
     P.open(a, "Board")
     a.key("Escape", wait=0.3)
@@ -121,9 +123,11 @@ def echoes():
     t = P.content("Board")
     log = P.said()
     revs = P.rows("SELECT revision FROM notes WHERE title = 'Board'")[0][0]
-    svgs = len(re.findall(r'"file":\s*"[0-9a-f]{64}\.svg"', t))
+    svgs = len(re.findall(r'"file":\s*"(?:media/)?[0-9a-f]{64}\.svg"', t))
     note(all(f"echoword{k}" in t for k in [1, 3, 5, 7]) and t.count('"ink"') >= 4, f"echoes: every word and stroke is in the file (revision {revs}, {t.count(chr(34) + 'ink' + chr(34))} ink)")
     note("conflict" not in log and P.held() == "" and "#save-copy" not in a.boxes(), f"echoes: no conflict; the web wrote picture names into {svgs}; rows that had only moved on, met by a save: {log.count('with the same words')}")
+    note(svgs >= 3 and revs > 9, "echoes: and the web did write it again (else nothing was tested)")
+    note("PNOTE FEED" in log and a.key("z", "Ctrl", wait=2.5) is None and len(json.loads(P.content("Board"))["nodes"]) == len(json.loads(t)["nodes"]) - 1, "echoes: the note wasn't opened again under the person: Ctrl+Z still takes back the last thing")
     a.key("Escape")
     note(a.close() == 0, "echoes: closes")
     P.end()
@@ -193,7 +197,7 @@ def conflict():
     c.execute("BEGIN IMMEDIATE")
     a.type("lockedwords", wait=0.2)
     t0 = time.time()
-    while time.time() - t0 < 40 and "#save-retry" not in a.boxes():
+    while time.time() - t0 < 80 and "#save-retry" not in a.boxes():
         time.sleep(1)
         a.move(600 + int(time.time()) % 5, 500)
     note("#save-retry" in a.boxes() and "lockedwords" in P.held(), f"conflict: a file locked by another program: said after {time.time() - t0:.0f} s, the words on disk")

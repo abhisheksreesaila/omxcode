@@ -265,7 +265,7 @@ def theirs(mut w: World, mut r: Rng, n: Int) raises:
         sql = "content"
     else:
         what = "puts its picture names in"
-        sql = "replace(content, '\"file\":\"\"', '\"file\":\"" + String("0123456789abcdef") * 4 + ".svg\"')"
+        sql = "replace(content, '\"file\":\"\"', '\"file\":\"media/" + String("0123456789abcdef") * 4 + ".svg\"')"
     if sql != "":
         w.db.exec("UPDATE notes SET revision = revision + 1, content = " + sql + " WHERE id = " + String(id))
     w.db.exec("UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1; COMMIT")

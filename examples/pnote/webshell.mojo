@@ -411,6 +411,7 @@ struct WebShell(Movable):
     var to_ready: List[Int]  # the screens still to ready, last first: a note's id, or WARM_OMNI/WARM_CARD/WARM_SETTINGS
     var ready_k: Float64  # the device scale they're readied for (0: not asked yet)
     var doc: OpenDoc  # (review 3) which note is open and whether it was read: what may be edited, kept and saved
+    var read_again: Bool  # the open note is being read again because another app changed it (refresh)
     var outbox: SaveOutbox  # edits that couldn't be written, until they land
     var page_src: String  # the open page's or map's content as it was read (a save changes it in place)
     var drafted: Bool  # the last document_of() held words still being written
@@ -509,6 +510,7 @@ struct WebShell(Movable):
         self.to_ready = List[Int]()
         self.ready_k = 0
         self.doc = OpenDoc()
+        self.read_again = False
         self.page_src = ""
         self.content_hash = 0
         self.drafted = False
@@ -1674,7 +1676,12 @@ struct WebShell(Movable):
                 self.save_kind = ""
                 self.current = 0  # (nothing here is unsaved: what the file holds, shown)
                 self.doc.begin(0)
+                var tool = self.tools.tool
+                self.read_again = True  # (nobody opened it: the tool stays, no caret begins to write)
                 self.open(cur)
+                self.read_again = False
+                if self.notes[i].kind == "canvas" and self.tools.tool != tool and self.doc.may_edit():
+                    self.tools.set_tool(tool, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
                 self.page.scroll = scroll
                 if self.notes[i].kind == "canvas" and self.view_set:
                     self.view = view
@@ -2842,7 +2849,7 @@ struct WebShell(Movable):
         """A canvas of writing opens like a document (main.js openCanvasView, startWriting): at 100 % at its topmost
         Markdown text, the caret at that text's end; an empty one at the page's top with a new text begun. A board of
         drawings opens as it did; so does one too big to read whole before it shows (2 MB: the web waits for it)."""
-        if self.tools.tool != "text" or not self.doc.may_edit() or not markdown and text_bytes > 600 or text_bytes > 2_000_000:
+        if self.read_again or self.tools.tool != "text" or not self.doc.may_edit() or not markdown and text_bytes > 600 or text_bytes > 2_000_000:
             return
         ref layer = self.board.edit()
         var top = -1
