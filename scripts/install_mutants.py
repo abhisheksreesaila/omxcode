@@ -40,10 +40,11 @@ for name, (a, b) in M.items():
         print("BAD  mutant not found:", name, src.count(a)); bad += 1; continue
     with tempfile.NamedTemporaryFile("w", suffix=".in", delete=False) as f:
         f.write(src.replace(a, b))
-    r = subprocess.run(["scripts/install_test.sh"], cwd=R, env=dict(os.environ, TEMPLATE=f.name), capture_output=True, text=True)
+    r = subprocess.run(["timeout", "90", "scripts/install_test.sh"], cwd=R, env=dict(os.environ, TEMPLATE=f.name), capture_output=True, text=True)
     os.unlink(f.name)
     out = (r.stdout.strip().splitlines() or [r.stderr.strip()[-120:]])[-1]
-    print("ok  " if r.returncode else "BAD ", name, "|", out[:150], flush=True)
-    bad += r.returncode == 0
+    noticed = r.returncode not in (0, 124)
+    print("ok  " if noticed else "BAD ", name, "|", out[:150], flush=True)
+    bad += not noticed
 print("install_mutants:", "ok" if not bad else f"BAD {bad}", len(M))
 sys.exit(1 if bad else 0)

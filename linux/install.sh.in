@@ -26,7 +26,7 @@ sum() { local s; s="$(sha256sum < "$1")"; echo "${s%% *}"; }
 listed() { [ -n "$mine" ] && grep -qxF -- "$1  $2" <<< "$mine"; }  # listed <sha> <path as the list has it>
 linked() {  # a link among the folders from <root> down to <relative path>'s, the path itself left out
   local d; d="$(dirname "$2")"
-  while [ "$d" != . ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done
+  while [ "$d" != . ] && [ "$d" != / ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done
   return 1
 }
 quoted() {  # a program's path in an Exec line (Desktop Entry Specification: in double quotes, \ " ` $ escaped, that once more as a string value is, % doubled)
@@ -58,7 +58,7 @@ mine=""; [ ! -f "$manifest" ] || mine="$(cat "$manifest")"
 while IFS= read -r f; do
   ! linked "$dest" "$f" || stop "a folder on the way to $dest/$f is a link"
   d="$(dirname "$f")"
-  while [ "$d" != . ]; do [ ! -e "$dest/$d" ] || [ -d "$dest/$d" ] || stop "$dest/$d is in the way: it isn't a folder"; d="$(dirname "$d")"; done
+  while [ "$d" != . ] && [ "$d" != / ]; do [ ! -e "$dest/$d" ] || [ -d "$dest/$d" ] || stop "$dest/$d is in the way: it isn't a folder"; d="$(dirname "$d")"; done
   if there "$dest/$f"; then
     [ ! -L "$dest/$f" ] && [ -f "$dest/$f" ] || stop "$dest/$f is in the way: it isn't a file of this program's"
     if ! cmp -s -- "$here/$f" "$dest/$f" && ! listed "$(sum "$dest/$f")" "$f"; then
@@ -95,7 +95,7 @@ dest="${HOME:?}/.local/lib/@EX@"; bin="${HOME:?}/.local/bin"
 if [ ! -f "$dest/.manifest" ] || [ -L "$dest/.manifest" ] || [ -L "$dest" ]; then
   echo "the list of what was installed ($dest/.manifest) is gone: nothing was removed. $dest holds only the program." >&2; exit 1
 fi
-linked() { local d; d="$(dirname "$2")"; while [ "$d" != . ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done; return 1; }
+linked() { local d; d="$(dirname "$2")"; while [ "$d" != . ] && [ "$d" != / ]; do [ ! -L "$1/$d" ] || return 0; d="$(dirname "$d")"; done; return 1; }
 left=""
 list="$(cat "$dest/.manifest")"
 for n in @EX@ omxc; do if [ "$(readlink "$bin/$n" 2>/dev/null || true)" = "$dest/$n" ]; then rm -f -- "${bin:?}/${n:?}"; fi; done
@@ -109,7 +109,7 @@ while IFS= read -r l; do
   h="$(sha256sum < "$root/$f")"; h="${h%% *}"
   if [ "$h" != "$s" ]; then grep -qxF -- "$h  ${l#*  }" <<< "$list" || left="$left $root/$f"; continue; fi
   rm -f -- "${root:?}/${f:?}"
-  if [ "$root" = "$dest" ]; then d="$(dirname "$f")"; while [ "$d" != . ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done; fi
+  if [ "$root" = "$dest" ]; then d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done; fi
 done <<< "$list"
 rm -f -- "${dest:?}/.manifest"
 rmdir -- "${dest:?}" 2>/dev/null || echo "$dest holds files that aren't what the installer wrote: left there"
@@ -150,7 +150,7 @@ while IFS= read -r l; do
   if grep -qxF -- "$f" <<< "$files" || linked "$dest" "$f" || [ -L "$dest/$f" ] || [ ! -f "$dest/$f" ]; then continue; fi
   if [ "$(sum "$dest/$f")" = "$s" ]; then
     rm -f -- "${dest:?}/${f:?}"
-    d="$(dirname "$f")"; while [ "$d" != . ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
+    d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${dest:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
   fi
 done <<< "$mine"
 printf '%s\n' "$new" > "$work/list"; put "$work/list" "$manifest"
@@ -160,7 +160,7 @@ if [ -d "$old" ] && [ ! -L "$old" ] && [ -f "$old/@EX@" ]; then
   while IFS= read -r f; do
     if [ -f "$old/$f" ] && [ ! -L "$old/$f" ] && ! linked "$old" "$f" && cmp -s -- "$here/$f" "$old/$f"; then
       rm -f -- "${old:?}/${f:?}"
-      d="$(dirname "$f")"; while [ "$d" != . ]; do rmdir -- "${old:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
+      d="$(dirname "$f")"; while [ "$d" != . ] && [ "$d" != / ]; do rmdir -- "${old:?}/${d:?}" 2>/dev/null || break; d="$(dirname "$d")"; done
     fi
   done <<< "$files"
   if [ -f "$old/@EX@" ]; then say "an older program is still in $old (its own files, beside what you made): the one that starts now is in $dest"; fi
