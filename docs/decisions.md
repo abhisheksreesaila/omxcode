@@ -2051,3 +2051,9 @@ Its placement rule doesn't reach a browser that the started program starts: thre
 
 ## D-8077: the reviewer's fair rule, prepared and off (ours)
 FAIR_RULE = False in 79-check.py. On: five interleaved rounds a side; a step's row by the median of the five p95s (Personal Note's benchmark gives each run's p95, not its frames: they can't be pooled without editing it), the median of the five maxima, all missed frames. judge_test holds both states. Nothing it would say is reported.
+
+## D-8078: a page's late layouts go by the heights as they are (ours; continuation 23)
+`PageSheet.lay_more` placed the paragraphs it laid out by where the last frame had drawn them; after a jump (a scroll bar's drag, a search's result) that is another place, so the scroll wasn't moved with them: some paragraphs of the window weren't drawn for a frame and the rest moved by a line. Now by the sum of the heights and the scroll of this frame. `PageSheet.lay_ns` is a field so that a test can make a frame lay out one paragraph. Found because a wide run on loaded cores failed test_pageedit once in two: a timing failure was a real one.
+
+## D-8079: gentler after the fourth stop (the main session's rule; its form ours)
+One build, test or run at a time on cores 0–5 at nice 15, started under load 6, with build/g79/heartbeat.txt written and synced every 20 s (build/hb.sh; package power isn't readable without root, so it logs the CPU's temperature, both GPUs' power and temperature, load and free memory). scripts/build-all builds one at a time unless BUILD_JOBS says otherwise.
