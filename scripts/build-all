@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything in this repository compiles: every function of the framework (mojo package), every example's Linux app (and the
-# programs some keep beside it), four at a time, niced. One line each; exit 1 when one doesn't. (Goal 79 broke four modules of other
-# goals without knowing for days: no test of its own builds them.) About eight minutes cold.
+# programs some keep beside it), one at a time (BUILD_JOBS=4: four), niced. One line each; exit 1 when one doesn't. (Goal 79 broke four modules of other
+# goals without knowing for days: no test of its own builds them.) About eight minutes cold with four.
 cd "$(dirname "$0")/.."
 O=build/all
 mkdir -p $O
@@ -28,6 +28,6 @@ ls examples | while read -r e; do
   [ -f "examples/$e/app.mojo" ] || continue
   if [ -f "examples/$e/platforms" ] && ! grep -qw linux "examples/$e/platforms"; then continue; fi
   echo "$e"
-done | xargs -P 4 -I{} bash -c 'one {}' | tee $O/examples.txt
+done | xargs -P "${BUILD_JOBS:-1}" -I{} bash -c 'one {}' | tee $O/examples.txt
 grep -q '^FAIL' $O/examples.txt && bad=1
 exit $bad
