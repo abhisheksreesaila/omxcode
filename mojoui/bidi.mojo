@@ -8,7 +8,6 @@
 #
 # Not wired into mojoui's shaper, TextEdit or PageSheet yet (they measure from the left): the next step of gap 81.
 # The character classes are Unicode 16's, the runs that aren't L (docs/goals/79/bidi_table.py makes them).
-from std.memory import ArcPointer
 
 comptime L = 0
 comptime R = 1
@@ -248,9 +247,9 @@ def bidi_levels(chars: List[Int], data: BidiData, base: Int = -1) -> Bidi:
     out.base = base if base >= 0 else max(_first_strong(out.cls, 0, n), 0)
     # X1–X8
     var t = out.cls.copy()
-    var sl = [out.base]
-    var so = [-1]
-    var si = [False]
+    var sl: List[Int] = [out.base]
+    var so: List[Int] = [-1]
+    var si: List[Bool] = [False]
     var over_iso = 0
     var over_emb = 0
     var valid = 0
