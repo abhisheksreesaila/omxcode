@@ -121,7 +121,7 @@ have the generic piece already. Size: S (hours), M (a day), L (more). **State** 
 | 78 | The canvas's paper didn't grow; words past it couldn't be reached | grows, folds back | M | **built** (D-8068); pages on the left and top appear at the drop |
 | 79 | Two windows on one file lost held edits | (one server) | M | **built** (D-8064) |
 | 80 | A new canvas text wasn't saved until it was finished | within 2 s | S | **built** (D-8065) |
-| 81 | Right-to-left words: the caret, a press and the selection are on the wrong side (measured from the left) | right | M | open |
+| 81 | Right-to-left words: the caret, a press and the selection are on the wrong side (measured from the left) | right | M | **started** (D-8082): mojoui.bidi works out levels, order, caret, press and selection (91,707 of Unicode's conformance lines, 58,329 random ones as ICU); **not wired** into the shaper, TextEdit or PageSheet: nothing looks different yet |
 | 82 | Markdown in a canvas text being written again shows as drawn, its caret by the raw words | raw while written | S | open |
 | 83 | The canvas's tool letters (t, p, s…) did nothing from a real keyboard on Linux: the input method ate them | pick the tool | S | **built** (App.takes_text; continuation 23) |
 | 84 | Ink stayed where it was when the paper grew left or up | moves with its paper | S | **built** (Obj.move, one shift for every kind; review 5) |

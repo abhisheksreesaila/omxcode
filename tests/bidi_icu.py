@@ -23,6 +23,8 @@ for k in range(n):
     pools = [p for i, p in enumerate(POOL) if not (plain and i in (12, 13, 14, 16))]
     few = r.sample(pools, r.randint(2, min(7, len(pools))))
     s = "".join(r.choice(r.choice(few)) for _ in range(r.randint(1, 40)))
+    if re.search("[][(){}][\u200d\u00ad\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]*[\u0301\u05b0\u064b]", s):  # (ICU doesn't let a mark go with its bracket; Unicode's rule N0 does)
+        continue
     u = [ord(c) for c in s]
     m = len(u)
     U = (C.c_uint16 * m)(*u)

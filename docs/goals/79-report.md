@@ -76,7 +76,7 @@ Proofs, checks and tests changed (none loosens a bar):
 - test_outboxmodel: `fault` is `disk.fault`; no thread, its settles run between steps.
 
 **Risk, most first.** docstore: `HeldDisk.settle`, `SaveOutbox.load` (a settle running while the window drops, lands or closes). webshell's rebase (`moved_on`, `undecorated`): what counts as the same words. `Runtime.take_pans` and `App.takes_text` for every app on both hosts (AppKit's ime_commit seen only by M5). `PageSheet.lay_more`. ObjectLayer.shift_frame with groups and drafts. The save thread's F_FULLFSYNC on a slow Mac disk (a longer write lock; not measured there). After a power cut a landed or dropped version may come back as held. The headed race's window rules on another Hyprland version. Stress undo's 19.0 ms passes against a web maximum of 19.7 in one run each: the row can go the other way.
-**Not done:** the Mac's M6. Gap 81 is started, not wired in (below). An idea being written in a map isn't in the file until Enter (gap 85).
+**Not done:** the Mac's M6. Gap 81: only the generic piece, `mojoui/bidi.mojo` with test_bidi (91,707 of Unicode's conformance lines, 58,329 random lines as ICU has them, 8,001 lines' carets, presses and selections; 6 mutants fail); nothing imports it, so no word on the screen changes yet (D-8082). An idea being written in a map isn't in the file until Enter (gap 85).
 
 ## Continuation 22 (2026-11-24, 11:13–14:50): the Mac unlocked, review round 4 fixed
 
