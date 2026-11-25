@@ -136,7 +136,11 @@ while time.time() < end:
         w = f"web{n}q"
         if NOTES[w_at] == "page":
             web("pageend")
+            f0 = web("focus")
             web("type", " " + w, 15)
+            t = web("pagetext")
+            if w not in t:
+                print("web page without its word:", w, w_at, "| island:", web("title"), "| focus", f0, "->", web("focus"), "| text:", repr(t[-60:]), flush=True)
         else:
             web("press", "Escape")
             web("press", "t")

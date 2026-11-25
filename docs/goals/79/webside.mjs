@@ -27,7 +27,7 @@ const ops = {
     const row = page.locator(`.note-list-item[data-note-id="${note.id}"]`).first()
     if (!(await row.isVisible().catch(() => false))) for (const b of await page.locator('.notebook-tab').all()) { await b.click(); await page.waitForTimeout(150); if (await row.isVisible().catch(() => false)) break }
     await row.click(); await page.waitForTimeout(1200); return await page.locator('#island-title').textContent() },
-  async pageend() { await page.locator('.cm-content').click(); await page.keyboard.press('Control+End'); return 'ok' },
+  async pageend() { await page.locator('.cm-content').focus(); await page.keyboard.press('Control+End'); return 'ok' },
   async type([t, delay]) { await page.keyboard.type(t, { delay: Number(delay || 0) }); return 'ok' },
   async press([k]) { await page.keyboard.press(k); return 'ok' },
   async click([x, y]) { await page.mouse.click(Number(x), Number(y)); return 'ok' },
@@ -35,6 +35,7 @@ const ops = {
   async shot([f]) { await page.screenshot({ path: f }); return f },
   async title() { return await page.locator('#island-title').textContent() },
   async pagetext() { return await page.evaluate(() => document.querySelector('.cm-content')?.innerText ?? '(no page)') },
+  async focus() { return await page.evaluate(() => { const a = document.activeElement; return (a?.className || a?.tagName || '?') + (a?.isContentEditable ? ' (writes)' : '') + ' ro=' + (document.querySelector('.cm-content')?.getAttribute('contenteditable') ?? '-') }) },
   async state() { return await page.evaluate(() => document.querySelector('#save-state, .save-state, #island-state')?.textContent ?? '?') + ' | ' + await page.evaluate(() => [...document.querySelectorAll('.toast, #toast, [role=status], [role=alert]')].map((e) => e.textContent.trim()).filter(Boolean).join(' / ')) },
   async notes() { const out = []; for (const n of await all()) { const f = await get(`/notes/${n.id}`); out.push([n.id, n.title, n.noteType, f.revision, n.noteType === 'page' ? f.content?.markdown : JSON.stringify(f.content)]) } return out },
   async del([title]) { const note = (await all()).find((n) => n.title === title); return (await fetch(`http://127.0.0.1:${port}/api/notes/${note.id}`, { method: 'DELETE', headers: H })).status },
