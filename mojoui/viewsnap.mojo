@@ -390,7 +390,7 @@ struct SnapWriter(Movable):
         for c in head.as_bytes():
             out.append(c)
         # (in place in one step, under a name of this process's own, readable by this user alone; the folder kept under its size)
-        var ok = private_write_parts(self.path, [(Int(out.unsafe_ptr()), len(out)), (Int(self.body.unsafe_ptr()), len(self.body))], durable=True)
+        var ok = private_write_parts(self.path, [(Int(out.unsafe_ptr()), len(out)), (Int(self.body.unsafe_ptr()), len(self.body))])  # (not durable: the renderer finishes it inside a frame, and a torn one is refused by its sum)
         _ = len(out)
         if ok:
             var cut = self.path.rfind("/")
