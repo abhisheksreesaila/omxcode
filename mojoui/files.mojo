@@ -6,7 +6,7 @@ from std.os.path import getsize, isdir, isfile
 from std.sys import CompilationTarget
 from std.os import listdir, stat
 from mojoui.shared import environment, make_dir, arguments, serial
-from mojoui.libc import chmod, unlink, rename, open_append, open_read, fsync, write_fd, close, getpid, clock_gettime, flock
+from mojoui.libc import file_identity, chmod, unlink, rename, open_append, open_read, fsync, write_fd, close, getpid, clock_gettime, flock
 
 
 def file_name(path: String) -> String:
@@ -239,7 +239,7 @@ def media_path_ok(path: String, own: List[String]) -> Bool:
 struct FileLock(Movable):
     """A file only its holder has (flock): held until release(), this value's end or the process's, however it ends. Says
     "someone is alive" to other processes, and to other holders in this one. What is held is the file that has the name:
-    one removed and made again between opening and locking isn't (a token written into it and read back by name)."""
+    one removed and made again between opening and locking isn't (its device and inode against the name's)."""
 
     var fd: Int
     var path: String
@@ -264,14 +264,8 @@ struct FileLock(Movable):
         if flock(fd, 2 | 4) != 0:
             _ = close(fd)
             return False
-        var token = String(getpid()) + "-" + String(serial()) + "-" + String(_now_ns()) + "\n"
-        _ = write_fd(fd, Int(token.unsafe_ptr()), token.byte_length())
-        var same = False
-        try:
-            with open(path, "r") as f:
-                same = f.read().endswith(token)
-        except:
-            pass
+        var mine = file_identity("", fd)  # (nothing is written: a full disk has locks too)
+        var same = mine[0] >= 0 and file_identity(path) == mine
         if not same:
             _ = close(fd)
             return False
@@ -287,12 +281,6 @@ struct FileLock(Movable):
             _ = close(self.fd)
         self.fd = -1
         self.path = ""
-
-
-def _now_ns() -> Int:
-    var ts: List[Int] = [0, 0]
-    _ = clock_gettime(0, Int(ts.unsafe_ptr()))
-    return ts[0] * 1_000_000_000 + ts[1]
 
 
 def sync_file(path: String) -> Bool:

@@ -716,7 +716,7 @@ struct SaveOutbox(Movable):
             self.owner = "p" + String(getpid()) + "-" + new_key("k")
             if self.lock.take(self.lock_path(self.owner)):
                 return
-        _ = unlink(self.lock_path(self.owner))
+            _ = unlink(self.lock_path(self.owner))
         self.owner = "n" + String(getpid()) + "-" + new_key("k")
 
     def lock_path(self, owner: String, space: String = "") -> String:
@@ -769,6 +769,10 @@ struct SaveOutbox(Movable):
         self.syncs.append(Settle(path, olds^))
         if not self.disk.inline:
             self.sync(False)
+
+    def settling_left(self) -> Bool:
+        """Files are waiting to be settled, or on their thread: sync() is to be asked again soon."""
+        return len(self.syncs) > 0 or Bool(self.syncer)
 
     def settle_next(mut self):
         """(tests, inline) The next file that waits is settled."""

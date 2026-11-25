@@ -1931,7 +1931,7 @@ struct WebShell(Movable):
 
     def waiting(self) -> Bool:
         """Something has to happen later without input: a save, a toast to go (App.every)."""
-        return self.saver.pending() or self.saving() or self.toast != ""
+        return self.saver.pending() or self.saving() or self.toast != "" or self.outbox.settling_left()
 
     def saving(self) -> Bool:
         """A save is being written on its thread."""

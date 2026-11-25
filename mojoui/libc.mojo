@@ -301,6 +301,24 @@ def open_read(var path: String) -> Int:
     return fd
 
 
+def file_identity(var path: String, fd: Int = -1) -> Tuple[Int, Int]:
+    """Which file a path (or an open fd) is: its device and inode; (-1, -1) when there is none. struct stat's first words: on
+    Linux x86-64 and arm64 st_dev is the first eight bytes, on a Mac the first four; st_ino is the second eight on all."""
+    var buf = List[UInt64](length=40, fill=0)
+    var rc: Int
+    if fd >= 0:
+        var f = _sym("fstat")
+        rc = Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(fd), Int(buf.unsafe_ptr())))
+    else:
+        var f = _sym("stat")
+        rc = Int(Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](Int(path.as_c_string_span().unsafe_ptr()), Int(buf.unsafe_ptr())))
+        _ = path.byte_length()
+    var dev = Int(buf[0] & 0xFFFFFFFF) if CompilationTarget.is_macos() else Int(buf[0])
+    var out = (dev, Int(buf[1])) if rc == 0 else (-1, -1)
+    _ = len(buf)
+    return out
+
+
 def open_append(var path: String) -> Int:
     """The file opened for appending (O_WRONLY | O_APPEND | O_CLOEXEC), made with mode 0600 when missing: the fd, or -1.
     open() is variadic, and on Apple's arm64 a variadic mode travels on the stack, where a fixed-argument call never
