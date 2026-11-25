@@ -2057,3 +2057,10 @@ FAIR_RULE = False in 79-check.py. On: five interleaved rounds a side; a step's r
 
 ## D-8079: gentler after the fourth stop (the main session's rule; its form ours)
 One build, test or run at a time on cores 0–5 at nice 15, started under load 6, with build/g79/heartbeat.txt written and synced every 20 s (build/hb.sh; package power isn't readable without root, so it logs the CPU's temperature, both GPUs' power and temperature, load and free memory). scripts/build-all builds one at a time unless BUILD_JOBS says otherwise.
+
+## D-8080: a held file is settled before what it stands for goes (ours; continuation 23, the main session's question)
+Written as "….new.json" (whole or absent however the process ends, readable at the next start, checked by a sum), then on a thread: its bytes on the disk, renamed to "….json", the folder on the disk, and only then are the earlier versions removed. Not on the UI thread because a sync costs 15–20 ms; not left unsynced because a power cut could take both versions (it had been so since D-8071). Cost: for some milliseconds an edit that couldn't be saved is safe from a crash but not from the power. After a power cut a dropped or landed version may come back as held: never the other way round; one whose words the file has is dropped at the start. A torn "….new.json" is left where it is and said in the log.
+`private_write(durable=True)` is the same order for threads that may wait (RowSaver's file of a waiting save, kept pictures). The warm-glyph list and the folder's label stay without it: caches.
+
+## D-8081: the notes file is opened to keep commits through a power cut (ours)
+Personal Note: WAL, synchronous FULL (its Python's SQLite is built so, checked: 3.54.0, DEFAULT_WAL_SYNCHRONOUS=2). Native said nothing and got FULL on Linux (2) and NORMAL on the Mac (Apple's: DEFAULT_WAL_SYNCHRONOUS=1), which may lose the last commits. `Database.durable()` sets FULL on the window's connection, and the save thread's also asks for the whole drive's cache on a Mac (F_FULLFSYNC, off the UI thread). Stronger than Personal Note there, equal on Linux.
