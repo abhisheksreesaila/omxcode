@@ -933,6 +933,42 @@ def m6():
         M6_RUNNING[0] = False
 
 
+def ours_running(root=None):
+    """(review 8: a server of a test's own was alive through a race said to be alone) Processes of this worktree besides this run: a
+    program under it, or a Python, Node, Xvfb or browser told of it in its arguments or of its scratch files in its environment.
+    This run's own (the processes above it, and what they started) and shells aren't."""
+    root = str(root or ROOT)
+    info, kids = {}, {}
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            stat = (d / "stat").read_text()
+            ppid = int(stat[stat.rindex(")") + 2:].split()[1])
+            info[int(d.name)] = (ppid, os.readlink(d / "exe"), (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip(), (d / "environ").read_bytes().decode(errors="replace"))
+            kids.setdefault(ppid, []).append(int(d.name))
+        except (OSError, ValueError):
+            pass
+    mine, p = set(), os.getpid()
+    while p in info and p > 1:
+        mine.add(p)
+        if "build/hb.sh" in info[p][2] or "scripts/check" in info[p][2]:  # (what this run's wrappers started beside it: the heartbeat)
+            todo = [p]
+            while todo:
+                for k in kids.get(todo.pop(), []):
+                    if k not in mine:
+                        mine.add(k)
+                        todo.append(k)
+        p = info[p][0]
+    out = []
+    for pid, (_, exe, cmd, environ) in info.items():
+        name = exe.split("/")[-1].replace(" (deleted)", "")
+        told = re.search(r"^(python|node|Xvfb|chrom|uvicorn|firefox)", name) and (root in cmd or any(v.partition("=")[2].startswith(root) for v in environ.split("\0") if v.startswith(("PERSONAL_NOTE_", "OMX_", "PNOTE_"))))
+        if pid not in mine and (exe.startswith(root + "/") or told):
+            out.append(f"{pid} {cmd[:90]}")
+    return out
+
+
 def m6_both():
     if os.environ.get("M6_ONLY") == "mac":  # (D-7988) the Mac's half alone, while iterating there: never a PASS by itself
         race = OUT / "race"
@@ -941,6 +977,8 @@ def m6_both():
         OPEN_TEST_OK[0] = rt2.returncode == 0 and "canvasload: ok" in rt2.stdout  # (the open's contract is the framework's: same test)
         st, msg = m6_mac(race)
         return ("FAIL" if st == "PASS" else st), f"Linux half not run (M6_ONLY=mac); Mac {st}: {msg}"
+    if left := ours_running():
+        return "BLOCKED", "something of this worktree's is still running: " + "; ".join(left)[:400]
     err = build_linux()
     if err:
         return "FAIL", err

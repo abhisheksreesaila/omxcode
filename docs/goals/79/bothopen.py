@@ -5,7 +5,7 @@ is one of its own; at the end each is in the file, or in an edit native holds an
 import json, os, random, re, shutil, sqlite3, subprocess, sys, threading, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from xdrive import App, ROOT, X
+from xdrive import App, ROOT, X, free_port, own_group, end_group
 MIN = float(sys.argv[1]) if len(sys.argv) > 1 else 10
 rnd = random.Random(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
 W = ROOT / "build/bothopen"
@@ -17,8 +17,10 @@ DB = W / "data/notes.db"
 
 class Web:
     def __init__(self):
-        self.p = subprocess.Popen(["nice", "taskset", "-c", "4-7", "node", str(ROOT / "docs/goals/79/webside.mjs"), str(DB), "4987", str(W / "web")],
-                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=__import__("headless").with_parent)
+        self.p = subprocess.Popen(["nice", "taskset", "-c", "4-7", "node", str(ROOT / "docs/goals/79/webside.mjs"), str(DB), str(free_port()), str(W / "web")],
+                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=own_group)
+        import atexit
+        atexit.register(end_group, self.p)
         self.errors = []
         while not self.read().startswith("READY"):
             pass
@@ -240,22 +242,30 @@ def caret_holds_nothing_back():
         open_(title)  # (opened afresh: its caret by itself; a map: its centre)
         a.move(1190, 790)
         time.sleep(0.8)
-        p0 = ink(f"caret{n}-0")
-        st = web("append", title, f"API{n}WORD")
-        t0 = time.time()
-        moved = 0
-        while time.time() - t0 < 4.0 and moved < 40:
-            time.sleep(0.3)
-            moved = int((abs(ink(f"caret{n}-1") - p0) > 60).sum())
-        if st != 200 or moved < 40:
-            bad.append(f"{title}: the other app's word ({st}) isn't on the screen after {time.time() - t0:.1f} s ({moved} px)")
-        took = time.time() - t0
-        if kind != "map":
-            a.type(f" mine{n}", wait=4.0)
+        times = []
+        for k in range(3):  # (first with nothing typed; then, twice, words typed and saved, the caret left standing there: how one writes)
+            a.move(1190, 790)
+            time.sleep(0.8)
+            p0 = ink(f"caret{n}-{k}a")
+            st = web("append", title, f"API{n}{k}WORD")
+            t0 = time.time()
+            moved = 0
+            while time.time() - t0 < 4.0 and moved < 40:
+                time.sleep(0.3)
+                moved = int((abs(ink(f"caret{n}-{k}b") - p0) > 60).sum())
+            times.append(round(time.time() - t0, 1))
+            if st != 200 or moved < 40:
+                bad.append(f"{title}: the other app's word {k} ({st}) isn't on the screen after {times[-1]} s ({moved} px)")
+            if kind == "map":  # (an idea, done)
+                a.key("Tab", wait=0.4)
+                a.type(f"mine{n}{k}", wait=0.2)
+                a.key("Return", wait=3.5)
+            else:
+                a.type(f" mine{n}{k}", wait=4.0)
             t = rows(f"SELECT content FROM notes WHERE title = '{title}'")[0][0]
-            if f"mine{n}" not in t or f"API{n}WORD" not in t or "#save-copy" in a.boxes() or held() != "":
-                bad.append(f"{title}: typed afterwards: {t[:200]!r} held {held()[:120]!r}")
-        print(f"  {title}: another app's change on the screen after {took:.1f} s, the caret untouched", flush=True)
+            if f"mine{n}{k}" not in t or f"API{n}{k}WORD" not in t or "#save-copy" in a.boxes() or held() != "":
+                bad.append(f"{title}: typed afterwards ({k}): {t[:200]!r} held {held()[:120]!r}")
+        print(f"  {title}: another app's change on the screen after {times} s (untouched; typed and saved, the caret there, twice)", flush=True)
     if a.close() != 0:
         bad.append("native didn't close")
     print("  a caret holds nothing back:", "ok" if not bad else bad, flush=True)

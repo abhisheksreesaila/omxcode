@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
-from xdrive import App, ROOT, X
+from xdrive import App, ROOT, X, free_port, own_group, end_group
 import ctypes
 X.XRaiseWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 W = ROOT / "build/real24"
@@ -28,9 +28,11 @@ class Place:
         self.db = self.w / "data/notes.db"
         self.p = None
         self.logs = []
-        self.port = str(5200 + os.getpid() % 500)
+        self.port = str(free_port())
         self.p = subprocess.Popen(["nice", "taskset", "-c", "4-7", "node", str(ROOT / "docs/goals/79/webside.mjs"), str(self.db), self.port, str(self.w / "web")],
-                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=__import__("headless").with_parent)
+                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=own_group)
+        import atexit
+        atexit.register(end_group, self.p)
         while not self.p.stdout.readline().startswith("READY"):
             pass
         for k, t in kinds:

@@ -31,14 +31,17 @@ M = {
     "links to nothing aren't looked at": ('[ -e "$p" ] || stop "$p is a link to nothing"', ":"),
     "any path is a path": ('''plain() { case "$1" in ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*|*$'\\n'*|*$'\\r'*) return 1 ;; esac; return 0; }''', "plain() { [ -n \"$1\" ]; }"),
     "a list that is a folder is fine": ('[ ! -L "$manifest" ] && [ -f "$manifest" ] && [ -r "$manifest" ] || stop', "true || stop"),
-    "both lists not kept (the new one only)": ("""printf '%s\n%s\n' "$mine" "$new" | grep""", """printf '%s\n%s\n' "$new" "$new" | grep"""),
-    "both lists not kept (the old one only)": ("""printf '%s\n%s\n' "$mine" "$new" | grep""", """printf '%s\n%s\n' "$mine" "$mine" | grep"""),
+    "both lists not kept (the new one only)": ("""printf '%s\\n%s\\n' "$mine" "$new" | grep""", """printf '%s\\n%s\\n' "$new" "$new" | grep"""),
+    "both lists not kept (the old one only)": ("""printf '%s\\n%s\\n' "$mine" "$new" | grep""", """printf '%s\\n%s\\n' "$mine" "$mine" | grep"""),
     "what the one before had: through links": ('|| linked "$dest" "$f" || [ -L "$dest/$f" ]', '|| [ -L "$dest/$f" ]'),
     "what the one before had: whatever it says now": ('if [ "$(sum "$dest/$f" 2>/dev/null || true)" = "$s" ]; then', "if true; then"),
     "old layout: no comparing": ('if [ "$(sum "$old/$f" 2>/dev/null || true)" = "$s" ]; then', "if true; then"),
     "old layout: through links": ('|| [ -L "$old/$f" ] || linked "$old" "$f"; then continue; fi', '|| [ -L "$old/$f" ]; then continue; fi'),
     "old layout: taken away from under an entry that was left": ('if [ "$put_desk" = 1 ] && [ -d "$old" ]', 'if [ -d "$old" ]'),
-    "uninstall: any place under HOME": ("""''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*) continue ;;\n    *) if""", """"~/"*) root="${HOME:?}"; f="${f#\\\\~/}" ;;\n    ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..) continue ;;\n    *) if"""),
+    "uninstall: any place under HOME": ('''    ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*) continue ;;
+    *) if''', '''    "~/"*) root="${HOME:?}"; f="${f#??}" ;;
+    ''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..) continue ;;
+    *) if'''),
     "uninstall: paths out of the folder": ("""''|/*|*//*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|"~"*) continue ;;\n    *) if""", """''|/*|"~"*) continue ;;\n    *) if"""),
     "uninstall: whatever it says now": ('if [ "$h" != "$s" ]; then grep', 'if false; then grep'),
     "uninstall: through folder links": ('*) if linked "$dest" "$f"; then continue; fi ;;', "*) ;;"),

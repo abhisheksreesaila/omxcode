@@ -2,6 +2,7 @@
 // without an error and says what native wrote (pictures build/g79/first5-web-*.png, CPU Chromium); then the web edits a page and a
 // canvas by hand and the copy is native's to open again. Scratch copies only.
 //   node <mojo-ui>/docs/goals/79/first5web.mjs <notes.db> <copy.db> <outdir>      (from ~/Projects/personalnotev2)
+import { withMe, endWith } from './serve.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -13,7 +14,7 @@ for (const s of ['', '-wal', '-shm']) fs.rmSync(copy + s, { force: true })
 for (const s of ['', '-wal']) if (fs.existsSync(src + s)) fs.copyFileSync(src + s, copy + s)
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pn-first5-'))
 const PORT = 4996
-const api = spawn('.venv/bin/python', ['-B', '-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', String(PORT)],
+const api = spawn(...withMe('.venv/bin/python', ['-B', '-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', String(PORT)]),
   { env: { ...process.env, PERSONAL_NOTE_DB: copy, PERSONAL_NOTE_PLUGINS_DIR: path.join(scratch, 'plugins') }, stdio: 'ignore' })
 process.on('exit', () => { try { api.kill() } catch {} })
 for (let i = 0; i < 200; i++) { try { if ((await fetch(`http://127.0.0.1:${PORT}/api/notebooks`)).ok) break } catch {} await new Promise((r) => setTimeout(r, 150)) }

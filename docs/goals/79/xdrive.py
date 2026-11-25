@@ -37,6 +37,30 @@ SPECIAL = {" ": "space", "#": "numbersign", "*": "asterisk", "`": "grave", "~": 
 SHIFTED = set('~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 
 
+def free_port():
+    """A port nobody has (a fixed one was a server's of a run before, which went on answering)."""
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def own_group():
+    """(Popen's preexec_fn) In a group of its own, to be ended whole (end_group), and ended by the kernel with this process."""
+    os.setpgid(0, 0)
+    headless.with_parent()
+
+
+def end_group(p):
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except ProcessLookupError:
+            return
+        time.sleep(0.5)
+
+
 class App:
     """pnote on the headless display, its boxes file, and a person's hands."""
 

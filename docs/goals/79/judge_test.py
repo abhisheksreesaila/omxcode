@@ -130,4 +130,16 @@ fair[("600", "undo")] = dict(fair[("600", "undo")], warm=[None] + [R()] * 4)
 t, ok = c.race_table(web, nat, start, {}, paced=paced, unwarm=unwarm, opens=opens, typed=TYPED, states=S(), fair=fair)
 assert not ok
 c.FAIR_RULE = False
+# (review 8, S2) something of the worktree's running beside a race is seen: a program under it, a server told of its files; not this run's own
+import os, shutil, subprocess, sys, tempfile, time
+assert c.ours_running() == [], c.ours_running()
+with tempfile.TemporaryDirectory() as t:
+    shutil.copy(shutil.which("sleep"), t + "/asleep")
+    ps = [subprocess.Popen(a, start_new_session=True, env=dict(os.environ, **e)) for a, e in [([t + "/asleep", "30"], {}), ([sys.executable, "-c", "import time; time.sleep(30)"], {"PERSONAL_NOTE_DB": t + "/notes.db"}), ([sys.executable, "-c", "import time; time.sleep(30)", "elsewhere"], {})]]
+    time.sleep(0.5)
+    own = c.ours_running(t)
+    assert len(own) == 2 and any("asleep" in x for x in own), own
+    for p in ps:
+        p.kill()
+        p.wait()
 print("judge: ok")

@@ -1,13 +1,15 @@
 // (review 5's probe, kept for bothopen.py)
 // review 5: the real web app on a scratch file, driven by lines on stdin: node webside.mjs <db> <port> <scratch> (cwd personalnotev2)
+import { withMe, endWith } from './serve.mjs'
 import fs from 'node:fs'; import path from 'node:path'; import { spawn } from 'node:child_process'; import readline from 'node:readline'
 const PN = process.cwd()
 const { chromium } = await import(path.join(PN, 'node_modules/playwright/index.mjs'))
 const [db, port, scratch] = process.argv.slice(2)
 for (const d of ['plugins', 'ai', 'voice', 'search', 'speed']) fs.mkdirSync(path.join(scratch, d), { recursive: true })
 const env = { ...process.env, PERSONAL_NOTE_DB: db, PERSONAL_NOTE_PLUGINS_DIR: scratch + '/plugins', PERSONAL_NOTE_AI_DIR: scratch + '/ai', PERSONAL_NOTE_VOICE_DIR: scratch + '/voice', PERSONAL_NOTE_SEARCH_DIR: scratch + '/search', PERSONAL_NOTE_SPEEDTEST_DIR: scratch + '/speed' }
-const api = spawn('.venv/bin/python', ['-B', '-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', port], { env, stdio: 'ignore' })
+const api = spawn(...withMe('.venv/bin/python', ['-B', '-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', port]), { env, stdio: 'ignore' })
 process.on('exit', () => { try { api.kill() } catch {} })
+endWith(api, 'uvicorn (its port is taken?)')
 for (let i = 0; i < 200; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/notebooks`)).ok) break } catch {} await new Promise((r) => setTimeout(r, 150)) }
 const H = { 'x-personal-note': '1', 'content-type': 'application/json' }
 const get = async (u) => (await fetch(`http://127.0.0.1:${port}/api${u}`, { headers: H })).json()
@@ -63,4 +65,4 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   if (op === 'quit') break
   try { console.log('R ' + JSON.stringify(await ops[op](args))) } catch (e) { console.log('R ' + JSON.stringify('ERR ' + e.message.slice(0, 300))) }
 }
-await browser.close(); api.kill(); process.exit(0)
+api.removeAllListeners('exit'); await browser.close(); api.kill(); process.exit(0)
