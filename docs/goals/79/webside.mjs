@@ -31,6 +31,15 @@ const ops = {
   async type([t, delay]) { await page.keyboard.type(t, { delay: Number(delay || 0) }); return 'ok' },
   async press([k]) { await page.keyboard.press(k); return 'ok' },
   async click([x, y]) { await page.mouse.click(Number(x), Number(y)); return 'ok' },
+  // another app of this person's, through the API (an agent, a second browser): the node with this word taken out
+  async wipe([title, word]) {
+    const note = (await all()).find((n) => n.title === title); if (!note) return 'no note ' + title
+    const f = await get(`/notes/${note.id}`)
+    const before = f.content.nodes.length
+    f.content.nodes = f.content.nodes.filter((n) => !JSON.stringify(n).includes(word))
+    if (f.content.nodes.length === before) return 'not there'
+    const r = await fetch(`http://127.0.0.1:${port}/api/notes/${note.id}`, { method: 'PUT', headers: H, body: JSON.stringify({ ...f, expectedRevision: f.revision }) })
+    return r.status },
   async wait([ms]) { await page.waitForTimeout(Number(ms)); return 'ok' },
   async shot([f]) { await page.screenshot({ path: f }); return f },
   async title() { return await page.locator('#island-title').textContent() },
