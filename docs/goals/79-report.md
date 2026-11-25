@@ -23,6 +23,61 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 23 (2026-11-24, 15:00–23:00, two unlogged stops of the desktop in it): review round 5 fixed, the race like-for-like
+
+**The judged commit is d354cc76** on both machines (later commits: tables, documents, and a module nothing imports yet).
+
+| | Linux (RTX 3090, both windows visible, 1.6×, 60 Hz) | Mac (M4, screen locked all round) |
+|---|---|---|
+| M0–M5 | PASS, all six, 21:55–22:08 | M1 and M5 halves PASS |
+| M6 | **PASS, 60 ✓ 0 ✗** (22:18–22:34, idle for ten minutes before; the one-run maximum rule, unchanged) | **BLOCKED: locked. Not raced.** The 12:20 table stays in race-mac.md marked "not like-for-like, superseded" |
+| M7 | not a Linux milestone | nine looks PASS (.987–.998), 22:45 |
+| BUILDS (new) | 45 of 45 at 6c271e89 (only viewsnap's one argument since) | — |
+| Tests | 87-test wide run at f8962759: 78 ok, the rest need data, a server, a library or an argument this worktree hasn't, or pageedit (a real bug, fixed). Every test the later changes touch run again (below) | 16 at d354cc76: powercut outboxmodel opendoc savelater saveattack review4 pnshell pnnotes pageedit shift pans longpara pagesheetmodel pagegrow canvasload framebudget. (viewsnap needs GL: never a Mac test) |
+| Kills | savekill 40; outboxkill 100 with and 100 without file locks (10,348 and 10,444 versions, none lost); wordsafe 600 seeds, then 120 (1,518 words) after the last save change | — |
+| Walks | native → web → native, real input: ok at f23d3f3a. Both open at once, ten minutes each: 293/293 (seed 11), 298/298 (23), **298/298 (47, at 6c271e89)** | — |
+
+**Two races were run, not one picked from several.** The first headed race (6c271e89) FAILED, 58 ✓ 2 ✗: pen on 600, one frame of 24–25 ms in all four runs. That was mine, an hour old (an fsync put into the renderer's frame); fixed, then raced once at d354cc76.
+
+### Findings
+| Finding | State | Proof |
+|---|---|---|
+| M1 ink doesn't move with its paper | fixed: one `Obj.move` for every kind, drafts, undo, folding | test_shift (property; 4 mutants fail). A note already saved wrong by that build can't exist outside scratch: no build of it was given to anyone |
+| M2 SaveOutbox loses another window's held edit | rewritten around files written once; invariants in the docstring | test_outboxmodel (8 mutants + 1), outboxkill 100 seeds × 2, the reviewer's obdrive |
+| M3 the Mac race isn't like-for-like | the web in a visible window of its own, on the same screen; scale, refresh and size read in the page; refuses when they differ, when locked, when not visible; a table a screen; logs kept in folders | judge_test; on Linux with real windows: alike → judged, native 1240×900 → refused, headless web → refused; on the Mac locked → refused |
+| SHOULD 1 the web's echo is a conflict | a row that moved on with the same words is rebased | test_wordsafe (the whole shell against a model), bothopen |
+| SHOULD 2 AppKit's check chains | one look at the clock at a time | test_tickchanges, pans (Mac) |
+| SHOULD 3 pan points against other events | the runtime's own queue, drained first by every event | test_pans |
+| SHOULD 4 fsync | see "power cuts": more than was asked, because the first fix had the order wrong | test_powercut, diskorder |
+| NITs: a drag that changed nothing saves; a long word's line; a job's file unlinked; the unused inode check; kept views without a sum | fixed | test_shift, test_pagesheetmodel (108,000 edits), outboxkill, test_opendoc, test_viewsnap |
+| Compile every example in the check | scripts/build-all, `scripts/check BUILDS` | 45 |
+| The fair rule | prepared, **off**; not reported | judge_test, both states. Limitation: PN's benchmark gives each run's p95, not its frames, so p95 is the median of five, not pooled |
+
+### Found here, not in the review
+- **Held files could lose both versions in a power cut** (mine, since 477899a4): renamed before their bytes were on the disk, the older one removed at once. Now settled: bytes, name, folder, then the older goes; a sum in each (D-8080). test_powercut cuts a model disk at 4,511 places; diskorder.py reads the order from the real system calls. Five mutants each fail in one of the two.
+- **On the Mac native's notes file was weaker than Personal Note's** against a power cut (Apple's SQLite: NORMAL in WAL; PN's Python: FULL). Now said on every connection (D-8081).
+- Without file locks, nothing unsettled was found at a start (mine, an hour old; outboxkill without locks, 100 of 100 seeds).
+- Opening a note whose save is queued took a newer revision and would have written over another app's words (test_wordsafe).
+- The canvas's tool letters never worked from a real keyboard on Linux (the input method ate them).
+- A negative x or y was cut, not rounded, when saved.
+- A jump into a long page (scroll bar, search result): some paragraphs blank for a frame, the rest moved a line (test_jumps; a wide run on loaded cores failed test_pageedit once in two).
+- GOAL's race on Linux was not like-for-like either: the web had been headless. Its maxima with a visible window are larger on the stress note (pen 333 ms against 150) and its memory 1,195 MB against 808: read the RSS row with that in mind (native 207).
+
+### What to tell the owner
+- **A browser window showed on your own screen for a few seconds three times this afternoon** (my probes of the headed web), and the start-up rows' windows of earlier races probably did too: the hidden screen's rule didn't reach a program's children. Fixed in scripts/testscreen before any race of this round; each rule is named mojotest-children-…, lives in the running Hyprland only, and is switched off at the end.
+- Mac: its two screens are mirrored, so macOS has one. Nothing was set. A temporary caffeinate (2 h, twice); one known_hosts line for 10.0.0.74 here. **To race it: unlock it, plug it in, leave it alone, then `MAC_SSH=bhoomijaprasad@10.0.0.74 scripts/mac-unlocked`: about 40 minutes** (30 a screen and 10; `MAC_FIRSTFRAMES=0` leaves the 10 out).
+- The desktop stopped at 18:27:30 and between 19:09:33 and 19:12. At the first nothing of mine had run for 2 min 25 s; at the second one CPU test, load 1.6, GPUs at 18 and 15 W. The heartbeat (build/g79/heartbeat.txt) ran through every heavy run after that, the two races included, with no stop.
+
+### For the reviewer
+Proofs, checks and tests changed (none loosens a bar):
+- 79-check.py: web rows in a visible window; `unlike` refuses; no Mac table written when locked; BUILDS; FAIR_RULE off. webmem gets `--dpr`.
+- Tests that faked another app's save with `revision + 1` now change its words too (test_review4, savelater, saveattack, pnshell, pnnotes): with the same words it isn't a conflict any more.
+- test_opendoc reads a held file after it is settled; outboxkill reads a folder that is being settled; bothopen counts a word another was typed into, gives the web's page the keyboard by focus, and types nothing when the web stayed on another note.
+- test_outboxmodel: `fault` is `disk.fault`; no thread, its settles run between steps.
+
+**Risk, most first.** docstore: `HeldDisk.settle`, `SaveOutbox.load` (a settle running while the window drops, lands or closes). webshell's rebase (`moved_on`, `undecorated`): what counts as the same words. `Runtime.take_pans` and `App.takes_text` for every app on both hosts (AppKit's ime_commit seen only by M5). `PageSheet.lay_more`. ObjectLayer.shift_frame with groups and drafts. The save thread's F_FULLFSYNC on a slow Mac disk (a longer write lock; not measured there). After a power cut a landed or dropped version may come back as held. The headed race's window rules on another Hyprland version. Stress undo's 19.0 ms passes against a web maximum of 19.7 in one run each: the row can go the other way.
+**Not done:** the Mac's M6. Gap 81 is started, not wired in (below). An idea being written in a map isn't in the file until Enter (gap 85).
+
 ## Continuation 22 (2026-11-24, 11:13–14:50): the Mac unlocked, review round 4 fixed
 
 **Final code: 2e198b04** (later commits: tables and documents).

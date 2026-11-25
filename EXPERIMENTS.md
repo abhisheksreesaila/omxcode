@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-24: goal 79, continuation 23 (review round 5; a race of two visible windows; power cuts)
+- **Setup.** Review 5 in hand; the Mac locked; the desktop stopped twice without a word (18:27 at idle, 19:09 at load 1.6).
+- **Worked.** Model tests of whole pieces (the save outbox, the whole shell, a disk that loses what wasn't synced) found in minutes what reading hadn't in days. Linux M6 PASS with the web in a visible window on the hidden output, 60 of 60.
+- **Broke / fixed.** Held files renamed before they were on the disk (the power cut that emptied git's objects would have taken both versions); Apple's SQLite is NORMAL in WAL; an fsync in a renderer's frame, seen by the race within the hour; a child's window on the owner's desktop.
+- **Means.** A file is safe when its bytes, its name and its folder are, in that order, and only then may the old one go. Headless isn't what a person sees. A flaky timing failure was a real bug.
+- **Next.** The Mac unlocked for 40 minutes; right-to-left wired into the layout; review 6.
+
 ## 2026-11-24: goal 79, continuation 22 (the Mac unlocked; review round 4)
 - **Setup.** The owner unlocked the M4 (144 Hz screen) for two hours; review 4 in hand.
 - **Worked.** Pictures counted by a display link of their own and the window server's use of our surfaces say what a bench can't: 15–36 a second before, 144 after. M6 passes on the Mac. Edits: two windows, a text still being written, a note deleted under a save, a locked file. A 20,000-character paragraph 3,070 → 0.3 ms a key. Paper that grows.
