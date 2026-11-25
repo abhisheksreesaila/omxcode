@@ -23,7 +23,7 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
-## Continuation 23 (2026-11-24, 15:00–23:00, two unlogged stops of the desktop in it): review round 5 fixed, the race like-for-like
+## Continuation 23 (2026-11-24, 15:00–22:55, two unlogged stops of the desktop in it): review round 5 fixed, the race like-for-like
 
 **The judged commit is d354cc76** on both machines (later commits: tables, documents, and a module nothing imports yet).
 
