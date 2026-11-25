@@ -528,19 +528,19 @@ struct Settle(Copyable, Movable):
 def held_space(dir: String, path: String, identity: String, identity_of: def(String) thin -> String) -> Tuple[String, List[String]]:
     """SaveOutbox's `space` of the store at `path`, which says it is `identity` ("": it doesn't say), and the names it had at
     places it has left (`also`): so a file put in its place isn't given its edits, and it finds them again after it was moved.
-    A note of each is kept in `dir` (space-….json). identity_of: what the store at a path says it is now ("" when there is none)."""
+    A note of each is kept in `dir` (space-….txt). identity_of: what the store at a path says it is now ("" when there is none)."""
     var head = path + "|" + identity if identity != "" else path
     var space = String(_sum(head))
     var also = List[String]()
     if dir == "" or identity == "":
         return (space, also^)
-    var own = dir + "/space-" + space + ".json"
+    var own = dir + "/space-" + space + ".txt"
     if not file_exists(own):
         _ = private_write(own, '{"path":' + json_string(path) + ',"identity":' + json_string(identity) + "}", durable=True)
     try:
         for name in listdir(dir):
             var n = String(name)
-            if not n.startswith("space-") or not n.endswith(".json") or n == "space-" + space + ".json":
+            if not n.startswith("space-") or not n.endswith(".txt") or n == "space-" + space + ".txt":
                 continue
             var t: String
             with open(dir + "/" + n, "r") as f:
@@ -548,7 +548,7 @@ def held_space(dir: String, path: String, identity: String, identity_of: def(Str
             var j = Json.parse(t)
             var was = j.text(j.get(0, "path"))
             if j.text(j.get(0, "identity")) == identity and was != path and identity_of(was) != identity:  # (it isn't there any more: this is it)
-                also.append(String(n[byte = 6 : n.byte_length() - 5]))
+                also.append(String(n[byte = 6 : n.byte_length() - 4]))
     except e:
         print("held_space: " + String(e), flush=True)
     return (space, also^)
