@@ -103,6 +103,7 @@ def run(seed):
                 p.send("put", i, rnd.randrange(5), t)
                 time.sleep(rnd.random() * 0.0015)
                 p.p.kill()
+                p.p.wait()  # (before the folder is looked at: a write it was in the middle of may still land, and stand for the one before)
                 if any(t in x for x in texts_there()) and i in p.own:
                     superseded.add(p.own[i])
             elif rnd.random() < 0.6:
