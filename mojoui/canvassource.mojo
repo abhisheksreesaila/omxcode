@@ -71,3 +71,44 @@ struct CanvasSource(Copyable, Movable):
 
     def edge(self, i: Int) -> String:
         return String(self.text[byte=self.es[i]:self.ee[i]])
+
+
+def undecorated(text: String) -> String:
+    """The document without the names of the pictures an app derives from its own objects ("file": 64 hex digits and .svg, of a
+    node that isn't an image): what a person made, the same before and after a web app has put them in. Text without any
+    comes back as it is."""
+    var key = String('"file":')
+    var b = text.as_bytes()
+    var n = len(b)
+    var out = String("")
+    var at = 0  # (copied up to here)
+    var i = 0
+    while True:
+        var f = text.find(key, i)
+        if f < 0:
+            break
+        var q = f + key.byte_length()
+        while q < n and (b[q] == 32 or b[q] == 10 or b[q] == 13 or b[q] == 9):
+            q += 1
+        i = q
+        if q + 70 > n or b[q] != 34:
+            continue
+        var hexes = True
+        for k in range(q + 1, q + 65):
+            var c = Int(b[k])
+            if not (48 <= c <= 57 or 97 <= c <= 102):
+                hexes = False
+                break
+        if not hexes or String(text[byte = q + 65 : q + 70]) != '.svg"':
+            continue
+        # (whose node it is: its pn's type comes right after it, as both apps write it; an image's file is the person's)
+        var rest = String(text[byte = q + 70 : min(n, q + 70 + 40)])
+        if rest.replace(" ", "").startswith(',"pn":{"type":"image"') or not rest.replace(" ", "").startswith(',"pn":{"type":'):
+            continue
+        out += String(text[byte=at:q]) + '""'
+        at = q + 70
+        i = at
+    if at == 0:
+        return text
+    out += String(text[byte=at:n])
+    return out^

@@ -248,7 +248,7 @@ struct FileLock(Movable):
         self.fd = -1
         self.path = ""
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         if self.fd >= 0:
             _ = close(self.fd)
 

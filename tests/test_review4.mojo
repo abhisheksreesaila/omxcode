@@ -108,7 +108,7 @@ def own_warning() raises:
     s.flush()
     var other = Database(DB)
     typed(s, "mine")
-    other.exec("UPDATE notes SET revision = revision + 1 WHERE id = " + String(a))
+    other.exec("UPDATE notes SET revision = revision + 1, content = json_set(content, '$.theirs', revision) WHERE id = " + String(a))
     due(s)
     settle(s)
     assert_true(s.save_state != "", "A's is told")
@@ -119,7 +119,7 @@ def own_warning() raises:
     assert_true(s.save_state != "" and s.outbox.find(a) >= 0, "B's save doesn't take A's warning away")
     s.open(b)
     typed(s, "cee")
-    other.exec("UPDATE notes SET revision = revision + 1 WHERE id = " + String(b))
+    other.exec("UPDATE notes SET revision = revision + 1, content = json_set(content, '$.theirs', revision) WHERE id = " + String(b))
     s.create("page", "C")
     settle(s)
     assert_true(s.save_state == "" and "“B”" in s.toast, "B's failure isn't said of C: " + s.toast)
@@ -314,7 +314,7 @@ def hands_down() raises:
     for k in range(10):
         _ = s.pan(600 + Float64(k) * 10, 400)
     var o = Database(DB)
-    o.exec("UPDATE notes SET revision = revision + 1 WHERE id = " + String(id) + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
+    o.exec("UPDATE notes SET revision = revision + 1, content = json_set(content, '$.theirs', revision) WHERE id = " + String(id) + "; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1")
     assert_true(not s.refresh(), "not while the pen is down")
     for k in range(10):
         _ = s.pan(700 + Float64(k) * 10, 400)

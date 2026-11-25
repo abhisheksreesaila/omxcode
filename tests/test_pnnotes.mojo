@@ -252,7 +252,7 @@ def filing() raises:
     s.move_note(0)
     assert_equal(count("SELECT notebook_id IS NULL FROM notes WHERE id = " + String(id)), 1)
     # another app moved the row on: refused, said so, nothing written
-    Database(DB).exec("UPDATE notes SET revision = revision + 1 WHERE id = " + String(id))
+    Database(DB).exec("UPDATE notes SET revision = revision + 1, content = json_set(content, '$.theirs', revision) WHERE id = " + String(id))
     s.move_note(1)
     assert_true(s.toast.startswith("Couldn’t move"), s.toast)
     assert_equal(count("SELECT notebook_id IS NULL FROM notes WHERE id = " + String(id)), 1)

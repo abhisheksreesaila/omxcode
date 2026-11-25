@@ -488,7 +488,7 @@ struct SaveOutbox(Movable):
         self.syncer = None
         self.fault = -1
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         if len(self.items) == 0 and len(self.files) == 0 and len(self.extras) == 0 and self.lock.held() and self.fault != 0:
             _ = unlink(self.lock.path)  # (nothing of it left: its name neither)
 
