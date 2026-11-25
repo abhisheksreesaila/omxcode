@@ -3067,6 +3067,8 @@ struct AppKitHost[A: App](Movable):
         var had = self.ime_text != ""
         self.ime_text = ""
         self.ime_node = -1
+        if self.rt.trace:
+            print("TRACE: event text " + text + " 0 nodes " + String(len(self.rt.shown.nodes)), flush=True)
         var d = self.rt.commit(node, text)
         self.apply(d, self_addr)
         if had:
@@ -3076,6 +3078,8 @@ struct AppKitHost[A: App](Movable):
     def canvas_key(mut self, node: Int, name: String, mods: Int, self_addr: Int):
         """A KEY on canvas node `node` (keyDown, and the test steps that stand for it)."""
         self.gpu_input(node)
+        if self.rt.trace:
+            print("TRACE: event key " + name + " 0 nodes " + String(len(self.rt.shown.nodes)), flush=True)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
         if (mods & 2) != 0 and (name == "v" or name == "V") and node < len(self.rt.shown.nodes) and self.rt.app.takes_paste(self.rt.shown.nodes[node].style):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
@@ -4565,6 +4569,50 @@ def canvas_key_step[A: App](host_addr: Int, which: String, name: String, mods: I
     host[].canvas_key(node, name, mods, host_addr)
 
 
+def real_key_step[A: App](host_addr: Int, which: String, name: String):
+    """realkey:K=a (or Enter, Escape, Space, ArrowDown): a key press as the system makes one (a CGEvent's NSEvent), handed to the
+    canvas's own keyDown:, so that what a person's keyboard goes through is gone through (the key: step isn't given an event)."""
+    var host = host_at[A](host_addr)
+    var node = canvas_node_at(host[], which)
+    var k = host[].canvas_at(node) if node >= 0 else -1
+    var make = shim_sym("CGEventCreateKeyboardEvent")
+    var put = shim_sym("CGEventKeyboardSetUnicodeString")
+    if k < 0 or make == 0 or put == 0:
+        print("TEST: no canvas " + which + " or no CGEvent", flush=True)
+        return
+    var code = 0
+    var text = name
+    if name == "Enter":
+        code = 36
+        text = "\r"
+    elif name == "Escape":
+        code = 53
+        text = "\x1b"
+    elif name == "ArrowDown":
+        code = 125
+        text = ""
+    elif name == "Space":
+        code = 49
+        text = " "
+    var ev = Pointer(to=make).unsafe_bitcast[def(Int, UInt16, UInt8) thin abi("C") -> Int]()[](0, UInt16(code), UInt8(1))
+    var units = List[UInt16]()
+    for cp in text.codepoints():
+        var c = Int(cp.to_u32())
+        if c > 0xFFFF:
+            units.append(UInt16(0xD800 + ((c - 0x10000) >> 10)))
+            units.append(UInt16(0xDC00 + ((c - 0x10000) & 0x3FF)))
+        else:
+            units.append(UInt16(c))
+    if len(units) > 0:
+        Pointer(to=put).unsafe_bitcast[def(Int, Int, Int) thin abi("C")]()[](ev, len(units), Int(units.unsafe_ptr()))
+    _ = len(units)
+    var ns = msg(cls("NSEvent"), "eventWithCGEvent:", ev)
+    if ns != 0:
+        _ = msg(host[].canvases[k].view, "keyDown:", ns)
+    var let_go = shim_sym("CFRelease")
+    Pointer(to=let_go).unsafe_bitcast[def(Int) thin abi("C")]()[](ev)
+
+
 def pct(xs: List[Float64], q: Float64) -> Float64:
     """The q-th quantile of xs (0 when empty), as GTK's framebench takes it."""
     if len(xs) == 0:
@@ -5548,6 +5596,12 @@ def run_step[A: App](host_addr: Int, step: String):
             presses.append(web_key(name))
         for p in presses:
             canvas_key_step[A](host_addr, kv[0], p, mods)
+    elif verb == "realkey" or verb == "realkeys":  # realkey:K=name / realkeys:K=text: as the system's keyboard does
+        if verb == "realkey":
+            real_key_step[A](host_addr, kv[0], kv[1])
+        else:
+            for ch in kv[1].codepoint_slices():
+                real_key_step[A](host_addr, kv[0], String(ch))
     elif verb == "clipboard":  # clipboard:text: the paste board holds text (as another app's copy would; in test mode the private one)
         var board = paste_board()
         _ = msg(board, "clearContents")
