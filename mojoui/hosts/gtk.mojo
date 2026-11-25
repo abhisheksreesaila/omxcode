@@ -491,6 +491,8 @@ struct GtkCanvas(Copyable, Movable):
     var keys: Int  # GtkEventControllerKey (the canvas takes focus when pressed)
     var im: Int  # its GtkIMMulticontext (keys go through the input method first; goal 79)
     var im_on: Bool  # it has the keyboard: words are being written there (App.takes_text) and the canvas is focused
+    var composing: String  # the composition as the input method last reported it ("": none)
+    var committed: Bool  # it committed something since commit_composition asked it to end
     var test_preedit: String  # (tests: imepreedit:) the preedit the next preedit-changed reports
     var test_preedit_on: Bool
     var im_x: Int  # the candidate window's rect last given to the input method (points)
@@ -602,6 +604,8 @@ struct GtkCanvas(Copyable, Movable):
         self.keys = 0
         self.im = 0
         self.im_on = False
+        self.composing = ""
+        self.committed = False
         self.test_preedit = ""
         self.test_preedit_on = False
         self.im_x = -1
@@ -2873,6 +2877,24 @@ struct GtkHost[A: App](Movable):
         else:
             external_call["gtk_im_context_reset", NoneType](self.canvases[ci].im)
             external_call["gtk_im_context_focus_out", NoneType](self.canvases[ci].im)
+
+    def commit_composition(mut self, ci: Int, self_addr: Int):
+        """A press elsewhere, or the keyboard leaving: what was being composed is the text, as in a browser's field (a click away
+        commits it there). Some input methods commit it themselves when they are told to end; then it isn't done twice."""
+        if self.canvases[ci].im == 0 or self.canvases[ci].composing == "":
+            return
+        var text = String(self.canvases[ci].composing)
+        var node = self.canvases[ci].node
+        self.canvases[ci].committed = False
+        external_call["gtk_im_context_reset", NoneType](self.canvases[ci].im)
+        if ci >= len(self.canvases) or self.canvases[ci].committed:
+            return
+        self.canvases[ci].composing = ""
+        self.canvases[ci].test_preedit_on = False
+        var d = self.rt.commit(node, text)
+        self.apply(d, self_addr)
+        var d2 = self.rt.text_event(node, IME_PREEDIT, "")
+        self.apply(d2, self_addr)
 
     def im_follow(mut self):
         """Each canvas's input method is on while words are being written there and the canvas has the keyboard."""
@@ -6093,6 +6115,9 @@ def on_drag_begin[A: App](drag: Int, x0: Float64, y0: Float64, host_addr: Int) a
     var ci = get_index(drag)
     if ci < 0 or ci >= len(host[].canvases):
         return
+    host[].commit_composition(ci, host_addr)  # (before the press reaches the app: it may end the writing)
+    if ci >= len(host[].canvases):
+        return
     var at = host[].at_canvas(ci, drag, x0, y0)
     var x = at[0]
     var y = at[1]
@@ -6300,6 +6325,8 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     var ci = get_index(keys)
     if ci < 0 or ci >= len(host[].canvases):
         return c_int(0)
+    if host[].im_wanted(ci):
+        im_place[A](host_addr, ci)  # (the candidate window at the caret as it is drawn now, before the key opens one)
     if host[].im_key(ci, keys):
         return c_int(1)
     if busy():
@@ -6337,7 +6364,9 @@ def on_canvas_unfocus[A: App](ctl: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var ci = get_index(ctl)
     if ci >= 0 and ci < len(host[].canvases):
-        host[].im_focus(ci, False)
+        host[].commit_composition(ci, host_addr)
+        if ci < len(host[].canvases):
+            host[].im_focus(ci, False)
 
 
 def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
@@ -6347,6 +6376,8 @@ def on_im_commit[A: App](im: Int, text: Int, host_addr: Int) abi("C"):
     if ci < 0 or ci >= len(host[].canvases):
         return
     var t = c_str(text)
+    host[].canvases[ci].composing = ""
+    host[].canvases[ci].committed = True
     host[].canvases[ci].test_preedit_on = False
     var d = host[].rt.commit(host[].canvases[ci].node, t)
     host[].apply(d, host_addr)
@@ -6377,6 +6408,7 @@ def on_im_preedit[A: App](im: Int, host_addr: Int) abi("C"):
         if at[0] != 0:
             external_call["pango_attr_list_unref", NoneType](at[0])
         _ = cur
+    host[].canvases[ci].composing = text
     ref c = host[].canvases[ci]
     var d = host[].rt.text_event(c.node, IME_PREEDIT, text, Float64(c.im_x), Float64(c.im_y), Float64(c.im_w), Float64(c.im_h), Float64(cursor))
     host[].apply(d, host_addr)

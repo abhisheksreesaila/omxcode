@@ -18,7 +18,7 @@ DB = W / "data/notes.db"
 class Web:
     def __init__(self):
         self.p = subprocess.Popen(["nice", "taskset", "-c", "4-7", "node", str(ROOT / "docs/goals/79/webside.mjs"), str(DB), "4987", str(W / "web")],
-                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=__import__("headless").with_parent)
         self.errors = []
         while not self.read().startswith("READY"):
             pass

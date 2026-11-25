@@ -946,6 +946,12 @@ def m6_both():
         return "FAIL", err
     race = OUT / "race"
     race.mkdir(parents=True, exist_ok=True)
+    stale = list(race.glob("*.log")) + list(race.glob("*.json"))  # (an earlier race's and diagnoses': put aside, so that what is kept with the table is this race's)
+    if stale:
+        aside = OUT / "race-old" / time.strftime("%Y%m%d-%H%M%S")
+        aside.mkdir(parents=True)
+        for f in stale:
+            f.rename(aside / f.name)
     # (D-7946 (d)) the progressive open's contract: a pan and an edit during the open end as the whole import does
     rt = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", "-o", str(race / "test_canvasload"), "tests/test_canvasload.mojo"], 900)
     rt2 = run([str(race / "test_canvasload")], 300) if rt.returncode == 0 else rt

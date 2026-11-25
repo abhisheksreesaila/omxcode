@@ -15,6 +15,14 @@ ROOT = Path(__file__).resolve().parent.parent
 _server = None
 
 
+def with_parent():
+    """(Popen's preexec_fn) The child ends with this process however it ends (a crash, a kill -9, an X error's exit: atexit runs in
+    none of them; a pnote and two Xvfbs stayed for three hours, 2026-11-25). Linux."""
+    import ctypes
+    import signal
+    ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+
+
 def _free_display():
     n = 90
     while Path(f"/tmp/.X11-unix/X{n}").exists() or Path(f"/tmp/.X{n}-lock").exists():
@@ -46,7 +54,7 @@ def ensure():
     xkb = _xkb_dir()
     if xkb:
         cmd += ["-xkbdir", xkb]
-    _server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=with_parent)
     atexit.register(stop)
     for _ in range(100):
         if Path(f"/tmp/.X11-unix/X{n}").exists():

@@ -3986,6 +3986,11 @@ def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     var t = from_tag(view)
     var host = host_at[A](t[0])
     _ = msg(msg(view, "window"), "makeFirstResponder:", view)  # the keyboard, too
+    if host[].ime_text != "" and host[].ime_node == t[1]:  # (a press elsewhere: what was being composed is the text, as in a browser's field)
+        var text = String(host[].ime_text)
+        _ = msg(msg(view, "inputContext"), "discardMarkedText")
+        if host[].ime_text != "":  # (the input context doesn't say so itself)
+            host[].ime_commit(t[1], text, t[0])
     var at = event_point(view, event)
     var k = host[].canvas_at(t[1])
     if k >= 0:

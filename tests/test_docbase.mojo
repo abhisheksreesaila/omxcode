@@ -461,6 +461,10 @@ def other_files() raises:
     assert_true("heldwords" not in other.page.markdown() and "heldwords" in held())
     other.close()
     _ = other^
+    with open(DIR + "/unsaved/space-0.txt", "w") as f:  # (torn notes of other spaces hide none)
+        f.write("{torn")
+    with open(DIR + "/unsaved/space-9999.txt", "w") as f:
+        f.write("")
     var moved = WebShell(DIR + "/moved.db", "paper")
     assert_true(len(moved.outbox.items) == 1 and "heldwords" in moved.outbox.items[0].content, "the moved file has them")
     moved.open(p)

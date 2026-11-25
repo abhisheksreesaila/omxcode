@@ -30,7 +30,7 @@ class Place:
         self.logs = []
         self.port = str(5200 + os.getpid() % 500)
         self.p = subprocess.Popen(["nice", "taskset", "-c", "4-7", "node", str(ROOT / "docs/goals/79/webside.mjs"), str(self.db), self.port, str(self.w / "web")],
-                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                                  cwd=os.path.expanduser("~/Projects/personalnotev2"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, preexec_fn=__import__("headless").with_parent)
         while not self.p.stdout.readline().startswith("READY"):
             pass
         for k, t in kinds:

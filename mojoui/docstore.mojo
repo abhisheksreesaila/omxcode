@@ -537,11 +537,16 @@ def held_space(dir: String, path: String, identity: String, identity_of: def(Str
     var own = dir + "/space-" + space + ".txt"
     if not file_exists(own):
         _ = private_write(own, '{"path":' + json_string(path) + ',"identity":' + json_string(identity) + "}", durable=True)
+    var names = List[String]()
     try:
         for name in listdir(dir):
-            var n = String(name)
-            if not n.startswith("space-") or not n.endswith(".txt") or n == "space-" + space + ".txt":
-                continue
+            names.append(String(name))
+    except e:
+        print("held_space: " + String(e), flush=True)
+    for n in names:
+        if not n.startswith("space-") or not n.endswith(".txt") or n == "space-" + space + ".txt":
+            continue
+        try:
             var t: String
             with open(dir + "/" + n, "r") as f:
                 t = f.read()
@@ -549,8 +554,8 @@ def held_space(dir: String, path: String, identity: String, identity_of: def(Str
             var was = j.text(j.get(0, "path"))
             if j.text(j.get(0, "identity")) == identity and was != path and identity_of(was) != identity:  # (it isn't there any more: this is it)
                 also.append(String(n[byte = 6 : n.byte_length() - 4]))
-    except e:
-        print("held_space: " + String(e), flush=True)
+        except e:  # (one that can't be read hides no other)
+            print("held_space: " + n + ": " + String(e), flush=True)
     return (space, also^)
 
 
