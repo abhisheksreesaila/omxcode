@@ -42,6 +42,7 @@ comptime DISPLAY_FACE = "Bricolage Grotesque"
 comptime UI_FACE = "Figtree"
 comptime MONO_FACE = "Geist Mono"
 comptime BODY = 18.0
+comptime TEXT_AT = 70.0 + 96  # where the text begins, below the scroll's top
 comptime LAY_NS = 4_000_000  # how long a frame may lay out what isn't in view
 
 
@@ -204,6 +205,7 @@ struct PageSheet(Movable):
     var laid: List[ParaLay]
     var tops: List[Float64]  # where the last draw put each paragraph (layout px)
     var code: List[Bool]  # per paragraph: inside a ``` block (or its fence), of the text's version `all_of`
+    var lay_ns: Int  # how long a frame may lay out what isn't in view (LAY_NS; a test makes it 0: one paragraph a frame)
     var waiting: Int  # the first paragraph that may still wait for its layout
     var all_of: Int
     var all_w: Float64
@@ -242,6 +244,7 @@ struct PageSheet(Movable):
         self.tops = List[Float64]()
         self.code = List[Bool]()
         self.waiting = 0
+        self.lay_ns = LAY_NS
         self.all_of = -1
         self.all_w = -1
         self.all_pre = ""
@@ -513,14 +516,18 @@ struct PageSheet(Movable):
         """Lays out paragraphs that wait, in order, until the clock says so; True while some still wait. What a paragraph
         above the window turns out to be high moves the scroll with it (nothing in view moves)."""
         self.sync()
+        var y = 0.0
+        for i in range(min(self.waiting, len(self.laid))):
+            y += self.laid[i].height
         while self.waiting < len(self.ed.paras):
+            var was = self.laid[self.waiting].height
             if self.laid[self.waiting].width != self.text_w:
-                var was = self.laid[self.waiting].height
                 var h = self.lay(self.waiting)
-                if self.waiting < len(self.tops) and self.tops[self.waiting] + was <= self.view_top:
+                if y + was <= self.scroll - TEXT_AT:  # (above the window: from the heights as they are, not where the last frame drew)
                     self.scroll += h - was
                 if Int(perf_counter_ns()) > until_ns:
                     return self.waiting + 1 < len(self.ed.paras)
+            y += self.laid[self.waiting].height
             self.waiting += 1
         return False
 
@@ -1299,7 +1306,7 @@ struct PageSheet(Movable):
         var t0 = Int(perf_counter_ns())
         _ = self.lay(self.ed.caret.para)
         # what the window shows is always laid out; the rest as there is time (a 300 KB page took 0.8 s at once)
-        var seen_from = self.scroll - 70 - 96
+        var seen_from = self.scroll - TEXT_AT
         var y = 0.0
         self.sync()
         for para in range(len(self.ed.paras)):
@@ -1312,7 +1319,7 @@ struct PageSheet(Movable):
             elif y > seen_from + dh + 300:
                 break
             y += self.laid[para].height
-        if self.lay_more(t0 + LAY_NS):
+        if self.lay_more(t0 + self.lay_ns):
             p.set_again()
         var text_h = self._text_height()
         # the sheet (behind the toolbar); in Draw a hint sits under the toolbar and the sheet moves down by its height

@@ -260,6 +260,37 @@ def test_styles() raises:
     assert_true(len(p.laid[2].segs) > 1 and len(p.laid[4].segs) == 1, "followed at once")
 
 
+def test_jumps() raises:
+    """A jump into a page still being laid out (a scroll bar, a search's result), however little a frame lays out: everything
+    in the window is laid out in the frame that shows it, and stays where it stands (found by a loaded machine's run)."""
+    var md = String("")
+    for i in range(700):
+        md += "Paragraph " + String(i) + " " + "some words " * (i % 37) + ("\n" if i < 699 else "")
+    for lay in range(5):
+        for to in range(7):
+            var p = PageSheet()
+            p.lay_ns = [0, 100_000, 400_000, 1_500_000, 6_000_000][lay]
+            p.set_markdown(md)
+            _ = p.key("Home", 2, 0)
+            _ = drawn(p)
+            for _ in range(to * 3 if lay < 2 else 0):
+                _ = drawn(p)
+            p.scroll = p.tops[60 + to * 90] - p.view_top - 200
+            for jump in range(40):
+                _ = drawn(p)
+                var y = -1.0
+                var shown = -1
+                for para in range(len(p.tops)):
+                    var top = p.tops[para]
+                    if top + p.laid[para].height > p.view_top and top < p.view_top + p.view_h:
+                        assert_true(p.laid[para].width == p.text_w, "in the window and not laid out: paragraph " + String(para) + " after a jump, frame " + String(jump))
+                        if shown < 0 and top > p.view_top + 60:
+                            shown = para
+                            y = top
+                _ = drawn(p)
+                assert_true(abs(p.tops[shown] - y) < 0.5, "what is in view stays: " + String(p.tops[shown] - y) + " frame " + String(jump) + " to " + String(to) + " lay " + String(lay))
+
+
 def test_long_pages() raises:
     """A long page is laid out as it is needed: the window at once, the rest in slices, nothing in view moving; an edit lays
     out what it touched; in the end everything is as if laid out at once."""
@@ -351,6 +382,7 @@ def line_keys() raises:
 
 
 def main() raises:
+    test_jumps()
     test_long_pages()
     test_styles()
     test_wraps()
