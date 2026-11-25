@@ -48,6 +48,18 @@ def settle(mut s: WebShell):
         _ = libc.usleep(500)
 
 
+def power() raises:
+    """Every connection that writes notes keeps a commit through a power cut, whatever the SQLite loaded defaults to."""
+    var db = Database("build/test_rowsaver.db")
+    db.exec("PRAGMA synchronous = NORMAL")
+    db.durable(whole_drive=True)
+    assert_equal(db.count("PRAGMA synchronous"), 2)
+    assert_equal(db.count("PRAGMA fullfsync"), 1)
+    var s = WebShell(DB, "paper")
+    assert_equal(s.dbs[0].count("PRAGMA synchronous"), 2)
+    assert_equal(text("PRAGMA journal_mode"), "wal")
+
+
 def generic() raises:
     """RowSaver alone: the outcome once, a conflict, a file that isn't there."""
     var path = String("build/test_rowsaver.db")
@@ -208,6 +220,7 @@ def main() raises:
     _ = unlink("build/test_savelater_cfg/settings.txt")
     fresh(DB)
     generic()
+    power()
     page()
     conflict()
     locked()
