@@ -1,89 +1,243 @@
-# mojoui.look (goal 32 M1): a look's surfaces become the same rules on GTK and the web; a theme's look is what its old
-# hand-written rules said (Liquid's toolbar: glass, 18 px corners, 10 px in from the sides, 6 px inside).
-#   scripts/mxbuild.sh -I . tests/test_look.mojo -o build/test_look && build/test_look
+# mojoui.personalize: the four whitelisted settings, a request read and checked (anything off the list refused with a
+# sentence, all or nothing), "put it back", one look per person, kept in a JSON file per person ($MOJOUI_LOOK overrides the
+# folder), and what the look means to an app (dark by the clock, the accent from the palette's own series, roomy tiles).
+#   pixi run mojo run -I . tests/test_look.mojo
+
 from std.testing import assert_equal, assert_true, assert_false
-from mojoui.theme import Look, Surface
-from mojoui.look import look_gtk_css, look_web_css, css_color, surface_rule, text_rule
-from mojoui.canvas import rgba
-from themes.liquid import liquid
-from themes.skins import ledger
-from themes.omarchy import omarchy
-from themes.omxqua import omxqua
+from std.os import setenv, makedirs
+from std.os.path import exists
+from mojoui.json import Json
+from mojoui.personalize import (
+    Personalize, LookPrefs, LookChange, look_values, look_labels, look_check, look_dir, is_profile_name, scheme_dark,
+    accent_colour, accent_index, stage_most, look_knobs, personalize_tool, PERSONALIZE, PERSONALIZE_PARAMS, UNDO_MAX,
+    KNOB_SCHEME, KNOB_ACCENT, KNOB_PRESENCE, KNOB_DENSITY, KNOB_UNDO,
+)
+from mojoui.theme import Palette
+from mojoui.view import SEGMENTED, BUTTON
+from themes.omxqua import counter_palette
+
+
+def scratch(name: String) raises -> String:
+    var d = String("build/test_look/") + name
+    makedirs(d, exist_ok=True)
+    for who in ["all", "a", "s", "m"]:
+        var f = d + "/" + who + ".json"
+        if exists(f):
+            with open(f, "w") as h:
+                h.write("")
+    return d
+
+
+def test_values_and_defaults() raises:
+    var p = LookPrefs()
+    assert_equal(p.json(), '{"scheme":"auto","accent":"default","presence":"orb","density":"compact"}')
+    assert_true(p.is_default())
+    assert_equal(len(look_values("accent")), 7)
+    assert_equal(look_labels("scheme")[2], "Dark")
+    assert_equal(look_check("scheme", "dark"), "")
+    assert_true(look_check("accent", "#ff00ff").find("theme's own colours") >= 0)
+    assert_true(look_check("font", "big").find("only change") >= 0)
+
+
+def test_ask_sets_and_says() raises:
+    var look = Personalize("t", dir="")
+    var c = look.ask('{"set":{"presence":"mascot","scheme":"dark"}}')
+    assert_true(c.ok)
+    assert_true(c.moved())
+    assert_equal(len(c.changed), 2)
+    assert_equal(look.prefs.presence, "mascot")
+    assert_equal(look.prefs.scheme, "dark")
+    assert_true(c.message.find("the mascot instead of the orb") >= 0)
+    var r = Json.parse(c.result())
+    assert_true(r.flag(r.get(0, "ok")))
+    assert_equal(r.size(r.get(0, "changed")), 2)
+    assert_equal(r.text(r.get(r.get(0, "now"), "scheme")), "dark")
+    # the same again: nothing moves, nothing to undo added
+    var again = look.ask('{"set":{"scheme":"dark"}}')
+    assert_true(again.ok)
+    assert_false(again.moved())
+    assert_equal(len(look.undos), 1)
+
+
+def test_refusals_are_all_or_nothing() raises:
+    var look = Personalize("t", dir="")
+    var c = look.ask('{"set":{"scheme":"dark","accent":"hotpink"}}')
+    assert_false(c.ok)
+    assert_true(c.message.find("theme's own colours") >= 0)
+    assert_equal(look.prefs.scheme, "auto")  # (the valid half didn't happen either)
+    assert_false(look.ask('{"set":{"font":"comic sans"}}').ok)
+    assert_false(look.ask('{"set":{"density":7}}').ok)
+    assert_false(look.ask("make it pretty").ok)
+    assert_false(look.ask('{"set":{}}').ok)
+    var r = Json.parse(c.result())
+    assert_false(r.flag(r.get(0, "ok")))
+    assert_true(r.text(r.get(0, "refused")).find("hotpink") >= 0)
+    assert_equal(look.serial, 1)  # (only the start's profile)
+
+
+def test_synonyms_and_flat_requests() raises:
+    var look = Personalize("t", dir="")
+    assert_true(look.ask('{"set":{"density":"bigger","accent":"Purple"}}').ok)
+    assert_equal(look.prefs.density, "roomy")
+    assert_equal(look.prefs.accent, "violet")
+    assert_true(look.ask('{"scheme":"night"}').ok)  # (a flat request: read as a set)
+    assert_equal(look.prefs.scheme, "dark")
+
+
+def test_undo_stack() raises:
+    var look = Personalize("t", dir="")
+    assert_false(look.undo().ok)  # (nothing to put back)
+    _ = look.set("scheme", "dark")
+    _ = look.set("accent", "blue")
+    var c = look.ask('{"undo":true}')
+    assert_true(c.ok)
+    assert_true(c.undo)
+    assert_equal(look.prefs.accent, "default")
+    assert_equal(look.prefs.scheme, "dark")
+    assert_true(c.message.startswith("Put back"))
+    _ = look.undo()
+    assert_true(look.prefs.is_default())
+    assert_false(look.can_undo())
+    for i in range(UNDO_MAX + 5):
+        _ = look.set("scheme", "dark" if i % 2 == 0 else "light")
+    assert_equal(len(look.undos), UNDO_MAX)
+
+
+def test_per_person() raises:
+    var look = Personalize("t", dir="")
+    _ = look.set("presence", "mascot")
+    assert_true(look.use_profile("a"))
+    assert_equal(look.prefs.presence, "orb")  # (A's own look: the defaults)
+    _ = look.set("density", "roomy")
+    _ = look.use_profile("all")
+    assert_equal(look.prefs.presence, "mascot")
+    assert_equal(look.prefs.density, "compact")
+    _ = look.use_profile("A")
+    assert_equal(look.prefs.density, "roomy")
+    assert_true(look.can_undo())  # (A's undo stack came back with A)
+    assert_false(look.use_profile("../etc"))
+    assert_false(is_profile_name("a/b"))
+    assert_false(is_profile_name(""))
+    assert_true(is_profile_name("m"))
+
+
+def test_saved_per_person() raises:
+    var d = scratch("files")
+    var look = Personalize("t", dir=d)
+    _ = look.set("scheme", "dark")
+    _ = look.use_profile("s")
+    _ = look.set("accent", "teal")
+    _ = look.set("presence", "mascot")
+    assert_true(exists(d + "/all.json"))
+    assert_true(exists(d + "/s.json"))
+    var again = Personalize("t", dir=d)  # (a new run: read back from the files)
+    assert_equal(again.prefs.scheme, "dark")
+    _ = again.use_profile("s")
+    assert_equal(again.prefs.accent, "teal")
+    assert_equal(again.prefs.presence, "mascot")
+    _ = again.undo()  # (the undo stack was saved too)
+    assert_equal(again.prefs.presence, "orb")
+    # a hand-edited file can't smuggle in a value off the list
+    with open(d + "/m.json", "w") as f:
+        f.write('{"scheme":"dark","accent":"#123456","presence":"robot","density":"roomy","undo":[{"scheme":"neon"}]}')
+    _ = again.use_profile("m")
+    assert_equal(again.prefs.scheme, "dark")
+    assert_equal(again.prefs.accent, "default")
+    assert_equal(again.prefs.presence, "orb")
+    assert_equal(again.prefs.density, "roomy")
+    with open(d + "/a.json", "w") as f:
+        f.write("{not json")
+    _ = again.use_profile("a")
+    assert_true(again.prefs.is_default())
+
+
+def test_look_dir_env() raises:
+    _ = setenv("MOJOUI_LOOK", "build/test_look/env", True)
+    assert_equal(look_dir("omx"), "build/test_look/env")
+    var look = Personalize("omx")
+    assert_equal(look.dir, "build/test_look/env")
+    _ = setenv("MOJOUI_LOOK", "", True)
+    _ = setenv("XDG_DATA_HOME", "/tmp/xdg-test", True)
+    assert_equal(look_dir("omx"), "/tmp/xdg-test/mojoui/look/omx")
+
+
+def test_reading_a_look() raises:
+    var p = LookPrefs()
+    assert_false(scheme_dark(p, False, 11))
+    assert_true(scheme_dark(p, False, 21))  # (auto: night)
+    assert_true(scheme_dark(p, False, 6))
+    assert_true(scheme_dark(p, True, 11))  # (auto: the system's dark)
+    p.scheme = "light"
+    assert_false(scheme_dark(p, True, 23))
+    p.scheme = "dark"
+    assert_true(scheme_dark(p, False, 12))
+    var pal = counter_palette(False)
+    assert_equal(accent_colour(pal, "default"), pal.accent)
+    assert_equal(accent_colour(pal, "blue"), pal.series[1])
+    assert_equal(accent_colour(pal, "gold"), pal.series[5])
+    assert_equal(accent_index("violet"), 0)
+    assert_equal(accent_index("default"), -1)
+    for a in look_values("accent"):  # (every accent is a colour of the palette: its own accent or one of its series)
+        var c = accent_colour(pal, a)
+        var found = c == pal.accent
+        for s in pal.series:
+            found = found or s == c
+        assert_true(found)
+    p.density = "roomy"
+    assert_equal(stage_most(p, 6), 4)
+    assert_equal(stage_most(p, 3), 3)
+    p.density = "compact"
+    assert_equal(stage_most(p, 6), 6)
+
+
+def test_knobs() raises:
+    var look = Personalize("t", dir="")
+    var v = look_knobs(look.prefs, 300, look.can_undo())
+    var segs = 0
+    var undo = False
+    for n in v.nodes:
+        if n.kind == SEGMENTED:
+            segs += 1
+        if n.kind == BUTTON and n.msg == 300 + KNOB_UNDO:
+            undo = True
+    assert_equal(segs, 4)
+    assert_false(undo)  # (nothing to put back yet: no button)
+    assert_true(look.knob(2, KNOB_SCHEME).moved())
+    assert_equal(look.prefs.scheme, "dark")
+    assert_true(look.knob(1, KNOB_PRESENCE).moved())
+    assert_true(look.knob(1, KNOB_DENSITY).moved())
+    assert_true(look.knob(3, KNOB_ACCENT).moved())
+    assert_equal(look.prefs.accent, "teal")
+    assert_false(look.knob(9, KNOB_ACCENT).ok)
+    var after = look_knobs(look.prefs, 300, look.can_undo())
+    var found = False
+    for n in after.nodes:
+        if n.kind == BUTTON and n.msg == 300 + KNOB_UNDO:
+            found = True
+    assert_true(found)
+    assert_true(look.knob(0, KNOB_UNDO).moved())
+    assert_equal(look.prefs.accent, "default")
+
+
+def test_tool() raises:
+    var t = personalize_tool()
+    assert_equal(t.name, PERSONALIZE)
+    var j = Json.parse(PERSONALIZE_PARAMS)
+    var props = j.get(j.get(j.get(0, "properties"), "set"), "properties")
+    assert_equal(j.size(j.get(j.get(props, "accent"), "enum")), len(look_values("accent")))
+    assert_equal(j.size(j.get(j.get(props, "density"), "enum")), 2)
 
 
 def main() raises:
-    assert_equal(css_color(rgba(255, 255, 255, 158)), "rgba(255,255,255,0.62)")
-    assert_equal(css_color(rgba(15, 23, 42, 15)), "rgba(15,23,42,0.06)")
-    assert_equal(css_color(rgba(14, 124, 134)), "rgb(14,124,134)")
-    var l = liquid()
-    var k = l.look.surface("toolbar")
-    assert_true(k >= 0, "Liquid has a toolbar surface")
-    assert_equal(l.look.surfaces[k].radius_top, 18)
-    var gtk = look_gtk_css(l.look, "window.liquid ")
-    var web = look_web_css(l.look, "body.liquid ")
-    assert_true("window.liquid .mui-tag-toolbar { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px;" in gtk, gtk)
-    assert_true("body.liquid [data-tag=toolbar], body.liquid button[data-tag=toolbar], body.liquid [data-role~=toolbar] { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px; box-sizing: border-box;" in web, web)
-    assert_true("backdrop-filter: blur(24px)" in web and "backdrop-filter" not in gtk, "the blur is the web's alone")
-    assert_true("border-radius: 0 0 14px 14px" in gtk, "the status bar's bottom corners")
-    assert_true("window.liquid .mui-tag-status-bar label:not(.mui-in-button) { font-family: 'Inter', sans-serif; font-size: 12px;" in gtk, gtk)
-    # a Board object wears its content's role: the content inside fills it with no second card (the web drew two)
-    assert_true("body.liquid .board > .object[data-tag=table] > [data-tag=table] { background: none; box-shadow: none;" in web, web)
-    assert_true("body.liquid label.toggle { min-height: 30px; }" in web, "the toggle row is a control's height, not the 48 px touch row")
-    assert_true("window.liquid .mui-tag-inspector-row {" in gtk and "min-height: 30px" in gtk, "an inspector row is as tall as a control")
-    assert_true("body.liquid button.tool.inline, body.liquid label.picker.tool.inline { min-width: 0; min-height: 34px; padding: 0 10px; border-radius: 10px; font-size: 12px; }" in web, web)
-    var g = look_gtk_css(ledger().look, "window.ledger ")
-    assert_true("font-family: 'JetBrains Mono', monospace" in g, "the skins' figures are mono")
-    assert_true("border-bottom: 1px solid" in g, "the skins' toolbar band has a hairline")
-    assert_equal(look_gtk_css(omarchy().look, "window.omarchy "), "", "Omarchy's look has no surfaces yet: no rules")
-    assert_true(Look.none().is_none())
-    # omxqua (goal 33 M3): the press is data; the web springs on omxqua's linear(), GTK on its ease-in; no other look presses
-    var q = omxqua()
-    assert_equal(q.look.motion.press_scale, 0.96)
-    var qweb = look_web_css(q.look, "body.omxqua ")
-    var qgtk = look_gtk_css(q.look, "window.omxqua ")
-    assert_true("body.omxqua button:active, body.omxqua label.picker:active { transform: scale(0.96); }" in qweb, qweb)
-    assert_true("transition: transform 300ms linear(0, 0.02, 0.071," in qweb, "the web takes the spring itself")
-    assert_true("window.omxqua button:active { transform: scale(0.96); }" in qgtk and "300ms cubic-bezier(0.2, 0, 0, 1)" in qgtk, qgtk)
-    assert_true("body.omxqua [data-tag=tile], body.omxqua button[data-tag=tile], body.omxqua [data-role~=tile] { background: rgb(255,255,255); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,16,10,0.06), 0 0 0 1px rgba(20,16,10,0.04);" in qweb, qweb)
-    assert_true("font-family: 'Geist Mono', monospace" in qweb, "mono labels")
-    # a table's cells wear roles without being views (data-role, two at once: "table-cell table-num"); a tagged button's title wears its role's type
-    assert_true("body.omxqua [data-tag=table-head], body.omxqua button[data-tag=table-head], body.omxqua [data-role~=table-head] { background: transparent; padding: 8px 16px;" in qweb, qweb)
-    assert_true("body.omxqua button[data-tag=crumb], body.omxqua :where([data-role~=crumb]) .text, body.omxqua [data-role~=crumb] { font-size: 13.5px; font-weight: 550;" in qweb, qweb)
-    assert_true("transform: scale" not in look_web_css(l.look, "body.liquid "), "Liquid's look has no press of its own")
-    var night = omxqua(True)
-    assert_equal(night.id, "omxqua-dark")
-    assert_true("body.omxqua-dark { background: #0b0b0d;" in night.web_css, "night: surface-0")
-    # goal 33 M7 (D-410): a surface's optional fields reach the web's and GTK's rules
-    var s = Surface("probe", 0, -1, -1, -1, -1, -1, 0, 14, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, -1, 0, 0, False, pad_left=12, pad_right=16, gap=10, height=40,
-                    icon_size=15, icon_stroke=1.75, text_align=2, width=110, max_width=980, scrolls_x=True)
-    var w = surface_rule(s, True)
-    assert_true("padding: 0 16px 0 12px;" in w and "gap: 10px !important;" in w and "height: 40px; min-height: 40px;" in w, w)
-    assert_true("width: 110px; min-width: 110px; flex-shrink: 0;" in w and "flex-wrap: nowrap; overflow-x: auto;" in w and "justify-content: center;" in w, w)
-    var gcss = look_gtk_css(Look(Look.none().type, Look.none().controls, [s.copy()], Look.none().segments), "window.x ")
-    assert_true("window.x button.mui-tag-probe > buttoncontent > box > label { padding: 0; }" in gcss, gcss)  # (no Adwaita 2 px after a button's words, D-533)
-    assert_false("border-spacing" in surface_rule(s, False), "GTK takes a role's gap as the stack's spacing (resolve_layout), never border-spacing as well (D-464: it doubled)")
-    assert_true("line-height: normal;" in text_rule(s, True) and "text-align: center;" in text_rule(s, True), text_rule(s, True))
-    var probe = Look(Look.none().type, Look.none().controls, [s.copy()], Look.none().segments)
-    var css = look_web_css(probe, "body.x ")
-    assert_true("body.x [data-tag=probe] svg, body.x [data-role~=probe] svg { width: 15px; height: 15px; stroke-width: 1.75px; }" in css, css)
-    # a role that gives way in a squeezed row (no width of its own: a status chip on a phone) gets its own rule; one-line
-    # words are cut with an ellipsis, but a button wearing a one-line role keeps its width (D-475, D-478)
-    var give = Surface("give", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, shrinks=True, items_shrink=True)
-    var one = Surface("one", 0, 999, 999, -1, -1, -1, 0, 12, 0, [], 0, 0, 0, -1, "", 12, 0, 0, 0, 0, 0, 0, False, one_line=True)
-    var sq = Look(Look.none().type, Look.none().controls, [give.copy(), one.copy()], Look.none().segments)
-    var scss = look_web_css(sq, "body.x ")
-    assert_true("body.x [data-tag=give], body.x button[data-tag=give], body.x [data-role~=give] { background: transparent; box-shadow: none; border: 0; min-width: 0 !important; flex-shrink: 1 !important; overflow: hidden; }" in scss, scss)
-    assert_true("body.x [data-tag=one] .text, body.x .text[data-tag=one] { overflow: hidden; text-overflow: ellipsis; min-width: 0; }" in scss, scss)
-    assert_true("body.x [data-tag=give] > * { min-width: 0; flex-shrink: 1; overflow: hidden; }" in scss, scss)
-    assert_false("button[data-tag=one], body.x :where([data-role~=one]) .text, body.x [data-role~=one] { font-size: 12px; white-space: nowrap; overflow" in scss, "a one-line button keeps its width")
-    var w1 = Surface("pillw", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, whole_width=True)
-    var wcss = look_web_css(Look(Look.none().type, Look.none().controls, [w1.copy()], Look.none().segments), "body.x ")
-    assert_true("--mojoui-whole-width: 1;" in wcss, wcss)  # (the web host's script sizes it to whole pixels, D-479)
-    var w2 = Surface("pillone", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, whole_width=True, one_line=True)
-    var w2css = look_web_css(Look(Look.none().type, Look.none().controls, [w2.copy()], Look.none().segments), "body.x ")
-    assert_true("white-space: nowrap;" in w2css and "text-overflow: ellipsis" not in w2css and "body.x [data-tag=pillone] .text, body.x .text[data-tag=pillone] { min-width: 0; }" in w2css, w2css)  # (its words never cut: the rounding's fraction spills, D-520)
-    var fl = Surface("flowing", 0, -1, -1, -1, -1, -1, 0, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, block_flow=True)
-    assert_true("display: block;" in surface_rule(fl, True) and "display" not in surface_rule(fl, False), surface_rule(fl, True))  # (D-481)
-    var lined = Surface("lined", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 11.5, 0, 0, 0, 18.4, 0, 0, False)
-    assert_true("line-height: 1.6;" in text_rule(lined, True), text_rule(lined, True))  # (a number, as the original's CSS: D-482)
-    print("LOOK TESTS PASSED")
+    test_values_and_defaults()
+    test_ask_sets_and_says()
+    test_refusals_are_all_or_nothing()
+    test_synonyms_and_flat_requests()
+    test_undo_stack()
+    test_per_person()
+    test_saved_per_person()
+    test_look_dir_env()
+    test_reading_a_look()
+    test_knobs()
+    test_tool()
+    print("test_look: 11 tests passed")
