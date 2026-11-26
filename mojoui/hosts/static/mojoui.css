@@ -199,3 +199,11 @@ button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
   padding: 12px 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 600; cursor: pointer; color: #fff;
   background: var(--o-accent, var(--accent)); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
 .mojoui-audio-pill[hidden] { display: none; }
+
+/* View transitions (App.transition, mojoui.transition): the old page fades over the new one while it settles from 0.985 on
+   omxqua's soft spring (--oq-spring, 710 ms); the browser's default crossfade otherwise. */
+::view-transition-old(root) { animation: mojoui-morph-out 420ms cubic-bezier(0.4, 0, 0.2, 1) both; mix-blend-mode: normal; }
+::view-transition-new(root) { animation: mojoui-morph-in 710ms linear(0, 0.023, 0.079, 0.154, 0.237, 0.322, 0.405, 0.482, 0.553, 0.617, 0.674, 0.723, 0.766, 0.803, 0.835, 0.862, 0.885, 0.905, 0.921, 0.935, 0.946, 0.955, 0.963, 0.97, 0.975, 0.98, 0.983, 0.986, 0.989, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 0.999, 0.999, 1) both; mix-blend-mode: normal; }
+@keyframes mojoui-morph-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mojoui-morph-in { from { transform: scale(0.985); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { ::view-transition-old(root), ::view-transition-new(root) { animation: none; } }

@@ -16,6 +16,10 @@ this repository):
 - e5-small-v2, intfloat (huggingface.co/intfloat/e5-small-v2): MIT
 - all-MiniLM-L6-v2, sentence-transformers (huggingface.co/sentence-transformers/all-MiniLM-L6-v2): Apache License 2.0
 
+The mascot pack in examples/stage/mascots/omx (the "Omx Spirit" sprite strips): AI-generated with Google Gemini (via
+Antigravity), 2026-11-25; original character; used under the generator's terms; no third-party artwork. How it was made:
+examples/stage/mascots/omx/README.md.
+
 Test pictures in tests/fixtures/vision: scikit-image sample data, CC0 / public domain (see its README.md).
 Robot data: DROID (Khazatsky et al. 2024, CC-BY-4.0; the LeRobot port jnogga/droid_success and jnogga/droid_failure on
 the Hugging Face Hub) and its paper (arXiv 2403.12945v2, CC-BY-4.0), not in this repository: scripts/setup fetches a slice

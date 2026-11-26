@@ -430,3 +430,41 @@ def raise_nofile() -> Int:
     var rc = Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(7 if CompilationTarget.is_linux() else 8), Int(lim.unsafe_ptr()))
     _ = len(lim)
     return want if Int(rc) == 0 else have[0]
+
+
+# the program itself ---------------------------------------------------------------------------------------------------
+
+def exe_path() -> String:
+    """The running program's own path ("" if the system won't say): /proc/self/exe on Linux, _NSGetExecutablePath on
+    the Mac; both looked up at run time (no new symbols to link). The Mac branch is written, not yet run (no Mac here, D-8416)."""
+    var buf = List[UInt8](length=4097, fill=0)
+    var n = 0
+    if CompilationTarget.is_macos():
+        var f = _sym("_NSGetExecutablePath")
+        if f == 0:
+            return ""
+        var size = List[UInt32](length=1, fill=4096)
+        var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
+        if Pointer(to=raw).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](Int(buf.unsafe_ptr()), Int(size.unsafe_ptr())) != 0:
+            return ""
+        while n < 4096 and buf[n] != 0:
+            n += 1
+    else:
+        var f = _sym("readlink")
+        if f == 0:
+            return ""
+        var link = String("/proc/self/exe")
+        var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
+        n = Pointer(to=raw).unsafe_bitcast[def(Int, Int, Int) thin abi("C") -> Int]()[](Int(link.as_c_string_span().unsafe_ptr()), Int(buf.unsafe_ptr()), 4096)
+        _ = link.byte_length()
+        if n <= 0:
+            return ""
+    buf.resize(n, 0)
+    return String(unsafe_from_utf8=buf)
+
+
+def exe_dir() -> String:
+    """The folder the running program is in ("." if unknown)."""
+    var p = exe_path()
+    var cut = p.rfind("/")
+    return String(p[byte=:cut]) if cut > 0 else String(".")

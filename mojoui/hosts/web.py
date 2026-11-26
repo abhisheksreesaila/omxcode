@@ -19,6 +19,7 @@ import os
 import importlib
 import io
 import json
+import itertools
 import re
 import time
 import traceback
@@ -46,6 +47,7 @@ os.environ["MOJOUI_PY_HOSTED"] = "1"  # the app's Python work (mojoui.speech, vo
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
  DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, WEBCOMP) = range(1, 41)
+MORPHS = itertools.count(1)  # (each view-transition mark differs, so htmx swaps it in every time)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -436,6 +438,18 @@ PAGE_JS = r"""
   };
   document.addEventListener('DOMContentLoaded', skinClasses);
   document.addEventListener('htmx:oobAfterSwap', skinClasses);
+  // a view transition (App.transition, mojoui.transition): an answer carrying #mojoui-morph is swapped inside
+  // document.startViewTransition (htmx's transition:true), the old page fading over the new while it settles (mojoui.css);
+  // a browser without it swaps as before
+  document.addEventListener('htmx:beforeSwap', e => {
+    const r = e.detail.serverResponse || '';
+    if (!document.startViewTransition || r.indexOf('id="mojoui-morph"') < 0) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const own = e.detail.elt && e.detail.elt.closest ? e.detail.elt.closest('[hx-swap]') : null;
+    const style = (e.detail.swapOverride || (own ? own.getAttribute('hx-swap') : '') || htmx.config.defaultSwapStyle).split(' ')[0];
+    e.detail.swapOverride = style + ' transition:true';
+    window.mojouiMorphs = (window.mojouiMorphs || 0) + 1;
+  });
   // an in-place editor: focus selects its text (data-focus=select) or puts the caret at its end (end)
   document.addEventListener('focusin', e => {
     const t = e.target;
@@ -2996,6 +3010,10 @@ def make_app(module_dir):
         controls (out-of-band swaps). Call with s.lock held, after s.nodes was refreshed."""
         note(sid, s)
         out = changes_of(s, sid, d, n, text, number)
+        if d.get("morph"):  # (App.transition: the page swaps this answer inside a view transition, PAGE_JS; mojoui.transition)
+            mark = I(hidden=True, id="mojoui-morph", data_ms=str(d["morph"]), data_n=str(next(MORPHS)))
+            mark.attrs["hx-swap-oob"] = "true"
+            out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
         if s.busy != s.busy_sent:  # (requests went out, or the last one came back: the page starts or stops waiting)
             mark = busy_mark(s, oob=True)
             out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)

@@ -270,6 +270,12 @@ trait App(Movable, Deinitable):
         mojoui.browser.Browser outbox and return its take(). http:// and https:// only; hosts open them (goal 57)."""
         return List[String]()
 
+    def transition(mut self) -> Int:
+        """A view transition asked for with the last update() (mojoui.transition.Morph: keep one and return its take()): the
+        host takes a picture of the screen before the change shows, then blends it away over this many ms while the new
+        screen settles (GTK, the web, AppKit, UIKit). 0 (the default): the change shows as it comes. Asked after every update()."""
+        return 0
+
     @staticmethod
     def web_assets() -> List[String]:
         """The script and style bundles the app's web page loads ("editor.js", "editor.css"): built from the app's
@@ -334,6 +340,7 @@ struct Runtime[A: App](Movable):
     var pan_msg: Int  # a drag's points not delivered yet (queue_pan), and whose message they are
     var pan_points: List[PanPoint]
     # frame ahead of time shows it only if this hasn't moved since (D-7560)
+    var morph_ms: Int  # a view transition the app asked for (App.transition), until the host takes it (take_transition)
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -355,6 +362,7 @@ struct Runtime[A: App](Movable):
         self.changes = 0
         self.pan_msg = 0
         self.pan_points = List[PanPoint]()
+        self.morph_ms = 0
         self.take_effects()  # (what the starting state asks for)
 
     def watch(mut self, budget_ms: Int):
@@ -400,6 +408,9 @@ struct Runtime[A: App](Movable):
                 self.inflight.append(start[Backend](reqs[i].copy()))
             else:
                 self.undeliverable.append(Event(reqs[i].msg, "", 0, id=reqs[i].id, error="this app doesn't send HTTP (set comptime HTTP = True in it)"))
+        var morph = self.app.transition()
+        if morph > 0:
+            self.morph_ms = max(self.morph_ms, morph)
         var wanted = self.app.every()
         var next = List[Timer]()
         for w in wanted:
@@ -436,6 +447,13 @@ struct Runtime[A: App](Movable):
                 self.commands_out.append(c^)
             elif c.reply != NO_MSG:
                 self.undeliverable.append(Event(c.reply, "", 0, id=c.id, error=problem, name=c.name))
+
+    def take_transition(mut self) -> Int:
+        """The view transition the app asked for since the host last took it (ms; 0: none), once: the host snapshots the
+        screen before it shows the change that came with it."""
+        var ms = self.morph_ms
+        self.morph_ms = 0
+        return ms
 
     def take_opens(mut self) -> List[String]:
         """The pages the app asked to open since the host last took them (each once): the host opens them."""

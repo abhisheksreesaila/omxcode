@@ -16,6 +16,9 @@
 #     self.mascot.draw(surface, palette)
 
 from std.math import sin, cos, sqrt
+from std.os import getenv
+from std.os.path import exists
+from mojoui import libc
 from mojoui.canvas import Surface
 from mojoui.clock import now_ns
 from mojoui.draw import over
@@ -38,6 +41,26 @@ comptime PRESENCE_ORB = 0
 comptime PRESENCE_MASCOT = 1
 
 comptime MASCOT_SHADOW: UInt32 = 0xFF06070B
+
+
+def mascot_pack_dir(override: String = "", name: String = "omx") -> String:
+    """Where a mascot pack is, without assuming the working directory: the environment variable `override` names (OMX_MASCOT,
+    STAGE_MASCOT) when it holds a folder; else `mascots/<name>` beside the program (a shipped app); else the repository's
+    examples/stage/mascots/<name> found from the program (scripts/build.sh puts it in build/<app>/linux/, three folders down);
+    else the same relative to the working directory. "" when none has a manifest.json."""
+    if override != "":
+        var own = getenv(override)
+        if own != "" and own != "0" and own != "1" and own != name:
+            if not exists(own + "/manifest.json"):  # (a typo in the variable: say so, then fall back to the shipped pack)
+                print("MASCOT: " + override + "=" + own + " has no manifest.json; using the default pack")
+            else:
+                return own
+    var d = libc.exe_dir()
+    var tries: List[String] = [d + "/mascots/" + name, d + "/../../../examples/stage/mascots/" + name, "examples/stage/mascots/" + name]
+    for t in tries:
+        if exists(t + "/manifest.json"):
+            return t
+    return ""
 
 
 def mascot_state_id(name: String) -> Int:
@@ -664,25 +687,80 @@ def MascotView(canvas: Int, version: Int, side: Int = 172, on_gesture: Int = NO_
     return Canvas(canvas, version, on_gesture=on_gesture, hover=hover).width(side).height(side).tag("mascot").tooltip("Tap to say hi")
 
 
+comptime PRESENCE_K = 260.0  # the crossfade's spring (omxqua's --oq-spring-slow, k260 c20 here: a slight settle past full size)
+comptime PRESENCE_C = 20.0
+comptime PRESENCE_FROM_SCALE = 0.86  # the newcomer grows from this while the one leaving swells a little and fades
+
+
+def _sample(px: List[UInt32], w: Int, h: Int, x: Float64, y: Float64) -> UInt32:
+    """A straight-alpha pixel of a w x h picture at (x, y) (nearest; outside: clear)."""
+    var ix = Int(x)
+    var iy = Int(y)
+    if x < 0.0 or y < 0.0 or ix >= w or iy >= h:
+        return 0
+    return px[iy * w + ix]
+
+
+def _layer(c: UInt32, a: Float64) -> Tuple[Float64, Float64, Float64, Float64]:
+    """A straight-alpha pixel premultiplied and weighted by `a`."""
+    var al = Float64(Int((c >> 24) & 255)) / 255.0 * a
+    return (Float64(Int(c & 255)) * al, Float64(Int((c >> 8) & 255)) * al, Float64(Int((c >> 16) & 255)) * al, al)
+
+
 struct Presence(Movable):
     """Pluggable presence switcher: lets an app toggle seamlessly between the Liquid Orb (PRESENCE_ORB) and any
-    drop-in 3D Companion pack (PRESENCE_MASCOT) through a single unified API."""
+    drop-in 3D Companion pack (PRESENCE_MASCOT) through a single unified API. A switch crossfades (mojoui.personalize's
+    "use the mascot instead of the orb", owner 2026-11-25: no snap): the newcomer grows from PRESENCE_FROM_SCALE on a spring
+    with a slight settle while the one leaving swells a little and fades, both still moving."""
 
     var kind: Int
     var orb: Orb
     var mascot: Mascot
+    var from_kind: Int  # the one leaving while blend runs
+    var blend: Spring  # 0 -> 1: the crossfade's progress (1: the current kind alone)
+    var blend_ns: Int
+    var stamp: Int
+    var _old: List[UInt32]  # the crossfade's two pictures
+    var _new: List[UInt32]
 
     def __init__(out self):
         self.kind = PRESENCE_ORB
         self.orb = Orb()
         self.mascot = Mascot()
+        self.from_kind = PRESENCE_ORB
+        self.blend = Spring(1.0, PRESENCE_K, PRESENCE_C)
+        self.blend_ns = 0
+        self.stamp = 0
+        self._old = List[UInt32]()
+        self._new = List[UInt32]()
+
+    def show(mut self, kind: Int) -> Bool:
+        """Switches to `kind` with the crossfade (the mascot only once a pack is loaded). True when `kind` now shows."""
+        var want = kind
+        if want == PRESENCE_MASCOT and not self.mascot.ready:
+            want = PRESENCE_ORB
+        if want != self.kind:
+            self.from_kind = self.kind
+            self.kind = want
+            self.blend.snap(0.0)
+            self.blend.to(1.0)
+            self.blend_ns = 0
+            self.stamp += 1
+        return want == kind
+
+    def crossfading(self) -> Bool:
+        return self.blend.moving() or self.blend.value < 0.999
 
     def use_orb(mut self):
-        self.kind = PRESENCE_ORB
+        _ = self.show(PRESENCE_ORB)
 
     def use_mascot(mut self, pack_dir: String, eager: Bool = False) raises:
         self.mascot = Mascot.load(pack_dir, eager=eager)
-        self.kind = PRESENCE_MASCOT
+        _ = self.show(PRESENCE_MASCOT)
+
+    def load_mascot(mut self, pack_dir: String, eager: Bool = False) raises:
+        """The pack ready to show, without switching to it (show(PRESENCE_MASCOT) then crossfades to it)."""
+        self.mascot = Mascot.load(pack_dir, eager=eager)
 
     def has_mascot(self) -> Bool:
         return self.mascot.ready
@@ -690,9 +768,9 @@ struct Presence(Movable):
     def toggle(mut self) -> Bool:
         """Toggle between Orb and Mascot (no-op if no mascot pack is loaded). Returns True if Mascot is active."""
         if not self.mascot.ready:
-            self.kind = PRESENCE_ORB
+            _ = self.show(PRESENCE_ORB)
             return False
-        self.kind = PRESENCE_ORB if self.kind == PRESENCE_MASCOT else PRESENCE_MASCOT
+        _ = self.show(PRESENCE_ORB if self.kind == PRESENCE_MASCOT else PRESENCE_MASCOT)
         return self.kind == PRESENCE_MASCOT
 
     def mode(mut self, m: Int):
@@ -721,12 +799,56 @@ struct Presence(Movable):
             self.mascot.poke()
 
     def version(self) -> Int:
+        var v = self.orb.version()
         if self.kind == PRESENCE_MASCOT and self.mascot.ready:
-            return self.mascot.version()
-        return self.orb.version()
+            v = self.mascot.version()
+        return v * 64 + self.stamp % 64  # (a switch is a new picture even when both have drawn as often)
 
-    def draw(mut self, mut s: Surface, p: Palette):
-        if self.kind == PRESENCE_MASCOT and self.mascot.ready:
+    def _draw_kind(mut self, kind: Int, mut s: Surface, p: Palette):
+        if kind == PRESENCE_MASCOT and self.mascot.ready:
             self.mascot.draw(s, p)
         else:
             self.orb.draw(s, p)
+
+    def draw(mut self, mut s: Surface, p: Palette):
+        var now = now_ns()
+        if self.blend_ns > 0:
+            _ = self.blend.step((now - self.blend_ns) // 1000)
+        self.blend_ns = now
+        if s.still:
+            self.blend.snap(1.0)
+        if not self.crossfading():
+            self._draw_kind(self.kind, s, p)
+            return
+        var w = s.width
+        var h = s.height
+        var n = w * h
+        if len(self._old) != n:
+            self._old = List[UInt32](length=n, fill=0)
+            self._new = List[UInt32](length=n, fill=0)
+        var old = Surface(Int(self._old.unsafe_ptr()), w, h, s.scale)
+        old.fill(0)
+        self._draw_kind(self.from_kind, old, p)
+        var neu = Surface(Int(self._new.unsafe_ptr()), w, h, s.scale)
+        neu.fill(0)
+        self._draw_kind(self.kind, neu, p)
+        var a = min(max(self.blend.value, 0.0), 1.0)
+        var k_new = PRESENCE_FROM_SCALE + (1.0 - PRESENCE_FROM_SCALE) * self.blend.value  # (the spring's settle shows as a size)
+        var k_old = 1.0 + 0.06 * a
+        var cx = Float64(w) * 0.5
+        var cy = Float64(h) * 0.5
+        for y in range(h):
+            for x in range(w):
+                var fx = Float64(x) + 0.5 - cx
+                var fy = Float64(y) + 0.5 - cy
+                var o = _layer(_sample(self._old, w, h, cx + fx / k_old, cy + fy / k_old), 1.0 - a)
+                var q = _layer(_sample(self._new, w, h, cx + fx / k_new, cy + fy / k_new), a)
+                var al = min(o[3] + q[3], 1.0)  # (weights a and 1 - a: a straight sum of the two premultiplied layers)
+                var out: UInt32 = 0
+                if al > 0.002:
+                    var r = (o[0] + q[0]) / al
+                    var g = (o[1] + q[1]) / al
+                    var b = (o[2] + q[2]) / al
+                    out = UInt32(min(Int(r + 0.5), 255)) | (UInt32(min(Int(g + 0.5), 255)) << 8) | (UInt32(min(Int(b + 0.5), 255)) << 16) | (UInt32(Int(al * 255.0 + 0.5)) << 24)
+                s.pixels().unsafe_offset(y * w + x)[] = out
+        s.again = True

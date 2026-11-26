@@ -29,8 +29,15 @@
 # people and Settings; no Try a day). STAGE_CLOCK=7:45: what the clock reads (the demo's clock stands still; default 10:59).
 # STAGE_DARK=1: the night look whatever the system says.
 # STAGE_MASCOT=1 (or a pack dir): perch a lightweight 3D Companion pack in the bottom-left rail under Pinned
-# (tap to poke, hover to lean; Settings toggles Mascot/Orb; STAGE_MASCOT_STATE=rest|listen|think|speak|hype|nap;
+# (tap to poke, hover to lean; STAGE_MASCOT_STATE=rest|listen|think|speak|hype|nap;
 # STAGE_MASCOT_CLOUD=1 previews the cloud warning aura).
+#
+# Personalize (mojoui.personalize, D-8400…): Settings opens the four knobs the agent's `personalize` tool changes in omx (light
+# or dark, an accent from the palette's own colours, the orb or the mascot in the chat bar, compact or roomy tiles) and "Put it
+# back"; each person in the top bar (All, A, S, M) keeps their own. Nothing snaps: a new scheme or accent morphs the window
+# (mojoui.transition: the window as it was fades over the new one while it settles), the presence crossfades, the tiles reflow
+# on their water spring (one that leaves shrinks away, one that joins grows in). In memory only
+# (the defaults every run, so the checks' pictures stay); STAGE_LOOK=dir keeps them in that folder.
 
 from mojoui.app import App, Event
 from mojoui.view import View, Node, VStack, HStack, Canvas, Spacer, Text, CENTER, START, SPACE_S, SPACE_M, PRESS, TAP, HOVER
@@ -41,9 +48,9 @@ from mojoui.text import Font
 from mojoui.theme import Theme, Palette, ThemePair
 from mojoui.orb import Orb, OrbView, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.mascot import (
-    MascotView, Presence, PRESENCE_MASCOT,
+    MascotView, Presence, PRESENCE_MASCOT, PRESENCE_ORB,
     MASCOT_REST, MASCOT_LISTEN, MASCOT_THINK, MASCOT_SPEAK, MASCOT_HYPE,
-    mascot_state_id,
+    mascot_state_id, mascot_pack_dir,
 )
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, DROPPED, size_name, tile_icon
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
@@ -55,7 +62,12 @@ from mojoui.jsonpatch import JDoc
 from mojoui.clock import now_ns
 from mojoui.png import encode_png
 from mojoui.shared import environment
+from mojoui.overlays import Popover
+from mojoui.personalize import Personalize, LookPrefs, LookChange, look_knobs, scheme_dark, accent_colour, stage_most, KNOB_COUNT
+from mojoui.transition import Morph
+from mojoui.theme import ThemeCache
 from themes.omxqua import omxqua_counter, counter_palette, counter_ground, counter_tv_look
+from std.os.path import exists
 from days import Moment, moments, ranked, day_tiles, clock_text, TIMER_START
 
 comptime TILES_CANVAS = 1
@@ -81,6 +93,8 @@ comptime CHAT = 34
 comptime CHIP = 40  # CHIP + k: the TV's chips (ASKS[k])
 comptime DAY = 50  # DAY + k: try moment k of the day
 comptime UNPIN = 70  # UNPIN + k: pinned card k back on the stage
+comptime KNOBS = 90  # KNOBS + 0 … 4: the look's knobs (mojoui.personalize.look_knobs)
+comptime SETTINGS_CLOSE = 95
 comptime WORD_BASE = 1000  # the cards' own messages and canvases (mojoui.genui)
 comptime ISO_BASE = 2000
 comptime WORD_CANVAS = 100
@@ -94,12 +108,16 @@ comptime ASK_ISO_LABEL = "Heat pump?"
 
 struct Main(App):
     var dark: Bool
-    var schemes: ThemePair  # light and dark, built once (D-7889)
+    var system_dark: Bool  # what the system (or STAGE_DARK) says: the look's "auto" follows it, and the night by the demo's clock
+    var themes: ThemeCache  # one theme per scheme and accent, each built once (D-7889)
+    var look: Personalize  # each person's look (mojoui.personalize)
+    var morph: Morph  # the next change morphs (mojoui.transition)
+    var settings_open: Bool
+    var perch: Bool  # STAGE_MASCOT: the mascot perched under Pinned
     var width: Int
     var height: Int
     var text: String
-    var orb: Orb
-    var presence: Presence
+    var presence: Presence  # the chat bar's orb or mascot (mojoui.mascot), and the perch's mascot
     var mascot_side: Int
     var tiles: LiveTiles
     var font: Font
@@ -128,25 +146,32 @@ struct Main(App):
 
     def __init__(out self):
         self.dark = False
-        self.schemes = ThemePair(omxqua_counter(False), omxqua_counter(True))
+        self.system_dark = False
+        self.themes = ThemeCache()
+        self.themes.put("light/default", omxqua_counter(False))
+        self.themes.put("dark/default", omxqua_counter(True))
+        self.look = Personalize("stage", dir=environment("STAGE_LOOK", ""))
+        self.morph = Morph()
+        self.settings_open = False
+        self.perch = False
         self.width = 1280
         self.height = 820
         self.text = ""
-        self.orb = Orb()
         self.presence = Presence()
         self.mascot_side = 184
         var pack = environment("STAGE_MASCOT")
         if pack != "" and pack != "0":
-            var pack_dir = String("examples/stage/mascots/omx") if (pack == "1" or pack == "omx") else pack
+            var pack_dir = mascot_pack_dir("STAGE_MASCOT")  # (a folder in STAGE_MASCOT, else the omx pack found from the program)
             try:
-                self.presence.use_mascot(pack_dir)
+                self.presence.load_mascot(pack_dir)  # (the perch draws the mascot; the chat bar keeps the person's choice)
+                self.perch = True
                 var init_state = environment("STAGE_MASCOT_STATE")
                 if init_state != "":
                     var sid = mascot_state_id(init_state)
                     if sid >= 0:
-                        self.presence.mode(sid)
+                        self.presence.mascot.mode(sid)
                 if environment("STAGE_MASCOT_CLOUD") == "1":
-                    self.presence.lane(True)
+                    self.presence.mascot.lane(True)
             except e:
                 print("stage mascot load failed:", e)
         self.tiles = LiveTiles()
@@ -233,7 +258,7 @@ struct Main(App):
         self.all = day_tiles(m, self.timer_s)
         wear_occasion(self.all, m.occasion if self.charms_on else String(""), m.about)
         var r = ranked(m)
-        self.feed = stage_feed(r, m.urgent, self.pins, most=3 if m.big else 6)
+        self.feed = stage_feed(r, m.urgent, self.pins, most=stage_most(self.look.prefs, 3 if m.big else 6))  # (roomy: fewer, bigger tiles)
         self.tiles.set_tiles(stage_tiles(self.all, self.feed))
         self.feed.place(r, self.tiles.layout().ids)
         self.log_feed()
@@ -287,22 +312,75 @@ struct Main(App):
             self.tv.open(now, "Today's conversation", "")
         self.tv.speaking(now, False)  # (no voice here: she has finished as soon as she answers)
         self.mark = now
-        self.presence.mode(MASCOT_SPEAK)
-        self.orb.mode(ORB_SPEAK)
+        self.presence.mode(MASCOT_SPEAK)  # (the chat bar's orb, and the mascot)
         self.log("OPEN " + (self.tv.next_card if self.tv.leave_t0 >= 0 else self.tv.card) + " " + question)
 
     def appearance(mut self, dark: Bool):
-        self.dark = dark or environment("STAGE_DARK") == "1"
+        self.system_dark = dark or environment("STAGE_DARK") == "1"
+        self.restyle()
+
+    def hour(self) -> Int:
+        """The demo's clock's hour (STAGE_CLOCK, 10:59 by default): the look's opt-in "night" is dark at night by it ("auto"
+        follows the system only)."""
+        try:
+            return Int(String(self.clock.split(":")[0]))
+        except:
+            return 12
+
+    def theme_key(self) -> String:
+        return ("dark/" if self.dark else "light/") + self.look.prefs.accent
+
+    def restyle(mut self):
+        """The look's scheme and accent into the theme (each theme built once, here, never in theme()) and the canvases."""
+        self.dark = scheme_dark(self.look.prefs, self.system_dark, self.hour())
+        var key = self.theme_key()
+        if not self.themes.has(key):
+            var p = counter_palette(self.dark)
+            self.themes.put(key, omxqua_counter(self.dark, accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else UInt32(0)))
         self.tiles.version += 1  # (the same tiles in the night's palette: their tints are names; nothing moves)
         self.tv.version += 1  # (the TV's box in the night's colours)
 
+    def personalized(mut self, c: LookChange):
+        """A look change (a knob, a person picked in the top bar): the scheme and accent restyle, the presence crossfades, the
+        tiles reflow on their water spring; only a new scheme or accent morphs the window."""
+        if not c.moved():
+            if c.message != "":
+                self.log("LOOK refused " + c.message)
+            return
+        var was = ("dark/" if self.dark else "light/") + c.before.accent  # (the theme before: the prefs have already changed)
+        self.restyle()
+        if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades by itself and the
+            self.morph.morph()        # tiles reflow on their own water spring: no picture of the old screen over them, D-8413)
+        if c.before.presence != c.after.presence:
+            if c.after.presence == "mascot":
+                self.mascot_ready()
+            _ = self.presence.show(PRESENCE_MASCOT if c.after.presence == "mascot" else PRESENCE_ORB)
+        if c.before.density != c.after.density:
+            self.refeed()
+        self.log("LOOK " + self.look.profile + " " + self.look.prefs.json() + " " + c.message)
+
+    def mascot_ready(mut self):
+        """The mascot pack loaded and its resting strip decoded (~85 ms, once), before a switch needs it: never in a transition."""
+        var pack = mascot_pack_dir("STAGE_MASCOT")
+        if self.presence.has_mascot() or pack == "":
+            return
+        try:
+            self.presence.load_mascot(pack)
+            _ = self.presence.mascot.clips[MASCOT_REST].ensure_loaded()
+        except e:
+            print("stage mascot load failed:", e)
+
+    def transition(mut self) -> Int:
+        return self.morph.take()
+
     def theme(self) -> Theme:
-        return self.schemes.of(self.dark)
+        return self.themes.get(self.theme_key())
 
     def update(mut self, event: Event):
         if event.message == TYPE:
             self.text = event.text
-            self.presence.mode(MASCOT_LISTEN if self.text != "" else MASCOT_REST)
+            if self.presence.has_mascot():  # (the mascot listens while you type; the orb keeps its own state)
+                self.presence.mascot.mode(MASCOT_LISTEN if self.text != "" else MASCOT_REST)
         elif event.message == SEND:
             if self.text != "":
                 var q = self.text
@@ -321,7 +399,6 @@ struct Main(App):
         elif event.message == TV_CLOSE:
             self.tv.close(tv_now(), "x")
             self.presence.mode(MASCOT_REST)
-            self.orb.mode(ORB_IDLE)
             self.mark = tv_now()
             self.log("CLOSE x")
         elif event.message == TV_FRAME:
@@ -331,8 +408,7 @@ struct Main(App):
                 self.mark = tv_now()
                 self.log("CLOSE " + self.tv.closed_by)
         elif event.message == MIC:
-            var next_m = ORB_IDLE if self.orb.current() == ORB_LISTEN else ORB_LISTEN
-            self.orb.mode(next_m)
+            var next_m = ORB_IDLE if self.presence.orb.current() == ORB_LISTEN else ORB_LISTEN
             self.presence.mode(next_m)
         elif event.message == GESTURE:
             if event.number == PRESS:
@@ -351,8 +427,8 @@ struct Main(App):
         elif event.message == TICK:
             var prev_timer = self.timer_s
             self.timer_s = max(self.timer_s - 1, 0)
-            if prev_timer > 0 and self.timer_s == 0:
-                self.presence.mode(MASCOT_HYPE)
+            if prev_timer > 0 and self.timer_s == 0 and self.presence.has_mascot():
+                self.presence.mascot.mode(MASCOT_HYPE)
             self.log("LIVE timer=" + clock_text(self.timer_s))
             var m = self.moment()  # (the tiles' words again: the Live row reads them; nothing moves)
             self.all = day_tiles(m, self.timer_s)
@@ -371,22 +447,33 @@ struct Main(App):
             self.person = event.message - PERSON
             if self.presence.has_mascot():
                 self.presence.poke()
+            var names: List[String] = ["all", "a", "s", "m"]
+            var before = self.look.prefs.copy()
+            _ = self.look.use_profile(names[self.person])
+            if not before.same(self.look.prefs):
+                if self.look.prefs.presence == "mascot":
+                    self.mascot_ready()
+                self.personalized(LookChange(True, "", before, self.look.prefs))
         elif event.message == SETTINGS:
-            if self.presence.has_mascot():
-                var on = self.presence.toggle()
-                self.log("PRESENCE " + ("mascot" if on else "orb"))
+            self.settings_open = not self.settings_open
+            if self.settings_open:
+                self.mascot_ready()  # (before the person can pick it: its first strip decodes now, not mid-transition)
+        elif event.message == SETTINGS_CLOSE:
+            self.settings_open = False
+        elif KNOBS <= event.message < KNOBS + KNOB_COUNT:
+            self.personalized(self.look.knob(event.number, event.message - KNOBS))
         elif event.message == MASCOT_GESTURE:
             if event.number == TAP:
                 self.presence.poke()
                 self.log("MASCOT poke")
             elif event.number == HOVER:
                 if event.x < 0 or event.y < 0:
-                    self.presence.look(0.0, 0.0, 0.0)
+                    self.presence.mascot.look(0.0, 0.0, 0.0)
                 else:
                     var half = Float64(self.mascot_side) * 0.5
                     var gx = (event.x - half) / max(half, 1.0)
                     var gy = (event.y - half) / max(half, 1.0)
-                    self.presence.look(gx, gy, 0.75)
+                    self.presence.mascot.look(gx, gy, 0.75)
         elif event.message == CHARMS:
             self.charms_on = not self.charms_on
             self.log("CHARMS_ON " + ("1" if self.charms_on else "0"))
@@ -410,8 +497,12 @@ struct Main(App):
     def view(self) -> View:
         var compact = stage_compact(self.width)
         var wide = stage_layout(self.width).right
+        var settings = HStack(StagePill("settings", "Settings", SETTINGS, compact), spacing=0).tag("stage-settings")  # (the popover's anchor
+        # wraps the pill: a role-wearing view is never tagged again, docs/lessons.md)
         var bar: List[View] = [StageAvatar("All", 0, PERSON), StageAvatar("A", 2, PERSON + 1), StageAvatar("S", 3, PERSON + 2),
-                               StageAvatar("M", 5, PERSON + 3), StagePill("settings", "Settings", SETTINGS, compact)]
+                               StageAvatar("M", 5, PERSON + 3), settings^]
+        if self.settings_open:
+            bar.append(Popover("stage-settings", "Settings", look_knobs(self.look.prefs, KNOBS, self.look.can_undo()), on_close=SETTINGS_CLOSE))
         if not self.clean:
             bar.append(StagePill("sparkles", "Charms", CHARMS, compact))
         var top = HStack(bar^, spacing=SPACE_S).align(CENTER)
@@ -445,10 +536,10 @@ struct Main(App):
         left_items.append(pinned^)
         if not wide and not compact and not self.clean:
             left_items.append(self.days())
-        if self.presence.kind == PRESENCE_MASCOT and self.presence.has_mascot() and not compact:
+        if self.perch and self.presence.has_mascot() and not compact:
             var perch = HStack(
                 Spacer(),
-                MascotView(MASCOT_CANVAS, self.presence.version(), side=self.mascot_side,
+                MascotView(MASCOT_CANVAS, self.presence.mascot.version(), side=self.mascot_side,
                               on_gesture=MASCOT_GESTURE, hover=True),
                 Spacer(),
                 spacing=0,
@@ -467,7 +558,7 @@ struct Main(App):
         if (wide or compact) and not self.clean:
             right_items.append(self.days())
         var right = VStack(right_items^, spacing=SPACE_M).align(START)
-        var chat = StageChat(OrbView(ORB_CANVAS, self.orb.version(), big=False, side=52), self.text, "Ask omx, or just say “omx”",
+        var chat = StageChat(OrbView(ORB_CANVAS, self.presence.version(), big=False, side=52), self.text, "Ask omx, or just say “omx”",
                              on_change=TYPE, on_submit=SEND, on_mic=MIC)
         var stage = Canvas(TILES_CANVAS, self.tiles.version, on_gesture=GESTURE, on_frame=FRAME).grow().fill().tag("stage.tiles")
         var card = View(List[Node]())
@@ -482,10 +573,10 @@ struct Main(App):
     def draw(mut self, canvas: Int, mut surface: Surface):
         var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
-            self.orb.draw(surface, p.with_accent(p.series[1]))  # (the Counter's accent is ink: the orb in the family's blue)
+            self.presence.draw(surface, p.with_accent(self.presence_colour(p)))  # (the orb, or the mascot, or the crossfade between them)
             return
         if canvas == MASCOT_CANVAS:
-            self.presence.mascot.draw(surface, p.with_accent(p.series[1]))
+            self.presence.mascot.draw(surface, p.with_accent(self.presence_colour(p)))
             return
         if self.tv.draws(canvas):
             self.tv.draw(canvas, surface, counter_tv_look(self.dark))
@@ -518,6 +609,11 @@ struct Main(App):
             if rec != self.said_tiles:
                 self.said_tiles = rec
                 self.log("TILES w=" + String(Int(self.tiles.width)) + " h=" + String(Int(self.tiles.height)) + " cols=" + String(self.tiles.cols) + " " + rec)
+
+    def presence_colour(self, p: Palette) -> UInt32:
+        """The orb's (and the mascot's aura's) colour: the accent the person picked, else the family's blue (the Counter's own
+        accent is ink)."""
+        return accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else p.series[1]
 
     def record(mut self, mut surface: Surface):
         """STAGE_TRACE: this frame's numbers; STAGE_SHOT: the canvas's pixels once, that far into the morph."""

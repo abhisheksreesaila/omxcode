@@ -112,10 +112,12 @@ def sizes_only(d: Diff, shown: View) -> Bool:
     return True
 
 
-def diff_to_json(d: Diff, shown: View) -> String:
+def diff_to_json(d: Diff, shown: View, morph: Int = 0) -> String:
+    """What changed, for web.py; `morph` (ms, App.transition): the page swaps it inside a view transition (mojoui.transition)."""
+    var m = String(',"morph":') + String(morph) if morph > 0 else String("")
     if d.rebuild and not sizes_only(d, shown):
-        return '{"rebuild":true,"nodes":' + view_to_json(shown) + "}"
-    var out = String('{"rebuild":false,"patches":[')
+        return '{"rebuild":true' + m + ',"nodes":' + view_to_json(shown) + "}"
+    var out = String('{"rebuild":false') + m + String(',"patches":[')
     for i in range(len(d.patches)):
         ref p = d.patches[i]
         if i > 0:
@@ -247,46 +249,46 @@ def web_draw[A: App](handle: Int, node: Int, width: Int, height: Int, scale: Flo
     var d = tab[].rt.draw(node, surface)
     gil_restore(ts)
     return ('{"address":' + String(Int(tab[].pixels.unsafe_ptr())) + ',"width":' + String(w) + ',"height":' + String(h)
-            + ',"again":' + ("true" if surface.again else "false") + ',"diff":' + diff_to_json(d, tab[].rt.shown) + "}")
+            + ',"again":' + ("true" if surface.again else "false") + ',"diff":' + diff_to_json(d, tab[].rt.shown, tab[].rt.take_transition()) + "}")
 
 
 def web_gesture[A: App](handle: Int, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, pressure: Float64 = 0) -> String:
     var rt = session_at[A](handle)
     var d = rt[].gesture(node, kind, x, y, dx, dy, zoom, pressure)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_key[A: App](handle: Int, node: Int, name: String, modifiers: Int) -> String:
     var rt = session_at[A](handle)
     var d = rt[].key(node, name, modifiers)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_cancel[A: App](handle: Int, node: Int, text: String) -> String:
     var rt = session_at[A](handle)
     var d = rt[].cancel(node, text)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_resize[A: App](handle: Int, width: Int, height: Int) -> String:
     """The page's viewport is width × height CSS pixels (on load, and when the window changes): App.resize."""
     var rt = session_at[A](handle)
     var d = rt[].resize(width, height)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_appearance[A: App](handle: Int, dark: Bool) -> String:
     """The browser's colour scheme (prefers-color-scheme), on load and when it changes: App.appearance."""
     var rt = session_at[A](handle)
     var d = rt[].appearance(dark)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_frame[A: App](handle: Int, node: Int, microseconds: Int) -> String:
     var rt = session_at[A](handle)
     var ts = gil_release()  # (a playing canvas's frame event: on every core, as its paint, goal 62 M5)
     var d = rt[].frame(node, microseconds)
-    var out = diff_to_json(d, rt[].shown)
+    var out = diff_to_json(d, rt[].shown, rt[].take_transition())
     gil_restore(ts)
     return out
 
@@ -299,7 +301,7 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     if e.message == 0:
         return '{"ignored":true}'
     var d = rt[].dispatch(e)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def control_event(shown: View, node: Int, second: Bool, text: String, number: Int) -> Event:
@@ -334,7 +336,7 @@ def web_widget_event[A: App](handle: Int, node: Int, name: String, payload: Stri
     if not rt[].accepts_widget_event(node, name, payload):
         return '{"ignored":true}'
     var d = rt[].widget_event(node, name, payload)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_reply[A: App](handle: Int, seq: Int, text: String, error: String) -> String:
@@ -343,7 +345,7 @@ def web_reply[A: App](handle: Int, seq: Int, text: String, error: String) -> Str
     if not rt[].knows_reply(seq):
         return '{"ignored":true}'
     var d = rt[].reply(seq, text, error)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_commands[A: App](handle: Int) -> String:
@@ -366,7 +368,7 @@ def web_poll[A: App](handle: Int) -> String:
     thread calls it when web_wake_in said so)."""
     var rt = session_at[A](handle)
     var d = rt[].poll(now_ns() // 1000)
-    return diff_to_json(d, rt[].shown)
+    return diff_to_json(d, rt[].shown, rt[].take_transition())
 
 
 def web_jobs[A: App](handle: Int) -> String:
@@ -378,7 +380,7 @@ def web_jobs[A: App](handle: Int) -> String:
         return "{}"
     var ts = gil_release()  # (every decoded video frame wakes every tab: their updates run on every core, goal 62 M5)
     var d = rt[].dispatch(Event(m, String(""), 0))
-    var out = diff_to_json(d, rt[].shown)
+    var out = diff_to_json(d, rt[].shown, rt[].take_transition())
     gil_restore(ts)
     return out
 

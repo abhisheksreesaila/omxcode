@@ -58,7 +58,7 @@ from mojoui.macactivity import InputActivity
 from mojoui.hosts.framewatch import FrameWatch
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
-    new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT, common_modes_constant,
+    new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT, common_modes_constant, layer_fade,
 )
 
 comptime NODE_BITS = 16
@@ -2335,6 +2335,11 @@ struct AppKitHost[A: App](Movable):
         _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("effectsDue:"), ns_number(self_addr), Float64(w) / 1e6)
 
     def apply(mut self, d: Diff, self_addr: Int):
+        var morph = self.rt.take_transition()
+        if morph > 0 and self.window != 0:  # (a view transition: the content's layer crossfades into what this change makes)
+            var content = msg(self.window, "contentView")
+            _ = msg(content, "setWantsLayer:", 1)
+            layer_fade(msg(content, "layer"), morph)
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.copy_if_asked()
         self.open_if_asked()

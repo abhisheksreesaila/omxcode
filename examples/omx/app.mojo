@@ -22,7 +22,13 @@
 #   the orb, the rim   mojoui.orb                         in the chat bar: listens/thinks/speaks; the cloud lane's frame
 #   the pointer        mojoui.pointer.Pointer             a ring over the whole page that moves to the part she names (a card's part,
 #                                                         a tile while the tiles show: mojoui.agentui.stage_parts)
-#   the look           themes.omxqua.omxqua_counter        omxqua's Counter family, light or night as the system is
+#   the look           themes.omxqua.omxqua_counter        omxqua's Counter family, light or night as the system is (by the clock only when a person picks "night")
+#   personalize        mojoui.personalize                 "make it darker", "use the mascot instead of the orb", "keep the scores
+#                                                         bigger", "put it back": the agent's `personalize` tool (and Settings' knobs)
+#                                                         change a few whitelisted settings per person (the top bar's All, A, S, M),
+#                                                         kept in ~/.local/share/mojoui/look/omx (MOJOUI_LOOK); a scheme or accent
+#                                                         morphs the window (mojoui.transition), the orb and the mascot crossfade
+#                                                         (mojoui.mascot), the tiles reflow on their water spring (mojoui.livetiles)
 #   the features       mojoui.assistant.Assistant         to-do (a file; the voice and the tick boxes edit it), news (cards of links),
 #                                                         think-it-through jobs (the model's second sequence), the cloud lane (`claude
 #                                                         -p`, only when asked for)
@@ -43,7 +49,8 @@
 # OMX_CLAUDE_CMD = the command that answers them (`claude`), MOJOUI_LEDGER = the record of what went out, MOJOUI_TODO = the to-do
 # file; MOJOUI_AUDIO_SOURCE / MOJOUI_AUDIO_SINK = the microphone and the speaker
 # (mojoui.audio: `file:a.wav@2.5` plays a recorded voice as the microphone); OMX_TV_QUIET = the TV's quiet before it closes (ms);
-# OMX_DARK=1 = the night look whatever the system says; OMX_CLEAN=1 = no "sample" on the sample tiles (recordings only: samples.mojo).
+# OMX_DARK=1 / 0 = the night / day look whatever the system and the person's look say (checks, recordings); OMX_MASCOT = a mascot
+# pack folder (default: examples/stage/mascots/omx, found from the program); OMX_CLEAN=1 = no "sample" on the sample tiles (recordings only: samples.mojo).
 # Run it with scripts/omx.sh, or on a tablet with scripts/tablet.sh omx. Each turn prints OMX lines (what was heard, the reply,
 # the card, the numbers) for the checker.
 
@@ -70,7 +77,11 @@ from mojoui.creator import Creator
 from mojoui.looker import Looker
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
-from mojoui.theme import Theme, Palette, ThemePair
+from mojoui.theme import Theme, Palette, ThemeCache
+from mojoui.mascot import Presence, PRESENCE_ORB, PRESENCE_MASCOT, MASCOT_REST, mascot_pack_dir
+from mojoui.personalize import (Personalize, LookChange, look_knobs, scheme_dark, is_night, accent_colour, stage_most, KNOB_COUNT,
+                                PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)
+from mojoui.transition import Morph
 from mojoui.utf8 import head, boundary
 from mojoui.voiceloop import VoiceLoop, LoopEvent, HEARD, STARTED, BARGED, READY, FAILED, POINT, LOOP_LOADING, LOOP_LISTENING, LOOP_HEARING, LOOP_THINKING, LOOP_SPEAKING
 from mojoui.voiceui import VoiceDock, VoiceLane
@@ -101,6 +112,7 @@ comptime SAMPLES = 15
 comptime PERSON = 40  # PERSON + 0 … 3: the avatars
 comptime RECENT = 60  # RECENT + k: a card shown before, into the TV again
 comptime UNPIN = 70  # UNPIN + k: pinned tile k back on the stage
+comptime KNOBS = 90  # KNOBS + 0 … 4: the look's knobs in Settings (mojoui.personalize.look_knobs)
 comptime CHIP = 100  # the suggestions: CHIP + k
 comptime TODO = 1000  # the to-do card's tick boxes: TODO + the thing's index (mojoui.assistant owns 200 numbers)
 comptime ORB_CANVAS = 1
@@ -138,7 +150,7 @@ struct Main(App):
     var screens: Screens[]
     var creator: Creator  # comics, pictures and notes (mojoui.creator)
     var looker: Looker  # the camera and what the model sees through it (mojoui.looker)
-    var orb: Orb
+    var presence: Presence  # the chat bar's orb, or the mascot a person asked for (they crossfade)
     var pointer: Pointer  # the ring that moves to the part of a card (or the tile) she is naming
     var turn_card: Int  # the first card of this turn: only this turn's cards are pointed at
     var parts_key: String  # what the loop's parts were last made from (cards, looks, the tiles' place, whether the TV hides them)
@@ -146,7 +158,11 @@ struct Main(App):
     var turn_look: Int  # the camera's look serial when this turn began: only this turn's looks are pointed at
     var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var dark: Bool
-    var schemes: ThemePair  # light and dark, built once (D-7889)
+    var system_dark: Bool  # the system's dark: the look's "auto" follows it
+    var night_was: Bool  # the clock was in the night (19:00-7:00) at the last restyle: "night" morphs when that changes
+    var themes: ThemeCache  # one theme per scheme and accent, each built once (D-7889)
+    var look: Personalize  # each person's look (mojoui.personalize)
+    var morph: Morph  # the next change morphs (mojoui.transition)
     var width: Int
     var height: Int
     var suggestions: List[String]
@@ -211,6 +227,7 @@ struct Main(App):
             self.assist.register(self.llm.value())
             Visual.register(self.llm.value())  # (the map card's show_map and the diagram's explain: mojoui.visual)
             self.llm.value().add_deferred(TILES, TILES_ABOUT, TILES_PARAMS)  # (the Stage's tiles: answered here, Screens.tiles on the stage card)
+            self.llm.value().add_deferred(PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)  # (the person's look: answered here, mojoui.personalize)
             self.llm.value().trust.allow("stop")  # (the only button that stays pressable after notes or news were read in a turn: mojoui.trust)
             self.llm.value().trust.allow("type")
         except e:
@@ -221,7 +238,14 @@ struct Main(App):
         var sd = environment("HOME") + "/Projects/omx-local"
         self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
         self.looker = Looker(LOOK_CANVAS)
-        self.orb = Orb()
+        self.presence = Presence()
+        var pack = mascot_pack_dir("OMX_MASCOT")  # (a folder in OMX_MASCOT, else the omx pack found from the program, not the working directory)
+        if pack != "":
+            try:  # (its resting strip decoded now, ~85 ms once: never while a change morphs)
+                self.presence.load_mascot(pack)
+                _ = self.presence.mascot.clips[MASCOT_REST].ensure_loaded()
+            except e:
+                print("omx: the mascot didn't load: " + String(e))
         self.pointer = Pointer()
         self.turn_card = 0
         self.parts_key = ""
@@ -229,7 +253,13 @@ struct Main(App):
         self.turn_look = 0
         self.marks = List[PointMark]()
         self.dark = False
-        self.schemes = ThemePair(omxqua_counter(False), omxqua_counter(True))
+        self.system_dark = False
+        self.night_was = False
+        self.themes = ThemeCache()
+        self.themes.put("light/default", omxqua_counter(False))
+        self.themes.put("dark/default", omxqua_counter(True))
+        self.look = Personalize("omx")
+        self.morph = Morph()
         self.width = 1280
         self.height = 820
         self.suggestions = ["What is the capital of France?", "Compare the three largest planets by diameter", "What can you do?"]
@@ -297,12 +327,48 @@ struct Main(App):
             self.tiles.set_columns(cols)
 
     def appearance(mut self, dark: Bool):
-        self.dark = dark or environment("OMX_DARK") == "1"
+        self.system_dark = dark
+        self.restyle()
+
+    def theme_key(self) -> String:
+        return ("dark/" if self.dark else "light/") + self.look.prefs.accent
+
+    def restyle(mut self):
+        """The look's scheme (auto: as the system is; night, opt-in: dark from 19:00 to 7:00 by this machine's clock) and accent
+        into the theme, each theme built once, here (never in theme()); the canvases redraw in it. OMX_DARK=1 / 0 pins the
+        night / day look over the system and the person's look (checks and recordings)."""
+        var hour = local_time().hour
+        self.night_was = is_night(hour)
+        var pin = environment("OMX_DARK")
+        self.dark = True if pin == "1" else (False if pin == "0" else scheme_dark(self.look.prefs, self.system_dark, hour))
+        var key = self.theme_key()
+        if not self.themes.has(key):
+            var p = counter_palette(self.dark)
+            self.themes.put(key, omxqua_counter(self.dark, accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else UInt32(0)))
         self.tiles.version += 1  # (the same tiles in the night's palette: their tints are names)
         self.tv.version += 1
 
+    def personalized(mut self, c: LookChange):
+        """A look change (the agent's personalize call, a knob, another person picked): the theme restyles, the presence
+        crossfades, the tiles reflow on their water spring; only a new scheme or accent morphs the window."""
+        self.out("OMX LOOK: " + self.look.profile + " " + self.look.prefs.json() + " ok=" + String(c.ok) + " " + c.message)
+        if not c.moved():
+            return
+        var was = ("dark/" if self.dark else "light/") + c.before.accent  # (the theme before: the prefs have already changed)
+        self.restyle()
+        if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades and the tiles reflow
+            self.morph.morph()        # by themselves, D-8413)
+        if c.before.presence != c.after.presence:
+            _ = self.presence.show(PRESENCE_MASCOT if c.after.presence == "mascot" else PRESENCE_ORB)
+        if c.before.density != c.after.density:
+            self.stage_sig = ""
+            self.place_stage()
+
+    def transition(mut self) -> Int:
+        return self.morph.take()
+
     def theme(self) -> Theme:
-        return self.schemes.of(self.dark)
+        return self.themes.get(self.theme_key())
 
     def every(self) -> List[Every]:
         return [Every(30, TICK)]
@@ -332,7 +398,7 @@ struct Main(App):
             self.cancel_cloud()
         elif m == LANE:
             self.assist.cloud.flip()
-            self.orb.lane(self.assist.cloud.framed)
+            self.presence.lane(self.assist.cloud.framed)
         elif m == GESTURE:
             if e.number == PRESS:
                 self.drop_zones()
@@ -358,6 +424,13 @@ struct Main(App):
             self.keep_stage()
         elif m >= PERSON and m < PERSON + 4:
             self.person = m - PERSON
+            var names: List[String] = ["all", "a", "s", "m"]
+            var before = self.look.prefs.copy()
+            _ = self.look.use_profile(names[self.person])
+            if not before.same(self.look.prefs):
+                self.personalized(LookChange(True, "", before, self.look.prefs))
+        elif m >= KNOBS and m < KNOBS + KNOB_COUNT:
+            self.personalized(self.look.knob(e.number, m - KNOBS))
         elif m >= RECENT and m < RECENT + RECENT_MAX:
             var k = m - RECENT
             if k < len(self.recent.keys):
@@ -422,6 +495,12 @@ struct Main(App):
 
     def tick(mut self):
         self.ticks += 1
+        if self.look.prefs.scheme == "night" and self.ticks % 1000 == 0:  # (every ~30 s, only while "night" is set: the hour
+            if is_night(local_time().hour) != self.night_was:                 # crossing 19:00 or 7:00 morphs the look; auto never looks)
+                var was = self.dark
+                self.restyle()
+                if self.dark != was:
+                    self.morph.morph()
         if not self.primed and self.llm:
             self.primed = True
             self.llm.value().set_tools(self.tools())
@@ -480,14 +559,14 @@ struct Main(App):
             if not talking:
                 self.stopped_at = tv_now()
         if s == LOOP_HEARING:
-            self.orb.mode(ORB_LISTEN)
+            self.presence.mode(ORB_LISTEN)
         elif s == LOOP_THINKING:
-            self.orb.mode(ORB_THINK)
+            self.presence.mode(ORB_THINK)
         elif s == LOOP_SPEAKING:
-            self.orb.mode(ORB_SPEAK)
+            self.presence.mode(ORB_SPEAK)
         else:
-            self.orb.mode(ORB_IDLE)
-        self.orb.drive(self.loop.level())
+            self.presence.mode(ORB_IDLE)
+        self.presence.drive(self.loop.level())
         self.tv_tick()
 
     def tv_tick(mut self):
@@ -595,7 +674,7 @@ struct Main(App):
         if why != "":
             self.loop.say("Sorry, " + why + ". I'll answer here. ")
             return False
-        self.orb.lane(True)
+        self.presence.lane(True)
         self.loop.say("Asking Claude. ")
         self.out("OMX LANE: cloud turn=" + String(self.turns) + " model=" + model)
         return True
@@ -603,7 +682,7 @@ struct Main(App):
     def cancel_cloud(mut self):
         if self.assist.cloud.cancel():
             self.out("OMX LANE: local turn=" + String(self.turns) + " (cloud turn dropped)")
-        self.orb.lane(False)
+        self.presence.lane(False)
 
     def cloud_step(mut self):
         """The cloud's answer arrives (or fails); the frame goes when what it said has been said."""
@@ -620,14 +699,14 @@ struct Main(App):
                      + " used=" + String(step.used) + " text=" + step.text)
         elif step.kind == STEP_FAILED:
             self.out("OMX CLOUD: failed turn=" + String(self.turns) + " why=" + step.text)
-            self.orb.lane(False)
+            self.presence.lane(False)
             self.out("OMX LANE: local turn=" + String(self.turns))
             self.loop.say("Claude didn't answer, so I'll answer here. ")
             self.jobs_before = self.assist.jobs_started
             self.client.say(step.question)
             self.start_run()
         elif step.kind == STEP_FRAME_OFF:
-            self.orb.lane(False)
+            self.presence.lane(False)
             self.out("OMX LANE: local turn=" + String(self.turns))
 
     def drive_assistant(mut self):
@@ -657,6 +736,7 @@ struct Main(App):
         self.assist.turn_ns = self.run_ns
         self.assist.flush(self.llm.value())  # (what a job found joins the conversation here: the start of a turn)
         var input = self.client.local_input()
+        self.look.begin_group()  # (what this turn changes in the look is one "put it back")
         self.llm.value().set_tools(self.tools())
         for ev in self.llm.value().begin(input):
             self.take(ev)
@@ -688,6 +768,11 @@ struct Main(App):
                     continue
                 if self.looker.handles(c.name):
                     self.looker.call(c.id, c.arguments)
+                    continue
+                if c.name == PERSONALIZE:  # (the person's look: checked, applied with a morph, the result says what changed)
+                    var ch = self.look.ask(c.arguments)
+                    self.personalized(ch)
+                    self.llm.value().answer(c.id, ch.result())
                     continue
                 if c.name == TILES:
                     self.llm.value().answer(c.id, self.screens.tiles(c.arguments, into=STAGE_CARD))
@@ -729,6 +814,7 @@ struct Main(App):
             except:
                 pass
         elif kind == EV_RUN_FINISHED or kind == EV_RUN_ERROR:
+            self.look.end_group()
             self.client.end_chunks()
             self.client.running = False
             if not self.silent_run:
@@ -791,7 +877,7 @@ struct Main(App):
         if len(ranked) == 0:
             return
         var big = len(all) > 0 and all[0].big
-        self.feed = stage_feed(ranked, ranked[0].id, self.pins, most=3 if big else 6)
+        self.feed = stage_feed(ranked, ranked[0].id, self.pins, most=stage_most(self.look.prefs, 3 if big else 6))  # (roomy: fewer, bigger tiles)
         self.all = all^
         self.tiles.set_tiles(stage_tiles(self.all, self.feed))
         self.feed.place(ranked, self.tiles.layout().ids)
@@ -985,7 +1071,8 @@ struct Main(App):
             top_items.append(where.copy())
         if self.settings_open:
             var body = VStack(Text("Answers come from this machine (Qwen 27B) unless you ask for Claude.", CAPTION),
-                              Checkbox("Sample tiles (calendar, weather, photos, home)", self.samples_on, SAMPLES), spacing=SPACE_S).align(START)
+                              Checkbox("Sample tiles (calendar, weather, photos, home)", self.samples_on, SAMPLES),
+                              look_knobs(self.look.prefs, KNOBS, self.look.can_undo()), spacing=SPACE_S).align(START)
             top_items.append(Popover("omx-settings", "Settings", body^, on_close=SETTINGS_CLOSE))
         var top = HStack(top_items^, spacing=SPACE_S).align(CENTER)
         # left: what she is doing (a phone), the clock and its weather line, Today, Pinned
@@ -1023,7 +1110,7 @@ struct Main(App):
         tools.append(StageTool("Close keyboard" if self.typing else "Type", TYPE, "keyboard"))
         if self.busy():
             tools.append(StageTool("Stop", STOP, "square"))
-        var chat = StageChat(OrbView(ORB_CANVAS, self.orb.version(), big=False, side=52), self.draft, "Type to omx" if self.typing else HINT,
+        var chat = StageChat(OrbView(ORB_CANVAS, self.presence.version(), big=False, side=52), self.draft, "Type to omx" if self.typing else HINT,
                              on_change=DRAFT, on_submit=SEND, on_mic=MUTE, subtitle=self.subtitle(), field=self.typing, tools=tools^,
                              mic="Unmute" if self.muted else "Mute", mic_icon="mic-off" if self.muted else "mic")
         var stage = Canvas(TILES_CANVAS, self.tiles.version, on_gesture=GESTURE, on_frame=FRAME).grow().fill().tag(TILES_TAG)
@@ -1040,8 +1127,9 @@ struct Main(App):
         var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
             var gaze = self.pointer.look("orb-small")
-            self.orb.look(gaze[0], gaze[1], gaze[2])
-            self.orb.draw(surface, p.with_accent(p.series[1]))  # (the Counter's accent is ink: the orb in the family's blue)
+            self.presence.look(gaze[0], gaze[1], gaze[2])
+            var tint = accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else p.series[1]
+            self.presence.draw(surface, p.with_accent(tint))  # (the Counter's accent is ink: the orb in the family's blue, or the accent picked)
         elif canvas == POINTER_CANVAS:
             self.pointer.draw(surface, p.with_accent(p.series[2]))  # (the ring in the family's teal: pointing reads apart from the ink)
         elif canvas == RIM_CANVAS:

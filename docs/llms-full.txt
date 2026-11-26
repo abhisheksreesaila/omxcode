@@ -993,7 +993,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | `ContextMenu` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Dialog` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Toast` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | kit |
-| `Popover` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
+| `Popover` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit, stage |
 | `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit, console |
 | `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer, console, pnote |
 | `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
@@ -1071,6 +1071,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall) | `Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252) | `DesktopSignIn(server) · .url · code() · token_request(msg, code)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Open in the system browser (an effect: App.opens, mojoui.browser) | `Browser.open(url) · def opens(mut self) -> List[String]` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition) | `mojoui.transition.Morph · def transition(mut self) -> Int` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -1262,6 +1263,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
+| `Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, undo, per-person files, the personalize tool, Settings knobs)` | `mojoui/personalize.mojo` | Segmented, Button, View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition) | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omx, stage |
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | pnote, sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, agenttiles, maccheck, mxstudio, omx, omxplorer, stage, workbook |
 | `Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)` | `mojoui/freeboard.mojo` | Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus), Board: drag, resize, snap, Board: scrolls, reveals a child, MenuBar | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | canvas, omxplorer |
@@ -1276,7 +1278,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | 🔨 | 🔨 | ❌ | 🔨 | 🔨 | 🔨 | — |
 | `Ribbon (tabs of captioned tool groups; the other tabs' tools hidden, still reachable)` | `mojoui/ribbon.mojo` | Toolbar button (icon over label), Icon toggle shown pressed, File picker, Hidden (in the tree, not drawn; agents and test steps still reach it), Divider, Tooltips | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer, ribbon |
 | `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer, pnote |
+| `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer, pnote, stage |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
@@ -1427,12 +1429,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 233 | 16 | 0 |
-| Web | 179 | 53 | 17 |
-| Android | 19 | 100 | 130 |
-| Mac (AppKit) | 9 | 211 | 29 |
-| iPhone (UIKit) | 0 | 174 | 75 |
-| Agent (MCP) | 67 | 79 | 103 |
+| Linux (GTK) | 235 | 16 | 0 |
+| Web | 181 | 53 | 17 |
+| Android | 19 | 100 | 132 |
+| Mac (AppKit) | 9 | 213 | 29 |
+| iPhone (UIKit) | 0 | 176 | 75 |
+| Agent (MCP) | 67 | 79 | 105 |
 
 ## Inside one app, not components yet (the debt)
 
