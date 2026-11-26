@@ -4,6 +4,11 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-26: merging goals 79, 80, 81 and main (branch merge-79-81, steps 1 and 2 of docs/goals/79-merge.md)
+- **Worked.** Both steps merged and proven: goal 79's M0–M6 (60 of 60 race rows on Linux and on the unlocked M4), KEYS, PACKAGE; goal 81's M1–M9 (M7 at 144 ticks/s on the merged clock); main's goals 73, 76, 78, 77's Stage; 52 builds. docs/goals/79-merge-report.md.
+- **Broke.** The auto-merge kept a check that dropped keys during a waiting rebuild; goal 81's held input kept its own HOVER = 11 (main's BOARD_LIVE); main's code read 79's old Json fields; my own step-2 edit commented out pnote's canvas tag (M2–M4 caught it). All fixed, with tests for the first two.
+- **Next.** Step 3 (into main) is the main session's; not run here: 77 M0–M6/M7F, 73 M4, 76 M3, the packages over released versions.
+
 ## 2026-11-25: goal 79, continuation 27 (review round 9: PASS)
 - **Worked.** Its four SHOULDs, test first; 52 installer mutants noticed; Linux M0–M6 at one commit (60 of 60); both packages.
 - **Broke.** Both-open on seed 101: a deleted word came back. The web's own unsaved edit of the deleted object did it (5 of 5 with no native app running); the harness is as it was.

@@ -115,3 +115,7 @@ One line per rule that prevents a mistake that happened.
 - A claim in a report that can be checked by a program is checked by one (M6 refuses while anything of ours runs; it was said in words twice and wrong twice).
 - A program's files are the packager's list, not the folder it was run from; a removal needs the list and the content, and data is refused even when listed (install_test, install_property).
 - A word that comes back in a two-app run is traced to the save that wrote it (record every revision; a control without our app) before it is called ours or theirs.
+- 2026-11-26 · A script that adds a comment to a line by replacing part of it can comment out the rest of a chained call (`Canvas(…).gpu()  # …).grow().fill().tag("desk")`: pnote lost its tag and size, merge of 79/81/main). Append comments only at a line's end, and diff every line a script touched before building.
+- 2026-11-26 · A merge can bring a module-local copy of a shared number (goal 81's gtk_held `HOVER = 11`) that the other side renumbers: it compiles and is wrong. Encoded: tests/test_gesture_numbers.py fails on any module's own copy of an event number.
+- 2026-11-26 · An old goal's checker may cascade into older goals that rebuild 13 GB of data and install whole pixi environments in a fresh worktree (73 M4 → 71 → 70 → 68 → 47). Before running another goal's checker, read what it calls and what it writes.
+
