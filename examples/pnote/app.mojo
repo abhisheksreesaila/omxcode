@@ -968,7 +968,7 @@ struct Main(App):
 
     def view(self) -> View:
         if len(self.web) > 0:
-            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu()  # (hover: the web look draws hover states).grow().fill().tag("desk")
+            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu().grow().fill().tag("desk")  # (hover: the web look draws hover states)
             comptime if CompilationTarget.is_macos():  # (the system menu bar: Personal Note's own menus, desktop_menu.py; Edit is the system's)
                 var bar = MenuBar([
                     Menu("File", [Item("New note", MENU0 + 0, shortcut="Ctrl+N"), Item("Quick note", MENU0 + 1), Separator(),
