@@ -347,7 +347,7 @@ struct Main(App):
             if c.message != "":
                 self.log("LOOK refused " + c.message)
             return
-        var was = self.theme_key()
+        var was = ("dark/" if self.dark else "light/") + c.before.accent  # (the theme before: the prefs have already changed)
         self.restyle()
         if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades by itself and the
             self.morph.morph()        # tiles reflow on their own water spring: no picture of the old screen over them, D-8413)

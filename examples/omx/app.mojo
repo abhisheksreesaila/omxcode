@@ -347,7 +347,7 @@ struct Main(App):
         self.out("OMX LOOK: " + self.look.profile + " " + self.look.prefs.json() + " ok=" + String(c.ok) + " " + c.message)
         if not c.moved():
             return
-        var was = self.theme_key()
+        var was = ("dark/" if self.dark else "light/") + c.before.accent  # (the theme before: the prefs have already changed)
         self.restyle()
         if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades and the tiles reflow
             self.morph.morph()        # by themselves, D-8413)
