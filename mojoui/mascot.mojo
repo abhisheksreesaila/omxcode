@@ -16,6 +16,9 @@
 #     self.mascot.draw(surface, palette)
 
 from std.math import sin, cos, sqrt
+from std.os import getenv
+from std.os.path import exists
+from mojoui import libc
 from mojoui.canvas import Surface
 from mojoui.clock import now_ns
 from mojoui.draw import over
@@ -38,6 +41,23 @@ comptime PRESENCE_ORB = 0
 comptime PRESENCE_MASCOT = 1
 
 comptime MASCOT_SHADOW: UInt32 = 0xFF06070B
+
+
+def mascot_pack_dir(override: String = "", name: String = "omx") -> String:
+    """Where a mascot pack is, without assuming the working directory: the environment variable `override` names (OMX_MASCOT,
+    STAGE_MASCOT) when it holds a folder; else `mascots/<name>` beside the program (a shipped app); else the repository's
+    examples/stage/mascots/<name> found from the program (scripts/build.sh puts it in build/<app>/linux/, three folders down);
+    else the same relative to the working directory. "" when none has a manifest.json."""
+    if override != "":
+        var own = getenv(override)
+        if own != "" and own != "0" and own != "1" and own != name:
+            return own
+    var d = libc.exe_dir()
+    var tries: List[String] = [d + "/mascots/" + name, d + "/../../../examples/stage/mascots/" + name, "examples/stage/mascots/" + name]
+    for t in tries:
+        if exists(t + "/manifest.json"):
+            return t
+    return ""
 
 
 def mascot_state_id(name: String) -> Int:

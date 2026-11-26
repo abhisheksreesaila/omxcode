@@ -5,11 +5,11 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 from std.os import setenv, makedirs
-from std.os.path import exists
+from std.os.path import exists, isdir
 from mojoui.json import Json
 from mojoui.personalize import (
     Personalize, LookPrefs, LookChange, look_values, look_labels, look_check, look_dir, is_profile_name, scheme_dark,
-    accent_colour, accent_index, stage_most, look_knobs, personalize_tool, PERSONALIZE, PERSONALIZE_PARAMS, UNDO_MAX,
+    accent_colour, accent_index, stage_most, is_night, look_knobs, personalize_tool, PERSONALIZE, PERSONALIZE_PARAMS, UNDO_MAX,
     KNOB_SCHEME, KNOB_ACCENT, KNOB_PRESENCE, KNOB_DENSITY, KNOB_UNDO,
 )
 from mojoui.theme import Palette
@@ -22,7 +22,7 @@ def scratch(name: String) raises -> String:
     makedirs(d, exist_ok=True)
     for who in ["all", "a", "s", "m"]:
         var f = d + "/" + who + ".json"
-        if exists(f):
+        if exists(f) and not isdir(f):
             with open(f, "w") as h:
                 h.write("")
     return d
@@ -34,6 +34,7 @@ def test_values_and_defaults() raises:
     assert_true(p.is_default())
     assert_equal(len(look_values("accent")), 7)
     assert_equal(look_labels("scheme")[2], "Dark")
+    assert_equal(look_labels("scheme")[3], "Night")
     assert_equal(look_check("scheme", "dark"), "")
     assert_true(look_check("accent", "#ff00ff").find("theme's own colours") >= 0)
     assert_true(look_check("font", "big").find("only change") >= 0)
@@ -164,9 +165,17 @@ def test_look_dir_env() raises:
 def test_reading_a_look() raises:
     var p = LookPrefs()
     assert_false(scheme_dark(p, False, 11))
-    assert_true(scheme_dark(p, False, 21))  # (auto: night)
-    assert_true(scheme_dark(p, False, 6))
+    assert_false(scheme_dark(p, False, 21))  # (auto follows the system only: never the clock)
+    assert_false(scheme_dark(p, False, 3))
     assert_true(scheme_dark(p, True, 11))  # (auto: the system's dark)
+    p.scheme = "night"  # (opt-in: dark from 19:00 to 7:00 by the clock, else as the system is)
+    assert_true(scheme_dark(p, False, 19))
+    assert_true(scheme_dark(p, False, 6))
+    assert_false(scheme_dark(p, False, 7))
+    assert_false(scheme_dark(p, False, 18))
+    assert_true(scheme_dark(p, True, 12))
+    assert_true(is_night(23))
+    assert_false(is_night(12))
     p.scheme = "light"
     assert_false(scheme_dark(p, True, 23))
     p.scheme = "dark"
@@ -219,6 +228,55 @@ def test_knobs() raises:
     assert_equal(look.prefs.accent, "default")
 
 
+def test_night_by_asking() raises:
+    var look = Personalize("t", dir="")
+    var c = look.ask('{"set":{"scheme":"dark at night"}}')
+    assert_true(c.ok)
+    assert_equal(look.prefs.scheme, "night")
+    assert_true(c.message.find("dark at night") >= 0)
+    assert_true(look.ask('{"set":{"scheme":"system"}}').ok)
+    assert_equal(look.prefs.scheme, "auto")
+
+
+def test_profile_names() raises:
+    var look = Personalize("t", dir="")
+    _ = look.set("scheme", "dark")
+    assert_false(look.use_profile("../x"))
+    assert_false(look.use_profile(""))
+    assert_false(look.use_profile("abcdefghijklmnopqrstuvwxy"))  # (25 bytes: over the 24 a name may have)
+    assert_false(look.use_profile("a b"))
+    assert_true(look.use_profile("abcdefghijklmnopqrstuvwx"))  # (24: the longest allowed)
+    _ = look.use_profile("all")
+    assert_equal(look.prefs.scheme, "dark")  # (a refused name changed nothing)
+    assert_equal(look.profile, "all")
+
+
+def test_corrupt_file_is_defaults() raises:
+    var d = scratch("corrupt")
+    for text in ["{not json", "", "[1, 2]", '{"scheme": 7, "undo": "x"}', "null"]:
+        with open(d + "/s.json", "w") as f:
+            f.write(text)
+        var look = Personalize("t", dir=d)
+        _ = look.use_profile("s")
+        assert_true(look.prefs.is_default())
+        assert_false(look.can_undo())
+        assert_true(look.set("accent", "red").ok)  # (and the next change writes a good file)
+        var again = Personalize("t", dir=d)
+        _ = again.use_profile("s")
+        assert_equal(again.prefs.accent, "red")
+
+
+def test_failed_save_leaves_no_tmp() raises:
+    var d = scratch("nosave")
+    makedirs(d + "/m.json", exist_ok=True)  # (a folder where the file should go: the rename fails)
+    var look = Personalize("t", dir=d)
+    _ = look.use_profile("m")
+    var c = look.set("density", "roomy")
+    assert_true(c.ok)  # (the change holds for this run)
+    assert_true(look.error != "")
+    assert_false(exists(d + "/m.json.tmp"))
+
+
 def test_tool() raises:
     var t = personalize_tool()
     assert_equal(t.name, PERSONALIZE)
@@ -226,6 +284,7 @@ def test_tool() raises:
     var props = j.get(j.get(j.get(0, "properties"), "set"), "properties")
     assert_equal(j.size(j.get(j.get(props, "accent"), "enum")), len(look_values("accent")))
     assert_equal(j.size(j.get(j.get(props, "density"), "enum")), 2)
+    assert_equal(j.size(j.get(j.get(props, "scheme"), "enum")), len(look_values("scheme")))
 
 
 def main() raises:
@@ -239,5 +298,9 @@ def main() raises:
     test_look_dir_env()
     test_reading_a_look()
     test_knobs()
+    test_night_by_asking()
+    test_profile_names()
+    test_corrupt_file_is_defaults()
+    test_failed_save_leaves_no_tmp()
     test_tool()
-    print("test_look: 11 tests passed")
+    print("test_look: 15 tests passed")

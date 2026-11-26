@@ -33,6 +33,12 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 
 FRAME_SIZE = 192
+# Where the default pack's art comes from (written into manifest.json; see examples/stage/mascots/omx/README.md). Pass --source
+# for a pack made from other art: say what it was made from and under which terms.
+OMX_SOURCE = ("AI-generated with Google Gemini (image model) via the Antigravity agent, 2026-11-25, from a text prompt: an original "
+              "character (a dark-blue round creature). One 1024x1024 pose sheet (rest, listen, think, hype), cut into four transparent "
+              "poses, animated into six strips by scripts/build_mascot_pack.py. No third-party artwork; the Masko 'Momo' video was only a "
+              "reference for the hub-and-spoke clip pattern. See README.md.")
 ANCHOR_Y = 178  # feet baseline inside 192x192 frame
 
 
@@ -165,7 +171,7 @@ def pack_strip(frames: list[Image.Image], out_path: Path):
     strip.save(out_path, format="PNG", optimize=True, compress_level=9)
 
 
-def build_from_poses(poses_dir: Path, out_dir: Path, name: str = "Omx Spirit"):
+def build_from_poses(poses_dir: Path, out_dir: Path, name: str = "Omx Spirit", source: str = OMX_SOURCE):
     rest_src = trim_and_clean(Image.open(poses_dir / "mascot_rest.png"))
     listen_src = trim_and_clean(Image.open(poses_dir / "mascot_listen.png"))
     think_src = trim_and_clean(Image.open(poses_dir / "mascot_think.png"))
@@ -310,6 +316,7 @@ def build_from_poses(poses_dir: Path, out_dir: Path, name: str = "Omx Spirit"):
     manifest = {
         "name": name,
         "version": 1,
+        "source": source,
         "frame_width": FRAME_SIZE,
         "frame_height": FRAME_SIZE,
         "anchor_y": round(ANCHOR_Y / float(FRAME_SIZE), 3),
@@ -333,7 +340,8 @@ def build_from_poses(poses_dir: Path, out_dir: Path, name: str = "Omx Spirit"):
     print(f"  Total PNGs: {total / 1024:.1f} KB")
 
 
-def build_from_clips(clips_dir: Path, out_dir: Path, name: str = "Custom Mascot", fps: int = 16, size: int = FRAME_SIZE):
+def build_from_clips(clips_dir: Path, out_dir: Path, name: str = "Custom Mascot", fps: int = 16, size: int = FRAME_SIZE,
+                     source: str = "not recorded: pass --source with where the clips come from and under which terms"):
     """Compile transparent video clips (.webm/.mov/.mp4) into an omxome companion pack via ffmpeg."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -372,6 +380,7 @@ def build_from_clips(clips_dir: Path, out_dir: Path, name: str = "Custom Mascot"
 
     manifest = {
         "name": name,
+        "source": source,
         "version": 1,
         "frame_width": size,
         "frame_height": size,
@@ -390,12 +399,13 @@ def main():
     ap.add_argument("--out", type=Path, required=True, help="Output pack directory")
     ap.add_argument("--name", default="Omx Spirit", help="Pack display name")
     ap.add_argument("--fps", type=int, default=16, help="Extraction FPS for --clips-dir")
+    ap.add_argument("--source", default=None, help="Where the art comes from and under which terms (manifest.json's source)")
     args = ap.parse_args()
 
     if args.poses_dir:
-        build_from_poses(args.poses_dir, args.out, args.name)
+        build_from_poses(args.poses_dir, args.out, args.name, args.source or OMX_SOURCE)
     elif args.clips_dir:
-        build_from_clips(args.clips_dir, args.out, args.name, fps=args.fps)
+        build_from_clips(args.clips_dir, args.out, args.name, fps=args.fps, source=args.source or "not recorded: pass --source with where the clips come from and under which terms")
     else:
         ap.error("Specify either --poses-dir or --clips-dir")
 

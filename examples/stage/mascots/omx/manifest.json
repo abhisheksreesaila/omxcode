@@ -1,6 +1,7 @@
 {
   "name": "Omx Spirit",
   "version": 1,
+  "source": "AI-generated with Google Gemini (image model) via the Antigravity agent, 2026-11-25, from a text prompt: an original character (a dark-blue round creature). One 1024x1024 pose sheet (rest, listen, think, hype), cut into four transparent poses, animated into six strips by scripts/build_mascot_pack.py. No third-party artwork; the Masko 'Momo' video was only a reference for the hub-and-spoke clip pattern. See README.md.",
   "frame_width": 192,
   "frame_height": 192,
   "anchor_y": 0.927,

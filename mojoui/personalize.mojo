@@ -2,7 +2,8 @@
 # the orb", "keep the scores bigger", "put it back"). Small, bounded changes only (owner, 2026-11-25): no theme picker, no
 # makeover, no arbitrary colour or code. Four settings, each with a fixed set of values:
 #
-#   scheme     auto (night from 19:00 to 7:00, or the system's dark) | light | dark
+#   scheme     auto (light or dark as the system is: the default, unchanged) | light | dark | night (opt-in: dark from 19:00
+#              to 7:00 by the app's clock, else as the system is)
 #   accent     default (the theme's own accent) | violet | blue | teal | orange | red | gold: the theme palette's own
 #              series colours (Palette.series 0..5), never a colour from outside it
 #   presence   orb | mascot (mojoui.mascot.Presence switches between them, with a crossfade)
@@ -20,7 +21,7 @@
 #   LlmAgent.add_deferred(PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)   # or personalize_tool() for an AG-UI client
 #   look_knobs(look.prefs, KNOBS, look.can_undo())          # the same four knobs and "Put it back" for touch (a Popover's body)
 #   var c = look.knob(event, KNOBS)                         # a knob's event (KNOBS + 0 … 4)
-#   scheme_dark(look.prefs, system_dark, hour) · accent_colour(palette, look.prefs.accent) · stage_most(look.prefs, 6)
+#   scheme_dark(look.prefs, system_dark, hour) · is_night(hour) · accent_colour(palette, look.prefs.accent) · stage_most(look.prefs, 6)
 
 from std.os import makedirs
 from std.os.path import exists
@@ -45,7 +46,8 @@ comptime ROOMY_MOST = 4  # density roomy: at most this many tiles on a Stage (li
 
 comptime PERSONALIZE_ABOUT = (
     "Change this person's look a little, only when they ask (\"make it darker\", \"use the mascot instead of the orb\", "
-    "\"keep the scores bigger\", \"make it blue\", \"put it back\"). set: one or more of scheme (auto: dark at night | light | dark), "
+    "\"keep the scores bigger\", \"make it blue\", \"dark at night\", \"put it back\"). set: one or more of scheme (auto: as the "
+    "system is | light | dark | night: dark from 7 pm to 7 am), "
     "accent (default | violet | blue | teal | orange | red | gold: the theme's own colours only), presence (orb | mascot: who "
     "listens in the chat bar), density (compact: up to six tiles | roomy: fewer, bigger tiles). undo: true puts the last change "
     "back. Nothing else can change: no other colours, sizes or code. The result says what changed, or why not, in a sentence to pass on."
@@ -53,7 +55,7 @@ comptime PERSONALIZE_ABOUT = (
 comptime PERSONALIZE_PARAMS = (
     '{"type":"object","properties":{'
     '"set":{"type":"object","properties":{'
-    '"scheme":{"type":"string","enum":["auto","light","dark"]},'
+    '"scheme":{"type":"string","enum":["auto","light","dark","night"]},'
     '"accent":{"type":"string","enum":["default","violet","blue","teal","orange","red","gold"]},'
     '"presence":{"type":"string","enum":["orb","mascot"]},'
     '"density":{"type":"string","enum":["compact","roomy"]}},'
@@ -77,7 +79,7 @@ def look_keys() -> List[String]:
 def look_values(key: String) -> List[String]:
     """The values `key` may take, its default first ([] for a key that isn't a setting)."""
     if key == "scheme":
-        return ["auto", "light", "dark"]
+        return ["auto", "light", "dark", "night"]
     if key == "accent":
         return ["default", "violet", "blue", "teal", "orange", "red", "gold"]
     if key == "presence":
@@ -100,7 +102,9 @@ def look_labels(key: String) -> List[String]:
 def _say_value(key: String, value: String) -> String:
     """A value as a sentence names it."""
     if key == "scheme":
-        return "the dark look" if value == "dark" else ("the light look" if value == "light" else "light or dark by the time of day")
+        if value == "night":
+            return "dark at night (7 pm to 7 am)"
+        return "the dark look" if value == "dark" else ("the light look" if value == "light" else "light or dark as the system is")
     if key == "accent":
         return "the theme's own accent" if value == "default" else value + " as the accent"
     if key == "presence":
@@ -118,8 +122,10 @@ def _synonym(key: String, value: String) -> String:
             return "dark"
         if v == "day" or v == "lighter" or v == "white" or v == "bright":
             return "light"
-        if v == "system" or v == "time" or v == "automatic" or v == "default":
+        if v == "system" or v == "automatic" or v == "default":
             return "auto"
+        if v == "nightly" or v == "at night" or v == "dark at night" or v == "evening" or v == "time" or v == "by the clock":
+            return "night"
     elif key == "accent":
         if v == "purple" or v == "indigo":
             return "violet"
@@ -410,17 +416,20 @@ struct Personalize(Movable):
         undo += "]"
         var body = self.prefs.json()
         var text = String(body[byte = 0 : body.byte_length() - 1]) + ',"undo":' + undo + "}\n"
+        var tmp = p + ".tmp"
         try:
             makedirs(self.dir, exist_ok=True)
-            var tmp = p + ".tmp"
             with open(tmp, "w") as f:
                 f.write(text)
             if libc.rename(tmp, p) != 0:  # (whole or not at all)
+                _ = libc.unlink(tmp)
                 self.error = "couldn't replace " + p
                 return False
             self.error = ""
             return True
         except e:
+            if exists(tmp):
+                _ = libc.unlink(tmp)  # (no half-written file left behind)
             self.error = String(e)
             return False
 
@@ -515,14 +524,22 @@ struct Personalize(Movable):
 # ------------------------------------------------------------------------------------------------ reading a look
 
 
+def is_night(hour: Int) -> Bool:
+    """NIGHT_FROM (19:00) to NIGHT_UNTIL (7:00)."""
+    return hour >= NIGHT_FROM or hour < NIGHT_UNTIL
+
+
 def scheme_dark(p: LookPrefs, system_dark: Bool, hour: Int) -> Bool:
-    """Whether the look is dark: dark or light as set; auto: the system's dark, or the night (NIGHT_FROM to NIGHT_UNTIL by
-    `hour`, the app's own clock: a demo's clock that stands still keeps its pictures)."""
+    """Whether the look is dark: dark or light as set; auto (the default): as the system is, nothing else; night (opt-in):
+    dark from NIGHT_FROM to NIGHT_UNTIL by `hour` (the app's own clock: a demo's clock that stands still keeps its pictures),
+    as the system is by day."""
     if p.scheme == "dark":
         return True
     if p.scheme == "light":
         return False
-    return system_dark or hour >= NIGHT_FROM or hour < NIGHT_UNTIL
+    if p.scheme == "night":
+        return system_dark or is_night(hour)
+    return system_dark
 
 
 def accent_index(accent: String) -> Int:

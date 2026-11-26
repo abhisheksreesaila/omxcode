@@ -50,7 +50,7 @@ from mojoui.orb import Orb, OrbView, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.mascot import (
     MascotView, Presence, PRESENCE_MASCOT, PRESENCE_ORB,
     MASCOT_REST, MASCOT_LISTEN, MASCOT_THINK, MASCOT_SPEAK, MASCOT_HYPE,
-    mascot_state_id,
+    mascot_state_id, mascot_pack_dir,
 )
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, DROPPED, size_name, tile_icon
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
@@ -95,7 +95,6 @@ comptime DAY = 50  # DAY + k: try moment k of the day
 comptime UNPIN = 70  # UNPIN + k: pinned card k back on the stage
 comptime KNOBS = 90  # KNOBS + 0 … 4: the look's knobs (mojoui.personalize.look_knobs)
 comptime SETTINGS_CLOSE = 95
-comptime MASCOT_PACK = "examples/stage/mascots/omx"
 comptime WORD_BASE = 1000  # the cards' own messages and canvases (mojoui.genui)
 comptime ISO_BASE = 2000
 comptime WORD_CANVAS = 100
@@ -162,7 +161,7 @@ struct Main(App):
         self.mascot_side = 184
         var pack = environment("STAGE_MASCOT")
         if pack != "" and pack != "0":
-            var pack_dir = String("examples/stage/mascots/omx") if (pack == "1" or pack == "omx") else pack
+            var pack_dir = mascot_pack_dir("STAGE_MASCOT")  # (a folder in STAGE_MASCOT, else the omx pack found from the program)
             try:
                 self.presence.load_mascot(pack_dir)  # (the perch draws the mascot; the chat bar keeps the person's choice)
                 self.perch = True
@@ -321,7 +320,8 @@ struct Main(App):
         self.restyle()
 
     def hour(self) -> Int:
-        """The demo's clock's hour (STAGE_CLOCK, 10:59 by default): the look's "auto" is dark at night by it."""
+        """The demo's clock's hour (STAGE_CLOCK, 10:59 by default): the look's opt-in "night" is dark at night by it ("auto"
+        follows the system only)."""
         try:
             return Int(String(self.clock.split(":")[0]))
         except:
@@ -361,10 +361,11 @@ struct Main(App):
 
     def mascot_ready(mut self):
         """The mascot pack loaded and its resting strip decoded (~85 ms, once), before a switch needs it: never in a transition."""
-        if self.presence.has_mascot() or not exists(MASCOT_PACK + "/manifest.json"):
+        var pack = mascot_pack_dir("STAGE_MASCOT")
+        if self.presence.has_mascot() or pack == "":
             return
         try:
-            self.presence.load_mascot(MASCOT_PACK)
+            self.presence.load_mascot(pack)
             _ = self.presence.mascot.clips[MASCOT_REST].ensure_loaded()
         except e:
             print("stage mascot load failed:", e)

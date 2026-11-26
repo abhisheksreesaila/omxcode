@@ -22,7 +22,7 @@
 #   the orb, the rim   mojoui.orb                         in the chat bar: listens/thinks/speaks; the cloud lane's frame
 #   the pointer        mojoui.pointer.Pointer             a ring over the whole page that moves to the part she names (a card's part,
 #                                                         a tile while the tiles show: mojoui.agentui.stage_parts)
-#   the look           themes.omxqua.omxqua_counter        omxqua's Counter family, light or night as the system is (or by the clock)
+#   the look           themes.omxqua.omxqua_counter        omxqua's Counter family, light or night as the system is (by the clock only when a person picks "night")
 #   personalize        mojoui.personalize                 "make it darker", "use the mascot instead of the orb", "keep the scores
 #                                                         bigger", "put it back": the agent's `personalize` tool (and Settings' knobs)
 #                                                         change a few whitelisted settings per person (the top bar's All, A, S, M),
@@ -49,7 +49,8 @@
 # OMX_CLAUDE_CMD = the command that answers them (`claude`), MOJOUI_LEDGER = the record of what went out, MOJOUI_TODO = the to-do
 # file; MOJOUI_AUDIO_SOURCE / MOJOUI_AUDIO_SINK = the microphone and the speaker
 # (mojoui.audio: `file:a.wav@2.5` plays a recorded voice as the microphone); OMX_TV_QUIET = the TV's quiet before it closes (ms);
-# OMX_DARK=1 = the night look whatever the system says; OMX_MASCOT = the mascot pack (default examples/stage/mascots/omx); OMX_CLEAN=1 = no "sample" on the sample tiles (recordings only: samples.mojo).
+# OMX_DARK=1 / 0 = the night / day look whatever the system and the person's look say (checks, recordings); OMX_MASCOT = a mascot
+# pack folder (default: examples/stage/mascots/omx, found from the program); OMX_CLEAN=1 = no "sample" on the sample tiles (recordings only: samples.mojo).
 # Run it with scripts/omx.sh, or on a tablet with scripts/tablet.sh omx. Each turn prints OMX lines (what was heard, the reply,
 # the card, the numbers) for the checker.
 
@@ -77,8 +78,8 @@ from mojoui.looker import Looker
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme, Palette, ThemeCache
-from mojoui.mascot import Presence, PRESENCE_ORB, PRESENCE_MASCOT, MASCOT_REST
-from mojoui.personalize import (Personalize, LookChange, look_knobs, scheme_dark, accent_colour, stage_most, KNOB_COUNT,
+from mojoui.mascot import Presence, PRESENCE_ORB, PRESENCE_MASCOT, MASCOT_REST, mascot_pack_dir
+from mojoui.personalize import (Personalize, LookChange, look_knobs, scheme_dark, is_night, accent_colour, stage_most, KNOB_COUNT,
                                 PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)
 from mojoui.transition import Morph
 from mojoui.utf8 import head, boundary
@@ -157,7 +158,8 @@ struct Main(App):
     var turn_look: Int  # the camera's look serial when this turn began: only this turn's looks are pointed at
     var marks: List[PointMark]  # points sent to the ring, until the ring has been drawn on them (the lag is printed then)
     var dark: Bool
-    var system_dark: Bool  # the system's (or OMX_DARK's) dark: the look's "auto" follows it, and the night
+    var system_dark: Bool  # the system's dark: the look's "auto" follows it
+    var night_was: Bool  # the clock was in the night (19:00-7:00) at the last restyle: "night" morphs when that changes
     var themes: ThemeCache  # one theme per scheme and accent, each built once (D-7889)
     var look: Personalize  # each person's look (mojoui.personalize)
     var morph: Morph  # the next change morphs (mojoui.transition)
@@ -237,8 +239,8 @@ struct Main(App):
         self.creator = Creator.from_environment("OMX", CREATOR_MSG, CREATOR_CANVAS, sd + "/third_party/stable-diffusion.cpp/build/bin/sd-server", models + "/card2")
         self.looker = Looker(LOOK_CANVAS)
         self.presence = Presence()
-        var pack = environment("OMX_MASCOT", "examples/stage/mascots/omx")
-        if exists(pack + "/manifest.json"):
+        var pack = mascot_pack_dir("OMX_MASCOT")  # (a folder in OMX_MASCOT, else the omx pack found from the program, not the working directory)
+        if pack != "":
             try:  # (its resting strip decoded now, ~85 ms once: never while a change morphs)
                 self.presence.load_mascot(pack)
                 _ = self.presence.mascot.clips[MASCOT_REST].ensure_loaded()
@@ -252,6 +254,7 @@ struct Main(App):
         self.marks = List[PointMark]()
         self.dark = False
         self.system_dark = False
+        self.night_was = False
         self.themes = ThemeCache()
         self.themes.put("light/default", omxqua_counter(False))
         self.themes.put("dark/default", omxqua_counter(True))
@@ -324,16 +327,20 @@ struct Main(App):
             self.tiles.set_columns(cols)
 
     def appearance(mut self, dark: Bool):
-        self.system_dark = dark or environment("OMX_DARK") == "1"
+        self.system_dark = dark
         self.restyle()
 
     def theme_key(self) -> String:
         return ("dark/" if self.dark else "light/") + self.look.prefs.accent
 
     def restyle(mut self):
-        """The look's scheme (auto: the system's dark, or the night by this machine's clock) and accent into the theme, each
-        theme built once, here (never in theme()); the canvases redraw in it."""
-        self.dark = scheme_dark(self.look.prefs, self.system_dark, local_time().hour)
+        """The look's scheme (auto: as the system is; night, opt-in: dark from 19:00 to 7:00 by this machine's clock) and accent
+        into the theme, each theme built once, here (never in theme()); the canvases redraw in it. OMX_DARK=1 / 0 pins the
+        night / day look over the system and the person's look (checks and recordings)."""
+        var hour = local_time().hour
+        self.night_was = is_night(hour)
+        var pin = environment("OMX_DARK")
+        self.dark = True if pin == "1" else (False if pin == "0" else scheme_dark(self.look.prefs, self.system_dark, hour))
         var key = self.theme_key()
         if not self.themes.has(key):
             var p = counter_palette(self.dark)
@@ -488,10 +495,12 @@ struct Main(App):
 
     def tick(mut self):
         self.ticks += 1
-        if self.ticks % 2000 == 0 and self.look.prefs.scheme == "auto":  # (about a minute: "auto" turns dark at night, with a morph)
-            if scheme_dark(self.look.prefs, self.system_dark, local_time().hour) != self.dark:
-                self.morph.morph()
+        if self.look.prefs.scheme == "night" and self.ticks % 1000 == 0:  # (every ~30 s, only while "night" is set: the hour
+            if is_night(local_time().hour) != self.night_was:                 # crossing 19:00 or 7:00 morphs the look; auto never looks)
+                var was = self.dark
                 self.restyle()
+                if self.dark != was:
+                    self.morph.morph()
         if not self.primed and self.llm:
             self.primed = True
             self.llm.value().set_tools(self.tools())
