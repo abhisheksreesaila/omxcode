@@ -103,6 +103,8 @@ dialog.alert .buttons { display: flex; gap: 8px; justify-content: center; }
 .overlay > .island.h-start { left: 0; } .overlay > .island.h-end { right: 0; }
 .overlay > .island.h-center { left: 50%; transform: translateX(-50%); }
 .overlay > .island.v-start { top: 0; } .overlay > .island.v-end { bottom: 0; }
+.overlay > .band { position: absolute; z-index: 5; left: 0; right: 0; display: flex; flex-direction: column; } .overlay > .band.v-start { top: 0; } .overlay > .band.v-end { bottom: 0; } .overlay > .band > * { flex: none; min-width: 0; }  /* a band across the overlay's edge (.pin(STRETCH, END)), no island's chrome: mojoui.stage's TV and chat bar (goal 77 M7d) */
+.overlay > .island.cover { inset: 0; margin: 0; transform: none; display: flex; flex-direction: column; } .overlay > .island.cover > * { flex: 1 1 0; min-height: 0; }  .overlay > .island.cover { pointer-events: none; }  /* a layer over the whole overlay (the cloud frame, the pointer ring): it only shows, presses go to the page (goal 77) */
 .menubar { display: flex; align-items: center; gap: 2px; }
 .menu { position: relative; }
 .menu-title { border: 0; background: transparent; padding: 4px 9px; border-radius: 4px; font: inherit; font-size: 12.5px; cursor: default; color: inherit; }
@@ -168,6 +170,8 @@ label.picker { position: relative; cursor: pointer; display: inline-flex; align-
 label.picker.tool { flex-direction: column; } label.picker input.picker-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 button.tool { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 58px; min-height: 48px; padding: 4px 6px; }
 button.tool span { font-size: 11px; line-height: 13px; }
+label.picker.tool:not(.inline):not(.icon-only) { justify-content: center; gap: 2px; min-width: 58px; min-height: 48px; padding: 4px 6px; }  /* (a picker as a tool: the same box as a button tool, goal 76's ribbon) */
+label.picker.tool:not(.inline) span { font-size: 11px; line-height: 13px; }
 button.tool.inline, label.picker.tool.inline { flex-direction: row; gap: 6px; min-width: 0; min-height: 34px; padding: 0 10px; }
 button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 [data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only { min-width: 34px; min-height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
@@ -190,3 +194,8 @@ button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 .mojoui-busy-page a.button { align-self: flex-start; text-decoration: none; }
 .mojoui-busy-page a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 8px; font-weight: 600;
   background: var(--accent, #2f7d6d); color: light-dark(#fff, #0b0d10); }
+/* the page's audio (docs/web-audio.md): shown only while an app wants sound and nobody has tapped the page yet */
+.mojoui-audio-pill { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 50;
+  padding: 12px 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 600; cursor: pointer; color: #fff;
+  background: var(--o-accent, var(--accent)); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
+.mojoui-audio-pill[hidden] { display: none; }

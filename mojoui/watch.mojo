@@ -147,6 +147,48 @@ def _errno() -> Int:
 
 # ---- listing folders (opendir/readdir: d_type says file or folder without a stat per entry)
 
+comptime KIND_OTHER = 0  # a symlink, a socket, a device…: never followed, never listed
+comptime KIND_FILE = 1
+comptime KIND_DIR = 2
+
+
+def classify_mode(mode: Int) -> Int:
+    """What an st_mode is: KIND_DIR, KIND_FILE, or KIND_OTHER (a symlink is OTHER: it is never followed out of the folder)."""
+    var fmt = mode & 0o170000
+    if fmt == 0o040000:
+        return KIND_DIR
+    if fmt == 0o100000:
+        return KIND_FILE
+    return KIND_OTHER
+
+
+def entry_mode(path: String) -> Int:
+    """The mode of the entry itself (lstat: a symlink answers as a symlink, not as what it points at); -1 if it can't be read."""
+    var p = path
+    comptime if CompilationTarget.is_macos():
+        var st = List[Int](length=24, fill=0)
+        var rc = Int(_c[c_int]("lstat", Int(p.as_c_string_span().unsafe_ptr()), Int(st.unsafe_ptr())))
+        _ = p.byte_length()
+        return (st[0] >> 32) & 0xFFFF if rc == 0 else -1  # (st_mode: a 16-bit field at byte 4)
+    var stx = List[Int](length=32, fill=0)
+    var rc = Int(_c[c_int]("statx", c_int(-100), Int(p.as_c_string_span().unsafe_ptr()), c_int(0x100), c_int(0x7FF), Int(stx.unsafe_ptr())))
+    _ = p.byte_length()  # (AT_FDCWD, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS; stx_mode is a 16-bit field at byte 28)
+    return (stx[3] >> 32) & 0xFFFF if rc == 0 else -1
+
+
+def entry_kind(d_type: Int, full: String) -> Int:
+    """What a directory entry is, from readdir's d_type; when the file system doesn't say (DT_UNKNOWN, 0) the entry is looked at
+    without following a link (D-7258): a symlink to a folder is OTHER, not a folder to descend into."""
+    if d_type == 4:
+        return KIND_DIR
+    if d_type == 8:
+        return KIND_FILE
+    if d_type == 0:
+        var m = entry_mode(full)
+        return classify_mode(m) if m >= 0 else KIND_OTHER
+    return KIND_OTHER
+
+
 def list_dir(path: String) -> List[Tuple[String, Bool]]:
     """A folder's entries (name, is_dir), without . and ..; symlinks and other kinds left out. Empty if unreadable."""
     var out = List[Tuple[String, Bool]]()
@@ -165,19 +207,11 @@ def list_dir(path: String) -> List[Tuple[String, Bool]]:
         var name = _from_c(e + name_at)
         if name == "." or name == "..":
             continue
-        if t == 4:  # DT_DIR
+        var kind = entry_kind(t, path + "/" + name)
+        if kind == KIND_DIR:
             out.append((name, True))
-        elif t == 8:  # DT_REG
+        elif kind == KIND_FILE:
             out.append((name, False))
-        elif t == 0:  # DT_UNKNOWN (some file systems): ask
-            var full = path + "/" + name
-            var probe = _c[Int]("opendir", Int(full.as_c_string_span().unsafe_ptr()))
-            _ = full.byte_length()
-            if probe != 0:
-                _ = _c[c_int]("closedir", probe)
-                out.append((name, True))
-            else:
-                out.append((name, False))
     _ = _c[c_int]("closedir", d)
     return out^
 

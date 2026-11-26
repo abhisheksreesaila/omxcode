@@ -1,6 +1,6 @@
 # What an app provides, and the platform-independent loop every host runs.
 
-from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY, PRESS, RELEASE, IME_COMMIT
+from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY, PRESS, RELEASE, IME_COMMIT, BOARD_LIVE, BOARD_ZOOM, BOARD_VIEW, BOARD_PICK
 from mojoui.graphemes import next_grapheme
 from mojoui.look import resolve_layout
 from mojoui.diff import Diff, diff
@@ -159,11 +159,6 @@ trait App(Movable, Deinitable):
     def hears_key_ups(self) -> Bool:
         """True: a modifier let go comes as a KEY of its own ("KeyUp:Control_L"; mojoui.doubletap), and on a Mac pressed
         ("Meta_L"), as GTK sends it. The default: no."""
-        return False
-
-    def hovers(self) -> Bool:
-        """True: the app's Canvases get HOVER gestures as the pointer moves over them with no button held (it draws hover
-        states itself; goal 79). The default: no, so apps that redraw on every gesture don't redraw on every motion."""
         return False
 
     def window_size(self) -> Tuple[Int, Int]:
@@ -700,6 +695,16 @@ struct Runtime[A: App](Movable):
                     return self.dispatch(Event(Int(n.hint), "hold" if kind == PRESS else "release", Int(x), x, y, dx, dy, zoom))
                 except:
                     return Diff(False, [])
+            if kind == BOARD_ZOOM or kind == BOARD_VIEW or kind == BOARD_PICK:  # (a free Board, mojoui.freeboard: Ctrl+wheel; the page
+                if n.msg == 0:                                                    # scrolled; a card pressed: it takes the focus)
+                    return Diff(False, [])
+                var what = "zoom" if kind == BOARD_ZOOM else ("view" if kind == BOARD_VIEW else "focus")
+                return self.dispatch(Event(n.msg, what, Int(x) if kind == BOARD_PICK else 0, x, y, dx, dy, zoom))
+            if kind == BOARD_LIVE:  # (a free Board's drag, every motion frame: y = the handle, 8 = the title band: a move)
+                var live = n.msg if Int(y) % 100 == 8 else n.msg2  # (y: the handle + NO_SNAP + FIRST_FRAME, mojoui.freeboard)
+                if live == 0:
+                    return Diff(False, [])
+                return self.dispatch(Event(live, "live", Int(x), x, y, dx, dy, zoom))
             var msg = n.msg if kind == PAN else (n.msg2 if kind == ZOOM else 0)
             if msg == 0:
                 return Diff(False, [])

@@ -414,7 +414,7 @@ struct UIKitHost[A: App](Movable):
             # pan, pinch and tap recognisers calling back into it.
             w = new("MojoCanvasView")
             _ = msg(w, "setContentMode:", 0)  # scale to fill: the pixels match its size
-            _ = msg(w, "setUserInteractionEnabled:", 1)  # image views ignore touches by default
+            _ = msg(w, "setUserInteractionEnabled:", 0 if node.size == 2 else 1)  # image views ignore touches by default; a .passthrough() canvas keeps ignoring them: they go to what is under it (D-7893)
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             for axis in range(2):  # its size comes from the layout, never from its picture
                 _ = msg(w, "setContentHuggingPriority:forAxis:", Float32(1), axis)
@@ -576,6 +576,12 @@ struct UIKitHost[A: App](Movable):
                 _ = msg(w, "addSubview:", child)
                 if k == 0:  # the base fills the overlay
                     for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
+                        _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+                elif self.rt.shown.nodes[c].fills and self.rt.shown.nodes[c].grows:  # a layer that covers the whole overlay (.fill().grow(): the Stage's TV box), as GTK's (D-7893)
+                    for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
+                        _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the whole width at an edge, no margin (mojoui.stage's TV, D-6711)
+                    for anchor in ["leadingAnchor", "trailingAnchor", "bottomAnchor" if self.rt.shown.nodes[c].y == END else "topAnchor"]:
                         _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
                 else:  # an island: pinned to an edge or corner, 12 pt in
                     var pin = self.rt.shown.nodes[c].copy()
@@ -766,6 +772,8 @@ struct UIKitHost[A: App](Movable):
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
         ref node = self.rt.shown.nodes[i]
         var outer = shown
+        if node.hidden:  # (.hidden(): in the tree, not drawn; a UIStackView leaves a hidden view out, D-7601)
+            _ = msg(shown, "setHidden:", 1)
         if node.tip != "" and self.widgets[i] != 0:  # a tooltip for the pointer (iPad with a trackpad or mouse)
             var tip = msg(msg(cls("UIToolTipInteraction"), "alloc"), "initWithDefaultToolTip:", ns_string(node.tip))
             _ = msg(self.widgets[i], "addInteraction:", tip)
@@ -789,6 +797,8 @@ struct UIKitHost[A: App](Movable):
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.min_w)), "setActive:", 1)
         if node.max_w != 0:
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintLessThanOrEqualToConstant:", Float64(node.max_w)), "setActive:", 1)
+        if node.hidden and outer != shown:  # (the padded or sized wrapper is what the parent stack holds: it hides too, review round 1)
+            _ = msg(outer, "setHidden:", 1)
         return outer
 
     def show(mut self, self_addr: Int):
@@ -968,7 +978,7 @@ struct UIKitHost[A: App](Movable):
         cfunc[NoneType]("CGImageRelease", image)
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
-        self.canvases[k].drawn = version
+        self.canvases[k].drawn = version if not surface.again else -1  # mid-animation: drawn again next tick, as GTK's (D-7894)
         self.apply(d, self_addr)
 
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):

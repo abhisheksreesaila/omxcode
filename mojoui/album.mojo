@@ -12,12 +12,17 @@ from mojoui.json import json_string
 from mojoui.canvas import Surface
 
 
+comptime MAX_HELD = 24  # pictures made at run time that an agent may still name; the oldest let go beyond this (D-7291)
+
+
 struct Album(Copyable, Movable, Defaultable):
     var names: List[String]
     var abouts: List[String]  # what each shows, for the agent
     var pictures: List[ArcPointer[Picture]]  # (copies of the album share the pixels: every screen holds one)
+    var held: List[String]  # the names hold() made, oldest first (add()'s pictures are the app's own and stay)
 
     def __init__(out self):
+        self.held = List[String]()
         self.names = List[String]()
         self.abouts = List[String]()
         self.pictures = List[ArcPointer[Picture]]()
@@ -33,6 +38,46 @@ struct Album(Copyable, Movable, Defaultable):
         self.names.append(name)
         self.abouts.append(about)
         self.pictures.append(ArcPointer(p^))
+
+    def hold(mut self, name: String, picture: ArcPointer[Picture], about: String) -> String:
+        """A picture the app made at run time (a tool drew it: mojoui.creator), kept under a name the agent may use. The name
+        is made safe: lower-case letters, digits and "-" only, at most 40 letters, never one already held (a number is added);
+        what it ended up as is returned. The agent still never sends pixels, only this name."""
+        var base = String("")
+        var dash = False
+        for b in name.as_bytes():
+            var c = Int(b)
+            if c >= 65 and c <= 90:
+                c += 32
+            if (c >= 97 and c <= 122) or (c >= 48 and c <= 57):
+                if dash and base.byte_length() > 0:
+                    base += "-"
+                dash = False
+                base += chr(c)
+            else:
+                dash = True
+        if base.byte_length() > 40:
+            var cut = String(base[byte = :40])
+            base = cut^
+        if base == "":
+            base = "picture"
+        var final = base
+        var n = 2
+        while self.find(final) >= 0:
+            final = base + "-" + String(n)
+            n += 1
+        self.names.append(final)
+        self.abouts.append(about)
+        self.pictures.append(picture)
+        self.held.append(final)
+        while len(self.held) > MAX_HELD:  # (a long session of comics: the oldest pictures stop being nameable, their cards keep drawing them)
+            var gone = self.find(self.held[0])
+            _ = self.held.pop(0)
+            if gone >= 0:
+                _ = self.names.pop(gone)
+                _ = self.abouts.pop(gone)
+                _ = self.pictures.pop(gone)
+        return final
 
     def find(self, name: String) -> Int:
         for k in range(len(self.names)):

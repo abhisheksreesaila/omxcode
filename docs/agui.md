@@ -22,6 +22,8 @@ it with generic pieces any app can use; `examples/agentchat` (60 lines) only com
 ```mojo
 var chat = AgentChat[SheetHub](url, base=20_000, canvas_base=2000, layout=CHAT_PANEL, title="Assistant")
 chat.suggest("Chart a million orders")                        # chips on the welcome screen (the agent's CUSTOM "suggestions" replace them)
+
+**Points** (goal 77): a voice app that shows a card and talks about it sends the CUSTOM event `point` while the audio that names a part plays: `{"type":"CUSTOM","name":"point","value":{"card":"card2","part":"meaning","at_ms":420}}` (`mojoui.pointer.point_event`; `at_ms` = how far into the clause's audio the name is said). A client that plays the audio itself shows the ring at that moment; omx's hosts draw it as a ring on the part tagged `card2.meaning`.
 chat.offer(Tool("refund_order", "Refund an order", schema), confirm=True)   # asks the person first
 var hub = SheetHub(); hub.add("orders", sheet^); chat.set_hub(hub^)          # datasets: rows stay here
 # App: requests() → chat.requests(); update(e) → chat.update(e); view() → chat.view() (or chat.over(content): a popup)
@@ -49,6 +51,39 @@ var hub = SheetHub(); hub.add("orders", sheet^); chat.set_hub(hub^)          # d
   run's `context`.
 - **An agent in the app's process** (`LocalAgent`): no HTTP, no other language; its events go through the same handler
   (2,004 events in 26 ms here, tests/test_local_agent.mojo).
+
+## The LLM agent in the app's own process (goal 72 M3, mojoui.llmagent)
+
+`LlmAgent` is a `LocalAgent` whose brain is `mojoui.llm` (Qwen3.8-27B through libllama, no server): every reply is AG-UI
+events, as the model produces them. The same agent is served over AG-UI's HTTP/SSE transport, so any client can use it.
+
+```mojo
+var agent = LlmAgent(Llm("models/Qwen3.8-27B-UD-Q4_K_M.gguf", gpu=1))
+agent.add_function(ToolFn("get_time", "The time now.", '{"type":"object","properties":{}}', clock))   # a plain Mojo function
+var runner = AppRunner[Shopping](Shopping())          # the app's own buttons, text fields and toggles are tools (D-162)
+var events = agent.run_with(input, runner)            # a whole run, blocking: tests, tools
+# an app steps it instead: var out = agent.begin(input); then, when the LLM's wake byte arrives: agent.poll(),
+# for c in agent.take_calls(): agent.answer(c.id, result), agent.cancel() for barge-in
+var served = serve_llm_agent(agent^, runner^, port=8765)     # POST http://127.0.0.1:8765/ (RunAgentInput) -> text/event-stream
+```
+
+- **Events** (D-7221): RUN_STARTED, STATE_DELTA (`/agent`: the step and the tools used), TEXT_MESSAGE_START/CONTENT/END
+  (words as they stream; tool-call markup is never text; the thinking is dropped), TOOL_CALL_START/ARGS/END/RESULT, RUN_FINISHED
+  (or RUN_ERROR). Up to 5 model steps a run: a call's result goes back to the model, which answers or calls again.
+- **Tools** (D-7222): the run's frontend tools (`render_ui`: validated by the catalog, the model reads the refusal and
+  corrects itself; any other frontend tool ends the run with its call and the client answers in the next), the app's own
+  controls named as the agent host names them (the tag, else a slug of the words; the tooltip describes; a call is the
+  tap's event; the result says what is on screen now) and plain Mojo functions. `view_tools(view)` is the list; the app
+  writes nothing for its buttons to be tools.
+- **Conversation** (D-7223): the agent keeps the thread and the prompt cache (sequence 0); a run adds only the messages it
+  hasn't seen, so a client that resends everything costs nothing. A second sequence stays free for background work.
+- **Barge-in** (D-7225): `cancel()` ends the run with RUN_FINISHED `result {"cancelled": true}` in 11-25 ms; the words
+  said stay in the conversation, marked as interrupted. Over HTTP the client closing the connection is the cancel.
+- **The endpoint** (D-7224): POST `/` or `/agent`, one run at a time (409 otherwise), loopback and local-only by default
+  (403 for a foreign Origin, 415 for a non-JSON body). Proved with the official `ag-ui-protocol` SDK: every event the
+  endpoint sends validates with its `Event` models (scripts/agui_llm_check.py).
+- **Numbers** (build/g72/agent-bench.json, Qwen3.8-27B Q4_K_M on one RTX 3090, warm prompt cache, median of 3): first
+  TEXT_MESSAGE_CONTENT 106-112 ms in the process, 111 ms through the endpoint (the HTTP and SSE hop adds about 5 ms).
 
 ## The client
 

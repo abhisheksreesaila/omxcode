@@ -14,6 +14,7 @@ from mojoui.album import Album
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from themes.omxqua import omxqua
+from mojoui.pointer import fitted_rect
 
 comptime TAGUS = "examples/agentchat/pictures/tagus.jpg"
 
@@ -21,6 +22,13 @@ comptime TAGUS = "examples/agentchat/pictures/tagus.jpg"
 def says(v: View, word: String) -> Bool:
     for ref n in v.nodes:
         if (n.kind == TEXT or n.kind == BUTTON) and n.text.find(word) >= 0:
+            return True
+    return False
+
+
+def says_tag(v: View, tag: String) -> Bool:
+    for ref n in v.nodes:
+        if n.name == tag:
             return True
     return False
 
@@ -64,8 +72,34 @@ def main() raises:
     var pal = omxqua(False).palette.copy()
     pic.draw(100, surface, pal, blank, Font())
     assert_true(surface.get(150, 80) != pal.card and surface.get(150, 80) != 0, "the picture is drawn, not only its backdrop")
+    _ = len(px)  # (the surface's pixels live in px: keep it alive past the last read, or Mojo frees it after Surface() took its address)
     assert_true(album.describe().find('"name":"tagus"') >= 0 and album.describe().find('"width":1200') >= 0, album.describe())
     print("picture: ok")
+    # Sight (goal 77 M6): a held picture with boxes named by their labels; a box outside 0-1000 or a name the app doesn't hold is refused
+    var sight = GenUi(sample("Sight"), 10_000, 100, album=album)
+    assert_equal(sight.problem, "")
+    assert_true(says(sight.view(blank, 0), "The bridge"), "its caption")
+    var sx = List[UInt32](length=300 * 200, fill=0)
+    var sight_surface = Surface(Int(sx.unsafe_ptr()), 300, 200, 1.0)
+    sight.draw(100, sight_surface, pal, blank, Font())
+    # the sample's box is 120,300..640,520 of 1000 on a 1200x800 picture fitted to 300x200 (scale 0.25): its left edge is at x = 36 (2 px wide)
+    assert_equal(sight_surface.get(37, 80), pal.series[0])
+    assert_true(sight_surface.get(60, 80) != pal.series[0], "inside the box is the picture, not a fill")
+    _ = len(sx)  # (as px above: the drawing wrote into freed memory and a later parse crashed once genui's struct grew, goal 77 M3)
+    # its boxes are parts the pointer lands on: named by the label, found in the picture's view (tagged card + ".picture" + canvas)
+    sight.card = "card4"
+    var sparts = sight.parts()
+    assert_equal(len(sparts), 1)
+    assert_equal(sparts[0].tag(), "card4.bridge")
+    assert_equal(sparts[0].inside, "card4.picture0")
+    assert_true(says_tag(sight.view(blank, 0), "card4.picture0"), "the picture's view carries the tag the part is found in")
+    var on = fitted_rect([0.0, 0.0, 300.0, 200.0], sparts[0].area)  # (the same 300x200 canvas: the box drawn at x = 36)
+    assert_equal(Int(on[0]), 36)
+    assert_equal(Int(on[0] + on[2]), 192)
+    assert_true(GenUi('{"ui":{"component":"Sight","name":"eiffel","boxes":[{"label":"a","x0":1,"y0":1,"x1":5,"y1":5}]}}', 10_000, 100, album=album).problem.find("unknown picture") >= 0, "an unknown picture")
+    assert_true(GenUi('{"ui":{"component":"Sight","name":"tagus","boxes":[{"label":"a","x0":1,"y0":1,"x1":5,"y1":2000}]}}', 10_000, 100, album=album).problem.find("bad prop") >= 0, "a box outside the picture")
+    assert_true(GenUi('{"ui":{"component":"Sight","name":"tagus","boxes":[]}}', 10_000, 100, album=album).problem.find("bad prop") >= 0, "no boxes")
+    print("sight: ok")
     # Disclosure: folded unless "open"; the user's tap opens or folds it (the screen's own state: no action for the agent)
     var fold = GenUi('{"ui":{"component":"Disclosure","title":"Getting around","children":[{"component":"Text","text":"Tram 28"}]}}', 10_000, 100)
     assert_true(says(fold.view(blank, 0), "Getting around") and not says(fold.view(blank, 0), "Tram 28"), "folded at first")

@@ -11,7 +11,9 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import View, BUTTON, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
 from mojoui.paragraph import link_href
 from mojoui.a11y import explicit_name
-from mojoui.diff import Diff
+from mojoui.diff import Diff, SET_SIZE, placed
+from mojoui.view import BOARD
+from mojoui.freeboard import is_free
 from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
@@ -19,6 +21,10 @@ from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
 from mojoui.uijobs import wake_pipe
 from mojoui.pygil import python_hosted, gil_release, gil_restore
+from mojoui.geometry import register_rects, SLOT_RECT_HOST
+from mojoui.json import Json, J_ARRAY, J_OBJECT
+from mojoui.shared import put_shared
+from std.ffi import c_int
 
 
 def json_str(s: String) -> String:
@@ -55,9 +61,9 @@ def view_to_json(v: View) -> String:
         out += ',"pad_v":' + String(n.pad_v) + ',"pad_h":' + String(n.pad_h) + ',"w":' + String(n.w) + ',"h":' + String(n.h)
         out += ',"min_w":' + String(n.min_w) + ',"max_w":' + String(n.max_w) + ',"grows":' + ("true" if n.grows else "false")
         out += ',"fills":' + ("true" if n.fills else "false") + ',"align_items":' + String(n.align_items)
-        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"a11y_name":' + json_str(explicit_name(n))
+        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"a11y_name":' + json_str(explicit_name(n)) + (',"cursor":' + json_str(n.cursor) if n.cursor != "" else "")
         out += ',"width_from_parent":' + ("true" if n.width_from_parent else "false") + ',"height_from_parent":' + ("true" if n.height_from_parent else "false")
-        out += ',"x":' + String(n.x) + ',"y":' + String(n.y) + (',"arrive":true' if n.arrives else "")
+        out += ',"x":' + String(n.x) + ',"y":' + String(n.y) + (',"arrive":true' if n.arrives else "") + (',"hidden":true' if n.hidden else "")
         out += ',"options":['
         for j in range(len(n.options)):
             if j > 0:
@@ -72,8 +78,42 @@ def view_to_json(v: View) -> String:
     return out + "]"
 
 
+def _mark_inside(v: View, i: Int, mut marks: List[Bool]):
+    marks[i] = True
+    for c in v.nodes[i].children:
+        _mark_inside(v, c, marks)
+
+
+def in_free_cards(v: View) -> List[Bool]:
+    """Which nodes are a free canvas's card or inside one (mojoui.freeboard)."""
+    var out = List[Bool](length=len(v.nodes), fill=False)
+    for n in v.nodes:
+        if n.kind == BOARD and is_free(n.text):
+            for c in n.children:
+                _mark_inside(v, c, out)
+    return out^
+
+
+def sizes_only(d: Diff, shown: View) -> Bool:
+    """A partial rebuild that keeps every node where it was (nothing came, went or moved between stacks) and whose sizes
+    are all a Board's cards' or, on a free canvas, anything's inside a card (a live resize also sizes the card's canvas, its
+    grid: mojoui.freeboard): the web takes it as patches, so a card being dragged isn't swapped out under the pointer (a
+    whole new screen would restart its canvases every frame and lose the drag's pointer capture)."""
+    if not d.partial or len(d.resync) > 0 or len(d.kept) != len(shown.nodes):
+        return False
+    for j in range(len(d.kept)):
+        if d.kept[j] != j:
+            return False
+    var on_board = placed(shown)
+    var inside = in_free_cards(shown)
+    for p in d.patches:
+        if p.op == SET_SIZE and not on_board[p.node] and not inside[p.node]:
+            return False
+    return True
+
+
 def diff_to_json(d: Diff, shown: View) -> String:
-    if d.rebuild:
+    if d.rebuild and not sizes_only(d, shown):
         return '{"rebuild":true,"nodes":' + view_to_json(shown) + "}"
     var out = String('{"rebuild":false,"patches":[')
     for i in range(len(d.patches)):
@@ -89,8 +129,12 @@ struct WebSession[A: App](Movable):
 
     var rt: Runtime[Self.A]
     var pixels: List[UInt32]
+    var rect_tags: List[String]  # where the page says its tagged views are (web_rects), 4 numbers each in rect_vals
+    var rect_vals: List[Float64]
 
     def __init__(out self):
+        self.rect_tags = List[String]()
+        self.rect_vals = List[Float64]()
         self.rt = Runtime(Self.A())
         self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines in the server's log)
         self.pixels = List[UInt32]()
@@ -115,7 +159,46 @@ def web_new[A: App]() -> Int:
     _ = python_hosted()
     var tab = alloc(Layout[WebSession[A]].single()).unsafe_leak()
     tab.unsafe_write(WebSession[A]())
+    var rect_fn = web_rect_of[A]  # (mojoui.geometry.rect_of: a drawn pointer asks where a tagged view is; the page's last report answers)
+    register_rects(Pointer(to=rect_fn).unsafe_bitcast[Int]()[], Int(tab))
     return Int(tab)
+
+
+def web_rects[A: App](handle: Int, data: String):
+    """The page's report of where its tagged views are: {"card2.meaning": [x, y, w, h], …} in viewport pixels (mojoui/hosts/web.py
+    PAGE_JS). Replaces the last report; at most 400 views are kept."""
+    var tab = tab_at[A](handle)
+    var tags = List[String]()
+    var vals = List[Float64]()
+    try:
+        var j = Json.parse(data)
+        for k in range(min(j.size(0) if j.kind(0) == J_OBJECT else 0, 400)):  # (goal 79's Json: members by at() and key(), the merge with main)
+            var a = j.at(0, k)
+            if j.kind(a) == J_ARRAY and j.size(a) == 4:
+                tags.append(j.key(0, k))
+                for q in range(4):
+                    vals.append(j.real(j.at(a, q)))
+    except:
+        return
+    tab[].rect_tags = tags^
+    tab[].rect_vals = vals^
+
+
+def web_rect_of[A: App](host_addr: Int, tag_addr: Int, tag_len: Int, out_addr: Int) abi("C") -> Int:
+    """mojoui.geometry.rect_of for the tab being drawn (web_draw says which): [x, y, w, h] from the page's last report."""
+    var tab = tab_at[A](host_addr)
+    var bytes = List[UInt8](capacity=tag_len)
+    var tp = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=tag_addr)
+    for k in range(tag_len):
+        bytes.append(tp[k])
+    var tag = String(unsafe_from_utf8=bytes)
+    for i in range(len(tab[].rect_tags)):
+        if tab[].rect_tags[i] == tag:
+            var out = Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=out_addr)
+            for k in range(4):
+                out[k] = tab[].rect_vals[4 * i + k]
+            return 1
+    return 0
 
 
 def web_title[A: App](handle: Int) -> String:
@@ -151,6 +234,7 @@ def web_draw[A: App](handle: Int, node: Int, width: Int, height: Int, scale: Flo
     {"address", "width", "height", "diff"}: where the RGBA pixels are (valid until the next
     call for this tab) and what else changed on screen."""
     var tab = tab_at[A](handle)
+    put_shared(SLOT_RECT_HOST, handle)  # (rect_of answers for the tab being drawn: the pointer ring and the orb ask while they draw)
     var w = min(max(width, 1), 4096)
     var h = min(max(height, 1), 4096)
     if len(tab[].pixels) != w * h:

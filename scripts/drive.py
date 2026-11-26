@@ -240,12 +240,18 @@ def step(page, s):
         page.keyboard.press(rest)
     elif verb == "tap":
         title, _, nth = rest.partition("@")
-        by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
+        by_title = page.locator("[data-kind=button]:visible").filter(has_text=exact(title))  # (a shown one first: a ribbon's other tabs are hidden, D-7601)
+        if not by_title.count():
+            by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
         if not by_title.count():  # (no button with that title: the one tagged so, as GTK's step and an agent name it)
             by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
         if not by_title.count():  # (an Image(on_tap) tagged so: a tappable picture, goal 71)
             by_title = page.locator(f"img.tappable[data-tag={title!r}]")
-        by_title.nth(int(nth or 0)).click()
+        target = by_title.nth(int(nth or 0))
+        if target.is_visible():
+            target.click()
+        else:  # (a hidden view's button, a ribbon's other tab: its click as GTK's tap: emits it, D-7601; a person picks the tab first)
+            target.dispatch_event("click")
     elif verb in ("type", "submit", "enter"):
         hint, _, text = rest.partition("=")
         field = page.locator(f"input[data-kind=field][placeholder={hint!r}]").first
@@ -408,7 +414,7 @@ def step(page, s):
     elif verb == "wait" and rest.isdigit():  # wait:1500: as GTK's wait (= pause), so one step list drives both hosts
         page.wait_for_timeout(int(rest))
     elif verb == "wait":  # until a button with this title appears (e.g. after frames change the screen)
-        page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000)
+        page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000, state="attached")  # (in the page: a ribbon's hidden tab counts, as GTK's waitfor reads the tree, D-7601)
     elif verb == "open" and "." in rest and not page.locator(".menu-title").filter(has_text=exact(rest)).count():
         # open:clip.mp4: a file, as GTK's step opens it: the first file picker on screen whose accept list takes its
         # extension (or any file) gets it; a relative name is looked up in $MOJOUI_DOCUMENTS, then $OMX_DOCUMENTS
@@ -455,9 +461,11 @@ RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientR
 
 
 # The window's regions, by mojoui/regions.mojo's rule (keep the two in step): the shells' role tags (sidebar, toolbar,
-# status-bar → status, inspector), a Board's scroller (the sheet) and each Board object with a headline title (card:<title>,
+# status-bar → status, inspector, mojoui.stage's stage-* regions), a Board's scroller (the sheet) and each Board object with a headline title (card:<title>,
 # clipped to its board; left out when scrolled away). Page pixels (the full-page shot's).
-REGIONS = """() => { const out = [], roles = { sidebar: 'sidebar', toolbar: 'toolbar', 'status-bar': 'status', inspector: 'inspector' };
+REGIONS = """() => { const out = [], roles = { sidebar: 'sidebar', toolbar: 'toolbar', 'status-bar': 'status', inspector: 'inspector',
+  'stage-top': 'stage-top', 'stage-left': 'stage-left', 'stage-centre': 'stage-centre', 'stage-right': 'stage-right', 'stage-panel': 'stage-panel', 'stage-bar': 'stage-bar',
+  'stage-tv': 'stage-tv', 'stage-tv-card': 'stage-tv-card', 'stage-tv-card-compact': 'stage-tv-card', 'stage-tv-thread': 'stage-tv-thread' };
   const box = e => { const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; };
   const push = (name, b) => { if (b.w >= 1 && b.h >= 1) out.push({ name, x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) }); };
   for (const e of document.querySelectorAll('#mojoui-root [data-tag]'))

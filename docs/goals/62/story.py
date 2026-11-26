@@ -120,7 +120,12 @@ class Visitor:
 
     def pivot(self):
         page = self.page
+        page.locator("[data-tag=ribbon-tab-insert]").first.click()  # (goal 76: Pivot lives on the ribbon's Insert tab, D-7624)
+        try_settle(page)
         page.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Pivot\s*$")).first.click()
+        try_settle(page)
+        # (goal 76: an inserted card opens no panel; a visitor taps the new pivot's title for its settings, D-7624)
+        page.locator("[data-tag^=pivot] button[data-kind=button]").filter(has_not_text=re.compile(r"^\s*(close|×|✕)?\s*$", re.I)).first.click()
         try_settle(page)
         runs = []
         for label, option in (("Value", "n"), ("Rows", "lab"), ("Columns", "outcome")):
@@ -194,6 +199,8 @@ class Visitor:
     def question(self, k, name, rows_re, expect):
         page = self.page
         if not page.locator("[data-tag=questions]").count():  # (the inspector turned to a pivot: back to the story, as a visitor would)
+            page.locator("[data-tag=ribbon-tab-view]").first.click()  # (goal 76: Story lives on the ribbon's View tab, D-7624)
+            try_settle(page)
             page.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Story\s*$")).first.click()
             try_settle(page)
         run = page.locator(f"[data-tag=questions] button[data-tag=run-question-{k}]").first

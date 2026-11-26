@@ -368,6 +368,7 @@ def robots(media, out):
         said["chart"] = s.call("read", name="chart-1")
         before = set(s.c.names())
         s.call("pivot")
+        s.call("inspector")  # (goal 76: an inserted card opens no panel; the inspector opens on the new pivot's page, D-7625)
         time.sleep(1.0)
         drops = [t["name"] for t in s.c.tools() if t["name"] not in before and t.get("description", "").startswith("Dropdown")]
         if len(drops) < 3:

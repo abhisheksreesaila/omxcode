@@ -355,9 +355,6 @@ struct Main(App):
     def theme(self) -> Theme:
         return liquid()
 
-    def hovers(self) -> Bool:
-        return len(self.web) > 0
-
     def caret(self, canvas: Int) -> Tuple[Float64, Float64, Float64, Float64]:
         if len(self.web) > 0:
             return self.web[0].caret()
@@ -971,7 +968,7 @@ struct Main(App):
 
     def view(self) -> View:
         if len(self.web) > 0:
-            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).gpu().grow().fill().tag("desk")
+            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu()  # (hover: the web look draws hover states).grow().fill().tag("desk")
             comptime if CompilationTarget.is_macos():  # (the system menu bar: Personal Note's own menus, desktop_menu.py; Edit is the system's)
                 var bar = MenuBar([
                     Menu("File", [Item("New note", MENU0 + 0, shortcut="Ctrl+N"), Item("Quick note", MENU0 + 1), Separator(),

@@ -1,7 +1,7 @@
 # Input that came while a rebuild waits (goal 81, M4): kept in order and sent once the new widgets are up, so a click, a
 # key or typed words are never lost, and never reach the wrong view. Each names its view by the widget's node id, which
 # the rebuild carries over to the new screen (GtkHost.carry_held); a view that's gone takes its input with it.
-from mojoui.view import View
+from mojoui.view import View, PAN, ZOOM, WHEEL, HOVER  # (the gesture kinds that run together: many small moves are one longer one; never copies of the numbers, D-8210)
 
 comptime HELD_MESSAGE = 0  # a message with a text from outside the widgets (a file dialog's answer, a dropped file)
 comptime HELD_SEND = 1  # a control's message (GtkHost.send)
@@ -47,12 +47,6 @@ struct Held(Copyable, Movable):
         self.dy = dy
         self.zoom = zoom
         self.pressure = pressure
-
-
-comptime PAN = 1  # (mojoui.view's gesture kinds that run together: many small moves are one longer one)
-comptime ZOOM = 2
-comptime WHEEL = 9
-comptime HOVER = 11
 
 
 def hold(mut queue: List[Held], var h: Held, slides: Bool = False):

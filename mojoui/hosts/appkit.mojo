@@ -245,6 +245,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
     """"Ctrl+Shift+S" → ("s", ⌘⇧): Ctrl means ⌘ on a Mac (D-159). Arrows become their NSMenuItem characters."""
     var name = shortcut
     var mask = 0
+    if name == "Escape":  # (a window-level Escape item, goal 76: no key equivalent on a Mac, where a menu's Esc would beat a field's own)
+        return (String(""), 0)
     while True:
         if name.startswith("Ctrl+"):
             mask |= MASK_COMMAND
@@ -260,6 +262,8 @@ def key_equivalent(shortcut: String) -> Tuple[String, Int]:
             name = cut
         else:
             break
+    if mask & MASK_OPTION != 0 and mask & MASK_COMMAND == 0:  # (⌥ alone types ƒ, † … and moves by words in a field: never a key
+        return (String(""), 0)                                  # equivalent; goal 78's Alt bindings are the Super/Alt scheme's, not the Mac's)
     if name == "↑":
         return (String(chr(0xF700)), mask)  # NSUpArrowFunctionKey
     if name == "↓":
@@ -777,8 +781,11 @@ struct AppKitHost[A: App](Movable):
                 var inh = self.inherited_size(i)
                 if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)
                     _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else (inh if inh > 0 else msg[Float64](msg(w, "font"), "pointSize")), self.look.type.tabular))
+                var up_ink = self.ancestor_role(i, 3) if sf.ink == 0 else -1  # (no ink of its own: the role around it, as CSS's color inherits; a bubble's words, D-7894)
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_rgba(sf.ink))
+                elif up_ink >= 0:
+                    _ = msg(w, "setTextColor:", ns_rgba(self.look.surfaces[up_ink].ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
                     var attrs = new("NSMutableDictionary")
                     _ = msg(attrs, "setObject:forKey:", msg(w, "font"), ns_string("NSFont"))
@@ -1008,7 +1015,7 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == CANVAS:
             # A MojoCanvas (an NSImageView whose scrollWheel: is Mojo) showing the app's pixels;
             # pan, pinch and click recognisers call back into it.
-            w = msg(msg(cls("MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))
+            w = msg(msg(cls("MojoPassCanvas" if node.size == 2 else "MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))  # (.passthrough(): presses go under it)
             _ = msg(w, "setImageScaling:", 1)  # NSImageScaleAxesIndependently: the pixels fill the view
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             for orientation in range(2):  # its size comes from the layout, never from its picture
@@ -1253,7 +1260,7 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(placed, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
                     self.objects[c] = placed
                 _ = msg(placed, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
-                if node.text == "clips":  # (a tiled Board: the resize grip in the corner that drags, as GTK's and the web's)
+                if node.text.startswith("clips"):  # (a tiled Board or a free canvas, goal 78: the resize grip in the corner that drags, as GTK's and the web's)
                     _ = msg(placed, "addSubview:", make_grip(cn.w, cn.h, self.pal.ink3, (msg(placed, "isFlipped") & 0xFF) != 0))
                 _ = msg(placed, "setIdentifier:", ns_string(String(tag_for(self_addr, c))))
                 _ = msg(content, "addSubview:", placed)
@@ -1273,6 +1280,12 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addSubview:", child)
                 if k == 0:  # the base fills the overlay
                     for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
+                        _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+                elif self.rt.shown.nodes[c].fills and self.rt.shown.nodes[c].grows:  # a layer that covers the whole overlay (.fill().grow(): the Stage's TV box, mojoui.orb.RimView, the cloud frame), as GTK's (D-7893)
+                    for anchor in ["topAnchor", "bottomAnchor", "leadingAnchor", "trailingAnchor"]:
+                        _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+                elif self.rt.shown.nodes[c].x == STRETCH:  # a band (.pin(STRETCH, START or END)): the whole width at an edge, no margin (mojoui.stage's TV, D-6711)
+                    for anchor in ["leadingAnchor", "trailingAnchor", "bottomAnchor" if self.rt.shown.nodes[c].y == END else "topAnchor"]:
                         _ = msg(msg(msg(child, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
                 else:  # an island: pinned to an edge or corner, 12 pt in (AppKit's y runs up: END is the bottom)
                     var pin = self.rt.shown.nodes[c].copy()
@@ -1843,6 +1856,8 @@ struct AppKitHost[A: App](Movable):
         var size = c.button_font if c.button_font > 0 else self.look.type.body
         var family = self.look.type.family
         var k = self.look.surface(self.rt.shown.nodes[i].name) if i >= 0 and self.rt.shown.nodes[i].name != "" else -1
+        if k < 0 and i >= 0 and style != SUBTLE and style != PROMINENT and style != DESTRUCTIVE:
+            k = self.on_role(i)  # (a strip's highlighted button: its "<strip>-button-on" role, as GTK's `.mui-tag-<strip> button:not(.flat)`)
         if k >= 0:
             ref sf = self.look.surfaces[k]
             if not text_only(sf):  # (a box rule: its own fill, or none)
@@ -2027,6 +2042,17 @@ struct AppKitHost[A: App](Movable):
             p = self.parents[p] if p < len(self.parents) else -1
         return -1
 
+    def on_role(self, i: Int) -> Int:
+        """The look's "<strip>-button-on" surface for a plain button among subtle ones, where <strip> is the nearest tagged view
+        around button i (the sheet's bottom tabs: the selected tab is plain, the others subtle; GTK and the web scope
+        their rule to the strip, `.mui-tag-sheet-tabs button:not(.flat)`, owner 2026-11-22). -1: the look has none."""
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            if self.rt.shown.nodes[p].name != "":
+                return self.look.surface(self.rt.shown.nodes[p].name + "-button-on")  # (not "-on": list-row-on, tab-on… are rows' own roles)
+            p = self.parents[p] if p < len(self.parents) else -1
+        return -1
+
     def inherited_size(self, i: Int) -> Float64:
         """The type size node i's words inherit, as CSS's font-size does: its own role's, else the nearest role above it
         with a size, a table's cells their head's or cell's (a label tagged mono in a table cell was the body's 14 pt for
@@ -2078,6 +2104,8 @@ struct AppKitHost[A: App](Movable):
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
         var node = self.rt.shown.nodes[i].copy()
         var outer = w
+        if node.hidden:  # (.hidden(): in the tree, not drawn; a stack detaches a hidden view, D-7601)
+            _ = msg(w, "setHidden:", 1)
         if node.tip != "":
             _ = msg(w, "setToolTip:", ns_string(node.tip))
         var spoken = explicit_name(node)  # (mojoui.a11y: what VoiceOver says when the control's own words don't)
@@ -2152,6 +2180,8 @@ struct AppKitHost[A: App](Movable):
             _ = msg(msg(msg(outer, "leadingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "leadingAnchor"), Float64(sf.margin_x)), "setActive:", 1)
             _ = msg(msg(msg(outer, "trailingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "trailingAnchor"), -Float64(sf.margin_x)), "setActive:", 1)
             outer = holder
+        if node.hidden and outer != w:
+            _ = msg(outer, "setHidden:", 1)
         return outer
 
     def show(mut self, self_addr: Int):
@@ -3350,7 +3380,7 @@ struct AppKitHost[A: App](Movable):
             return
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
-        self.canvases[k].drawn = version
+        self.canvases[k].drawn = version if not surface.again else -1  # mid-animation (the draw asked for another frame: the word card's letters, D-7894): drawn again next tick, as GTK's
         self.apply(d, self_addr)
 
     def show_pixels(mut self, k: Int, wpx: Int, hpx: Int, bounds: CGRect) -> Bool:
@@ -4059,9 +4089,12 @@ def pen_pressure(event: Int) -> Float64:
 
 
 def on_canvas_mouse_moved[A: App](view: Int, cmd: Int, event: Int) abi("C"):
-    """(goal 79) The pointer moved over the canvas, no button held: HOVER there (apps draw hover states), as GTK's motion."""
+    """(goal 79) The pointer moved over a Canvas(hover=True), no button held: HOVER there (apps draw hover states), as GTK's
+    motion; -1, -1 once it is outside."""
     var t = from_tag(view)
     var host = host_at[A](t[0])
+    if t[1] < 0 or t[1] >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[t[1]].text != "hover":  # (Canvas(hover=True) only, as GTK and the web: the merge with main, D-8211)
+        return
     var at = event_point(view, event)
     var b = msg[CGRect](view, "bounds")
     if at.x < 0 or at.y < 0 or at.x > b.width or at.y > b.height:
@@ -4455,6 +4488,10 @@ def bench_settle[A: App](host_addr: Int, ns: Int):
         pump_run_loop(0.005)
         if host[].idle():
             break
+
+
+def hit_nothing(view: Int, cmd: Int, x: Float64, y: Float64) abi("C") -> Int:
+    return 0  # (hitTest: answers nil: a pass-through canvas is never the view a press lands on; the views under it are)
 
 
 def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
@@ -5578,7 +5615,8 @@ def run_step[A: App](host_addr: Int, step: String):
             var x = nums[0] / 1000.0 * b.width
             var y = nums[1] / 1000.0 * b.height
             host[].canvases[k].moved = False
-            host[].canvas_send(node, HOVER, x, y, 0, 0, 1, host_addr)  # (the pointer got there first, as GTK's tapat: hover states)
+            if host[].rt.shown.nodes[node].text == "hover":
+                host[].canvas_send(node, HOVER, x, y, 0, 0, 1, host_addr)  # (the pointer got there first, as GTK's tapat: hover states)
             host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
             host[].canvas_send(node, TAP, x, y, 0, 0, 1, host_addr)
         elif len(nums) >= 2:  # drag:K=dx,dy from (10, 10); dragat:K=fx,fy,dx,dy from (fx, fy) thousandths: press, two moves (GTK's)
@@ -6100,7 +6138,7 @@ def tiled_pan[A: App](child: Int, recognizer: Int, state: Int) -> Bool:
         var board = -1
         var index = -1
         for b in range(len(host[].rt.shown.nodes)):
-            if host[].rt.shown.nodes[b].kind == BOARD and host[].rt.shown.nodes[b].text == "clips":
+            if host[].rt.shown.nodes[b].kind == BOARD and host[].rt.shown.nodes[b].text.startswith("clips"):
                 for k in range(len(host[].rt.shown.nodes[b].children)):
                     if host[].rt.shown.nodes[b].children[k] == node:
                         board = b
@@ -6443,6 +6481,9 @@ def run[A: App]() -> c_int:
     if ime_install[A](canvas):  # (D-7979: bridge/mac_ime.m linked in)
         put_shared(SLOT_MAC_IME, 1)
     register_class(canvas)
+    var pass_canvas = new_class("MojoPassCanvas", "MojoCanvas")  # .passthrough(): it only shows; presses go to what's under it (GTK's can-target off)
+    add_method(pass_canvas, "hitTest:", hit_nothing, "@@:{CGPoint=dd}")
+    register_class(pass_canvas)
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top
     add_method(board, "isFlipped", is_flipped, "B@:")
     register_class(board)

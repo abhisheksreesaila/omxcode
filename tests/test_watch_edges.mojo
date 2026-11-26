@@ -11,7 +11,7 @@
 #   pixi run mojo run -I . tests/test_watch_edges.mojo
 from std.ffi import c_int
 from std.memory import Pointer
-from mojoui.watch import FolderWatcher, WatchEvent, list_dir, _c, CREATED, MODIFIED, DELETED, OVERFLOW
+from mojoui.watch import FolderWatcher, WatchEvent, list_dir, _c, CREATED, MODIFIED, DELETED, OVERFLOW, entry_kind, entry_mode, classify_mode, KIND_OTHER, KIND_FILE, KIND_DIR
 from mojoui.clock import now_ns
 
 
@@ -51,6 +51,11 @@ def bytes_of(s: String) -> List[UInt8]:
     for i in range(s.byte_length()):
         out.append(p[i])
     return out^
+
+
+def assert_kind(got: Int, want: Int, what: String) raises:
+    if got != want:
+        raise Error(what + ": kind " + String(got) + ", wanted " + String(want))
 
 
 def temp_dir() raises -> String:
@@ -207,8 +212,37 @@ def main() raises:
         raise Error("drop: pipe " + String(size) + " bytes, threads " + String(before) + " before, " + String(after) + " after")
     print("edges drop: ok (pipe " + String(size) + " bytes; threads " + String(before) + " → " + String(after) + "; " + String(Int(took)) + " ms with the writes)", flush=True)
 
+    # a file system that doesn't say what an entry is (DT_UNKNOWN, 0): the entry is looked at without following a link, so a
+    # symlink to a folder (here one that points out of the watched tree) is never descended into (D-7258)
+    var root4 = temp_dir()
+    var outside = temp_dir()
+    write(outside + "/secret.txt", "x")
+    mkdir(root4 + "/real")
+    write(root4 + "/file.txt", "1")
+    shell("ln -s '" + outside + "' '" + root4 + "/out'")
+    shell("ln -s '" + root4 + "/file.txt' '" + root4 + "/filelink'")
+    assert_kind(entry_kind(0, root4 + "/real"), KIND_DIR, "an unknown entry that is a folder")
+    assert_kind(entry_kind(0, root4 + "/file.txt"), KIND_FILE, "an unknown entry that is a file")
+    assert_kind(entry_kind(0, root4 + "/out"), KIND_OTHER, "a symlink to a folder outside: not a folder")
+    assert_kind(entry_kind(0, root4 + "/filelink"), KIND_OTHER, "a symlink to a file: not a file")
+    assert_kind(entry_kind(0, root4 + "/missing"), KIND_OTHER, "an entry that isn't there")
+    assert_kind(entry_kind(4, root4 + "/real"), KIND_DIR, "d_type says folder")
+    assert_kind(entry_kind(10, root4 + "/out"), KIND_OTHER, "d_type says link")  # (DT_LNK = 10)
+    assert_kind(classify_mode(0o040755), KIND_DIR, "mode of a folder")
+    assert_kind(classify_mode(0o120777), KIND_OTHER, "mode of a link")
+    assert_kind(classify_mode(0o100644), KIND_FILE, "mode of a file")
+    if entry_mode(root4 + "/out") & 0o170000 != 0o120000:
+        raise Error("lstat of the link says " + String(entry_mode(root4 + "/out")))
+    # the listing itself: the folder, the file; neither link
+    var names = String("")
+    for ref e in list_dir(root4):
+        names += e[0] + (("/" if e[1] else "") + ",")
+    if names != "real/,file.txt," and names != "file.txt,real/,":
+        raise Error("list_dir: " + names)
+    print("edges unknown-type: ok", flush=True)
+
     w.stop()
     w2.stop()
-    for d in [root, root2, root3]:
+    for d in [root, root2, root3, root4, outside]:
         shell("rm -rf '" + d + "'")
     print("edges: all ok", flush=True)

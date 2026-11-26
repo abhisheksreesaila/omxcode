@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxome · a home assistant that shows you</title>
+<meta name="description" content="omxome, a visual home assistant for the kitchen counter: live tiles on a three-column Stage, a chat bar that grows to explain anything visually, private local intelligence most of the time, and your own AI subscription whenever you ask for it.">
+<meta property="og:title" content="omxome: a home assistant that shows you">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/omx/clip-map.jpg">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<!-- omxome's cover (owner, 2026-11-22; round six 2026-11-24: product-first showcase — general hybrid subscription positioning,
+     developer details kept in examples/omx/README.md, closing download/setup section). -->
+<style>
+.ohero { padding-top: 34px; padding-bottom: 38px; text-align: center; }
+.ohero h1 { font-size: clamp(68px, 9.6vw, 132px); margin-top: 8px; }
+.ohero .eyebrow { justify-content: center; }
+.ohero .lede { max-width: 780px; margin: 14px auto 0; }
+.ohero .lede.sub { max-width: 980px; margin-top: 12px; font-size: clamp(16.5px, 1.45vw, 20px); line-height: 1.45; }
+.needs { font: 12.5px/1.6 var(--mono); color: var(--ink2); margin: 12px 0 0; }
+
+/* the film: steps on the left scroll; the window on the right stays. The window starts right under the hero (so the Stage shows
+   above the fold) and sticks once it reaches the middle of the screen; --fh is its height (the grid's 8/13 at 1600:1024). */
+.film2 { --fh: calc((min(100vw, 1320px) - 104px) * 8 / 13 * .64); display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 8fr); gap: 56px; max-width: 1320px; margin: 0 auto; padding: 0 24px; }
+.steps { padding: 0 0 22svh; }
+.step { min-height: 78svh; display: flex; flex-direction: column; justify-content: center; opacity: .55; transition: opacity .5s var(--ease); }
+.step:first-child { min-height: var(--fh); }
+.step.now { opacity: 1; }
+.step .k { font: 600 12.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--word); }
+.step h2 { font: 800 clamp(30px, 3.4vw, 48px)/1.04 var(--display); letter-spacing: -.04em; margin: 12px 0 0; }
+.step p { color: var(--ink2); font-size: 17.5px; line-height: 1.55; margin: 16px 0 0; max-width: 460px; text-wrap: pretty; }
+.pin { position: sticky; top: max(86px, calc((100svh - var(--fh)) / 2 + 32px)); align-self: start; margin-bottom: 12svh; }
+.frame { position: relative; width: 100%; aspect-ratio: 1600 / 1024; border-radius: 22px; overflow: hidden; background: #111216; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); }
+.face { position: absolute; inset: 0; margin: 0; opacity: 0; scale: .985; visibility: hidden;
+  transition: opacity .26s var(--ease), scale .26s var(--ease), visibility 0s linear .26s; }
+.face.on { opacity: 1; scale: 1; visibility: visible; z-index: 1;
+  transition: opacity .42s var(--ease) .16s, scale .7s var(--oq-spring, var(--ease)) .16s, visibility 0s; }
+.face img, .face video { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+.lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 44px; text-align: left; }
+.lanes > div { border-radius: 22px; padding: 26px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.lanes .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.lanes .local .k { color: var(--oq-ok, #3ccf6e); } .lanes .cloud .k { color: #f59a3c; }
+.lanes .cloud { box-shadow: 0 0 0 1.5px color-mix(in srgb, #f59a3c 60%, transparent); }
+.lanes h3 { font: 700 28px/1.1 var(--display); letter-spacing: -.03em; margin-top: 10px; }
+.lanes p { color: var(--ink2); font-size: 16px; line-height: 1.55; margin: 10px 0 0; }
+.plats { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 30px; }
+.plats span { display: inline-flex; align-items: center; gap: 8px; font: 600 15px var(--sans); padding: 10px 16px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
+.plats span i { width: 8px; height: 8px; border-radius: 50%; background: var(--oq-ok, #3ccf6e); }
+.plats span.soon { color: var(--ink2); background: transparent; }
+.plats span.soon i { background: var(--soon, #f5a623); }
+.devs { display: grid; grid-template-columns: 2.4fr 1fr 1fr; gap: 16px; align-items: end; margin-top: 44px; }
+.devs .shot { border-radius: 20px; overflow: hidden; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); }
+.devs .shot img { display: block; width: 100%; height: auto; }
+.devs .ph { border-radius: 26px; }
+.get-note { font: 13px/1.6 var(--mono); color: var(--ink2); margin: 18px auto 0; max-width: 560px; }
+.f-links { display: inline-flex; gap: 18px; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .face, .face.on, .step { transition: none; } .face { scale: 1; } }
+@media (max-width: 860px) {
+  .film2 { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px; }
+  .pin { order: -1; top: 70px; margin-bottom: 0; z-index: 3; padding: 10px 0 14px; background: linear-gradient(#000 85%, transparent); }
+  .steps { padding: 4svh 0 20svh; }
+  .step, .step:first-child { min-height: 62svh; justify-content: flex-start; padding-top: 4svh; }
+  .step:first-child { padding-top: 0; }
+  .lanes, .devs { grid-template-columns: 1fr; }
+  .devs .ph { display: none; }
+}
+</style>
+<noscript><style>.rv { opacity: 1; transform: none; } .step { opacity: 1; }</style></noscript>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxome</a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#film">Tour</a><a href="#hybrid">Hybrid</a><a href="#devices">Devices</a><a href="#get">Download</a></div>
+  <div class="right"><a class="cta" href="#get">Download</a></div>
+</nav>
+
+<main>
+<section class="ohero">
+  <div class="wrap">
+    <div class="eyebrow rise"><span>Your visual home assistant</span></div>
+    <h1 class="rise" data-words data-step="0" data-d0="120">omxome</h1>
+    <p class="lede rise"><span data-words data-step="45" data-d0="380">Ask it out loud.</span> <span class="two" data-words data-step="35" data-d0="560">It shows you.</span></p>
+    <p class="lede sub rise">A voice in a box can't show you anything. omxome puts a quiet, glanceable screen on your counter&nbsp;— pinned on the left, live on the right, and a stage in the middle that builds visuals as it talks.</p>
+    <p class="needs rise">Linux &amp; Mac · iPhone, iPad &amp; Android coming soon</p>
+  </div>
+</section>
+
+<section id="film" style="padding:0">
+  <div class="film2">
+    <div class="steps">
+      <article class="step now" data-k="0"><div class="k">The Stage</div><h2>Your day on one screen.</h2><p>What you pinned on the left. What matters now in the middle. What's live on the right. Talk or tap at the bottom.</p></article>
+      <article class="step" data-k="1"><div class="k">Ask anything</div><h2>The chat takes the stage.</h2><p>Ask for a Saturday in Lisbon, how a heat pump works, or what a word means. It builds the visual it needs&nbsp;— a real map, a diagram, a word card&nbsp;— points at each part as it talks, then folds back to your tiles.</p></article>
+      <article class="step" data-k="2"><div class="k">Left · pinned</div><h2>Keep what you want close.</h2><p>Drag any tile onto Pinned and it stays at your side while the stage closes the gap. Unpin it and it comes back.</p></article>
+      <article class="step" data-k="3"><div class="k">Right · live</div><h2>What keeps changing.</h2><p>The pasta timer, a game's score, a landing: small rows that keep up quietly on the right. When one needs you, it can step into the big tile in the middle.</p></article>
+    </div>
+    <div class="pin">
+      <div class="frame" data-beat="0">
+        <figure class="face on" data-k="0"><img src="img/omx/stage-day.jpg" alt="The Stage: Today and Pinned on the left; live tiles in the centre with traffic big; the pasta timer, a game's score and a landing on the right; the chat bar at the bottom"></figure>
+        <figure class="face" data-k="1"><video src="img/omx/clip-map.mp4" poster="img/omx/clip-map.jpg" muted loop playsinline preload="metadata" aria-label="Plan a Saturday in Lisbon: the chat bar grows into the TV with a map that flies to each stop, then folds back"></video></figure>
+        <figure class="face" data-k="2"><video src="img/omx/clip-pin.mp4" poster="img/omx/clip-pin.jpg" muted loop playsinline preload="none" aria-label="A tile dragged from the stage onto Pinned on the left; the stage closes the gap"></video></figure>
+        <figure class="face" data-k="3"><video src="img/omx/clip-live.mp4" poster="img/omx/clip-live.jpg" muted loop playsinline preload="none" aria-label="The Live column: the pasta timer ticks, the game's score changes, a flight landing"></video></figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="hybrid" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Hybrid intelligence</div>
+    <h2 class="rv">Local when you want it. <span class="two">Your subscription when you need it.</span></h2>
+    <p class="lede rv">Most of the time, everything runs privately right on your own machine. When a question calls for a bigger brain, ask for it by name&nbsp;— it connects to the AI subscription you already have, whether that's Claude, Gemini, Antigravity, or others.</p>
+    <div class="lanes">
+      <div class="local rv"><div class="k">● local · most of the time</div><h3>Private at home</h3><p>Listening, thinking, and answering all happen right on your own hardware. Fast, quiet, and always ready&nbsp;— everyday questions never leave the room.</p></div>
+      <div class="cloud rv"><div class="k">● your subscription · when you ask</div><h3>Bring your own AI</h3><p>Ask for Claude, Gemini, Antigravity, or any subscription you already pay for when you want extra firepower. A warm orange frame glows round the screen while it's online, personal secrets stay home, and nothing goes out unless you ask.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="devices" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Everywhere at home</div>
+    <h2 class="rv">One calm screen. <span class="two">Every screen in the house.</span></h2>
+    <p class="lede rv">Fast, quiet, and right at home on every device&nbsp;— three spacious columns on a counter or desktop, one clean view in your pocket.</p>
+    <div class="plats rv"><span><i></i>Linux</span><span><i></i>Mac</span><span class="soon"><i></i>iPhone &amp; iPad · soon</span><span class="soon"><i></i>Android · soon</span></div>
+    <div class="devs">
+      <div class="shot rv"><img src="img/omx/mac-heatpump.jpg" alt="The Stage on a Mac at night: the heat pump diagram in the TV"></div>
+      <div class="shot ph rv"><img src="img/omx/phone-home.jpg" alt="The Stage at phone width"></div>
+      <div class="shot ph rv"><img src="img/omx/phone-dark.jpg" alt="At phone width at night: the ephemeral card above the conversation"></div>
+    </div>
+  </div>
+</section>
+
+<section id="get" class="center" style="padding-top:40px">
+  <div class="wrap">
+    <div class="eyebrow rv">Get omxome</div>
+    <h2 class="rv">Ask it out loud. <span class="two">It shows you.</span></h2>
+    <p class="lede rv">A calmer, private home assistant that shows instead of just telling. Try it on your own machine today.</p>
+    <div class="ctas rv" style="margin-top:32px">
+      <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omx#run-it">Download &amp; setup guide</a>
+      <a class="more" href="https://github.com/abhisheksreesaila/omxcode/releases">Releases</a>
+    </div>
+    <div class="card install rv">
+<pre id="cmds">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode &amp;&amp; pixi install
+scripts/build.sh omx linux &amp;&amp; build/omx/linux/omx</pre>
+      <div class="src">Install from source · Linux (Mac guide on GitHub)<button class="cp" data-copy="#cmds">copy</button></div>
+    </div>
+    <p class="get-note rv">One-click installers for Linux, Mac, iPhone, iPad, and Android are on the way.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fine">
+      <span>omxome · MIT licence · Claude is a trademark of Anthropic; Gemini is a trademark of Google. omxome is an independent project, not affiliated with or endorsed by either.</span>
+      <span class="f-links"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omx">Technical details</a><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></span>
+    </div>
+  </div>
+</footer>
+<script>
+// the film (gitaway.me's pattern): which step is in the middle of the screen picks the window's face; only that face's clip plays,
+// from its start. No scroll handler, no layout reads. Reduced motion: the faces still switch, the clips show their posters.
+(function () {
+  const frame = document.querySelector('.frame'); if (!frame) return;
+  const steps = [...document.querySelectorAll('.step')], faces = [...frame.querySelectorAll('.face')];
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let beat = -1;
+  function setBeat(k) {
+    if (k === beat) return; beat = k;
+    frame.dataset.beat = k;
+    steps.forEach((s) => s.classList.toggle('now', +s.dataset.k === k));
+    faces.forEach((f) => {
+      const on = f.dataset.k.split(' ').includes(String(k)), v = f.querySelector('video');
+      const was = f.classList.contains('on');
+      f.classList.toggle('on', on);
+      if (!v) return;
+      if (on && !was) { v.preload = 'auto'; if (!calm) { try { v.currentTime = 0; } catch (e) {} v.play().catch(() => {}); } }
+      if (!on && was) setTimeout(() => { if (!f.classList.contains('on')) v.pause(); }, 300);
+    });
+  }
+  if (!('IntersectionObserver' in window)) { steps.forEach((s) => s.classList.add('now')); return; }
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) setBeat(+e.target.dataset.k); }), { rootMargin: matchMedia('(max-width: 860px)').matches ? '-60% 0px -32% 0px' : '-45% 0px -45% 0px' });  // (a phone: the window sits on top, so a step counts once its words are below it)
+  steps.forEach((s) => io.observe(s));
+  setBeat(0);
+  // the tour off screen: its clip rests; back on screen, the step's clip plays again
+  new IntersectionObserver((es) => es.forEach((e) => frame.querySelectorAll('.face.on video').forEach((v) => { if (!e.isIntersecting) v.pause(); else if (!calm) v.play().catch(() => {}); }))).observe(document.getElementById('film'));
+})();
+</script>
+<script src="site.js"></script>
+<script src="omxqua/src/omxqua.js" defer></script>
+</body>
+</html>

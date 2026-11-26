@@ -50,8 +50,16 @@ build_linux() {
   local out="build/$EX/linux"; mkdir -p "$out"; rm -f "$out/$EX"
   echo "== Linux ($EX): GTK4 + libadwaita"
   local debug=(); [ "${MOJOUI_DEBUG:-}" = 1 ] && debug=(-D MOJOUI_DEBUG) && echo "   (debug build: WebKit's inspector for widget views, source maps)"
+  # An app whose needs file says flare talks https (mojoui.http through Flare: TLS 1.2/1.3 via OpenSSL, redirects, compression):
+  # Flare's shims are built first (scripts/flare_ffi.sh) and found beside the binary or in build/flare/lib (goal 72 M6, D-7262).
+  local flare=()
+  if grep -qx flare "examples/$EX/needs" 2>/dev/null; then
+    bash scripts/flare_ffi.sh >/dev/null
+    flare=(-D MOJOUI_FLARE -Xlinker -rpath -Xlinker '$ORIGIN' -Xlinker -rpath -Xlinker "$PWD/build/flare/lib")
+    echo "   (https through Flare)"
+  fi
   mojo_build hosts/linux_main.mojo "${debug[@]}" -o "$out/$EX" \
-    -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
+    -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}" "${flare[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
   [ -d fonts ] && cp -R fonts/* "$out/fonts/"  # (mojoui.fonttext's faces with their OFL licences, as the Mac's: a copy outside the checkout drew no words without them, review 6)
   companions "$out" || return 1
@@ -78,13 +86,18 @@ build_linux() {
   # Machine-local, not relocatable: the launcher hard-codes this checkout's absolute .pixi/envs/speech paths, and the
   # build runs `pixi install -e speech` (torch + CUDA wheels, several GB) first. Moving the checkout or copying the
   # build elsewhere needs a rebuild there.
-  if grep -qx speech "examples/$EX/needs" 2>/dev/null; then
-    pixi install -e speech >/dev/null
-    local env; env="$(pwd)/.pixi/envs/speech"
+  # `voice` (goal 72: Kokoro, Parakeet and Silero in the app's process: CPython 3.12) does the same on the `voice` environment.
+  local pyenv=""
+  for candidate in speech voice; do grep -qx "$candidate" "examples/$EX/needs" 2>/dev/null && pyenv="$candidate"; done
+  if [ -n "$pyenv" ]; then
+    pixi install -e "$pyenv" >/dev/null
+    local env; env="$(pwd)/.pixi/envs/$pyenv"
     local lib; lib="$(ls "$env"/lib/libpython3*.so.1.0 | head -1)"
     mv "$out/$EX" "$out/$EX.bin"
-    printf '#!/bin/sh\n# the app on the speech environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
-      "$lib" "$env" "$env" "$EX" > "$out/$EX"
+    local flare_dir=""  # (Flare looks for its shims in $CONDA_PREFIX/lib, which is this environment now: tell it where they are)
+    if grep -qx flare "examples/$EX/needs" 2>/dev/null; then flare_dir=" FLARE_LIB_DIR=\"$(pwd)/build/flare/lib\""; fi
+    printf '#!/bin/sh\n# the app on the %s environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"%s\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
+      "$pyenv" "$lib" "$env" "$env" "$flare_dir" "$EX" > "$out/$EX"
     chmod +x "$out/$EX"
   fi
   stamp "$out"; echo "   $out/$EX"

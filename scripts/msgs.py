@@ -37,15 +37,23 @@ def collisions(path):
         if lo is None or hi is None:
             continue
         ranges.append((base, lo, hi + (1 if op == "<=" else 0)))
-    singles = set(re.findall(r"\bm == ([A-Z][A-Z0-9_]*)\b", src))
+    # each `m == NAME` and `m == NAME + k` (a two-message pair like TAB, TAB + 1: 2026-11-22, goal 78's CANVAS_MODE = 94 was
+    # TAB + 1, so a click on the Report tab toggled the canvas setting instead)
+    singles = {}
+    for name, k in re.findall(r"\bm == ([A-Z][A-Z0-9_]*)(?: \+ ([0-9]+))?\b", src):
+        if name in consts:
+            singles[name if not k else f"{name} + {k}"] = (name, consts[name] + int(k or 0))
     found = []
-    for name in sorted(singles):
-        if name not in consts:
-            continue
-        v = consts[name]
+    for label, (name, v) in sorted(singles.items()):
         for base, lo, hi in ranges:
             if lo <= v < hi and name != base:
-                found.append(f"{name} = {v} lies in {base}'s range {lo}–{hi - 1}")
+                found.append(f"{label} = {v} lies in {base}'s range {lo}–{hi - 1}")
+    by_value = {}  # (two messages update() tells apart by `m ==` with one number: the first branch takes both, goal 78 review 1)
+    for label, (name, v) in sorted(singles.items()):
+        by_value.setdefault(v, []).append(label)
+    for v, names in sorted(by_value.items()):
+        if len(names) > 1:
+            found.append(f"{' and '.join(names)} are all {v}")
     return found
 
 

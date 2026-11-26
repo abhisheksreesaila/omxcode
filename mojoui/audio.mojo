@@ -7,8 +7,14 @@
 #   mic.total(); mic.level(); mic.running(); mic.failed(); mic.stop()
 #
 # Linux: libpulse-simple (the PulseAudio API; PipeWire serves it through pipewire-pulse), opened with dlopen so neither
-# `mojo run` nor a build needs a link flag. Mac / iPhone / web: not built yet (start() marks the microphone failed with
-# a reason: AVAudioEngine is the planned path); it compiles there, so apps that use it still build.
+# `mojo run` nor a build needs a link flag. Web host (goal 72 M5): the same calls, but the samples are the browser's
+# microphone, carried over the host's audio socket (mojoui.webaudio); a page that is open and tapped is the microphone.
+# Mac / iPhone: not built yet (start() marks the microphone failed with a reason: AVAudioEngine is the planned path); it
+# compiles there, so apps that use it still build.
+# A recorded voice for a microphone (tests, demos, a checker that has no person): $MOJOUI_AUDIO_SOURCE (or Microphone(source))
+# of the form `file:<a.wav>[@<seconds>][,<b.wav>[@<seconds>]…]` plays 16 kHz 16-bit mono files into the capture ring at
+# their offsets from start(), in real time and mixed over silence, through the very same worker, stamps and level as the
+# sound server's source (no PulseAudio needed). The ring runs on after the last file: an unattended app hears silence.
 # Also here: load_wav (16-bit PCM .wav -> floats) and best_match (normalised cross-correlation at the best lag).
 
 from std.atomic import Atomic
@@ -17,8 +23,9 @@ from mojoui import libc
 from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
-from std.math import sqrt
+from std.math import sqrt, sin, cos
 from mojoui.clock import now_ns
+from mojoui.shared import get_shared
 
 comptime RATE = 16000  # samples per second, mono
 comptime CHUNK = 320  # samples per read from the sound server: 20 ms
@@ -37,6 +44,17 @@ comptime W_SOURCE = 7  # a NUL-terminated copy of the source name, or 0 (default
 comptime W_TIME = 8  # now_ns() when the newest chunk landed
 comptime W_SEQ = 9  # odd while the worker updates W_TIME and W_TOTAL together (a reader retries, for at most STAMP_WAIT_NS: captured_ns)
 comptime W_WORDS = 10
+# The web host's hub (mojoui.webaudio): one block of words per process, found through mojoui.shared. The browser's microphone
+# is a set of capture words (the same layout, W_*), the speaker's words follow (mojoui.speaker's S_*), then the hub's own.
+comptime SLOT_WEB_AUDIO = 89
+comptime HUB_SPEAKER = W_WORDS  # the speaker's words start here (S_WORDS = 14)
+comptime HUB_CTL = W_WORDS + 14
+comptime H_MIC_WANT = 0  # 1 while an app has started its Microphone (the page opens its microphone)
+comptime H_CLIENTS = 1  # pages with an audio socket
+comptime H_WORDS = 4
+comptime E_REFUSED = 101  # W_ERR when the page's microphone failed: the person said no
+comptime E_NONE = 102  # ...no microphone found
+comptime E_INSECURE = 103  # ...the page isn't allowed one (not https or localhost)
 comptime STAMP_WAIT_NS = 2_000_000  # captured_ns stops retrying an odd W_SEQ after 2 ms (the writer's update is 3 stores)
 
 
@@ -78,8 +96,62 @@ def _release(words: Int):
         _P(unsafe_from_address=words).unsafe_free()
 
 
+def _source_text(words: Int) -> String:
+    var addr = Int(_A.load(_word(words, W_SOURCE)))
+    var out = String("")
+    if addr == 0:
+        return out^
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var k = 0
+    while p[k] != 0:
+        out += chr(Int(p[k]))
+        k += 1
+    return out^
+
+
+def _capture_files(words: Int, spec: String) raises:
+    """The `file:` source: the recorded files, each from its offset, paced like a live source (20 ms a chunk)."""
+    var files = List[List[Float32]]()
+    var starts = List[Int]()
+    for part in spec.split(","):
+        var item = String(part)
+        var at = item.rfind("@")
+        var path = String(item[byte = :at]) if at >= 0 else item
+        var secs = Float64(String(item[byte = at + 1 :])) if at >= 0 else 0.0
+        files.append(load_wav(path))
+        starts.append(Int(secs * Float64(RATE)))
+    _A.store(_word(words, W_STATE), 1)
+    var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING))))
+    var t0 = now_ns()
+    var k = 0
+    while _A.load(_word(words, W_STOP)) == 0:
+        var due = t0 + (k + 1) * (CHUNK * 1_000_000_000 // RATE)
+        while now_ns() < due:
+            _ = libc.usleep(1000)
+        var total = Int(_A.load(_word(words, W_TOTAL)))
+        var sq = Float64(0)
+        for i in range(CHUNK):
+            var v = Float32(0)
+            for f in range(len(files)):
+                var j = total + i - starts[f]
+                if j >= 0 and j < len(files[f]):
+                    v += files[f][j]
+            ring.unsafe_offset((total + i) % RING)[] = v
+            sq += Float64(v) * Float64(v)
+        _A.store(_word(words, W_LEVEL), Int64(sqrt(sq / CHUNK) * 1e6))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        _A.store(_word(words, W_TIME), Int64(now_ns()))
+        _A.store(_word(words, W_TOTAL), Int64(total + CHUNK))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        k += 1
+
+
 def _capture(words: Int) raises:
     """The worker: open a record stream, then read 20 ms at a time into the ring until asked to stop."""
+    var source = _source_text(words)
+    if source.startswith("file:"):
+        _capture_files(words, String(source[byte = 5 :]))
+        return
     var handle = OwnedDLHandle("libpulse-simple.so.0")  # (the standard library's dlopen: see gtk_webview, D-1413)
     var lib = 0  # (RTLD_GLOBAL: its symbols are found anywhere while `handle` holds it)
     var spec = unsafe_alloc[Int32](4)  # pa_sample_spec { int32 format; uint32 rate; uint8 channels }
@@ -151,18 +223,32 @@ struct Microphone(Movable):
     var source: String
     var started: Bool
     var reason: String  # why it failed, in words (empty while fine)
+    var web: Bool  # the browser's microphone (the web host's hub): `words` are the hub's, and total() counts from base
+    var base: Int  # the hub's sample count when this microphone started
 
     def __init__(out self, source: String = ""):
         self.source = source if source.byte_length() > 0 else getenv("MOJOUI_AUDIO_SOURCE", "")
         self.words = 0
         self.started = False
         self.reason = ""
+        self.web = False
+        self.base = 0
 
     def start(mut self):
         """Starts capture on its own thread and returns at once. Safe to call once; samples arrive through read()."""
         if self.started:
             return
         self.started = True
+        var hub = get_shared(SLOT_WEB_AUDIO)
+        if hub != 0:  # the web host: the page's microphone, not the sound server's
+            self.web = True
+            self.words = hub
+            self.base = Int(_A.load(_word(hub, W_TOTAL)))
+            _A.store(_word(hub, W_ERR), 0)
+            if Int(_A.load(_word(hub, W_STATE))) != 1:
+                _A.store(_word(hub, W_STATE), 0)
+            _A.store(_word(hub + 8 * HUB_CTL, H_MIC_WANT), 1)
+            return
         comptime if not CompilationTarget.is_linux():
             self.reason = "no microphone on this host yet (Mac: AVAudioEngine, planned)"
         else:
@@ -197,6 +283,13 @@ struct Microphone(Movable):
         """Why it failed, in words."""
         if self.reason:
             return self.reason
+        if self.web and self._state() == -1:
+            var c = Int(_A.load(_word(self.words, W_ERR)))
+            if c == E_REFUSED:
+                return "the browser's microphone was refused: allow it for this page"
+            if c == E_INSECURE:
+                return "this page isn't allowed a microphone: open it over https (or on localhost)"
+            return "the browser found no microphone"
         if self.words != 0 and self._state() == -1:
             var e = Int(_A.load(_word(self.words, W_ERR)))
             if self.total() > 0:
@@ -207,7 +300,7 @@ struct Microphone(Movable):
 
     def total(self) -> Int:
         """Samples captured since start()."""
-        return Int(_A.load(_word(self.words, W_TOTAL))) if self.words != 0 else 0
+        return Int(_A.load(_word(self.words, W_TOTAL))) - self.base if self.words != 0 else 0
 
     def captured_ns(self, index: Int) -> Int:
         """When sample `index` (absolute) was captured, on now_ns()'s clock (from when its 20 ms chunk landed)."""
@@ -228,7 +321,7 @@ struct Microphone(Movable):
                     give_up = now + STAMP_WAIT_NS
                 elif now >= give_up:
                     break  # (the unpaired values are off by one 20 ms chunk at most; clamped to now below)
-        var at = t - ((total - 1 - index) * 1_000_000_000) // RATE
+        var at = t - ((total - 1 - index - self.base) * 1_000_000_000) // RATE
         return at if paired else min(at, now_ns())
 
     def level(self) -> Float64:
@@ -240,8 +333,8 @@ struct Microphone(Movable):
         var out = List[Float32]()
         if self.words == 0:
             return out^
-        var total = self.total()
-        var start = max(since, total - RING)
+        var total = self.total() + self.base  # (absolute, in the ring's own count)
+        var start = max(since + self.base, total - RING)
         if start >= total:
             return out^
         out.reserve(total - start)
@@ -252,11 +345,19 @@ struct Microphone(Movable):
 
     def stop(mut self):
         """Asks the worker to stop (it does after its current 20 ms read). Never waits."""
-        if self.words != 0:
+        if self.web:
+            _A.store(_word(self.words + 8 * HUB_CTL, H_MIC_WANT), 0)
+            if Int(_A.load(_word(self.words, W_STATE))) == 1:
+                _A.store(_word(self.words, W_STATE), 2)
+        elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
 
     def __deinit__(deinit self):
-        if self.words != 0:
+        if self.web:  # (the hub's words are the process's: nothing to free)
+            _A.store(_word(self.words + 8 * HUB_CTL, H_MIC_WANT), 0)
+            if Int(_A.load(_word(self.words, W_STATE))) == 1:
+                _A.store(_word(self.words, W_STATE), 2)
+        elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
             _release(self.words)
 
@@ -342,3 +443,37 @@ def best_match(rec: List[Float32], want: List[Float32]) -> Tuple[Float64, Int]:
             best = c
             at = lag
     return (best, at)
+
+
+def resample(x: List[Float32], src: Int, dst: Int) -> List[Float32]:
+    """`x` at `src` samples/s as `dst` samples/s: a Hann-windowed sinc, 16 taps each side (wider when it filters down), so
+    24 kHz speech goes to 16 kHz for a recogniser (or to a speaker's own rate) without folding the top octave back in."""
+    var out = List[Float32]()
+    if src == dst or src <= 0 or dst <= 0:
+        out.extend(x.copy())
+        return out^
+    comptime HALF = 16
+    comptime Q = 256  # kernel table steps per input sample
+    var cutoff = Float64(1) if dst >= src else Float64(dst) / Float64(src)
+    var width = Float64(HALF) / cutoff
+    var table = List[Float64](length=Int(width * Float64(Q)) + 2, fill=0.0)
+    var pi = Float64(3.141592653589793)
+    for k in range(len(table)):
+        var d = Float64(k) / Float64(Q)
+        var s = cutoff
+        if d > 0:
+            s = sin(pi * d * cutoff) / (pi * d)
+        table[k] = s * (0.5 + 0.5 * cos(pi * d / width)) if d < width else 0.0
+    var step = Float64(src) / Float64(dst)
+    var n_out = (len(x) * dst) // src
+    out.reserve(n_out)
+    var n = len(x)
+    for i in range(n_out):
+        var c = Float64(i) * step
+        var lo = max(0, Int(c - width) + 1)
+        var hi = min(n - 1, Int(c + width))
+        var acc = Float64(0)
+        for j in range(lo, hi + 1):
+            acc += Float64(x[j]) * table[Int(abs(Float64(j) - c) * Float64(Q))]
+        out.append(Float32(acc))
+    return out^

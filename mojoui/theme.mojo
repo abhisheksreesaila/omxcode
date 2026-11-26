@@ -493,6 +493,17 @@ struct Theme(Copyable, Movable):
                 + String(self.gtk_css.byte_length()) + "/" + String(self.web_css.byte_length()) + "/" + String(len(self.look.surfaces)))
 
 
+@fieldwise_init
+struct ThemePair(Copyable, Movable):
+    """A theme's light and dark schemes, each built once (App.theme() is called on every refresh and every restyle check:
+    building a theme writes its whole GTK and web style sheets, D-7887). Keep one in the app; theme() returns of(dark)."""
+    var light: Theme
+    var dark: Theme
+
+    def of(self, dark: Bool) -> Theme:
+        return self.dark.copy() if dark else self.light.copy()
+
+
 def palette_css(p: Palette) -> String:
     """A palette as a page's CSS variables (the vocabulary every web theme reads): the web host's page and GTK's
     WebComponent views (goal 34 M3)."""

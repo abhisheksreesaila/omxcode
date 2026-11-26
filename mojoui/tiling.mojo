@@ -206,6 +206,23 @@ struct Tiling(Copyable, Movable, Sized):
         else:
             self.nodes[up].b = split
 
+    def insert_below(mut self, id: String, height: Int, extra: Int) raises:
+        """A new card as a row under everything: the whole width, `extra` high in an area that becomes height + GAP +
+        extra tall. Every card already here keeps its pixels."""
+        if self.has(id):
+            raise Error("tiling: " + id + " is already here")
+        self.nodes.append(_Node(LEAF, id, 0.5, -1, -1, -1))
+        var new = len(self.nodes) - 1
+        if self.root < 0:
+            self.root = new
+            return
+        var old = self.root
+        self.nodes.append(_Node(H, "", Float64(height) / Float64(height + extra), old, new, -1))
+        var split = len(self.nodes) - 1
+        self.nodes[old].parent = split
+        self.nodes[new].parent = split
+        self.root = split
+
     def remove(mut self, id: String) -> Bool:
         """The card goes; its sibling (a card or a whole part) takes the space they shared. False when it isn't here."""
         var n = self._find(id)
@@ -306,6 +323,99 @@ struct Tiling(Copyable, Movable, Sized):
             return False
         self.nodes[pick].ratio = Float64(want) / Float64(room)
         return True
+
+    # ---- a taller or shorter area (goal 73: the Board grows downwards and scrolls)
+
+    def has_below(self, id: String) -> Bool:
+        """Whether another card's space is under this card's: a split above it puts it first, one above the other. False:
+        its bottom edge is the area's bottom (dragging it down can only make the area taller)."""
+        var n = self._find(id)
+        if n < 0:
+            return False
+        var child = n
+        var k = self.nodes[n].parent
+        while k >= 0:
+            if self.nodes[k].kind == H and self.nodes[k].a == child:
+                return True
+            child = k
+            k = self.nodes[k].parent
+        return False
+
+    def _within(self, n: Int, target: Int) -> Bool:
+        var k = target
+        while k >= 0:
+            if k == n:
+                return True
+            k = self.nodes[k].parent
+        return False
+
+    def _slack(self, n: Int, toward: Int, r: Rect) -> Int:
+        """How much shorter part n (placed at r) can get with every card in it still at its minimum height."""
+        ref node = self.nodes[n]
+        if node.kind == LEAF:
+            return max(0, r.h - self.min_h)
+        if node.kind == V:
+            var wa = self._split_at(n, r.w, True)
+            var ta = toward if self._within(node.a, toward) else -1
+            var tb = toward if self._within(node.b, toward) else -1
+            return min(self._slack(node.a, ta, Rect(r.x, r.y, wa, r.h)), self._slack(node.b, tb, Rect(r.x + wa + GAP, r.y, r.w - wa - GAP, r.h)))
+        var ha = self._split_at(n, r.h, False)
+        var ta = toward if self._within(node.a, toward) else -1
+        var tb = toward if self._within(node.b, toward) else -1
+        return self._slack(node.a, ta, Rect(r.x, r.y, r.w, ha)) + self._slack(node.b, tb, Rect(r.x, r.y + ha + GAP, r.w, r.h - ha - GAP))
+
+    def _stretch(mut self, n: Int, toward: Int, delta: Int, r: Rect):
+        """Part n (placed at r) made `delta` taller (shorter if negative, within its slack): the share goes along the
+        card `toward`, else to the bottom (when shorter: from the other side once that one is at its minimum); a part
+        beside it takes the same; every other part keeps its pixels (its ratio is set against the new height)."""
+        if delta == 0 or self.nodes[n].kind == LEAF:
+            return
+        var a = self.nodes[n].a
+        var b = self.nodes[n].b
+        var ta = toward if self._within(a, toward) else -1
+        var tb = toward if self._within(b, toward) else -1
+        if self.nodes[n].kind == V:
+            var wa = self._split_at(n, r.w, True)
+            self._stretch(a, ta, delta, Rect(r.x, r.y, wa, r.h))
+            self._stretch(b, tb, delta, Rect(r.x + wa + GAP, r.y, r.w - wa - GAP, r.h))
+            return
+        var ha = self._split_at(n, r.h, False)
+        var hb = r.h - ha - GAP
+        var ra = Rect(r.x, r.y, r.w, ha)
+        var rb = Rect(r.x, r.y + ha + GAP, r.w, hb)
+        var first_a = ta >= 0  # (the side that takes it: the card's, else the bottom one)
+        var da = 0
+        var db = 0
+        if delta > 0:
+            da = delta if first_a else 0
+            db = 0 if first_a else delta
+        else:
+            var give = -delta
+            if first_a:
+                da = min(give, self._slack(a, ta, ra))
+                db = give - da
+            else:
+                db = min(give, self._slack(b, tb, rb))
+                da = give - db
+            da = -da
+            db = -db
+        self.nodes[n].ratio = Float64(ha + da) / Float64(r.h - GAP + delta)
+        self._stretch(a, ta, da, ra)
+        self._stretch(b, tb, db, rb)
+
+    def stretch(mut self, id: String, extra: Int, width: Int, height: Int) -> Int:
+        """The area made `extra` taller (shorter if negative, as far as every card can keep its minimum height) along the
+        card's row: the card, and the cards beside it, take it; every card above or below keeps its pixels. Returns
+        what was applied."""
+        var n = self._find(id)
+        if n < 0 or extra == 0:
+            return 0
+        var r = Rect(0, 0, width, height)
+        var delta = extra
+        if extra < 0:
+            delta = -min(-extra, self._slack(self.root, n, r))
+        self._stretch(self.root, n, delta, r)
+        return delta
 
     # ---- text
 

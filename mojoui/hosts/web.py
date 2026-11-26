@@ -37,6 +37,11 @@ from fasthtml.common import (
 )
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # (the host's own modules, also when a test loads this file by path)
+import pairing
+
+os.environ["MOJOUI_PY_HOSTED"] = "1"  # the app's Python work (mojoui.speech, voice) shares this interpreter's lock: speech.mojo, D-7246
+
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
@@ -45,6 +50,7 @@ CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 START, CENTER, END = 1, 2, 3
+STRETCH = 4  # (align only; an Overlay island pinned STRETCH is a band)
 SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES = 1, 2, 3, 4, 5, 6, 7, 8, 9
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
@@ -60,6 +66,8 @@ AGENT_SOCKET = "" if PUBLIC else os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an
 # to be set on a deployed host (docs/js.md).
 DEV = os.environ.get("MOJOUI_DEV") == "1" and not PUBLIC
 DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
+AUDIO_CHUNK = 1920  # bytes of speaker samples (16-bit, 24 kHz: 40 ms) the host hands the page at a time
+AUDIO = not PUBLIC # the page's microphone and speaker for the app's Microphone and Speaker (goal 72 M5); never in the public copy
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds with nothing to say (0: as long as the tab lives)
 PUSH = os.environ.get("MOJOUI_PUSH", "1" if PUBLIC else "0") == "1"  # (local apps keep pulling at the display's rate)
@@ -158,19 +166,30 @@ MENU_JS = r"""
     if (t && document.querySelector('.menubar > .menu.open') && !t.parentElement.classList.contains('open')) { menus.closeAll(); t.parentElement.classList.add('open'); }
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); return; }
+    if (e.key === 'Escape' && document.querySelector('.menu.open:not(.context)')) { menus.closeAll(); e.preventDefault(); e.stopPropagation(); return; }  // (the menu took it: nothing after it does, not a focused canvas either, goal 76)
     if (e.key === 'Escape') { const c = document.querySelector('.menu.context, .popover') || document.querySelector('.dialog-layer');
       if (c) { menus.dismiss(c); e.preventDefault(); e.stopPropagation(); return; } }
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
     const fkey = /^F\d{1,2}$/.test(e.key);
     if (!(e.ctrlKey || e.metaKey || e.altKey || fkey)) return;
     const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-    const name = (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + key;
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);  // (a Mac's Command is Ctrl; elsewhere Meta is the Super key: goal 78's canvas keys)
+    const name = (e.metaKey && !mac ? 'Super+' : '') + (e.ctrlKey || (e.metaKey && mac) ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + key;
     const typing = e.target.matches && e.target.matches('input, textarea, [contenteditable], [contenteditable] *');
     if (typing && ['Ctrl+C', 'Ctrl+X', 'Ctrl+V', 'Ctrl+A', 'Ctrl+Z'].includes(name)) return;  // a field's own copy, paste, select all, undo
+    if (typing && (/^(Arrow|Home|End|Page)/.test(key) || (e.altKey && !e.ctrlKey && !e.metaKey && key.length === 1))) return;  // (a field's own word jumps and
+    // selections, and a Mac's ⌥ characters (ƒ, †): never a canvas's Arrange keys, goal 78)
     const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === name);
     if (item) { e.preventDefault(); e.stopPropagation(); menus.closeAll(); item.click(); }
   }, true);
+  // An Escape nothing took (no open menu, popover or dialog, not typed in a field): the enabled item declaring the
+  // shortcut "Escape" fires (omxplorer: close the docked panel), the GTK host's last-chance controller (goal 76).
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('#mojoui-overlay dialog.alert')) return;  // (an alert answers Esc itself, on keyup)
+    if (e.target.matches && e.target.matches('input, textarea, select, [contenteditable], [contenteditable] *')) return;
+    const item = [...document.querySelectorAll('[data-kind=item]:not([disabled])')].find(i => i.dataset.shortcut === 'Escape');
+    if (item) { e.preventDefault(); item.click(); }
+  });
   document.addEventListener('htmx:afterSettle', menus.place);
   // Clipboard(text, version): a new version puts the text on the system clipboard (window.mojouiClip keeps it for tests)
   const copyAsked = () => document.querySelectorAll('[data-kind=clipboard]').forEach(c => {
@@ -315,6 +334,33 @@ MENU_JS = r"""
   addEventListener('load', tellScheme);
   scheme.addEventListener('change', tellScheme);
   addEventListener('resize', () => { clearTimeout(sizeTimer); sizeTimer = setTimeout(tellSize, 120); });
+  // Where the tagged views are (mojoui.geometry.rect_of, which the app's pointer ring asks for, goal 77 M1): the page reports the
+  // rects, in viewport pixels, of the views whose tag has a dot (a card's parts: "card2.meaning"), of the pointer's own layer
+  // ("pointer") and of the orb ("orb…"), whenever the screen settles, scrolls or resizes, and only when they changed.
+  let rectsTimer = 0, rectsSent = '';
+  const tellRects = () => {
+    rectsTimer = 0;
+    const root = document.getElementById('mojoui-root');
+    if (!root || !root.dataset.sid) return;
+    const out = {};
+    document.querySelectorAll('[data-tag]').forEach(el => {
+      const t = el.dataset.tag;
+      if (!(t.includes('.') || t === 'pointer' || t.startsWith('orb'))) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out[t] = [Math.round(r.left * 10) / 10, Math.round(r.top * 10) / 10, Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10];
+    });
+    const text = JSON.stringify(out);
+    if (text === rectsSent) return;
+    rectsSent = text;
+    htmx.ajax('POST', `/rects/${root.dataset.sid}`, { values: { data: text }, swap: 'none', source: lane('rects') });
+  };
+  const rectsSoon = () => { if (!rectsTimer) rectsTimer = setTimeout(tellRects, 60); };
+  document.addEventListener('htmx:afterSettle', rectsSoon);
+  afterSwaps(rectsSoon);
+  addEventListener('load', rectsSoon);
+  addEventListener('resize', rectsSoon);
+  document.addEventListener('scroll', rectsSoon, true);
+  document.addEventListener('DOMContentLoaded', () => new MutationObserver(rectsSoon).observe(document.body, { childList: true, subtree: true, characterData: true }));
 })();
 """
 
@@ -469,10 +515,17 @@ BOARD_JS = r"""
     if (!p || p.classList.contains('moving')) return;  // (a drag in progress owns the position)
     if (p.classList.contains('board')) {
       p.style.width = d.w + 'px'; p.style.height = d.h + 'px';
+      if (d.zoom) { const was = Number(p.dataset.zoom || 100), z = Number(d.zoom), sc = p.parentElement;
+        if (was !== z) { const x = sc.scrollLeft * z / was, y = sc.scrollTop * z / was; p.dataset.zoom = d.zoom; p.style.zoom = z / 100;
+          requestAnimationFrame(() => { sc.scrollLeft = x; sc.scrollTop = y; }); } }
       const key = p.dataset.sid + '/' + p.dataset.node, token = Number(d.reveal || 0);
       if (token && revealed[key] !== token) { revealed[key] = token; requestAnimationFrame(() => reveal(p, token)); }
     }
-    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; p.dataset.tone = d.tone || '0'; }
+    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; p.dataset.tone = d.tone || '0';
+      if (d.w) {  // (a free canvas's card: its size too, and its content's own box: live while it's dragged)
+        p.style.width = d.w + 'px'; p.style.height = d.h + 'px'; p.dataset.w = d.w; p.dataset.h = d.h;
+        const inner = p.firstElementChild;
+        if (inner && inner !== mark && inner.style.width) { inner.style.width = d.w + 'px'; inner.style.height = d.h + 'px'; } } }
   }
   // Board(on_hold=…): a press on an object held still for HOLD_MS is a hold (number PRESS, x = its index); letting go
   // after it sends RELEASE. Any press counts (a canvas's too: its own gestures still run), but not on a control.
@@ -530,7 +583,135 @@ BOARD_JS = r"""
       obj.addEventListener('pointermove', move); obj.addEventListener('pointerup', up); obj.addEventListener('pointercancel', up);
     });
   }
-  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place); };
+  // A free canvas (mojoui.freeboard): an edge or corner of a card resizes it, its title band moves it, live: the app hears
+  // every pointer move (BOARD_LIVE: x = the card, y = the handle, +100 with Alt: no snap; dx/dy from the press, in page
+  // points) and answers with the card's place and size (its mark, applied at once), then PAN / ZOOM when it's let go.
+  // Ctrl+wheel zooms (BOARD_ZOOM); the page's scroll tells the app what shows (BOARD_VIEW). Hit-testing is
+  // mojoui.freeboard.handle_at's, the same numbers.
+  const LIVE = 11, BZOOM = 12, BVIEW = 13, PICK = 15, HMOVE = 8, NONE = -1, EDGE = 6, CORNER = 16, GRIP = 24, HEADER = 44;
+  const CURSORS = ['nwse-resize', 'ns-resize', 'ns-resize', 'ew-resize', 'ew-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'move'];
+  function handleAt(w, h, x, y) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return NONE;
+    if (x >= w - GRIP && y >= h - GRIP) return 0;
+    const l = x < CORNER, r = x >= w - CORNER, t = y < CORNER, b = y >= h - CORNER;
+    if (l && t && (x < EDGE || y < EDGE)) return 6;
+    if (r && t && (x >= w - EDGE || y < EDGE)) return 5;
+    if (l && b && (x < EDGE || y >= h - EDGE)) return 7;
+    if (y < EDGE) return 1;
+    if (y >= h - EDGE) return 2;
+    if (x < EDGE) return 4;
+    if (x >= w - EDGE) return 3;
+    return y < HEADER ? HMOVE : NONE;
+  }
+  // (the board's zoom now: a drag reads it from the board on the page, not the element it pressed, which a zoom's answer may
+  // have replaced, review 4)
+  const zoomOf = board => { const b = board.isConnected ? board : (document.querySelector(`.board[data-node="${board.dataset.node}"]`) || board);
+    return Number(b.dataset.zoom || 100) / 100; };
+  function hit(board, e) {  // (by the cards' boxes, not what the pointer is over: a rounded corner's cut-out still grabs the corner)
+    let obj = null, raised = false;
+    for (const o of board.children) {
+      if (!o.classList.contains('object') || o.dataset.tag === 'board-guide') continue;
+      const r = o.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) continue;
+      if (raised && !o.classList.contains('raised')) continue;  // (the card dragged last stays on top)
+      obj = o; raised = o.classList.contains('raised');
+    }
+    if (!obj) return [null, NONE];
+    const f = obj.firstElementChild;  // (an in-place editor is typed in, never dragged)
+    if (f && (f.dataset.kind === 'field' || f.querySelector(':scope > [data-kind=field]'))) return [null, NONE];
+    const r = obj.getBoundingClientRect(), z = r.width / Math.max(obj.offsetWidth, 1) || zoomOf(board);
+    return [obj, handleAt(Math.round(r.width / z), Math.round(r.height / z), Math.floor((e.clientX - r.left) / z), Math.floor((e.clientY - r.top) / z))];
+  }
+  window.mojouiFreeHandle = (tag, handle) => {  // (tests) where a hand grabs that handle of card `tag`, in the window
+    const obj = document.querySelector(`.board.free > .object[data-tag="${tag}"]`); if (!obj) return null;
+    const r = obj.getBoundingClientRect(), w = r.width, h = r.height, z = w / Math.max(obj.offsetWidth, 1), e = EDGE / 2 * z;
+    const at = { n: [w / 2, e], s: [w / 2, h - 1 - e], e: [w - 1 - e, h / 2], w: [e, h / 2], ne: [w - 1 - e, e], nw: [e, e], sw: [e, h - 1 - e], se: [w - 8 * z, h - 8 * z], move: [(CORNER + 24) * z, HEADER / 2 * z] }[handle];
+    if (at && handle === 'move') {  // (the title band's blank: its words and buttons are the card's own, a hand grabs beside them)
+      for (let x = (CORNER + 24) * z; x < w - CORNER * z; x += 6 * z) {
+        const el = document.elementFromPoint(r.left + x, r.top + at[1]);
+        if (el && el.closest('.object') === obj && !el.closest('input, textarea, select, button, a, [contenteditable]')) return [r.left + x, r.top + at[1]];
+      }
+    }
+    return at ? [r.left + at[0], r.top + at[1]] : null;
+  };
+  function free(board) {
+    if (board.mojouiFree) return;
+    board.mojouiFree = true;
+    const post = (number, x, y, dx, dy, zoom) => htmx.ajax('POST', `/e/${board.dataset.sid}`, { values: { n: Number(board.dataset.node), number,
+      x, y, dx, dy, zoom: zoom || 1, v: shape() }, swap: 'none', source: window.mojouiLane('board') });
+    let dragging = null;
+    board.addEventListener('pointermove', e => {  // (the pointer says what a press does: each edge and corner its own cursor)
+      if (dragging) return;
+      const [obj, h] = hit(board, e);
+      board.querySelectorAll(':scope > .object[data-grab]').forEach(o => { if (o !== obj || h === NONE) { delete o.dataset.grab; o.style.removeProperty('--grab'); } });
+      if (obj && h !== NONE) { obj.dataset.grab = '1'; obj.style.setProperty('--grab', CURSORS[h]); }
+      board.style.cursor = obj && h !== NONE ? CURSORS[h] : '';  // (a rounded corner's cut-out is the board's own)
+    });
+    board.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const [obj, h] = hit(board, e);
+      if (obj && obj.dataset.tone !== '5') post(PICK, Number(obj.dataset.index), 0, 0, 0);  // (a press on a card takes the focus, as a window manager's click)
+      if (!obj || h === NONE) return;
+      if (h === HMOVE && e.target.closest('input, textarea, select, button, a, [contenteditable]')) return;  // (the title band's own controls)
+      e.preventDefault(); e.stopPropagation();  // (an edge is the canvas's, not the card content's)
+      let z = zoomOf(board), x0 = e.clientX, y0 = e.clientY, lastX = x0, lastY = y0;
+      const index = Number(obj.dataset.index);
+      const d = { obj, h, live: false, alt: e.altKey }; dragging = d;  // (this drag's own state: a second touch's drag never shares it, review 4)
+      board.setPointerCapture(e.pointerId);
+      let sent = 0, first = true;
+      const pid = e.pointerId;
+      const move = ev => {
+        if (ev.pointerId !== pid) return;
+        if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) {  // (a release the page never saw: Alt+Tab mid-drag; it ends where the
+          up({ pointerId: pid, clientX: lastX, clientY: lastY, altKey: d.alt }); return; }  // last frame left the card, with that frame's Alt, review 5)
+        if (zoomOf(board) !== z) {  // (the zoom changed mid-drag: the press starts again where the last frame sent was, at the new
+          z = zoomOf(board); x0 = lastX; y0 = lastY; first = true;  // zoom; the app rebases on the card as that frame left it, review 3)
+        }
+        const dx = (ev.clientX - x0) / z, dy = (ev.clientY - y0) / z;
+        if (!d.live) {
+          if (h === HMOVE && Math.abs(dx) + Math.abs(dy) < 4) return;
+          d.live = true;
+          board.querySelectorAll(':scope > .object.raised').forEach(o => o.classList.remove('raised'));
+          obj.classList.add('raised');  // (the dragged card on top)
+        }
+        const now = performance.now(); if (!first && now - sent < 12) return; sent = now;
+        post(LIVE, index, h + (ev.altKey ? 100 : 0) + (first ? 1000 : 0), dx, dy);  // (FIRST_FRAME: the app starts this drag afresh)
+        d.alt = ev.altKey;
+        first = false; lastX = ev.clientX; lastY = ev.clientY;
+      };
+      const up = ev => {
+        if (ev.pointerId !== pid) return;
+        window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true);
+        if (dragging === d) dragging = null;
+        if (!d.live) return;
+        let restart = false;  // (a zoom since the last frame: the end starts again from that frame, flagged FIRST_FRAME as move()
+        if (zoomOf(board) !== z) { z = zoomOf(board); x0 = lastX; y0 = lastY; restart = true; }  // does, or the card went back, review 4)
+        post(h === HMOVE ? PAN : ZOOM, index, h + (ev.altKey ? 100 : 0) + (restart ? 1000 : 0), (ev.clientX - x0) / z, (ev.clientY - y0) / z);
+      };
+      // (followed on the window, not only through the board's pointer capture: a Ctrl+wheel mid-drag lost the capture without a
+      // lostpointercapture or a pointerup in Chromium, and the drag stalled with no end; review 3)
+      window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', up, true);
+    }, true);
+    let wheelAt = 0;
+    board.addEventListener('wheel', e => {  // Ctrl+wheel (a pinch on a trackpad): zoom, not the browser's
+      if (!e.ctrlKey) return;
+      e.preventDefault(); e.stopPropagation();
+      const now = performance.now(); if (now - wheelAt < 60) return; wheelAt = now;
+      post(BZOOM, 0, 0, 0, 0, e.deltaY > 0 ? 1 / 1.1 : 1.1);
+    }, { passive: false, capture: true });
+    const sc = board.parentElement;
+    let timer = 0;
+    const view = () => { const z = zoomOf(board); post(BVIEW, sc.scrollLeft / z, sc.scrollTop / z, sc.clientWidth / z, sc.clientHeight / z); };
+    sc.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(view, 150); });
+  }
+  const sized = m => {  // (a node inside a free card resized live: its new size as its style, mojoui.freeboard)
+    const el = document.getElementById('n' + m.dataset.node), d = m.dataset; m.remove();
+    if (!el || d.v !== shape()) return;  // (from an older screen: its n<i> is another node now, as #mojoui-v guards every other answer)
+    el.style.width = Number(d.w) ? d.w + 'px' : ''; el.style.height = Number(d.h) ? d.h + 'px' : '';
+    el.style.minWidth = Number(d.minw) ? d.minw + 'px' : ''; el.style.maxWidth = Number(d.maxw) ? d.maxw + 'px' : '';
+  };
+  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { if (b.classList.contains('free')) free(b); else attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place);
+    document.querySelectorAll('#mojoui-sizes > [data-kind=size]').forEach(sized); };
   scan();
   new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
 })();
@@ -543,7 +724,7 @@ CANVAS_JS = r"""
 // its version or size changes. Gestures: drag = PAN, wheel/pinch = ZOOM, click = TAP,
 // sent through htmx like any other event, so the rest of the page updates as usual.
 (() => {
-  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9;
+  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9, HOVER = 14;
   const shape = () => document.getElementById('mojoui-v').value;
   // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
   // (light/dark, a skin) redraws it even when its version didn't move (D-673)
@@ -693,12 +874,16 @@ CANVAS_JS = r"""
     e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
   }, true);
   window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
+  // A canvas on a zoomed free canvas (mojoui.freeboard, CSS zoom): drawn at its own size in points, at the zoomed pixel
+  // density (the app lays it out as at 100 %, crisp at the zoom), as GTK draws a scaled card's canvas.
+  const canvasZoom = div => { const b = div.closest('.board.free'); return b ? Number(b.dataset.zoom || 100) / 100 : 1; };
   // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
   // swap, not only when a frame arrives: words can change while the picture doesn't.
   window.mojouiWords = div => {
     const m = document.getElementById('n' + div.dataset.node + '-meta'), cv = div.querySelector('canvas');
     if (!m) return;
     if ((m.dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip; }
+    if (cv && cv.style.cursor !== (m.dataset.cursor || '')) cv.style.cursor = m.dataset.cursor || '';  // (.cursor(): a link under the pointer, goal 78)
     if (cv && (cv.getAttribute('aria-label') || '') !== (m.dataset.name || '')) cv.setAttribute('aria-label', m.dataset.name || '');
   };
   function attach(div) {
@@ -717,10 +902,12 @@ CANVAS_JS = r"""
     // overlap): only an answer newer than the picture shown is drawn. Returns what the loop does next.
     async function one(tick) {
       const m = meta(), version = m ? m.dataset.version : '', skin = skinNow(), seq = ++st.seq;
-      const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, zf = canvasZoom(div);
+      if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { await new Promise(ok => requestAnimationFrame(ok)); return 'ok'; }  // (not laid out yet, a screen just rebuilt: a 1x1 frame would wipe the picture it kept; up to 30 frames, D-6713)
+      st.unsized = 0;
       const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
-      const params = { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
+      const params = { w, h, scale: dpr * zf, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
       const res = await getFrame(sid, n, params);
       if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {
         if (seq > st.drawnSeq) { st.drawn = version; st.skin = skin; }
@@ -799,10 +986,12 @@ CANVAS_JS = r"""
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
           const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
-          const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+          const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, zf = canvasZoom(div);
+          if ((r.width < 1 || r.height < 1) && (st.unsized = (st.unsized || 0) + 1) <= 30) { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); continue; }  // (not laid out yet: as in one(), D-6713)
+          st.unsized = 0;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
-          const res = await getFrame(sid, n, { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
+          const res = await getFrame(sid, n, { w, h, scale: dpr * zf, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
           if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {  // (the picture it shows is still the one: nothing sent)
             st.drawn = version; st.skin = skin;
             if (res.headers.get('X-Mojoui-Pending') === '1') update();
@@ -847,6 +1036,7 @@ CANVAS_JS = r"""
       const q = events.queue, last = q[q.length - 1], same = last && last.n === n && last.number === kind;
       if (same && (kind === PAN || kind === WHEEL)) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
       else if (same && kind === ZOOM) { last.zoom *= zoom; }
+      else if (same && kind === HOVER) { last.x = x; last.y = y; }
       else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text, pressure });
       flushEvents();
     }
@@ -869,6 +1059,16 @@ CANVAS_JS = r"""
       });
     }
     cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = at(e); send(SECONDARY, x, y, 0, 0, 1); });
+    if (div.dataset.hover === '1') {  // Canvas(hover=True): where the pointer is (HOVER; -1, -1 once it leaves), at most every 40 ms
+      let hoverAt = 0, hoverTimer = 0;
+      cv.addEventListener('pointermove', e => {
+        if (pointers.size) return;
+        const [x, y] = at(e), now = performance.now(); clearTimeout(hoverTimer);
+        if (now - hoverAt >= 40) { hoverAt = now; send(HOVER, x, y, 0, 0, 1); }
+        else hoverTimer = setTimeout(() => { hoverAt = performance.now(); send(HOVER, x, y, 0, 0, 1); }, 40);
+      });
+      cv.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); send(HOVER, -1, -1, 0, 0, 1); });
+    }
     const mods = e => (e.shiftKey ? 1 : 0) + (e.ctrlKey || e.metaKey ? 2 : 0) + (e.altKey ? 4 : 0);  // SHIFT, CTRL, ALT (mojoui.view)
     const pen = e => e.pointerType === 'pen' ? (e.pressure || 0) : 0;
     cv.addEventListener('pointerdown', e => {
@@ -937,6 +1137,13 @@ CANVAS_JS = r"""
     if (first) { if (!first.mojoui) attach(first); first.querySelector('canvas').focus({ preventScroll: true }); }
   }
   document.addEventListener('DOMContentLoaded', () => { scan(); focusFirst(); });
+  // A rebuilt screen's canvases are wired up (each shows the picture it kept) before the browser paints it, not ~20 ms
+  // later at afterSettle: in between, a new <canvas> painted blank (the Stage's TV flashed as its body arrived, D-6713).
+  // One microtask per answer, however many elements it swapped.
+  let scanQueued = false;
+  const scanSoon = () => { if (scanQueued) return; scanQueued = true; queueMicrotask(() => { scanQueued = false; scan(); }); };
+  document.addEventListener('htmx:oobAfterSwap', scanSoon);
+  document.addEventListener('htmx:afterSwap', scanSoon);
   document.addEventListener('htmx:afterSettle', () => {
     scan();
     release();
@@ -1108,7 +1315,7 @@ class SessionRequests:
 
     EXEMPT = ("static", "assets", "health", "wait", "push", "bye", "download", "img", "favicon.ico", "")  # (no session work, or a few a tab holds)
     # (the routes that name a session, but the exempt ones; any other path, /dev/… on a public copy, gets its own answer)
-    ROUTES = ("e", "w", "frame", "pending", "resize", "save", "reply", "appearance", "describe", "dropfile", "jslog", "rows", "spot", "upload")
+    ROUTES = ("e", "w", "frame", "pending", "resize", "save", "reply", "appearance", "describe", "dropfile", "jslog", "rows", "spot", "upload", "rects")
 
     def __init__(self, app, alive):
         self.app, self.alive, self.open, self.lock = app, alive, {}, threading.Lock()
@@ -1221,7 +1428,8 @@ def content_name(name, data):
 def host_files():
     """The host's own files, by content hash: {name: (hashed name, bytes, media type)}. mojoui.js is every adapter
     (canvas, board, menus, effects, the page's listeners, widgets) in one script."""
-    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-widgets.js").read_text()]).encode()
+    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-audio.js").read_text(),
+                    (STATIC / "mojoui-widgets.js").read_text()]).encode()
     out = {}
     for name, data, media in (("htmx.min.js", (STATIC / "htmx.min.js").read_bytes(), "text/javascript"),
                               ("mojoui.js", js, "text/javascript"), ("mojoui.css", CSS.encode(), "text/css")):
@@ -1322,8 +1530,41 @@ def place_mark(s, i):
     n = s.nodes[i]
     if n["kind"] == BOARD:
         return I(hidden=True, id=f"n{i}-place", data_kind="place", data_w=str(n["spacing"]), data_h=str(n["size"]),
-                 data_reveal=str(n["value"]))
-    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)))
+                 data_reveal=str(n["value"]), data_zoom=str(board_zoom(n)) if free_board(n) else None)
+    p = parent_of(s, i)
+    sized = p >= 0 and free_board(s.nodes[p])  # (a free canvas's card: its size goes with its place, mojoui.freeboard)
+    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)),
+             data_w=str(n["w"]) if sized else None, data_h=str(n["h"]) if sized else None)
+
+
+def inside_free_card(s, i):
+    """Whether node i sits inside a free canvas's card (mojoui.freeboard)."""
+    p = parent_of(s, i)
+    while p >= 0:
+        q = parent_of(s, p)
+        if q >= 0 and free_board(s.nodes[q]):
+            return True
+        p = q
+    return False
+
+
+def size_mark(s, i):
+    """Node i's sizes for BOARD_JS to set as its style (appended to #mojoui-sizes, applied and removed at once)."""
+    n = s.nodes[i]
+    mark = I(hidden=True, data_kind="size", data_node=str(i), data_v=str(s.shape), data_w=str(n["w"]), data_h=str(n["h"]), data_minw=str(n["min_w"]),
+             data_maxw=str(n["max_w"]))  # (v: the screen it numbers nodes for; a mark that outlives its screen is dropped, review 2)
+    return Div(mark, hx_swap_oob="beforeend:#mojoui-sizes")
+
+
+def free_board(n):
+    """A free canvas (mojoui.freeboard): cards anywhere at any size, dragged live, zoomed."""
+    return n["kind"] == BOARD and n["text"].startswith("clips free")
+
+
+def board_zoom(n):
+    """A free canvas's zoom in percent (its text's z=…), 100 when none."""
+    m = re.search(r"\bz=(\d+)", n["text"])
+    return int(m.group(1)) if m else 100
 
 
 def object_tone(s, i):
@@ -1400,6 +1641,9 @@ def render(s, i, sid):
         el.attrs["style"] = (old + ";" if old else "") + ";".join(css)
     if n["name"]:
         el.attrs["data-tag"] = n["name"]
+    if n.get("hidden"):  # (.hidden(): in the page, not shown; agents still reach its controls, D-7601)
+        el.attrs["hidden"] = True
+        el.attrs["style"] = (el.attrs.get("style", "") + ";display:none").lstrip(";")
     if n.get("arrive"):  # (.arrive(): a spring the first time it's inserted; mojoui.css .mojoui-arrive)
         el.attrs["class"] = (el.attrs.get("class", "") + " mojoui-arrive").strip()
     if n.get("tip"):
@@ -1699,9 +1943,11 @@ def render_node(s, i, sid):
             kids.append(Div(render(s, c, sid), place_mark(s, c), cls="object", data_kind="object", data_index=str(k), data_tag=ch["name"],
                             data_x=str(ch["x"]), data_y=str(ch["y"]), data_w=str(ch["w"]), data_h=str(ch["h"]), data_tone=str(object_tone(s, c)),
                             style=f"left:{ch['x']}px;top:{ch['y']}px;width:{ch['w']}px;height:{ch['h']}px"))
-        board = Div(*kids, place_mark(s, i), cls="board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid, data_hold="1" if n["hint"] else None,
-                    style=f"width:{n['spacing']}px;height:{n['size']}px")
-        return Div(board, cls="board-scroll", id=nid)  # the page scrolls when it's bigger than its room
+        free = free_board(n)
+        board = Div(*kids, place_mark(s, i), cls="board free" if free else "board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid,
+                    data_hold="1" if n["hint"] else None, data_zoom=str(board_zoom(n)) if free else None,
+                    style=f"width:{n['spacing']}px;height:{n['size']}px" + (f";zoom:{board_zoom(n) / 100}" if free else ""))
+        return Div(board, cls="board-scroll free-scroll" if free else "board-scroll", id=nid)  # the page scrolls when it's bigger than its room
     if kind == DIALOG:  # modal over a scrim; ✕ and Escape are on_close (its content's own buttons close it otherwise)
         close = Button("✕", type="button", cls="dialog-close", title="Close", aria_label="Close", **dict(common, hx_vals=json.dumps({"n": i, "second": 1})))
         head = Div(H3(n["text"], id=f"{nid}-t"), close, cls="dialog-head")
@@ -1805,7 +2051,11 @@ def render_node(s, i, sid):
                 ch = s.nodes[c]
                 h = {START: "start", END: "end"}.get(ch["x"], "center")
                 v = "end" if ch["y"] == END else "start"
-                kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}"))
+                cover = " cover" if ch["fills"] and ch["grows"] else ""  # (a layer over the whole overlay: mojoui.orb.RimView)
+                if ch["x"] == STRETCH:  # (a band, .pin(STRETCH, START or END): the overlay's whole width at an edge, no margin, no island's chrome; mojoui.stage's TV, D-6711)
+                    kids.append(Div(render(s, c, sid), cls=f"band v-{v}"))
+                    continue
+                kids.append(Div(render(s, c, sid), cls=f"island h-{h} v-{v}{cover}"))
         return Div(*kids, cls="overlay", id=nid, data_kind="overlay")
     if kind == CANVAS:
         # Its own size only when the app's layout doesn't size it (as on the other hosts).
@@ -1813,7 +2063,7 @@ def render_node(s, i, sid):
         sized_h = n["h"] or (n["height_from_parent"] if "height_from_parent" in n else n["grows"] or n["fills"])
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
-                   data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None,
+                   data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None, data_hover="1" if n["text"] == "hover" else None,
                    data_scroll="pan" if n["spacing"] == 1 else None,
                    style=";".join(([own] if own else []) + (["pointer-events:none"] if n["size"] == 2 else [])) or None)
     if kind == DIVIDER:
@@ -1830,7 +2080,8 @@ def render_node(s, i, sid):
 def canvas_meta(n, i):
     """What the canvas adapter needs to know (version, whether it wants frames), kept beside
     the <canvas> so a patch can replace it without clearing the picture."""
-    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""), data_name=n.get("a11y_name", ""))
+    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""), data_name=n.get("a11y_name", ""),
+             data_cursor=n.get("cursor", ""))
 
 
 def render_alert(s, i, sid):
@@ -2104,6 +2355,12 @@ def make_app(module_dir):
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:
         print(f"SHARED: {loads} load, 0 sessions", flush=True)
+    audio = AUDIO and hasattr(mod, "audio_init")
+    if audio:
+        mod.audio_init()  # the hub an app's Microphone and Speaker talk to, before any session
+    camera = audio and hasattr(mod, "camera_init")
+    if camera:
+        mod.camera_init()  # the hub an app's Camera talks to (the page's rear camera, stills only when asked: docs/web-audio.md)
     files = host_files()
     by_name = {hashed: (data, media) for hashed, data, media in files.values()}
     fonts = {}
@@ -2123,10 +2380,16 @@ def make_app(module_dir):
         # inherited their list's hx-target and silently sent nothing). Note: hx-vals is still
         # merged from ancestors even so, so elements set every key they rely on themselves.
         # No eval and no scripts from answers (the CSP forbids both anyway); no inline style for htmx's indicators.
-        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'),
+        # No settle delay (goal 77 M7f, D-7840): for its 20 ms default htmx lends a swapped-in element whose id an old one had
+        # the old element's attributes (classes, styles) so CSS transitions can run; mojoui's ids are node numbers, which a
+        # rebuilt screen gives to different views, so a frame could paint the new screen in the old one's sizes (the Stage's
+        # TV body caught squashed, its orb on black). mojoui animates with its own springs, never with htmx's settle classes.
+        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "defaultSettleDelay": 0}'),
         Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
         Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
     app.add_middleware(SecurityHeaders)
+    if not PUBLIC:  # (another device only with the pairing key, and only under an allowed host name: mojoui/hosts/pairing.py)
+        app.add_middleware(pairing.Pairing)
     if PUBLIC:
         roots = [Path(module_dir).resolve(), Path(__file__).resolve().parents[2], Path.home(), uploads_base().parent]
         for name in ("OMX_STARTER", "OMX_DOCUMENTS", "OMX_CONFIG"):
@@ -2442,7 +2705,8 @@ def make_app(module_dir):
         # While an alert is up the page behind is inert (no clicks, no keyboard focus);
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
-        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+        page = Main(version, Div(id="mojoui-sizes", hidden=True), busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+                    data_audio="1" if AUDIO else None,  # (the page opens its audio socket: docs/web-audio.md)
                     data_push="1" if PUSH else None,  # (playing canvases' pictures pushed: the public copy, or MOJOUI_PUSH=1)
                     data_agent="1" if AGENT_SOCKET else None, data_dev="1" if DEV else None)  # (widgets tell the host what they show only while an agent may read it)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
@@ -2479,6 +2743,119 @@ def make_app(module_dir):
             return Response(status_code=404)
         data, media = by_name[name]
         return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+    worklet = (STATIC / "mojoui-mic-worklet.js").read_bytes()
+
+    @app.get("/audio/worklet.js")
+    def audio_worklet():
+        """The page's microphone worklet (AudioWorklet modules load from a URL, and the page's policy allows only its own)."""
+        if not audio:
+            return Response(status_code=404)
+        return Response(worklet, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+    audio_logged = []  # (the audio pump says why it stopped once, not for every page)
+    hub = {"active": None}  # the audio socket holding the microphone and speaker: the last page that was tapped
+
+    async def audio_socket(ws):
+        """A page's audio (docs/web-audio.md): its microphone in, the app's Speaker out, one socket. Tag byte 1 = microphone
+        up, 2 = speaker down (3 is kept for the camera); JSON text for the rest. Only the claimed page (its first tap) is
+        heard; a page opened later and tapped takes over, and the one before is told so."""
+        import asyncio
+        from starlette.websockets import WebSocketDisconnect
+        await ws.accept()
+        me = object()
+        pcm = (ctypes.c_char * (1 + AUDIO_CHUNK))()
+        addr = ctypes.addressof(pcm) + 1
+        state = {"mic": None, "told": False, "held": False, "flushes": mod.audio_flushes(), "cam": None, "snap": 0}
+
+        async def pump():  # the app's side: wants and flushes now, speaker samples as the app queues them
+            try:
+                while True:
+                    if hub["active"] is me:
+                        state["held"] = True
+                        mic = bool(mod.audio_wants() & 1)
+                        if mic != state["mic"]:
+                            state["mic"] = mic
+                            await ws.send_text('{"t":"mic","on":%s}' % ("true" if mic else "false"))
+                        flushes = mod.audio_flushes()
+                        if flushes != state["flushes"]:
+                            state["flushes"] = flushes
+                            mod.audio_settle()
+                            await ws.send_text('{"t":"flush"}')
+                        if camera:  # the camera: opened while an app wants it, a still each time one is asked for
+                            cam = bool(mod.camera_wants())
+                            if cam != state["cam"]:
+                                state["cam"] = cam
+                                await ws.send_text('{"t":"cam","on":%s}' % ("true" if cam else "false"))
+                            asked = mod.camera_request()
+                            if asked != state["snap"]:
+                                state["snap"] = asked
+                                await ws.send_text('{"t":"snap","id":%d}' % asked)
+                        n = mod.audio_pull(addr, AUDIO_CHUNK)
+                        if n:
+                            pcm[0] = b"\x02"
+                            await ws.send_bytes(memoryview(pcm)[:1 + n].tobytes())
+                            continue
+                    elif state["held"]:  # (another page was tapped: this one is told, and stays quiet)
+                        state["held"] = False
+                        await ws.send_text('{"t":"bumped"}')
+                    else:
+                        wanted = mod.audio_wants() != 0 and hub["active"] is None
+                        if wanted and not state["told"]:  # (an app wants audio and nobody has tapped: the page says so)
+                            await ws.send_text('{"t":"tap"}')
+                        state["told"] = wanted
+                    await asyncio.sleep(0.005)
+            except Exception as e:  # (the socket closed under a send: the receive loop below ends too; anything else is said once)
+                if not isinstance(e, (WebSocketDisconnect, RuntimeError)) and not audio_logged:
+                    audio_logged.append(1)
+                    print(f"AUDIO: the pump for a page stopped: {type(e).__name__}: {e}", flush=True)
+                return
+
+        task = asyncio.create_task(pump())
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                data = msg.get("bytes")
+                if data is not None:
+                    if hub["active"] is me and data[:1] == b"\x01" and len(data) > 1:
+                        mod.audio_push(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p).value + 1, len(data) - 1)
+                    elif camera and hub["active"] is me and data[:1] == b"\x03" and len(data) > 11 and data[9:11] == b"\xff\xd8":
+                        # a still: tag 3, the request it answers (u32), its width and height (u16, u16), then the JPEG (little-endian)
+                        asked, w, h = struct.unpack("<IHH", data[1:9])
+                        mod.camera_push(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p).value + 9, len(data) - 9, asked, w, h)
+                    continue
+                try:
+                    note = json.loads(msg.get("text") or "{}")
+                except ValueError:
+                    continue
+                kind = note.get("t") if isinstance(note, dict) else None
+                if kind == "claim" and hub["active"] is not me:
+                    first = hub["active"] is None
+                    hub["active"] = me
+                    state["mic"] = None
+                    state["cam"] = None
+                    state["snap"] = 0  # (a still asked for while no page was tapped is asked of this one now)
+                    mod.audio_client(1 if first else 0)  # (the first page to be tapped drops what nobody heard)
+                    state["flushes"] = mod.audio_flushes()
+                elif kind == "mic_fail" and hub["active"] is me and isinstance(note.get("code"), int):
+                    mod.audio_fail(note["code"] if note["code"] in (101, 102, 103) else 102)
+                elif kind == "cam_fail" and camera and hub["active"] is me and isinstance(note.get("code"), int):
+                    mod.camera_fail(note["code"] if note["code"] in (101, 102, 103) else 102)
+                elif kind == "latency" and isinstance(note.get("us"), int):
+                    mod.audio_latency(max(0, min(note["us"], 5_000_000)))
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            task.cancel()
+            if hub["active"] is me:
+                hub["active"] = None
+                mod.audio_client(-1)
+
+    if audio:
+        from starlette.routing import WebSocketRoute
+        app.router.routes.insert(0, WebSocketRoute("/audio", audio_socket))  # (plain Starlette: FastHTML's own websocket wrapper accepts for you)
 
     @app.get("/assets/{name}")
     def asset(name: str):
@@ -2543,9 +2920,12 @@ def make_app(module_dir):
             made()
             sessions[sid] = s
             if not PUBLIC:
-                gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
+                keep = 1 if audio else MAX_SESSIONS  # (D-7277: an app with sound has one microphone, one speaker and one model per process)
+                gone += list(sessions.items())[:max(0, len(sessions) - keep)]  # (local: the oldest tab gives way)
         for old_sid, old in gone:
-            end_session(old_sid, old, "This page was closed to make room. Reload it to start again.")
+            end_session(old_sid, old, "Another page opened this app, so this one stopped: the microphone, the speaker and the model "
+                        "belong to one page at a time. Reload this page to take them back." if audio and not PUBLIC
+                        else "This page was closed to make room. Reload it to start again.")
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
@@ -2644,7 +3024,12 @@ def make_app(module_dir):
             target = s.nodes[i]
             if op == SET_IMAGE:
                 s.images[i] = s.images.get(i, 0) + 1
-            if op == SET_PLACE or (op == SET_VALUE and target["kind"] == BOARD):  # (a Board's value: what to reveal)
+            if op == SET_SIZE and parent_of(s, i) >= 0 and free_board(s.nodes[parent_of(s, i)]):  # (a free canvas's card resized: its mark, live)
+                op = SET_PLACE
+            elif op == SET_SIZE and inside_free_card(s, i):  # (inside a free card being resized: the new size as a style, live; the
+                moved.append(size_mark(s, i))                # node isn't sent again, so its canvas keeps its picture and the drag its pointer)
+                continue
+            if op == SET_PLACE or (op in (SET_VALUE, SET_TEXT) and target["kind"] == BOARD):  # (a Board's value: what to reveal; a free one's text: its zoom)
                 mark = place_mark(s, i)
                 mark.attrs["hx-swap-oob"] = "true"
                 moved.append(mark)
@@ -2864,6 +3249,18 @@ def make_app(module_dir):
             if s.closed or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != CANVAS:
                 return "-1,-1"
             return mod.spot(s.handle, n, name)
+
+    @app.post("/rects/{sid}")
+    def tag_rects(sid: str, data: str = ""):
+        """Where the tagged views are in the page (mojoui.geometry.rect_of): {tag: [x, y, w, h]} in viewport pixels, sent by the page
+        when they change (PAGE_JS). Kept for the app's drawing (the pointer ring); never an input, so an idle tab stays idle."""
+        s = sessions.get(sid)
+        if s is None or len(data) > 65536 or not hasattr(mod, "rects"):
+            return ""
+        with s.lock:
+            if not s.closed:
+                mod.rects(s.handle, data)
+        return ""
 
     @app.post("/describe/{sid}")
     def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):
@@ -3456,6 +3853,9 @@ def deadline_protocol():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--pair-key"]:  # (scripts/tablet.sh: the key a tablet's first visit carries, ?k=)
+        print(pairing.pair_key())
+        raise SystemExit(0)
     module_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MOJOUI_MODULE", "build/hello/web")
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "5001"))  # (a platform's port: $PORT)
     host = os.environ.get("HOST", "127.0.0.1")  # (a container listens on 0.0.0.0: HOST)

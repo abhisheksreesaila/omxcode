@@ -19,7 +19,7 @@
 from std.collections import Dict
 from mojoui.app import Event
 from mojoui.sqlname import sql_name, quote_ident, column_ref
-from mojoui.view import View, Text, Button, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY, CENTER, START, TONE_STRONG
+from mojoui.view import View, Text, Button, PLAIN, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY, CENTER, START, TONE_STRONG
 
 comptime LINK_KEY = 1  # a.col = b.col (rows with the same value)
 comptime LINK_TIME = 2  # a.t ↔ b.t: b = a · scale + offset (seconds)
@@ -43,7 +43,9 @@ comptime LINKS_UNLINK = 4  # + i: the panel's row i's Unlink
 comptime LINKS_OFFSET = LINKS_UNLINK + LINKS_MAX  # + i: row i's offset field's Return (event.text = seconds)
 comptime LINKS_LESS = LINKS_OFFSET + LINKS_MAX  # + i: row i's offset nudged down (LINKS_NUDGE seconds)
 comptime LINKS_MORE = LINKS_LESS + LINKS_MAX
-comptime LINKS_MESSAGES = LINKS_MORE + LINKS_MAX
+comptime LINK_COMPLETIONS = 8  # chips under the field: what could come next in the draft (at most)
+comptime LINKS_PICK = LINKS_MORE + LINKS_MAX  # + k: the panel's chip k (event: the draft becomes its completion)
+comptime LINKS_MESSAGES = LINKS_PICK + LINK_COMPLETIONS
 comptime LINKS_NUDGE = 0.1
 
 
@@ -152,6 +154,15 @@ def _num(v: Float64) -> String:
             f = cut
         s += "." + f
     return ("-" + s) if v < 0 and (whole > 0 or frac > 0) else s
+
+
+@fieldwise_init
+struct Completion(Copyable, Movable, ImplicitlyCopyable):
+    """One thing that could come next in a typed link: `label` is what its chip says ("episode", "fleet.", "="), `text` the
+    whole draft once it's taken (the word being typed replaced, the rest as typed)."""
+
+    var label: String
+    var text: String
 
 
 @fieldwise_init
@@ -379,12 +390,28 @@ struct CardRows(Copyable, Movable):
         return Reaction(self.card, REACT_SELECT, rows^, -1.0, -1, -1, 0, 0, 0, 0)
 
 
+comptime CHIP_ROOM = 252  # a row of chips in a 300-point inspector (its padding taken off)
+comptime CHIP_PAD = 28  # a chip's padding and border, both sides
+comptime CHIP_CHAR = 8  # a body-text character's width, rounded up (Inter at 14 averages under 7)
+comptime CHIP_GAP = 6
+
+
+def chip_width(label: String) -> Int:
+    """A chip's width, estimated on the safe side: wide enough for any host's font (a row never overflows its panel)."""
+    return CHIP_PAD + CHIP_CHAR * label.byte_length()
+
+
 def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
     """A link from how it reads: "orders.order_id = clip.mp4.code" (key), "sensor_log.t ~ clip.mp4.t +1.2"
     (time: offset in seconds, optional "×scale"). A card's name may hold dots; the column is after the last one."""
     var t = String(text.strip())
     if t.find(" = ") >= 0:
         var parts = t.split(" = ")
+        var rhs = String(parts[1].strip())
+        var cut = rhs.rfind(" ")
+        if cut > 0 and _is_number(String(rhs[byte = cut + 1 :])):  # ("a.t = b.t +1.2": an offset only means something on a time link;
+            var w = String(rhs[byte = cut + 1 :])                  # a card named "Robot runs 2024" is a name, not an offset)
+            raise Error('an offset needs "~" (a time link): "' + String(parts[0].strip()) + " ~ " + String(String(rhs[byte=0:cut]).strip()) + " " + w + '"; "=" matches equal values')
         return Link.key(_end(String(parts[0])), _end(String(parts[1])), by)
     if t.find(" ~ ") >= 0:
         var parts = t.split(" ~ ")
@@ -399,6 +426,24 @@ def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
                 offset = atof(String(w[byte = 1:]) if w.startswith("+") else w)
         return Link.time(_end(String(parts[0])), _end(String(rest[0])), offset, scale, by)
     raise Error('a link reads "card.column = card.column" (key) or "card.column ~ card.column +seconds" (time), not "' + t + '"')
+
+
+def _is_number(w: String) -> Bool:
+    """The whole word is a number: an optional sign, digits, at most one point, at least one digit ("+1.2", "-3", "0.5")."""
+    var digits = 0
+    var points = 0
+    var bytes = w.as_bytes()
+    for k in range(len(bytes)):
+        var ch = Int(bytes[k])
+        if 48 <= ch <= 57:
+            digits += 1
+        elif ch == 46:
+            points += 1
+        elif (ch == 43 or ch == 45) and k == 0:
+            pass
+        else:
+            return False
+    return digits > 0 and points <= 1
 
 
 def _end(text: String) raises -> End:
@@ -421,11 +466,17 @@ struct Links(Movable, Sized):
     var notes: List[String]  # per link, what the panel says under it ("orders ↔ clip.mp4 · 12 of 14 match"; "": its cards)
     var derived: List[Link]  # where a query's answer came from (answer.order = orders.order_id): provenance, not a
     # guess, so a row of the answer follows like a row of its source; never listed, never joined (D-1262)
+    var cards: List[String]  # the cards a person can name in a link, as the app spells them (`know`, `know_card`), and …
+    var card_columns: Dict[String, List[String]]  # … what each has: the completions' source (a video's file / t / frame too)
+    var chip_room: Int  # how wide a row of chips may be, in points (the panel's inside: the app sets it when its panel differs)
     var schemas: Dict[String, List[String]]  # per table (its SQL name), the columns it has (`know`): a key link's column
     # must be one of them (D-1341); a table not known yet is checked when it becomes known (`know`, `resolve`)
 
     def __init__(out self, msg_base: Int = 0):
+        self.chip_room = CHIP_ROOM
         self.schemas = Dict[String, List[String]]()
+        self.cards = List[String]()
+        self.card_columns = Dict[String, List[String]]()
         self.notes = List[String]()
         self.derived = List[Link]()
         self.items = List[Link]()
@@ -443,7 +494,102 @@ struct Links(Movable, Sized):
         them from now on, and a link already made on it whose column isn't there is unlinked (`problem` says why). How
         many links that removed."""
         self.schemas[sql_name(table)] = columns.copy()
+        self.know_card(table, columns)
         return self._drop_invalid()
+
+    def know_card(mut self, card: String, columns: List[String]):
+        """A card a person may name in a link, and the columns it offers (a video's file, t and frame; a folder's fields):
+        only the completions use this; `know` is what checks a key link."""
+        if not (card in self.card_columns):
+            self.cards.append(card)
+        self.card_columns[card] = columns.copy()
+
+    def _whole_end(self, text: String) -> Bool:
+        """`text` is a known card's name, a dot and one of its columns (any case)."""
+        var low = text.lower()
+        for card in self.cards:
+            if low.startswith(card.lower() + "."):
+                var part = String(low[byte = card.byte_length() + 1 :])
+                var got = self.card_columns.get(card)
+                if got:
+                    for col in got.value():
+                        if col.lower() == part:
+                            return True
+        return False
+
+    def _complete_end(self, typed: String, prefix: String, first: Bool) -> List[Completion]:
+        """The card names, or (once a known card and its dot are typed) that card's columns, starting with `typed`."""
+        var out = List[Completion]()
+        var low = typed.lower()
+        var best = -1  # (the longest card the word starts with: a card's name may hold dots, "clip.mp4")
+        for i in range(len(self.cards)):
+            if low.startswith(self.cards[i].lower() + ".") and (best < 0 or self.cards[i].byte_length() > self.cards[best].byte_length()):
+                best = i
+        if best >= 0:
+            var card = self.cards[best]
+            var part = String(low[byte = card.byte_length() + 1 :])
+            var got = self.card_columns.get(card)
+            if got:
+                for col in got.value():
+                    if col.lower().startswith(part) and len(out) < LINK_COMPLETIONS:  # (the first end gets a space: the operator is next)
+                        out.append(Completion(col, prefix + card + "." + col + (" " if first else "")))
+            if len(out) > 0:
+                return out^
+        for card in self.cards:
+            if card.lower().startswith(low) and len(out) < LINK_COMPLETIONS:
+                out.append(Completion(card + ".", prefix + card + "."))
+        return out^
+
+    def complete(self, draft: String) -> List[Completion]:
+        """What could come next in `draft`, at most LINK_COMPLETIONS: the cards' names, then (after "card.") that card's
+        columns, then (after a whole end and a space) "=" and "~", then the second end the same way. Each replaces only the
+        word being typed. Nothing after the second end: its offset is free text."""
+        var s = String(draft.lstrip())
+        var at = -1
+        for op in [" = ", " ~ "]:
+            var i = s.find(op)
+            if i >= 0 and (at < 0 or i < at):
+                at = i
+        if at >= 0:  # the second end
+            var rest = String(String(s[byte = at + 3 :]).lstrip())
+            if rest.find(" ") >= 0:
+                return List[Completion]()
+            return self._complete_end(rest, String(s[byte = 0 : at + 3]), False)
+        var sp = s.rfind(" ")
+        if sp > 0 and self._whole_end(String(s[byte = 0:sp])):  # a whole end, a space: the operators
+            var out = List[Completion]()
+            var word = String(s[byte = sp + 1 :])
+            for op in ["=", "~"]:
+                if String(op).startswith(word):
+                    out.append(Completion(String(op), String(s[byte = 0:sp]) + " " + String(op) + " "))
+            return out^
+        return self._complete_end(s, String(""), True)
+
+    def chips(self) -> View:
+        """The completions of the draft as tappable chips under the field (rows packed to `chip_room` points by a cautious
+        estimate of each chip's width, chip_width; an agent sees each as a tool,
+        "link-pick-k"); tapping one makes the draft its text. Empty when nothing could come next."""
+        var rows = List[View]()
+        var row = List[View]()
+        var used = 0
+        var found = self.complete(self.draft)
+        for k in range(len(found)):
+            var label = found[k].label
+            var w = chip_width(label)
+            if w > self.chip_room:  # (one name longer than the panel: shortened, the tooltip and the draft keep it whole)
+                var keep = max(1, (self.chip_room - CHIP_PAD) // CHIP_CHAR - 1)
+                label = String(label[byte=0:keep]) + "…"
+                w = self.chip_room
+            if len(row) > 0 and used + CHIP_GAP + w > self.chip_room:  # (rows packed by width: never wider than the panel)
+                rows.append(HStack(row, spacing=CHIP_GAP).fill().align(CENTER))
+                row = List[View]()
+                used = 0
+            used += (CHIP_GAP if len(row) > 0 else 0) + w
+            row.append(Button(label, self.msg_base + LINKS_PICK + k, PLAIN).tag("link-pick-" + String(k)).tooltip(
+                "Put " + found[k].text + " in the link"))
+        if len(row) > 0:
+            rows.append(HStack(row, spacing=CHIP_GAP).fill().align(CENTER))
+        return VStack(rows, spacing=CHIP_GAP).fill().align(START).tag("link-chips")
 
     def check(self, link: Link) raises:
         """Raises when a key link's end names a column its table doesn't have (as far as `know` was told), or a column
@@ -666,8 +812,9 @@ struct Links(Movable, Sized):
         items.append(TextField(self.draft, "orders.order_id = clip.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
             'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
+        items.append(self.chips())
         if self.problem != "":
-            items.append(Text(self.problem, CAPTION))
+            items.append(Text(self.problem, CAPTION).tag("link-problem"))
         if len(self.items) > 0:
             var opts: List[String] = ["Unlink…"]
             for l in self.items:
@@ -703,8 +850,9 @@ struct Links(Movable, Sized):
         add.append(TextField(self.draft, "orders.order_id = clip.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
             'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
+        add.append(self.chips())
         if self.problem != "":
-            add.append(Text(self.problem, CAPTION))
+            add.append(Text(self.problem, CAPTION).tag("link-problem"))
         var out = List[View]()
         rows.insert(0, Text("On this sheet", CAPTION).tone(TONE_STRONG))  # (a plain heading: Liquid's section-title role wrapped a long one)
         add.insert(0, Text("Add a link", CAPTION).tone(TONE_STRONG))
@@ -726,12 +874,29 @@ struct Links(Movable, Sized):
             self.draft = event.text
         elif m == LINKS_ADD:
             var text = event.text if event.text != "" else self.draft
+            var next = self.complete(text)
+            var whole = len(next) == 0
+            for c in next:
+                whole = whole or c.text.lower() == text.lower()  # (any case: "Orders.ORDER_ID" is whole as typed)
+            if not whole:  # (the word being typed only begins what could come: "clip.mp4.fr", whose card's columns the
+                self.draft = next[0].text  # check below can't know, links nothing; Return completes it, as on any partial draft;
+                self.problem = String("")  # so a column named as a strict prefix of a video's file/t/frame ("f") can't be typed)
+                return True
             try:
                 _ = self.add(parse_link(text, BY_PERSON))  # (a host can't tell a person's typing from an agent's)
                 self.draft = String("")
                 self.problem = String("")
             except e:
-                self.problem = String(e)
+                if len(next) > 0 and next[0].text != text:  # (not a whole link: Return takes the first thing that could come next)
+                    self.draft = next[0].text
+                    self.problem = String("")
+                else:
+                    self.problem = String(e)
+        elif LINKS_PICK <= m < LINKS_MESSAGES:
+            var next = self.complete(self.draft)
+            if m - LINKS_PICK < len(next):
+                self.draft = next[m - LINKS_PICK].text
+                self.problem = String("")
         elif m == LINKS_REMOVE:
             if event.number >= 1:
                 _ = self.remove(event.number - 1)

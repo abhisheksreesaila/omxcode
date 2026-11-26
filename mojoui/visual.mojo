@@ -1,0 +1,81 @@
+# mojoui.visual: visual first (goal 77 M5). An assistant on a kitchen counter is looked at from across the room and listened to; nobody
+# reads it. So the agent shows first and speaks after: it prefers a card for anything it can show, builds it before it says a word,
+# and then says one or two sentences that point at the card by the labels printed on it.
+#
+#   VISUAL_SYSTEM                      the system prompt (the framework's, not the app's): which card for which question, show first,
+#                                      one or two sentences that refer to the card, no card for plain talk
+#   Visual.register(agent)             the card tools: show_map (mojoui.maptool, the map card, goal 77 M3) and explain (mojoui.explain,
+#                                      the isometric diagram, M4)
+#   card_kind(tool, shape) -> String   the kind of card a turn showed ("word", "map", "iso", "table", "todo", "news", "other", "")
+#
+# The tools it names: render_ui (a WordCard, a Table, any catalogued card), show_map (a trip, a route, places: a map with real tiles,
+# mojoui.tripmap, goal 77 M3) and explain (how something works, a small isometric diagram: M4, mojoui.explain), the to-do tools and
+# news (mojoui.assistant). Visual.register leaves a name that is already registered alone, so an app's own tool wins.
+#
+# A card tool says its parts by name in its description (WordCard: word, sounds, meaning, example, origin), and the card prints a small
+# label over each part, so "the meaning says…" refers to something on the screen: mojoui.pointer matches those words to parts and moves
+# the ring.
+
+from mojoui.llmagent import LlmAgent, ToolFn
+from mojoui.maptool import show_map_tool
+from mojoui.explain import EXPLAIN, explain_tool
+
+comptime SHOW_MAP = "show_map"
+
+comptime VISUAL_SYSTEM = (
+    "You are a voice assistant that runs privately on the user's own computer, standing on a kitchen counter. People glance at the screen "
+    "from across the room and listen to you; nobody reads. So show first, then speak. Whenever the answer can be shown as a card, call "
+    "the card's tool FIRST, before you say a word, then speak one or two short sentences that refer to the card, naming its parts by the "
+    "labels printed on it (\"the meaning says...\", \"the example is...\"). Never read a card out. Which card: what a word means or how it "
+    "is said, use render_ui with a WordCard, then say the word, what its meaning says and what its example shows, in two sentences at "
+    "most (\"Ephemeral. The meaning says it lasts a very short time, and the example is a sunset.\"); a trip, a route, a walk or places to go, call show_map; how something works or is made, call "
+    "explain; two or more things to compare, numbers, a schedule or a list of things with details, even a short one, use render_ui with a Card holding a Table (cards always sit in a Card with a title); things to remember or "
+    "do, the to-do tools; the news, the news tool. Plain talk needs no card: a greeting, a yes or no, a quick fact, an opinion, a joke, "
+    "a sum: answer in one or two short sentences. If a card tool says it is not available, build the closest card with render_ui. Your "
+    "words are spoken aloud: natural sentences, no markdown, no bullet lists, no emoji, numbers written the way they are said. If a tool "
+    "can answer, use it instead of guessing, and never claim to have done something a tool did not report. To use one of the app's "
+    "buttons, call the tool of that name. If you were interrupted, stop and listen."
+)
+
+
+def card_kind(tool: String, shape: String) -> String:
+    """What a turn showed, from the first card tool it called and the shape of the card it built: "word", "map", "iso", "table",
+    "todo", "news", "other" (some other card), or "" (no card at all)."""
+    if tool == SHOW_MAP:
+        return "map"
+    if tool == EXPLAIN:
+        return "iso"
+    if tool.startswith("todo_"):
+        return "todo"
+    if tool == "news":
+        return "news"
+    if shape.find("WordCard") >= 0:
+        return "word"
+    if shape.find("MapView") >= 0 or shape.find("TripMap") >= 0:
+        return "map"
+    if shape.find("Iso") >= 0:
+        return "iso"
+    if shape.find("Table") >= 0 or shape.find("DataGrid") >= 0:
+        return "table"
+    if shape != "":
+        return "other"
+    return ""
+
+
+struct Visual:
+    @staticmethod
+    def register(mut agent: LlmAgent):
+        """Offers the model the card tools (before agent.prime(): the tools are part of the prompt the cache holds): show_map and
+        explain. A name already registered is left alone: an app's own tool wins."""
+        var have = List[String]()
+        for ref f in agent.functions:
+            have.append(f.name)
+        var map_there = False
+        var explain_there = False
+        for n in have:
+            map_there = map_there or n == SHOW_MAP
+            explain_there = explain_there or n == EXPLAIN
+        if not map_there:
+            agent.add_function(show_map_tool())
+        if not explain_there:
+            agent.add_function(explain_tool())

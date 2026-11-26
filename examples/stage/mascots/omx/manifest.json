@@ -1,0 +1,47 @@
+{
+  "name": "Omx Spirit",
+  "version": 1,
+  "frame_width": 192,
+  "frame_height": 192,
+  "anchor_y": 0.927,
+  "states": {
+    "rest": {
+      "file": "rest.png",
+      "frames": 16,
+      "fps": 12,
+      "loop": true
+    },
+    "listen": {
+      "file": "listen.png",
+      "frames": 12,
+      "fps": 12,
+      "loop": true
+    },
+    "think": {
+      "file": "think.png",
+      "frames": 16,
+      "fps": 12,
+      "loop": true
+    },
+    "speak": {
+      "file": "speak.png",
+      "frames": 12,
+      "fps": 16,
+      "loop": true
+    },
+    "hype": {
+      "file": "hype.png",
+      "frames": 14,
+      "fps": 18,
+      "loop": false,
+      "next": "rest"
+    },
+    "nap": {
+      "file": "nap.png",
+      "frames": 12,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "transitions": {}
+}

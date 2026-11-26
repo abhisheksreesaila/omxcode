@@ -6,7 +6,9 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot, web_hosted, web_take_download
+from mojoui import webaudio
+from mojoui import webcamera
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot, web_rects, web_hosted, web_take_download
 
 
 @export
@@ -29,6 +31,7 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[key]("key", docstring="A key on a focused canvas (node, name, modifiers); returns what changed as JSON.")
         m.def_function[cancel]("cancel", docstring="Escape in a field (node, text); returns what changed as JSON.")
         m.def_function[spot]("spot", docstring="Where on canvas node `node` the part called `name` is drawn: 'x,y' in points.")
+        m.def_function[rects]("rects", docstring="Where the tagged views are in the page (handle, JSON {tag: [x, y, w, h]}): what mojoui.geometry.rect_of answers.")
         m.def_function[describe]("describe", docstring="A canvas's content as text for an agent (node, first, count); '' when it offers none.")
         m.def_function[appearance]("appearance", docstring="The browser's colour scheme (1 dark, 0 light); returns what changed as JSON.")
         m.def_function[resize]("resize", docstring="The page's viewport (width, height in CSS pixels); returns what changed as JSON.")
@@ -44,6 +47,20 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[wake_in]("wake_in", docstring="Microseconds until poll() has something to do (-1: nothing until the next event).")
         m.def_function[hosted]("hosted", docstring="App.hosted (handle, documents folder, public): where this tab's documents go, and whether the app is on the public internet.")
         m.def_function[take_download]("take_download", docstring="App.take_download: a file or folder the app made for the person to keep ('' for none).")
+        m.def_function[audio_init]("audio_init", docstring="The audio hub (mojoui.webaudio), once per process: an app's Microphone and Speaker then talk to the page's. Not called in the public copy.")
+        m.def_function[audio_client]("audio_client", docstring="A page's audio socket attached (+1) or went away (-1).")
+        m.def_function[audio_wants]("audio_wants", docstring="1 while an app has started its Microphone (the page opens its microphone).")
+        m.def_function[audio_push]("audio_push", docstring="The page's microphone: (address, bytes) of 16-bit mono samples at 16 kHz.")
+        m.def_function[audio_pull]("audio_pull", docstring="The app's Speaker for the page: (address, max bytes) of room for 16-bit mono samples at 24 kHz; returns the bytes written.")
+        m.def_function[audio_flushes]("audio_flushes", docstring="Counts up on every Speaker.stop(): the page drops what it holds.")
+        m.def_function[audio_settle]("audio_settle", docstring="After a flush: the page holds nothing now.")
+        m.def_function[audio_fail]("audio_fail", docstring="The page's microphone failed (101 refused, 102 none, 103 not allowed here).")
+        m.def_function[audio_latency]("audio_latency", docstring="The page's own output delay in microseconds.")
+        m.def_function[camera_init]("camera_init", docstring="The camera hub (mojoui.webcamera), once per process: an app's Camera then looks through the page's. Not called in the public copy.")
+        m.def_function[camera_wants]("camera_wants", docstring="1 while an app wants the camera (the page opens its rear camera).")
+        m.def_function[camera_request]("camera_request", docstring="The id of the newest still an app asked for (the host tells the page when it grows).")
+        m.def_function[camera_push]("camera_push", docstring="The page's still: (address, bytes, request id, width, height) of a JPEG.")
+        m.def_function[camera_fail]("camera_fail", docstring="The page's camera failed (101 refused, 102 none, 103 not allowed here).")
         return m.finalize()
     except e:
         abort(String("mojoui: couldn't create the Python module: ", e))
@@ -113,6 +130,11 @@ def spot(handle: PythonObject, node: PythonObject, name: PythonObject) raises ->
     return PythonObject(web_spot[Main](Int(py=handle), Int(py=node), String(py=name)))
 
 
+def rects(handle: PythonObject, data: PythonObject) raises -> PythonObject:
+    web_rects[Main](Int(py=handle), String(py=data))
+    return PythonObject("")
+
+
 def describe(handle: PythonObject, node: PythonObject, first: PythonObject, count: PythonObject) raises -> PythonObject:
     return PythonObject(web_describe[Main](Int(py=handle), Int(py=node), Int(py=first), Int(py=count)))
 
@@ -177,3 +199,66 @@ def hosted(handle: PythonObject, documents: PythonObject, public: PythonObject) 
 
 def take_download(handle: PythonObject) raises -> PythonObject:
     return PythonObject(web_take_download[Main](Int(py=handle)))
+
+
+def audio_init() raises -> PythonObject:
+    return PythonObject(webaudio.audio_init())
+
+
+def audio_client(delta: PythonObject) raises -> PythonObject:
+    webaudio.audio_client(Int(py=delta))
+    return PythonObject(0)
+
+
+def audio_wants() raises -> PythonObject:
+    return PythonObject(webaudio.audio_wants())
+
+
+def audio_push(addr: PythonObject, nbytes: PythonObject) raises -> PythonObject:
+    webaudio.audio_push(Int(py=addr), Int(py=nbytes))
+    return PythonObject(0)
+
+
+def audio_pull(addr: PythonObject, most: PythonObject) raises -> PythonObject:
+    return PythonObject(webaudio.audio_pull(Int(py=addr), Int(py=most)))
+
+
+def audio_flushes() raises -> PythonObject:
+    return PythonObject(webaudio.audio_flushes())
+
+
+def audio_settle() raises -> PythonObject:
+    webaudio.audio_settle()
+    return PythonObject(0)
+
+
+def audio_fail(code: PythonObject) raises -> PythonObject:
+    webaudio.audio_fail(Int(py=code))
+    return PythonObject(0)
+
+
+def audio_latency(us: PythonObject) raises -> PythonObject:
+    webaudio.audio_latency(Int(py=us))
+    return PythonObject(0)
+
+
+def camera_init() raises -> PythonObject:
+    return PythonObject(webcamera.camera_init())
+
+
+def camera_wants() raises -> PythonObject:
+    return PythonObject(webcamera.camera_wants())
+
+
+def camera_request() raises -> PythonObject:
+    return PythonObject(webcamera.camera_request())
+
+
+def camera_push(addr: PythonObject, nbytes: PythonObject, id: PythonObject, width: PythonObject, height: PythonObject) raises -> PythonObject:
+    webcamera.camera_push(Int(py=addr), Int(py=nbytes), Int(py=id), Int(py=width), Int(py=height))
+    return PythonObject(0)
+
+
+def camera_fail(code: PythonObject) raises -> PythonObject:
+    webcamera.camera_fail(Int(py=code))
+    return PythonObject(0)

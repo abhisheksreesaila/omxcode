@@ -9,6 +9,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,11 +31,12 @@ def child(module_dir, case):
         raise AssertionError("MOJOUI_DEV was taken with a release build")
     from starlette.testclient import TestClient
     app = web.make_app(module_dir)
-    far = TestClient(app, client=("10.0.0.5", 50000))
+    far = TestClient(app, base_url="http://127.0.0.1", client=("10.0.0.5", 50000))
+    far.cookies.set("mojoui_pair", web.pairing.pair_key())  # (paired: the dev routes' own 127.0.0.1 rule is what is tested here)
     for method, path, data in [("get", "/dev/assets", None), ("post", "/dev/reload", {"token": TOKEN}), ("get", "/dev/wait/0", None)]:
         r = getattr(far, method)(path, data=data) if data else getattr(far, method)(path)
         assert r.status_code == 403, f"{path} from 10.0.0.5 answered {r.status_code}"
-    near = TestClient(app, client=("127.0.0.1", 50000))
+    near = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     for data in ({"token": "wrong-token"}, {"token": ""}, {}):
         r = near.post("/dev/reload", data=data)
         assert r.status_code == 403, f"/dev/reload with {data} answered {r.status_code}"
@@ -48,7 +50,7 @@ def main():
     if len(sys.argv) == 4:
         return child(sys.argv[1], sys.argv[3])
     debug, release = sys.argv[1], sys.argv[2]
-    env = dict(os.environ, MOJOUI_DEV="1", MOJOUI_DEV_TOKEN=TOKEN)
+    env = dict(os.environ, MOJOUI_DEV="1", MOJOUI_DEV_TOKEN=TOKEN, MOJOUI_PAIR_KEY_FILE=str(Path(tempfile.mkdtemp()) / "pair-key"))
     env.pop("MOJOUI_AGENT_SOCKET", None)
     for d, case in ((release, "release"), (debug, "debug")):
         r = subprocess.run([sys.executable, __file__, d, "-", case], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)

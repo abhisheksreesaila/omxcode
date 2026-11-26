@@ -41,6 +41,12 @@ def _lift_ring(p: Palette) -> String:
     return "0 0 0 1.5px " + css_color(_a(p.accent, 0.8)) + ", 0 14px 34px " + _shade(p, 0.55)
 
 
+def _focus_ring(p: Palette) -> String:
+    """A free canvas's focused card (goal 78, the keys act on it): a thin accent ring at half strength over its own
+    shadow, no lift (focus is a state, not a peek)."""
+    return "0 0 0 1.5px " + css_color(_a(p.accent, 0.55)) + ", 0 6px 18px " + _shade(p, 0.35)
+
+
 def _held_ring(p: Palette) -> String:
     """The held card: the accent ring, a faint halo of it, one soft shadow."""
     return "0 0 0 2px " + css_color(p.accent) + ", 0 0 0 6px " + css_color(_a(p.accent, 0.16)) + ", 0 18px 44px " + _shade(p, 0.6)
@@ -78,6 +84,12 @@ def board_gtk_css(p: Palette, scope: String, ease: String = "") -> String:
     # a tiled card's resize grip (Board(clips=True)): the ink's third tone at rest, the accent while the card is hovered
     out += scope + ".mui-board-grip { margin: 0 5px 5px 0; " + _grip(ink3) + "opacity: .8; transition: opacity 150ms ease; }\n"
     out += scope + ".mui-board-clip:hover > .mui-board-grip { " + _grip(ac) + "opacity: 1; }\n"
+    # a free canvas resizes from every edge and corner (the cursor shows which), so the one-corner grip would mislead (owner, 2026-11-22)
+    out += scope + ".mui-board-free .mui-board-grip, " + scope + ".mui-board-free .mui-board-clip:hover > .mui-board-grip { opacity: 0; }\n"
+    # a free canvas (mojoui.freeboard): the focused card's quiet ring, the snap guides, a hovered card's edges hinted
+    out += scope + ".mui-board > .mui-tone-focus { box-shadow: " + _focus_ring(p) + "; }\n"
+    out += (scope + ".mui-board > .mui-tag-board-guide { background: " + css_color(_a(p.accent, 0.7)) + "; min-width: 1px; min-height: 1px; "
+            + "border: 0; border-radius: 0; box-shadow: none; padding: 0; }\n")
     # the link UI's floating pieces
     out += (scope + ".mui-tag-link-ghost { background: " + raised + "; color: " + ac + "; font-weight: 600; font-size: 11px; "
             + "padding: 4px 9px; border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px " + _shade(p, 0.5) + "; }\n")
@@ -117,6 +129,15 @@ def board_web_css(p: Palette, scope: String, ease: String = "") -> String:
     # the resize grip (mojoui.css places it): the ink's third tone at rest, the accent while the card is hovered, as GTK's
     out += scope + ".board > .object::after { border: 0; width: 18px; height: 18px; right: 5px; bottom: 5px; " + _grip(ink3) + "opacity: .8; }\n"
     out += scope + ".board > .object:hover::after { " + _grip(ac) + "opacity: 1; }\n"
+    out += scope + ".board.free > .object::after { display: none; }\n"  # (every edge resizes a free card: no one-corner grip)
+    # a free canvas (mojoui.freeboard): the focused card's quiet ring, the snap guides (they take no pointer)
+    out += scope + ".board > .object[data-tone='5'] { box-shadow: " + _focus_ring(p) + "; }\n"
+    out += (scope + ".board > .object[data-tag=board-guide] { background: " + css_color(_a(p.accent, 0.7)) + "; pointer-events: none; z-index: 9; "
+            + "box-shadow: none; border-radius: 0; }\n")
+    out += scope + ".board > .object[data-tag=board-guide]::after { display: none; }\n"
+    out += scope + ".board-scroll.free-scroll { contain: inline-size; min-width: 0; }\n"  # (a canvas wider than the window scrolls; the window never widens)
+    out += scope + ".board.free > .object.raised { z-index: 4; }\n"
+    out += scope + ".board.free > .object[data-grab], " + scope + ".board.free > .object[data-grab] * { cursor: var(--grab) !important; }\n"
     out += scope + ".board > .object[data-tag^=link-], " + scope + ".board > .object[data-tag^=peek-] { z-index: 8; overflow: visible; }\n"
     out += scope + ".board > .object[data-tag^=link-]::after, " + scope + ".board > .object[data-tag^=peek-]::after { display: none; }\n"
     out += scope + ".board > .object[data-tag=peek-lines] { z-index: 5; pointer-events: none; }\n"

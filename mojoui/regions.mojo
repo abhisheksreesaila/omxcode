@@ -3,7 +3,8 @@
 # host answers from the same rule, so no app tags its regions by hand.
 #
 #   The role tags the shells already set (and themes style through Look surfaces): sidebar (mojoui.sidebar, Rail),
-#   toolbar and status-bar (mojoui.sheetchrome), inspector (mojoui.inspector). A Board is the sheet; each Board object
+#   toolbar and status-bar (mojoui.sheetchrome), inspector (mojoui.inspector), mojoui.stage's stage-top, stage-left,
+#   stage-centre, stage-right, stage-panel and stage-bar (named as tagged). A Board is the sheet; each Board object
 #   with a HEADLINE title is a card, named "card:<its title>" (a cell editor floating on the board is no card).
 #
 #   for r in regions(host.rt.shown): …  r.node, r.name, r.board (the Board a card sits on: clip it to that board's view)
@@ -13,13 +14,19 @@
 
 from mojoui.view import View, BOARD, TEXT, HEADLINE
 
-comptime REGION_ROLES: List[String] = ["sidebar", "toolbar", "status-bar", "inspector"]
+comptime REGION_ROLES: List[String] = ["sidebar", "toolbar", "status-bar", "inspector",
+                                      # mojoui.stage's regions (goal 77 M7a): the top bar, the three columns, the stage, the chat bar
+                                      "stage-top", "stage-left", "stage-centre", "stage-right", "stage-panel", "stage-bar",
+                                      # the TV (goal 77 M7d): its body, the card in it, the conversation
+                                      "stage-tv", "stage-tv-card", "stage-tv-thread"]
 
 
 def region_of(role: String) -> String:
     """A role tag's region name ("status-bar" → "status"), "" for a tag that names no region."""
     if role == "status-bar":
         return "status"
+    if role == "stage-tv-card-compact":  # (a phone's TV card: the same region)
+        return "stage-tv-card"
     for r in materialize[REGION_ROLES]():
         if r == role:
             return role
@@ -45,10 +52,24 @@ def headline_in(v: View, i: Int) -> String:
     return String("")
 
 
+def shown_nodes(v: View) -> List[Bool]:
+    """Which nodes are drawn: neither they nor a parent .hidden() (a ribbon's other bands, D-7601)."""
+    var out = List[Bool](length=len(v.nodes), fill=True)
+    for i in range(len(v.nodes)):  # (parents come before their children in a View)
+        if v.nodes[i].hidden or not out[i]:
+            out[i] = False
+            for c in v.nodes[i].children:
+                out[c] = False
+    return out^
+
+
 def regions(v: View) -> List[Region]:
     var out = List[Region]()
+    var drawn = shown_nodes(v)
     for i in range(len(v.nodes)):
         ref n = v.nodes[i]
+        if not drawn[i]:
+            continue
         var name = region_of(n.name)
         if name != "":
             out.append(Region(i, name, -1))
