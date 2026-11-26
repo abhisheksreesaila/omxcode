@@ -109,7 +109,7 @@ def main():
     after = row(db, nid)
     if after != before:
         fail(f"the secure note changed: {before} → {after}")
-    if "PNOTE SAVE: refused (secure note" not in out:
+    if f"PNOTE SAVE: refused (note {nid}: secure" not in out:  # (the words since goal 79's ddabcd7c, review 3; this very note: D-8209)
         fail("the rename never reached the save path (no refusal logged): " + " | ".join(l for l in out.splitlines() if l[:5] in ("PNOTE", "TEST:"))[-600:])
     if "PNOTE ERROR" in out:
         fail("errors: " + " | ".join(l for l in out.splitlines() if "PNOTE ERROR" in l)[:400])
