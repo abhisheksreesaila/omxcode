@@ -1877,3 +1877,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 34) — D-8101
 - lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).
+
+## 2026-11-26 goal 79 (continuation 35)
+- After the 15:27 stop: no empty objects. D-8102 (83d3518c), judge_test. Gaps 89/90 shelved. Typing table: Linux 600 typing max close; Mac ahead everywhere (its gaps below the refresh since D-8099). Mac locked at 16:15: no race.

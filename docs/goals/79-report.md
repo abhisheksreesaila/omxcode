@@ -23,6 +23,24 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 35 (2026-11-26, 15:37–16:20): every latency row at the frame begun (D-8102); typing first
+**D-8102 (83d3518c):** the opens' first frame, open again, a press during an open, note switch, omnibar and typing in a long paragraph are judged at the frame begun on both hosts, as undo and redo (D-8101); native's picture on the screen beside; FAIR_RULE stays off (the owner). judge_test covers it.
+**Shelved (the owner's steer):** gaps 89 (Mac stress redo max) and 90 (Mac stress zoom p95), with their numbers and causes; nothing in progress was kept.
+**Typing, every row (latest valid tables: Linux 8206e754 at 60 Hz, before D-8101/2; the Mac 76d64786 at 144 Hz):**
+
+| row | Linux web | Linux native | margin | Mac web | Mac native | margin |
+|---|---|---|---|---|---|---|
+| 600 typing (frames) | 16.7 / 16.8 | 16.7 / 18.7 | **close: max 1.9 ms (11 %) behind, tie at the refresh** | 7.3 / 8.4 | 2.7 / 5.4 | ahead |
+| 600 typing, not warmed | 16.7 / 16.8 | 16.7 / 16.8 | within 3 % | 7.3 / 8.4 | 2.8 / 6.8 | ahead |
+| stress typing (frames) | 16.8 / 200 | 16.7 / 16.8 | ahead | 8.7 / 8.7 | 2.6 / 8.2 | ahead |
+| stress typing, not warmed | 16.8 / 200 | 16.7 / 17.0 | ahead | 8.7 / 8.7 | 2.9 / 5.8 | ahead |
+| 20,000-character paragraph (key to frame) | 19.9 / 30.7 | 16.7 / 18.8 | ahead (16 % / 39 %) | 13.5 / 26.9 | 2.6 / 2.6 | ahead |
+| beside: key to paint | 16.0 / 16.0 | 16.8 / 18.8 (600), 16.8 / 21.0 (stress) | **behind by 0.8 / 2.8–5 ms (not judged)** | 24.0 / 24.0 | 1.6 / 1.5 | ahead |
+| input method (M5) | — | PASS | — | — | PASS | — |
+
+**Close:** Linux's 600 typing max (18.7 against 16.8) and Linux's key-to-paint beside it. Not fixed this round: Linux must stay quiet for the merge session's judged run; to look at next with a Linux typing trace. **A caveat on the Mac's typing frames:** since D-8099 a key is drawn at once, so its "gaps" (2.6–2.9 ms) are draws faster than the 144 Hz screen shows them; counted at the screen they're one refresh (6.9), still ahead of the web's 7.3 / 8.7.
+**Mac race not run:** locked (BENCHSTATE locked=1, front loginwindow); the probe built and ran the current code there. No Linux M6 (the merge session's).
+
 ## Continuation 34 (2026-11-26, 13:55–14:58): the owner's ruling on undo/redo (D-8101)
 **Done (6e2dd2f0, judge_test 76d64786):** undo and redo judged at the frame begun on both sides (web: benchmark-f034's rAF + task; native: frame committed on the Mac, the end of its own paint on Linux); native's picture handed to the screen printed beside. Tie rule and thresholds unchanged. The old tables can't be rejudged (no frame-begun numbers in their logs).
 **Mac M6 (full mac-unlocked at 76d64786): 57 ✓ 3 ✗**: stress redo 9.0 / 11.1 against 9.0 / 9.0 (p95 level, the max over the tie limit at 144 Hz), redo not warmed 6.6 / 11.2 (the max), stress zoom from 30 % 8.4 / 10.2 against 7.8 / 48.7 (p95 7.7 % behind; inside c33's spread of native's own runs, 8.1–10.1; its not-warmed row passed this time).
