@@ -2039,3 +2039,10 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Goal 73's M4 / 76's M3 cascade rebuilt goal 47's robot data and installed two pixi environments in this worktree: stopped and removed; the data reflink-copied from ../mojo-ui-g74 for 73/76/78.
 - 81's M9 held-out read 1.69× on the table scene under load (base swung too); quiet rerun 1.0246×. The race at b42cd6d4 after ten idle minutes: 60 ✓ on both machines; mac-frames 144 of 144; 81 M7 PASS.
 - goal-81-quality moved on after step 1 (b9250c55, 08197483); the parts that apply were taken by hand (D-8215).
+## 2026-11-25 goal 79 (continuation 28) — tie rule, the Mac's stress redo
+- 18:20 the main session's race (b44257f2: 58 ✓ 2 ✗). Mac runs 18:24–18:31, each checked locked=0: per-frame parts of undo/redo; A/Bs (tile ahead, budget, warming, snapshots, a busy core). Redo's own steps cost as undo's; its first two frames after the settle are 3–4× slow. Not fixed.
+- 18:40 D-8097: ties at the measured refresh; judge_test 60/144 Hz; rejudged: Linux unchanged, Mac 51 ✓ 9 ✗ (272d530b).
+
+## 2026-11-25 goal 79 (continuation 29) — fairness probe, blocked
+- 20:50 from 8053d6e1. The Mac answered and was unlocked, but a system dialog (UserNotificationCenter) held the front for the whole window; pnote inactive (active=0 key=0), mac-unlocked refused twice. Linux: gpu-free NO (another project's job). Stopped as the brief says.
+- Found by reading: benchmark-f034's undo/redo have no rAF loop and no pause; native settles and is photographed between steps. Probe script written (PAUSE_MS), not run. My caffeinate on the Mac stopped.
