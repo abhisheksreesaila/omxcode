@@ -1836,7 +1836,7 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         "- *Latency* (opens, a press during one, undo, redo, note switch, omnibar): from the event to the frame that shows it painted by the app's "
         "thread and handed on. Web: a requestAnimationFrame, then a task after it; from the input event's own timestamp, undo and redo from the call "
         "(as benchmark-f034 times them). Native: to GTK's after-paint; undo and redo from the key event, the note switch and omnibar from the app's "
-        "own step (no pointer event in front: the one difference left, in native's favour by its hit test).",
+        "own step (no pointer event in front: the one difference left, in native's favour by its hit test). **Undo and redo (D-8101, the owner's ruling, 2026-11-26): both clocks stop at the frame begun and the app's own code done** (web: as benchmark-f034, a rAF then a task; native: its frame committed on the Mac, the end of its own paint on Linux); native's picture handed to the screen is printed beside, not judged.",
         "- *Opens*: the same note opened inside the running app from another note, first time in the process (native: nothing kept, the note "
         "parsed; and a new process opening it from the view the last one kept) and again. Web: webopen.mjs, the click to the frame after its canvas "
         "settled; native: the open request to the frame that completes the board. benchmark-f034's own open row (a page load in a new browser "
