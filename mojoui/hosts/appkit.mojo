@@ -318,7 +318,8 @@ struct AppKitHost[A: App](Movable):
     var link: Int  # what ticks every canvas, once a frame (0 = stopped): the screen's own clock (a CADisplayLink), else an NSTimer at 60 Hz
     var link_is_screen: Bool  # it is the screen's clock
     var link_mark: Int  # `ticks` when the clock was last looked at (frameCheck:)
-    var link_misses: Int  # times the screen's clock didn't tick though the window was on screen (3: the timer from then on)
+    var link_misses: Int  # the screen's clock didn't tick though the window was on screen: the timer until the window is seen anew
+    var hidden_watch: Bool  # a look at a hidden window is due (watch_hidden)
     var link_late: Int  # looks in a row without a tick
     var seen_on_screen: Bool  # the window has been on screen: from then on no frames while it's hidden or covered
     var clock_mode: String  # "" the screen's clock; "timer" the 60 Hz timer (test runs and unshown windows: their frames don't depend on a screen)
@@ -423,6 +424,7 @@ struct AppKitHost[A: App](Movable):
         self.link_is_screen = False
         self.link_mark = 0
         self.link_misses = 0
+        self.hidden_watch = False
         self.link_late = 0
         self.seen_on_screen = False
         self.clock_mode = env("MOJOUI_FRAME_CLOCK")
@@ -2961,7 +2963,7 @@ struct AppKitHost[A: App](Movable):
         if self.resize_pending:
             return
         self.resize_pending = True
-        var modes = msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes"))  # (live: also while an edge is dragged)
+        var modes = msg(cls("NSArray"), "arrayWithObject:", common_modes())  # (live: also while an edge is dragged)
         _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("windowResizeLater:"), ns_number(self_addr), Float64(0), modes)
 
     def resized(mut self, self_addr: Int):
@@ -3124,12 +3126,13 @@ struct AppKitHost[A: App](Movable):
         while a slider or a menu tracks the mouse)."""
         if self.link != 0 or len(self.canvases) == 0:
             return
-        var screen = self.clock_mode != "timer" and self.link_misses < 3
-        if screen:
+        var screen = self.clock_mode != "timer" and self.link_misses == 0  # (it didn't tick: the timer until the window is seen anew)
+        if self.clock_mode != "timer":  # (no frames while it can't be seen, by either clock)
             if self.on_screen():
                 self.seen_on_screen = True
             elif self.seen_on_screen:
-                return  # (windowDidChangeOcclusionState: starts them again)
+                self.watch_hidden()  # (windowDidChangeOcclusionState: starts them again; a look every half second in case it came early)
+                return
             else:
                 screen = False  # (not up yet: the first frames don't wait for it)
         self.link_late = 0
@@ -3139,7 +3142,8 @@ struct AppKitHost[A: App](Movable):
             if self.link != 0:
                 self.link = msg(self.link, "retain")
                 self.link_is_screen = True
-                _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), ns_string("kCFRunLoopCommonModes"))
+                if self.clock_mode != "dead":  # (MOJOUI_FRAME_CLOCK=dead, a test: a clock never added to the run loop never ticks)
+                    _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), common_modes())
                 self.check_frames()
         if self.link == 0:
             self.start_timer()
@@ -3151,16 +3155,33 @@ struct AppKitHost[A: App](Movable):
     def start_timer(mut self):
         self.link_is_screen = False
         self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
-        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, ns_string("kCFRunLoopCommonModes"))
+        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, common_modes())
 
     def check_frames(self):
         """Looks at the screen's clock again in 0.1 s (frameCheck:)."""
-        var modes = msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes"))
+        var modes = msg(cls("NSArray"), "arrayWithObject:", common_modes())
         _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("frameCheck:"), msg(self.window, "identifier"), Float64(0.1), modes)
+
+    def watch_hidden(mut self):
+        """Frames wait for the window to be seen again: looked at every half second (macOS's notice can come before the
+        window counts as visible), until it is or nothing needs drawing."""
+        if self.hidden_watch:
+            return
+        self.hidden_watch = True
+        var modes = msg(cls("NSArray"), "arrayWithObject:", common_modes())
+        _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("frameCheck:"), msg(self.window, "identifier"), Float64(0.5), modes)
 
     def frames_checked(mut self):
         """0.1 s later: the screen's clock has ticked, or the window is hidden, or (twice in a row, so a main thread that
-        was just busy isn't one) the timer takes over."""
+        was just busy isn't one) the timer takes over. (Or half a second later, the window was hidden: seen again yet?)"""
+        if self.hidden_watch and self.link == 0:
+            self.hidden_watch = False
+            if not self.idle():
+                if self.on_screen():
+                    self.wake()
+                else:
+                    self.watch_hidden()
+            return
         if self.link == 0 or not self.link_is_screen:
             return
         if not self.on_screen():
@@ -3190,7 +3211,8 @@ struct AppKitHost[A: App](Movable):
             return
         if self.on_screen():
             self.seen_on_screen = True
-            if self.link != 0 and not self.link_is_screen and self.link_misses < 3:  # (the first frames' timer: the screen's clock now)
+            self.link_misses = 0  # (on screen anew, maybe another one: its clock is tried again)
+            if self.link != 0 and not self.link_is_screen:  # (the first frames' timer: the screen's clock now)
                 self.stop_frames()
             self.wake()
         elif self.seen_on_screen:
@@ -3831,6 +3853,15 @@ def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
     host_at[A](host_addr)[].finish_ready()
 
 
+def common_modes() -> Int:
+    """NSRunLoopCommonModes itself (kCFRunLoopCommonModes: the same object). Core Foundation knows that mode by its
+    address: a string that only reads the same is a mode of its own that the run loop never runs (goal 79's finding; a
+    display link and a run-loop observer added with one never fired)."""
+    var name = String("kCFRunLoopCommonModes")
+    var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
+    return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")
+
+
 def on_frame_check[A: App](target: Int, cmd: Int, id: Int) abi("C"):
     host_at[A](msg(id, "longLongValue"))[].frames_checked()
 
@@ -3871,7 +3902,7 @@ def watch_hangs() -> Int:
     if observer == 0:
         return 0
     var loop = Pointer(to=rm).unsafe_bitcast[def() thin abi("C") -> Int]()[]()
-    Pointer(to=ra).unsafe_bitcast[def(Int, Int, Int) thin abi("C") -> None]()[](loop, observer, ns_string("kCFRunLoopCommonModes"))
+    Pointer(to=ra).unsafe_bitcast[def(Int, Int, Int) thin abi("C") -> None]()[](loop, observer, common_modes())
     return marks
 
 

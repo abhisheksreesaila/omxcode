@@ -27,5 +27,11 @@ case $1 in
       if kill -0 $p 2>/dev/null; then kill $p; echo "$a: didn't end"; failed=$((failed + 1)); else wait $p; rc=$?; echo "$a: exit $rc"; [ $rc = 0 ] || { tail -3 ../app-$a.out; failed=$((failed + 1)); }; fi
     done
     echo "FACT mac_apps 3"; echo "FACT mac_apps_failed $failed"; [ $failed = 0 ] && echo "mac_apps: ok" ;;
+  hang) # (tests/gtkapps/hang on AppKit, shown: its 1.2 s update said during and after, its 0.1 s one not)
+    mojo "mojo build -I tests/gtkapps/hang -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../hangapp -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../hang-build.log || { grep error -A3 ../hang-build.log | head; exit 1; }
+    rm -rf ../hstate; MOJOUI_STATE=$PWD/../hstate ../hangapp > ../hang.out 2>&1 & p=$!
+    sleep 8; kill $p 2>/dev/null; wait $p 2>/dev/null
+    cat ../hang.out; echo "LOG:"; cat ../hstate/hangs.log 2>/dev/null
+    grep -q 'HANG: [0-9]* ms and counting: update msg=77' ../hang.out && grep -q 'HANG: ended after 1[0-9][0-9][0-9] ms: update msg=77' ../hang.out && [ "$(grep -c '^HANG:' ../hang.out)" = 2 ] && echo "mac_hang: ok" ;;
   clock) bash scripts/mac81-clock ;;
 esac
