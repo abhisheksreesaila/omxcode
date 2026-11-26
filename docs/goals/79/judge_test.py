@@ -35,7 +35,7 @@ W = lambda p=16.7, m=16.8: {"p95": p, "max": m, "missed": 1, "n": 100}
 def world():
     web = {"cold_desktop_ms": 700, "cold_chromium_ms": 500, "rss_mb": 800, "switch": 50, "switch_max": 60, "omnibar": 30, "omnibar_max": 31, "type page": {"p95": 19.4, "max": 20.3}}
     nat, paced, unwarm, opens = {}, {}, {}, {}
-    n = {"p95": 4.0, "max": 5.0, "cpu": 0, "gap_n": 100, "gap_p95": 16.7, "gap_max": 16.8, "gap_over20": 0, "lat_p95": 12, "lat_max": 13}
+    n = {"p95": 4.0, "max": 5.0, "cpu": 0, "gap_n": 100, "gap_p95": 16.7, "gap_max": 16.8, "gap_over20": 0, "lat_p95": 12, "lat_max": 13, "lat_code_p95": 10, "lat_code_max": 11}
     o = dict(n, complete_max=200, complete_p95=190, complete_p50=100, press_lat_n=10, press_lat_p95=12, press_lat_max=13, during_p95=3, during_max=4, press_n=10, press_p95=3, press_max=3)
     for note in c.RACE_NOTES:
         web[note] = {s: W() for s in c.RACE_STEPS}
@@ -70,7 +70,24 @@ def fails(change, needle):
     assert not ok and bad and needle in bad[0], (needle, bad)
 
 
-fails(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_max=40), "undo")
+# (D-8101) undo and redo: judged at the frame begun (lat_code_*), native's picture on the screen (lat_*) beside, not judged
+def _code(v, p, m):
+    def f(web, nat, start, paced, unwarm, opens):
+        for note in c.RACE_NOTES:
+            for d in (paced, unwarm):
+                for k in ("lat_code_p95", "lat_code_max"):
+                    d[note]["undo"].pop(k, None) if p is None else d[note]["undo"].update({"lat_code_p95": p, "lat_code_max": m})
+                d[note]["undo"].update(v)
+    return f
+
+
+fails(_code({}, None, None), "not measured: native")  # (no frame-begun number: not judged by the other one)
+fails(_code({"lat_p95": 5, "lat_max": 6}, 30, 31), "undo (latency, to the frame begun)")  # (on the screen sooner doesn't count)
+t, ok = judged(_code({"lat_p95": 40, "lat_max": 41}, 10, 11))
+assert ok and "undo: native's picture handed to the screen p95 / max (the web isn't timed to it) | | 40 / 41" in t, [l for l in t.splitlines() if "handed" in l][:2]
+
+
+fails(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_code_max=40), "undo")  # (D-8101: the frame-begun number is the judged one)
 fails(lambda w, n, s, p, u, o: u["stress"]["zoom from 30%"].update(gap_max=40), "not warmed")
 fails(lambda w, n, s, p, u, o: p["600"]["pan 30%"].update(gap_over20=3), "more missed frames")
 fails(lambda w, n, s, p, u, o: n["600"]["pen"].update(cpu=2), "CPU frames")
@@ -93,7 +110,7 @@ assert not ok and "work only, not like-for-like" in t and "| ✓" not in "\n".jo
 # the Mac with its frames shown (unlocked, in front: live): judged as Linux's, and fails as Linux's
 t, ok = judged(machine="mac", live=True)
 assert ok and "work only" not in t and "| ✓" in t, [l for l in t.splitlines() if "✗" in l]
-t, ok = judged(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_max=40), machine="mac", live=True)
+t, ok = judged(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_code_max=40), machine="mac", live=True)
 assert not ok and any("undo" in l and "✗" in l for l in t.splitlines())
 for out, good in [("BENCHSTATE: undo active=1 key=1 locked=0 activity=0 not held", True), ("BENCHSTATE: a active=1 key=1 locked=1", False), ("BENCHSTATE: a active=0 key=1 locked=0", False),
                   ("BENCHSTATE: a active=1 key=1 locked=-1", False), ("", False), ("BENCHSTATE: a active=1 key=1 locked=0\nBENCHSTATE: b active=1 key=0 locked=0", False)]:

@@ -510,6 +510,7 @@ struct Tiles(Movable):
     var ahead: Bool  # (D-8019) kept tiles extended ahead of a zoom-out (MOJOUI_TILE_AHEAD=0: A/B)
     var cull: Bool  # (D-8022) instances outside a raster's part not built (MOJOUI_TILE_CULL=0: A/B)
     var hurry: Bool  # (D-8016) the window is closing: a settled view is kept in this frame, not after 750 ms, a tile a frame
+    var lean: Bool  # (c32) this frame answers an input (a key, a press): only what it shows is rastered; the ring, the strips ahead and a snapshot's reads wait for the next tick
     var settle_ns: Int
     var planned_ops: Int  # ops in this frame's rasters so far (the budget counts them)
     var promote_off: Bool
@@ -530,6 +531,7 @@ struct Tiles(Movable):
         self.damaged = 0
         self.budget_ops = TILE_BUDGET_OPS
         self.hurry = False
+        self.lean = False
         self.cull = getenv("MOJOUI_TILE_CULL") != "0"
         self.ahead = getenv("MOJOUI_TILE_AHEAD") != "0"
         try:
@@ -941,7 +943,9 @@ struct Tiles(Movable):
                 continue
         # the ring round the view (within the budget, once nothing on screen is missing; while a zoom moves too, at the
         # tiles' zoom: zooming out finds its edges ready)
-        if len(missing) == 0 and not self.hurry:
+        if self.lean and len(missing) == 0:
+            self.more = True  # (the ring and the strips ahead: the next tick's)
+        if len(missing) == 0 and not self.hurry and not self.lean:
             for jj in range(j0 - 1, j1 + 2):
                 for ii in range(i0 - 1, i1 + 2):
                     if jj >= j0 and jj <= j1 and ii >= i0 and ii <= i1:
@@ -1011,7 +1015,10 @@ struct Tiles(Movable):
                 for ii in range(i0, i1 + 1):
                     if _pack(ii, jj) in self.sets[s].dirty or not (_pack(ii, jj) in self.sets[s].tiles):
                         settled = False
-        self._save_step(out, s, scene, i, w, h, settled, j0, j1, i0, i1)
+        if self.lean:
+            self.more = True  # (a snapshot's read: the next tick's)
+        else:
+            self._save_step(out, s, scene, i, w, h, settled, j0, j1, i0, i1)
         # far tiles go (beyond two tiles round the view), keeping the pool for what's near
         var far = List[Int]()
         for e in self.sets[s].tiles.items():

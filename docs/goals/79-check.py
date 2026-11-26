@@ -1505,7 +1505,7 @@ def native_race(out):
                 continue
             res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
                          "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
-            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
+            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
                 if k in kv:
                     res[name][k] = float(kv[k])
             if what.group(1) == "openpress" and "press_lat_n" in kv:
@@ -1696,7 +1696,7 @@ def fair_rounds(race):
                         x = w.get(note, {}).get(step)
                         d["web"].append((x["p95"], x["max"], x.get("missed") or 0) if x else None)
                     v = n.get(step)
-                    a, b = ("lat_p95", "lat_max") if step in ("undo", "redo") else ("gap_p95", "gap_max")
+                    a, b = ("lat_code_p95", "lat_code_max") if step in ("undo", "redo") else ("gap_p95", "gap_max")  # (D-8101)
                     d["warm" if warm else "notwarm"].append((v[a], v[b], v.get("gap_over20", 0)) if v and a in v else None)
     return out
 
@@ -1836,7 +1836,7 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         "- *Latency* (opens, a press during one, undo, redo, note switch, omnibar): from the event to the frame that shows it painted by the app's "
         "thread and handed on. Web: a requestAnimationFrame, then a task after it; from the input event's own timestamp, undo and redo from the call "
         "(as benchmark-f034 times them). Native: to GTK's after-paint; undo and redo from the key event, the note switch and omnibar from the app's "
-        "own step (no pointer event in front: the one difference left, in native's favour by its hit test).",
+        "own step (no pointer event in front: the one difference left, in native's favour by its hit test). **Undo and redo (D-8101, the owner's ruling, 2026-11-26): both clocks stop at the frame begun and the app's own code done** (web: as benchmark-f034, a rAF then a task; native: its frame committed on the Mac, the end of its own paint on Linux); native's picture handed to the screen is printed beside, not judged.",
         "- *Opens*: the same note opened inside the running app from another note, first time in the process (native: nothing kept, the note "
         "parsed; and a new process opening it from the view the last one kept) and again. Web: webopen.mjs, the click to the frame after its canvas "
         "settled; native: the open request to the frame that completes the board. benchmark-f034's own open row (a page load in a new browser "
@@ -1850,6 +1850,8 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
 
     def mark(p95, mx):
         return "≤ 8.3 and ≤ 16.7" if p95 <= P95 and mx <= MAX else "over: " + ", ".join([x for x in ("p95 > 8.3" if p95 > P95 else "", "max > 16.7" if mx > MAX else "") if x])
+
+    shown_beside = []
 
     def add(note, label, w, n, work=None, gaps=False, extra="", need=True, missed=None):
         """One judged row: w and n are (p95, max) or None; missed: (web's, native's) or None."""
@@ -1908,8 +1910,9 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
                     add(note, label + f" (median of {FAIR_ROUNDS} runs)", got[0] if got else None, got[1] if got else None, work if d is pn else None,
                         gaps=step not in ("undo", "redo"), need=cpu, missed=got[2] if got and step not in ("undo", "redo") else None)
                     continue
-                if step in ("undo", "redo"):
-                    add(note, label + " (latency)", pair(w), pair(n, "lat_p95", "lat_max"), work if d is pn else None, need=cpu)
+                if step in ("undo", "redo"):  # (D-8101, the owner's ruling: both clocks stop at the frame begun and the app's own code done; native's picture on the screen beside)
+                    add(note, label + " (latency, to the frame begun)", pair(w), pair(n, "lat_code_p95", "lat_code_max"), work if d is pn else None, need=cpu)
+                    shown_beside.append((note, label, n))
                 else:
                     missed = (w["missed"], n["gap_over20"]) if w and n and w.get("missed") is not None and "gap_over20" in n else None
                     add(note, label + " (frames)", pair(w), pair(n, "gap_p95", "gap_max"), work if d is pn else None, gaps=True, need=cpu, missed=missed)
@@ -1918,6 +1921,8 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         need=(typed or {}).get("cpu", 0) == 0)
 
     lines += ["", "**Beside, not judged:**", "", "| note | what | web | native |", "|---|---|---|---|"]
+    for note_, label_, n_ in shown_beside:  # (D-8101) native's own picture handed to the screen, for information
+        lines.append(f"| {note_} | {label_}: native's picture handed to the screen p95 / max (the web isn't timed to it) | | {f'{n_['lat_p95']} / {n_['lat_max']}' if n_ and 'lat_p95' in n_ else '—'} |")
     for note in RACE_NOTES:
         wn, pn, si = web.get(note, {}), paced.get(note, {}), SNAPINFO.get(note, {})
         if "open" in wn:
@@ -2213,9 +2218,36 @@ def keys():
         md = page_markdown(dbm, "Weekly review") if dbm else None
         if e or md is None or " hé q1 t" not in md:
             probs.append(f"Mac: pnote's page after real keys: {e or (md or '')[-60:]!r}")
+    probs += prompt_tick_check()
     if probs:
         return "FAIL", "; ".join(probs)
-    return "PASS", "Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote"
+    return "PASS", "Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote; a key drawn at once while the clock runs (D-8099)"
+
+
+def prompt_tick_check():
+    """(c32, D-8099) On the Mac, a key while the frame clock runs is drawn right after it, not at the clock's next tick: twelve
+    paced undos on the stress note, each step's wait from the key to the tick that draws it (MOJOUI_BENCH_SPLIT). With the rule
+    p95 under 1 ms; with it off (MOJOUI_PROMPT_INPUT=0) the same run must show the wait (over 1 ms), or this test can't see the
+    fault. Problems, or []."""
+    db = OUT / "race" / "race-stress.db"
+    if not db.exists():
+        return [f"prompt tick: no {db} (Linux's M6 seeds it)"]
+    waits = {}
+    for on in ("1", "0"):
+        out, e = mac_run(f"prompt-{on}", ["wait:800", "window:1440x900", "framebench:desk=open,2", "appbench:desk=zoom100", "framebench:desk=undo,12", "quit"],
+                         {"PNOTE_DB": "{data}/race-stress.db", "OMX_CONFIG": "{data}/cfg-prompt-" + on + "-" + str(int(time.time())), "MOJOUI_BENCH_PACED": "1",
+                          "MOJOUI_BENCH_SPLIT": "1", "MOJOUI_PROMPT_INPUT": on}, [db])
+        w = sorted(float(x) for x in re.findall(r"^SPLIT: undo \d+ event [\d.]+ to_tick ([\d.]+)", out, re.M))
+        if e or len(w) < 10:
+            return [f"prompt tick: the Mac's run ({on}): {e or 'no SPLIT lines'}"]
+        waits[on] = w[min(len(w) - 1, int(0.95 * len(w)))]
+    bad = []
+    if waits["1"] > 1.0:
+        bad.append(f"Mac: a key waits {waits['1']:.1f} ms (p95) for the frame clock's tick (D-8099)")
+    if waits["0"] <= 1.0:
+        bad.append(f"prompt tick: with the rule off the wait is {waits['0']:.1f} ms: this test can't see the fault")
+    print(f"  prompt tick: wait p95 {waits['1']:.1f} ms with the rule, {waits['0']:.1f} without", flush=True)
+    return bad
 
 
 CHECKS = {"BUILDS": builds, "KEYS": keys, "PACKAGE": package, "M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}

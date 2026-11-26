@@ -120,3 +120,5 @@ One line per rule that prevents a mistake that happened.
 - 2026-11-26 · A merge can bring a module-local copy of a shared number (goal 81's gtk_held `HOVER = 11`) that the other side renumbers: it compiles and is wrong. Encoded: tests/test_gesture_numbers.py fails on any module's own copy of an event number.
 - 2026-11-26 · An old goal's checker may cascade into older goals that rebuild 13 GB of data and install whole pixi environments in a fresh worktree (73 M4 → 71 → 70 → 68 → 47). Before running another goal's checker, read what it calls and what it writes.
 
+- scripts/mac-unlocked (79-check M6) takes ~/.cache/omx-mac.lock itself and ignores OMX_MAC_LOCKED: never run it under an outer flock of the same lock.
+- Before a race, look for any 79-check M6 on the machine, not only this worktree's (another session's ran beside ours on 11-26).

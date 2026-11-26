@@ -1,0 +1,104 @@
+start 10:13:02
+BENCHSTATE: open active=1 key=1 locked=0 scale=1.0 refresh=144 size=1440x900 activity=0 not held
+The Mac is unlocked and the app came to the front: measuring (about 30 minutes a screen, and 10; leave it alone).
+R1 web pause=0 front="Finder" ASN:0x0-0x3 10:13:43
+WEBSTATE: when=start headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [5.5,6.8,7.1,7,7.2,6.8,7,6.8,6.9,7,6.9,7,6.8,7,7,8.6,5.3,8.7,4.9,7.3,8.7,6.3,5,7,7.8]
+STEPS redo [4.9,5.2,8.5,5.4,8.6,4.4,7,7.8,8.5,5.3,6.9,8.6,4.5,7.1,7.7,8.6,5.2,7.1,8.5,5.2,7,9.2,4.8,8.6,5.1]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 7   │ 8.7  │ 8.7  │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0.1  │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 7   │ 8.6  │ 9.2  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=142.96 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R1 web pause=1000 front="Finder" ASN:0x0-0x3 10:13:59
+WEBSTATE: when=start headed=1 dpr=1 raf=142.86 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [0.8,10.2,8.4,5.1,7,6.8,6.9,7,7,6.9,7,7,6.9,6.9,7,6.9,7.1,6.8,7,8.6,5.6,8.1,4.7,7.7,8.6]
+STEPS redo [0.9,6.1,7,8.5,5.4,7.4,6.4,8.6,5.4,8.6,5.2,6.9,7,6.9,6.9,7,7,6.9,6.9,7,7,7,6.8,7,6.9]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0    │ 0.2  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 7   │ 8.6  │ 10.2 │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.9 │ 8.6  │ 8.6  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R1 native 10:14:19 build/mac-ssh/pnote-20261126-101359
+BENCHSTATE: undo active=1 key=1 locked=0 FRAMEBENCH: undo gap_p50=7.0 lat_p95=11.6 lat_max=14.9 lat_p95=0.0 lat_max=0.0 BENCHSTATE: redo active=1 key=1 locked=0 FRAMEBENCH: redo gap_p50=12.6 lat_p95=14.8 lat_max=15.8 lat_p95=0.0 lat_max=0.0
+R2 web pause=0 front="Finder" ASN:0x0-0x3 10:14:33
+WEBSTATE: when=start headed=1 dpr=1 raf=143.35 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [5.3,7.6,6.2,7.1,7,6.8,7.3,6.8,6.8,6.9,6.9,7,11.4,2.8,6.8,6.9,7.5,6.3,6.9,6.9,7,6.9,7,7.2,6.8]
+STEPS redo [4.1,6.8,7,6.9,6.8,7,7,7,6.9,7,6.9,7.1,6.8,7,7,7.1,6.8,6.8,7,7,7,6.9,6.9,6.9,7.1]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0    │ 0.2  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 6.9 │ 7.6  │ 11.4 │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 7   │ 7.1  │ 7.1  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R2 web pause=1000 front="Finder" ASN:0x0-0x3 10:14:48
+WEBSTATE: when=start headed=1 dpr=1 raf=143.40 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [0.9,10.2,7.7,7.4,5.5,8.6,5.2,7.2,6.8,7,6.9,6.8,7,6.9,7,6.9,7,6.9,7,7,6.9,6.9,7,6.9,8.7]
+STEPS redo [0.8,5.9,6.9,8.6,5.4,8.6,6.4,5.8,8.7,5.1,8.6,5.4,8.6,6.5,5,7.8,8.6,6.9,5.3,8.6,6.4,5.8,8.6,5.3,8.6]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0.1  │ 0.3  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 7   │ 8.7  │ 10.2 │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.5 │ 8.6  │ 8.7  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=143.46 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R2 native 10:16:03 build/mac-ssh/pnote-20261126-101448
+BENCHSTATE: undo active=1 key=1 locked=0 FRAMEBENCH: undo gap_p50=7.0 lat_p95=13.6 lat_max=15.0 lat_p95=0.0 lat_max=0.0 BENCHSTATE: redo active=1 key=1 locked=0 FRAMEBENCH: redo gap_p50=7.8 lat_p95=15.7 lat_max=16.0 lat_p95=0.0 lat_max=0.0
+R3 web pause=0 front="Finder" ASN:0x0-0x3 10:16:17
+WEBSTATE: when=start headed=1 dpr=1 raf=143.44 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [5.6,8.4,5.1,6.9,7.1,6.8,7.4,6.6,6.8,7.2,8.6,5.1,14.2,1.3,6.7,5.7,10.7,3.1,6.8,7,7,6.9,6.9,7,7.3]
+STEPS redo [4,6.8,6.9,6.9,6.9,7,7,7,8.6,5.3,7,8.6,5.3,8.6,5.5,6.8,8.6,5.2,7.5,8.1,4.5,7.7,8.6,6.5,5.8]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0.1  │ 0.1  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 6.9 │ 10.7 │ 14.2 │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0    │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.9 │ 8.6  │ 8.6  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=142.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R3 web pause=1000 front="Finder" ASN:0x0-0x3 10:16:33
+WEBSTATE: when=start headed=1 dpr=1 raf=142.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [0.9,8.8,7.8,8.8,5,6.9,7,6.9,7,6.9,6.9,7,6.9,7.1,6.8,7,7.1,6.8,7,6.8,7,7,6.9,7,6.9]
+STEPS redo [0.8,7.3,6.8,7,6.9,6.9,7,7,6.9,7,7,6.9,6.8,7,7,6.9,6.9,7.1,6.8,7,7,6.9,7,6.9,6.9]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0.1  │ 0.2  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 7   │ 8.8  │ 8.8  │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0.1  │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.9 │ 7.1  │ 7.3  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R3 native 10:16:52 build/mac-ssh/pnote-20261126-101633
+BENCHSTATE: undo active=1 key=1 locked=0 FRAMEBENCH: undo gap_p50=13.6 lat_p95=16.8 lat_max=17.7 lat_p95=0.0 lat_max=0.0 BENCHSTATE: redo active=1 key=1 locked=0 FRAMEBENCH: redo gap_p50=13.9 lat_p95=15.9 lat_max=17.9 lat_p95=0.0 lat_max=0.0
+R4 web pause=0 front="Finder" ASN:0x0-0x3 10:17:05
+WEBSTATE: when=start headed=1 dpr=1 raf=142.44 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [5.3,7.3,6.7,7.4,6.7,6.9,6.9,9.4,5.5,6.1,8.5,5.1,9.5,4.3,7,6.9,7.7,6.2,6.9,7,6.9,6.9,7,7.2,6.8]
+STEPS redo [6,4.9,8.9,4.9,6.8,7.1,6.8,7,7,6.9,7,6.9,7,6.9,7,7.1,6.8,7,6.9,7,6.9,6.9,7,7,8.9]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0.1  │ 0.2  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 6.9 │ 9.4  │ 9.5  │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0.1  │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 7   │ 8.9  │ 8.9  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=142.94 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R4 web pause=1000 front="Finder" ASN:0x0-0x3 10:17:21
+WEBSTATE: when=start headed=1 dpr=1 raf=143.29 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [0.8,9.6,8.4,4.9,7.1,6.8,6.9,7,6.9,7,7,6.9,8.9,5.2,9.5,4.4,8.7,4.9,6.9,7,6.9,7,6.9,7,7]
+STEPS redo [0.8,8.5,5.2,8.6,4.9,7.1,8.8,5.2,8.8,4.8,7,6.9,7,6.9,7,6.9,7,7,8.9,5.2,8.7,5,6.8,7,7]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0.1  │ 0.2  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 7   │ 9.5  │ 9.6  │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0    │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 7   │ 8.8  │ 8.9  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=142.31 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R4 native 10:17:40 build/mac-ssh/pnote-20261126-101721
+BENCHSTATE: undo active=1 key=1 locked=0 FRAMEBENCH: undo gap_p50=7.0 lat_p95=13.3 lat_max=15.1 lat_p95=0.0 lat_max=0.0 BENCHSTATE: redo active=1 key=1 locked=0 FRAMEBENCH: redo gap_p50=13.1 lat_p95=15.1 lat_max=17.0 lat_p95=0.0 lat_max=0.0
+R5 web pause=0 front="Finder" ASN:0x0-0x3 10:17:54
+WEBSTATE: when=start headed=1 dpr=1 raf=142.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [5.5,6.9,7.3,6.9,7.2,6.6,7,6.9,6.9,6.9,6.9,6.9,18.5,0.2,2.4,6.7,11.5,2.3,7,6.9,7,7,6.9,6.9,7]
+STEPS redo [5.2,7.3,6.7,7,6.9,6.9,9.1,5.2,8.7,4.9,6.9,6.9,7,6.9,6.9,7,9.1,5.1,8.6,4.9,6.9,6.9,7.1,6.9,6.9]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 6.9 │ 11.5 │ 18.5 │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0    │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.9 │ 9.1  │ 9.1  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=142.91 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R5 web pause=1000 front="Finder" ASN:0x0-0x3 10:18:10
+WEBSTATE: when=start headed=1 dpr=1 raf=142.91 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+STEPS undo [1.2,8.8,8.5,5,7,6.8,6.9,7,7,6.9,6.9,7.8,6.2,6.8,7,7,6.8,7,7.1,6.8,7,6.9,6.9,7,6.9]
+STEPS redo [0.8,6.7,6.9,6.9,6.9,7,6.9,7,6.9,7,7,6.8,7,7,6.9,6.9,7,7,7,6.8,7,7,6.9,7.3,6.9]
+│ 1       │ 'undo (25 steps, the call)'           │ 0   │ 0    │ 0.3  │ 25 │
+│ 2       │ 'undo (25 steps, to the frame after)' │ 6.9 │ 8.5  │ 8.8  │ 25 │
+│ 3       │ 'redo (25 steps, the call)'           │ 0   │ 0.1  │ 0.1  │ 25 │
+│ 4       │ 'redo (25 steps, to the frame after)' │ 6.9 │ 7    │ 7.3  │ 25 │
+WEBSTATE: when=end headed=1 dpr=1 raf=143.44 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R5 native 10:18:29 build/mac-ssh/pnote-20261126-101810
+BENCHSTATE: undo active=1 key=1 locked=0 FRAMEBENCH: undo gap_p50=7.0 lat_p95=12.3 lat_max=12.4 lat_p95=0.0 lat_max=0.0 BENCHSTATE: redo active=1 key=1 locked=0 FRAMEBENCH: redo gap_p50=7.1 lat_p95=12.6 lat_max=14.5 lat_p95=0.0 lat_max=0.0
+C30 done 10:18:29

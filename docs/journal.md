@@ -2059,3 +2059,19 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Follow-up: roomy / compact no longer uses the window morph (D-8413): tiles that stay glide, a leaving tile shrinks away in ~0.33 s, a joining one grows in, all on the water spring. x11grab: 28 moving frames, the biggest single frame 20 % of the change, no double image (build/look/roomy-strip.png). The real-model omx run was not done: scripts/gpu-free still refused (another project's job, 22:37).
 - Review fixes: "auto" follows the system only and "night" is the opt-in clock (D-8414, replacing D-8402), OMX_DARK=1/0 pin the look; the mascot pack's provenance in its README, manifest `source` and NOTICE (D-8415); the pack found from the program, checked by running the Stage from a folder outside the repository (the mascot showed in the chat bar), Personalize.save cleans its .tmp (D-8416); test_look 15/15 (night by asking, refused profile names, corrupt files, a failed save).
 - Real model (Qwen3.8-27B on GPU 0, gpu-free said yes at 23:24; build/llm shim built here; no voice environment, so typed turns only): "use the mascot and make it dark" → two personalize calls ({"set":{"presence":"mascot","density":"roomy"}} — roomy unasked — then {"set":{"scheme":"dark"}}), dark morphed; "put it back" → {"undo":true} undid only the dark. Fixed with one undo step per agent turn and a tighter tool description (D-8417); second run: {"presence":"mascot","density":"compact"} (no change to density) + {"scheme":"dark"}, then {"undo":true} put back both (orb and auto), each with a morph (build/look/model-morph1-strip.png, model-morph2-strip.png). Without a voice no reply is ever "spoken", so omx merged the second typed turn into the first ("…make it dark put it back"); the model still called undo.
+
+## 2026-11-26 goal 79 (continuation 30) — probe c29 run
+- 10:12 Mac front Finder, unlocked; probe built, 5 interleaved rounds 10:13–10:18 (web pause 0 / 1000, native paced). Web unaffected by idle; native slower. D-8098.
+
+## 2026-11-26 goal 79 (continuation 31) — split, prompt tick, Mac M6
+- 10:20 split built (MOJOUI_BENCH_SPLIT); 5 rounds: the wait for the next tick 0–5.7 ms in every step. prompt_tick for keys and presses (D-8099); A/B 5 rounds. 72166365.
+- 10:31 mac-unlocked under my flock deadlocked on the checker's own lock (38 min idle); killed, rerun 11:12–11:50: 54 ✓ 6 ✗.
+
+## 2026-11-26 goal 79 (continuation 32)
+- prompt_tick_check in KEYS (0.6 vs 3.6 ms). Tile trace with STEPSTART: same rasters for undo and redo; lean input frames (D-8100). Split's tick stamp read at draw (a later tick moved it). Mac M6 at c7c00801: 56 ✓ 4 ✗.
+
+## 2026-11-26 goal 79 (continuation 33)
+- GPU split of redo frames (composite 1.2 constant; rasters 0.8–5). Zoom: spikes are strip rasters; budget/ahead A/B within noise. End points: web 2nd rAF 14–16 ms; native ahead at both like-for-like pairs. My probe first read process.env inside the page (no numbers); fixed and rerun. No fix landed, no M6.
+
+## 2026-11-26 goal 79 (continuation 34) — D-8101
+- lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).

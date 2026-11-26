@@ -5912,6 +5912,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var ring_full0 = host[].gpu2d()[].gl.full if host[].g2d != 0 else 0
     var gaps = List[Float64]()
     var lats = List[Float64]()
+    var code_lats = List[Float64]()  # (D-8101) the gesture to the end of the paint that shows it (the frame begun, the app's own code done; GSK's render after it not waited for)
     var last_start = -1  # (µs) the last shown frame's paint start; -1: none to measure from
     var no_raster = paced or getenv("MOJOUI_BENCH_RASTER") == "0"  # (diagnosis only: the raster check skipped, to see what it costs the rest)
     var offloaded = 0  # timed frames GTK showed through its subsurface (graphics offload, read from GTK's own state)
@@ -6116,6 +6117,8 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 gaps.append(Float64(start_us - last_start) / 1000.0)
             last_start = start_us
             lats.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
+            var since_paint = Float64(Int(external_call["g_get_monotonic_time", Int64]()) - host[].paint_end_us[shown_in % 64]) / 1000.0  # (that paint's end, on its own clock)
+            code_lats.append(max(lats[len(lats) - 1] - since_paint, 0.0))
             if getenv("MOJOUI_TRACE_LATS") == "1":  # (which step was late, and what of it was the app's: event, the wait for the frame, its paint)
                 print("TRACELAT: " + what + " " + String(i) + " t " + String(Int(perf_counter_ns()) // 1_000_000) + " lat " + one_decimal(Float32(lats[len(lats) - 1])) + " event " + one_decimal(Float32(ev_ms)) + " draw "
                       + one_decimal(Float32(host[].canvases[ci].bench_draw_ms)) + " paint " + one_decimal(Float32(host[].paint_ring[shown_in % 64]))
@@ -6300,6 +6303,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                 over += 1
         counts += " gap_n=" + String(len(gaps)) + " gap_p50=" + one_decimal(Float32(pct(gaps, 0.5))) + " gap_p95=" + one_decimal(Float32(pct(gaps, 0.95))) + " gap_max=" + one_decimal(Float32(pct(gaps, 1.0))) + " gap_over20=" + String(over)
         counts += " lat_p95=" + one_decimal(Float32(pct(lats, 0.95))) + " lat_max=" + one_decimal(Float32(pct(lats, 1.0)))
+        counts += " lat_code_p95=" + one_decimal(Float32(pct(code_lats, 0.95))) + " lat_code_max=" + one_decimal(Float32(pct(code_lats, 1.0)))
         counts += " press_lat_n=" + String(len(press_lats)) + " press_lat_p95=" + one_decimal(Float32(pct(press_lats, 0.95))) + " press_lat_max=" + one_decimal(Float32(pct(press_lats, 1.0)))
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
