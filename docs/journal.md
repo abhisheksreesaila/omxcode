@@ -1868,3 +1868,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 ## 2026-11-26 goal 79 (continuation 31) — split, prompt tick, Mac M6
 - 10:20 split built (MOJOUI_BENCH_SPLIT); 5 rounds: the wait for the next tick 0–5.7 ms in every step. prompt_tick for keys and presses (D-8099); A/B 5 rounds. 72166365.
 - 10:31 mac-unlocked under my flock deadlocked on the checker's own lock (38 min idle); killed, rerun 11:12–11:50: 54 ✓ 6 ✗.
+
+## 2026-11-26 goal 79 (continuation 32)
+- prompt_tick_check in KEYS (0.6 vs 3.6 ms). Tile trace with STEPSTART: same rasters for undo and redo; lean input frames (D-8100). Split's tick stamp read at draw (a later tick moved it). Mac M6 at c7c00801: 56 ✓ 4 ✗.
