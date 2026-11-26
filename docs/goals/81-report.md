@@ -9,9 +9,9 @@ Checker: `scripts/check` (docs/goals/81-check.py). Decisions D-8101–D-8110. Re
 | M2 | Long lists | PASS: 600 rows + 1 on top: 1 of 1,804 widgets kept → all of them (10,000 too); 499 unchanged rows 1.74 → 0.08 ms; cost grows with length, not its square |
 | M3 | Several long lists | PASS: 0 stale rows of 280 (old way: 13 stale reads) |
 | M4 | No lost input (GTK) | PASS: 0 of 1,215 (0 of 4,175 in a longer run); the base lost 890 of 1,240 in the same kind of burst, which is harsher than a person's input |
-| M5 | Hang monitor | PASS on Linux: says what hangs while it hangs and after; 0.17 µs an event; 0 wake-ups idle. Built and runs on the Mac |
+| M5 | Hang monitor | PASS on Linux: says what hangs while it hangs and after; 0.17 µs an event; 0 wake-ups idle. On the M4 too (11-25): the same two lines for a 1.2 s update |
 | M6 | Mac: a new letter | PASS on the M4: at most 112 rows a frame sent, of up to 2,036 in use; 180 frames, 0 levels from the reference |
-| M7 | Mac frame clock | **BLOCKED**: built; the Mac's screen was locked all night. Its screens are 120 and 144 Hz; our timer gave 60 |
+| M7 | Mac frame clock | PASS on the M4 (11-25, unlocked): 144.2 ticks a second on its 144 Hz screen (the timer gave 60), 0 while hidden or idle, 60 from the fallback when the screen's clock doesn't tick |
 | M8 | Pictures | PASS on GL, Metal, CPU: worst 0.88 levels from a perfect box filter (bar 2); unscaled bit for bit; an unchanged 1920 × 1080 picture costs 0.0 ms a frame (2.0 ms when copied and hashed) |
 | M9 | Nothing slower or broken | PASS: goal 80's held-out scenes worst 1.009× (bar 1.05; bests 0.90×); 30 tests; 6 Linux apps built and opened headless, 3 AppKit apps built and run unshown on the M4 |
 
@@ -31,14 +31,12 @@ into a text field could come back later as if typed, overwriting the app's newer
 ![Pictures before and after](../research/img/g81-pictures.png)
 
 ## Not done, not checked
-- **Correction (2026-11-24, from goal 79's session; read in our code, not run):** the Mac display link (appkit.mojo:3142) is added with a
-  string that reads `kCFRunLoopCommonModes`; Core Foundation knows that mode by address, so the link most likely never ticks and M7
-  would run on the 60 Hz fallback. The hang monitor's Mac run-loop observer (appkit.mojo:3874) passes the same string, so it most likely
-  never fires either: "runs on the Mac" below means the app starts with it, not that it watches. The fallback timer is also dropped
-  when a frame leaves the canvases idle, which goal 79 measured as 24-57 ms late frames. Fixed on goal-79-pnote-lookalike (2e198b04);
-  take its frame clock at the merge, give the observer the real constant, and don't run M7 before.
-- M7's rate is unmeasured: the Mac's screen was locked all night. Its screens are 120 and 144 Hz; the link's path has not run on a visible window.
-- The hang monitor runs on the Mac; no hang was provoked there.
+- **Fixed 2026-11-25 (goal 79's finding):** the display link and the hang monitor's run-loop observer were added with a string that
+  reads `kCFRunLoopCommonModes`; Core Foundation knows the mode by address, so neither ever fired. Both now use the constant
+  itself (`common_modes()`), and both were then measured on the unlocked M4. Running that also showed two faults of the clock
+  itself, fixed: frames could stay stopped after the window came back (macOS's notice can come before it counts as visible: it
+  is now looked at every half second while hidden), and the fallback retried the dead clock at every restart (now: the timer
+  until the window is seen anew). These fixes were run, not reviewed.
 - Keeping widgets across shape changes on Mac, iPhone, Android, web (F5), F7, F8: not chosen. Text spacing, contrast, snapped borders: skipped by the owner.
 - Dropped input was a GTK fault; the web and Apple hosts weren't tested for it.
 - A changing picture drawn with `image()` (a video frame) costs about as much CPU as before plus 0.7 ms for its half size at 1080p when drawn smaller.
