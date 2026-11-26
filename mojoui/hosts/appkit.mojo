@@ -3027,6 +3027,8 @@ struct AppKitHost[A: App](Movable):
         self.input_activity(self_addr)
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
+        if kind == PRESS or kind == RELEASE:
+            self.prompt_tick()
 
     def queue_pan(mut self, node: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, pressure: Float64):
         """A drag's point: kept until the next frame, where the app gets every one of them and the screen is worked out once
@@ -3082,6 +3084,7 @@ struct AppKitHost[A: App](Movable):
             print("TRACE: event key " + name + " 0 nodes " + String(len(self.rt.shown.nodes)), flush=True)
         var d = self.rt.key(node, name, mods)
         self.apply(d, self_addr)
+        self.prompt_tick()
         if (mods & 2) != 0 and (name == "v" or name == "V") and node < len(self.rt.shown.nodes) and self.rt.app.takes_paste(self.rt.shown.nodes[node].style):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
             var text = from_ns(msg(paste_board(), "stringForType:", ns_string("public.utf8-plain-text")))
             if text != "":
@@ -3159,6 +3162,17 @@ struct AppKitHost[A: App](Movable):
     def wake(mut self):
         """Something may need drawing (a new version, frames, a new size): tick again."""
         self.start_frames()
+
+    def prompt_tick(mut self):
+        """(c31) A key or a press: its frame is drawn right after the event, not at the clock's next tick, also while the
+        clock runs (measured on the Mac at 144 Hz: the wait for the next tick was 0–5.7 ms of a key's 8–17). Moves and
+        scrolls keep to the clock (a stream draws at the screen's rate); the tick that follows finds nothing new and
+        draws nothing. MOJOUI_PROMPT_INPUT=0: as before (A/B)."""
+        if len(self.canvases) == 0 or self.prompt_due or env("MOJOUI_PROMPT_INPUT") == "0":
+            return
+        self.prompt_due = True
+        var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes if self.common_modes != 0 else ns_string("kCFRunLoopCommonModes"))
+        _ = msg(self.canvases[0].view, "performSelector:withObject:afterDelay:inModes:", sel("canvasFrame:"), 0, Float64(0), modes)
 
     def on_screen(self) -> Bool:
         """Whether any of the window shows (not hidden, covered whole, minimized, or on a locked screen)."""
@@ -4759,6 +4773,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
     var on_cpu = 0
     var last = -1
     var keys = List[String]()
+    var split = env("MOJOUI_BENCH_SPLIT") == "1"  # (c31, diagnostic: each step's time split; and to the web's end point, the frame's own code done)
+    var cpu_lats = List[Float64]()
     for i in range(count):
         node = canvas_node_at(host[], tag)
         k = host[].canvas_at(node) if node >= 0 else -1
@@ -4770,16 +4786,21 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
         var drawn0 = host[].canvases[k].drawn
         var t0 = Int(now_ns())
         bench_gesture[A](host_addr, node, k, what, i, count, x, y, drag_x0, drag_y0, w, h, keys)
+        var t_ev = Int(now_ns())
         host[].wake()
         var by = t0 + 2_000_000_000
         var drew = False
         var seen = False
+        var t_drew = 0
+        var parts = (0.0, 0.0, 0.0)
         while Int(now_ns()) < by:  # (the tick that draws it; then its picture handed over, which the next tick may do)
             pump_run_loop(0.0005)
             node = canvas_node_at(host[], tag)
             k = host[].canvas_at(node) if node >= 0 else -1
             if not drew and (host[].g2d_frames != frames0 or (k >= 0 and host[].canvases[k].drawn != drawn0)):
                 drew = True
+                t_drew = Int(now_ns())
+                parts = (host[].g2d_parts[0], host[].g2d_parts[1], host[].g2d_parts[2])
                 if host[].g2d_frames != frames0:
                     on_gpu += 1
                 else:
@@ -4797,6 +4818,13 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             continue
         if seen:
             lats.append(Float64(Int(now_ns()) - t0) / 1e6)
+        if split and drew:
+            var t_seen = Int(now_ns())
+            cpu_lats.append(Float64(t_drew - t0) / 1e6)
+            var gms = host[].g2d_done[len(host[].g2d_done) - 1] if len(host[].g2d_done) > 0 else 0.0
+            print("SPLIT: " + what + " " + String(i) + " event " + one_decimal(Float64(t_ev - t0) / 1e6) + " to_tick " + one_decimal(Float64(host[].drew_tick_ns - t_ev) / 1e6)
+                  + " frame " + one_decimal(Float64(t_drew - host[].drew_tick_ns) / 1e6) + " (scene " + one_decimal(parts[0]) + " batch " + one_decimal(parts[1]) + " encode " + one_decimal(parts[2])
+                  + ") gpu " + one_decimal(gms) + " to_shown " + one_decimal(Float64(t_seen - t_drew) / 1e6) + " total " + one_decimal(Float64(t_seen - t0) / 1e6), flush=True)
         if opens:
             var pressed = False
             var press_ns = 0
@@ -4849,6 +4877,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
         if g > 20.0:
             over += 1
     var n = on_gpu + on_cpu
+    if split:
+        print("SPLITSUM: " + what + " to_code_done_p95=" + one_decimal(pct(cpu_lats, 0.95)) + " to_code_done_max=" + one_decimal(pct(cpu_lats, 1.0)), flush=True)
     print("FRAMEBENCH: " + what + " n=" + String(n) + " missed=" + String(missed) + " unchanged=0 renderer=" + ("gpu2d-Metal" if on_cpu == 0 else "mixed") + " p95=0.0 max=0.0 gpu_frames=" + String(on_gpu)
           + " cpu_frames=" + String(on_cpu) + " gap_n=" + String(len(gaps)) + " gap_p50=" + one_decimal(pct(gaps, 0.5)) + " gap_p95=" + one_decimal(pct(gaps, 0.95)) + " gap_max=" + one_decimal(pct(gaps, 1.0))
           + " gap_over20=" + String(over) + " lat_p95=" + one_decimal(pct(lats, 0.95)) + " lat_max=" + one_decimal(pct(lats, 1.0)) + " press_lat_n=" + String(len(press_lats))
