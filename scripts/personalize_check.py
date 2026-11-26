@@ -1,7 +1,10 @@
 """Personalize by asking, proved on GTK (D-8400…D-8411): examples/stage on the headless display, Settings driven with MOJOUI_TEST
 steps, each change recorded with ffmpeg x11grab (the display's real pixels, 60 fps) and read frame by frame: the pixels that
 change pass through in-between values (a blend) instead of jumping (a snap), and no frame leaves the old..new range (a blank
-flash). Then the same switch with the morph off and on, for the longest frame gap (the host's MORPH and GAPS lines).
+flash). A new scheme or accent (and a person whose look differs) morphs the whole window; the presence crossfades by itself and
+roomy / compact reflows the tiles on their own water spring, with no window morph (D-8413): for those the check reads motion,
+frame by frame (how many frames move, and that no single frame carries most of the change: a jump). Then the same switch with
+the morph off and on, for the longest frame gap (the host's MORPH and GAPS lines).
 
     scripts/build.sh stage linux && pixi run python scripts/personalize_check.py        (frames in build/look/<change>/frames)
 
@@ -92,14 +95,19 @@ def main():
         s, n, blended, snapped, worst = b
         print(f"{name}: change at frame {s}, {n} px in {region}: blended over >= 3 frames {100 * blended:.1f} %, snapped {100 * snapped:.1f} %, "
               f"worst frame outside old..new {100 * worst:.1f} %; {' | '.join(morphs)}; looks: {looks}")
-        if len(morphs) == 0:
+        wants_morph = name not in ("mascot", "roomy")
+        if wants_morph and len(morphs) == 0:
             bad.append(f"{name}: no morph ran")
+        if not wants_morph and len(morphs) > 0:
+            bad.append(f"{name}: the window morphed (only a scheme or accent should)")
         ims = frames(out, region)
-        moving = sum(1 for k in range(s, min(s + 72, len(ims) - 1)) if (np.abs(ims[k + 1] - ims[k]).sum(axis=2) > 40).mean() > 0.002)
-        print(f"   {name}: the region changed on {moving} frames after the start")
-        if name == "roomy":  # (tiles glide on the water spring: a pixel a tile passes over jumps, so motion is counted in frames, not pixels)
-            if moving < 4 or blended < 0.3:
-                bad.append(f"{name}: the tiles changed on {moving} frames only, {100 * blended:.1f} % blended")
+        steps = [float(np.abs(ims[k + 1] - ims[k]).sum()) for k in range(s - 1, min(s + 72, len(ims) - 1))]
+        moving = sum(1 for k in range(s - 1, min(s + 72, len(ims) - 1)) if (np.abs(ims[k + 1] - ims[k]).sum(axis=2) > 40).mean() > 0.002)
+        share = max(steps) / max(sum(steps), 1.0)
+        print(f"   {name}: the region moved on {moving} frames; the biggest single frame carried {100 * share:.0f} % of all the change")
+        if name == "roomy":  # (tiles glide: a pixel a tile passes over jumps, so motion is read in frames, not pixels)
+            if moving < 8 or share > 0.30:
+                bad.append(f"{name}: the tiles moved on {moving} frames, the biggest frame carried {100 * share:.0f} % (a jump)")
         elif snapped > (0.05 if name in ("dark", "undo", "person") else 0.10):  # (the presence and the mic: a growing shape leaves edge pixels that jump)
             bad.append(f"{name}: {100 * snapped:.1f} % of the changing pixels snapped")
     for m in ("0", "1"):

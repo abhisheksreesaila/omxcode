@@ -31,7 +31,9 @@
 # The pure layout (preset, pack, cell_box, press_amount) has no Canvas in it: tests/test_livetiles.mojo calls it directly.
 # Presets by tile count keep the grid full: 6 = l w w w s s, 5 = l w w w w, 4 = l l w w, 3 = xl w w, 2 = xl band, 1 = full;
 # packing is CSS grid-auto-flow: dense, in order. More than 6 tiles (3 with a big one): the rest are reported as overflow.
-# Motion: the water spring (k 150, c 19.5: about 2 % overshoot, settled in ~0.7 s) moves a tile's rect; the press is
+# Motion: the water spring (k 150, c 19.5: about 2 % overshoot, settled in ~0.7 s) moves a tile's rect; a tile that joins grows
+# in from nothing about its centre and one that leaves shrinks to nothing, both on the same spring (D-8413: a Stage going roomy
+# or compact reflows by itself, no crossfade); the press is
 # omxqua's (0.90 for <= 48 pt, 0.955 for <= 260 pt, else 0.975, back on the fast spring k 380 c 30); faces turn every
 # 6.5 s on a slow spring that does not overshoot. Reduced motion (set_reduced, or a still Surface): everything lands at once.
 
@@ -468,6 +470,8 @@ struct _Anim(Copyable, Movable):
     var face_wait_us: Int
     var charm: String  # the charm it wears ("" none) and its arrival (0 -> 1: drops in and fades in)
     var charm_in: Spring
+    var grow: Spring  # its size about its centre: 1 at rest; 0 -> 1 as it joins, 1 -> 0 as it leaves (water)
+    var size: Int  # the size it was last drawn at (a tile leaving keeps its words' sizes)
 
     def __init__(out self, id: String, at: Box, order: Int):
         self.id = id
@@ -482,6 +486,8 @@ struct _Anim(Copyable, Movable):
         self.face_wait_us = FACE_MS * 1000 + order * 700_000
         self.charm = ""
         self.charm_in = Spring(1.0, FAST_K, FAST_C)
+        self.grow = Spring(1.0, WATER_K, WATER_C)
+        self.size = TILE_S
 
     def cur(self) -> Box:
         var q = self.p.value
@@ -496,6 +502,16 @@ def _water(fr: Box, to: Box, start: Float64) -> Spring:
     var sp = Spring(start, WATER_K, WATER_C, rest=min(0.002, 0.5 / max(far, 1.0)))
     sp.to(1.0)
     return sp^
+
+
+def _tile_named(tiles: List[Tile], id: String) -> List[Tile]:
+    """The tile called `id` ([] when there is none)."""
+    var out = List[Tile]()
+    for t in tiles:
+        if t.id == id:
+            out.append(t.copy())
+            break
+    return out^
 
 
 def _lead(tiles: List[Tile]) -> String:
@@ -558,6 +574,10 @@ struct LiveTiles(Copyable, Movable):
     var zone_names: List[String]  # places outside the grid a tile can be dropped on (drop_zone), in canvas points
     var zone_boxes: List[Box]
     var hover_zone: String  # the zone a dragged tile is over now ("" none): a caller may mark it
+    var leaving: List[_Anim]  # tiles that left the grid, shrinking away (drawn under the rest; no hit tests, not in the record)
+    var leaving_tiles: List[Tile]  # what each of them shows
+    var prev_tiles: List[Tile]  # the tiles before the last set_tiles (a tile that leaves is drawn from here)
+    var taken: String  # the tile last dropped on a zone (it went with the pointer: no shrinking away in its old cell)
 
     def __init__(out self):
         self.tiles = List[Tile]()
@@ -600,6 +620,10 @@ struct LiveTiles(Copyable, Movable):
         self.zone_names = List[String]()
         self.zone_boxes = List[Box]()
         self.hover_zone = ""
+        self.leaving = List[_Anim]()
+        self.leaving_tiles = List[Tile]()
+        self.prev_tiles = List[Tile]()
+        self.taken = ""
 
     # ---------------------------------------------------------------- feeding it
 
@@ -608,6 +632,7 @@ struct LiveTiles(Copyable, Movable):
         another first tile, or another `big` one) forgets the size and place the person gave it, so it is the large tile
         again; what the person chose for tiles that are gone is forgotten (a tile added again starts fresh)."""
         var was = _lead(self.tiles)
+        self.prev_tiles = self.tiles.copy()
         self.tiles = tiles.copy()
         self._prune()
         var now = _lead(self.tiles)
@@ -855,8 +880,9 @@ struct LiveTiles(Copyable, Movable):
                     found = k
             if found < 0:
                 var a = _Anim(id, to, j)
-                if not snap and not self.reduced and self.width > 0:
+                if not snap and not self.reduced and self.width > 0 and len(self.anims) > 0:  # (a tile joining: it grows in)
                     a.fade_us = 0
+                    a.grow = _water(Box(0, 0, 0, 0), Box(0, 0, 1, 1), 0.0)
                 out.append(a^)
                 continue
             var a = self.anims[found].copy()
@@ -873,6 +899,33 @@ struct LiveTiles(Copyable, Movable):
                 if resized:
                     a.fade_us = 0
             out.append(a^)
+        var animate = not snap and not self.reduced and self.width > 0
+        for k in range(len(self.anims)):  # (a tile that leaves the grid shrinks away where it is)
+            var stays = False
+            for o in out:
+                if o.id == self.anims[k].id:
+                    stays = True
+            if stays or not animate or self.anims[k].id == self.taken:
+                continue
+            var t = _tile_named(self.tiles, self.anims[k].id)
+            if len(t) == 0:
+                t = _tile_named(self.prev_tiles, self.anims[k].id)
+            if len(t) == 0:
+                continue
+            var g = self.anims[k].copy()
+            var here = g.cur()
+            g.fr = here
+            g.to = here
+            g.p.snap(1.0)
+            g.fade_us = -1
+            g.grow = _water(Box(0, 0, 0, 0), Box(0, 0, 1, 1), 1.0)
+            g.grow.snap(min(max(self.anims[k].grow.value, 0.0), 1.0))
+            g.grow.to(0.0)
+            self.leaving.append(g^)
+            self.leaving_tiles.append(t[0].copy())
+        if not animate:
+            self.leaving.clear()
+            self.leaving_tiles.clear()
         for k in range(len(out)):  # (a charm that changes drops in on the fast spring)
             var ti = self._index(out[k].id)
             var want = self.tiles[ti].charm if ti >= 0 else String("")
@@ -886,10 +939,10 @@ struct LiveTiles(Copyable, Movable):
     # ---------------------------------------------------------------- time
 
     def moving(self) -> Bool:
-        if self.mode == _DRAGGING:
+        if self.mode == _DRAGGING or len(self.leaving) > 0:
             return True
         for a in self.anims:
-            if a.p.moving() or a.press.moving() or a.lift.moving() or a.face.moving() or a.fade_us >= 0 or a.charm_in.moving():
+            if a.p.moving() or a.press.moving() or a.lift.moving() or a.face.moving() or a.fade_us >= 0 or a.charm_in.moving() or a.grow.moving():
                 return True
         return False
 
@@ -929,6 +982,9 @@ struct LiveTiles(Copyable, Movable):
             if a.charm_in.moving():
                 _ = a.charm_in.step(us)
                 changed = True
+            if a.grow.moving():
+                _ = a.grow.step(us)
+                changed = True
             if a.charm != "" and not reduced and charm_moves(a.charm):
                 changed = True
             if a.fade_us >= 0:
@@ -945,6 +1001,15 @@ struct LiveTiles(Copyable, Movable):
                     else:
                         a.face.to(a.face.target + 1.0)
                     changed = True
+        var k2 = 0
+        while k2 < len(self.leaving):  # (gone once it has shrunk away)
+            _ = self.leaving[k2].grow.step(us)
+            changed = True
+            if self.leaving[k2].grow.value <= 0.01 or reduced:
+                _ = self.leaving.pop(k2)
+                _ = self.leaving_tiles.pop(k2)
+            else:
+                k2 += 1
         if self.mode == _DRAGGING:
             changed = True
         if changed:
@@ -1055,6 +1120,7 @@ struct LiveTiles(Copyable, Movable):
                 self.hover_zone = ""
                 if zone != "":  # (let go over a drop zone: the caller takes it; if it doesn't, the tile glides home)
                     self.results.append(TileResult(DROPPED, self.active, zone))
+                    self.taken = self.active  # (the caller takes it: it leaves the grid without shrinking back in its cell)
                 else:
                     var order = String("")
                     var lay = self.layout()
@@ -1198,6 +1264,26 @@ struct LiveTiles(Copyable, Movable):
                 var which = 2 if dragged else (0 if grows else 1)
                 if which == pass_:
                     order.append(i)
+        if not still:
+            for i in range(len(self.leaving)):  # (shrinking away, under the rest; kept out of the hit tests and the record)
+                var g = self.leaving[i].copy()
+                var gq = min(max(g.grow.value, 0.0), 1.0)
+                if gq <= 0.01:
+                    continue
+                var size = g.size
+                var n_ids = len(self.drawn_ids)
+                var n_pills = len(self.pill_ids)
+                var gt = self.leaving_tiles[i].copy()
+                self._tile(s, look, font, gt, size, g.to, g.to, min(max(gq * 2.0 - 1.0, 0.0), 1.0), gq, 0.0,
+                           g.face.value, False, False)
+                self.drawn_ids.resize(n_ids, String(""))
+                self.drawn_surf.resize(n_ids, Box(0, 0, 0, 0))
+                self.drawn_text.resize(n_ids, Box(0, 0, 0, 0))
+                self.drawn_op.resize(n_ids, 0.0)
+                self.drawn_font.resize(n_ids, 0.0)
+                self.pill_ids.resize(n_pills, String(""))
+                self.pill_text.resize(n_pills, String(""))
+                self.pill_box.resize(n_pills, Box(0, 0, 0, 0))
         for i in order:
             var a = self.anims[i].copy()
             var ti = self._index(a.id)
@@ -1207,6 +1293,7 @@ struct LiveTiles(Copyable, Movable):
             for j in range(len(lay.ids)):
                 if lay.ids[j] == a.id:
                     size = lay.sizes[j]
+            self.anims[i].size = size
             var surf = a.to if still else a.cur()
             var lifted = self.mode == _DRAGGING and a.id == self.active
             if lifted:
@@ -1214,7 +1301,9 @@ struct LiveTiles(Copyable, Movable):
             var op = 1.0
             if not still and a.fade_us >= 0:
                 op = fade_at(Float64(a.fade_us) / 1000.0, Float64(self.water_us) / 1000.0)
-            var q = 1.0 if still else a.press.value * a.lift.value
+            var q = 1.0 if still else a.press.value * a.lift.value * min(max(a.grow.value, 0.0), 1.2)
+            if q <= 0.01:
+                continue
             var darken = 0.0
             if not still and a.press_amt < 1.0:
                 darken = 0.10 * min(max((1.0 - a.press.value) / (1.0 - a.press_amt), 0.0), 1.0)

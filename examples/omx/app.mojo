@@ -26,8 +26,9 @@
 #   personalize        mojoui.personalize                 "make it darker", "use the mascot instead of the orb", "keep the scores
 #                                                         bigger", "put it back": the agent's `personalize` tool (and Settings' knobs)
 #                                                         change a few whitelisted settings per person (the top bar's All, A, S, M),
-#                                                         kept in ~/.local/share/mojoui/look/omx (MOJOUI_LOOK); every change morphs
-#                                                         (mojoui.transition) and the orb and the mascot crossfade (mojoui.mascot)
+#                                                         kept in ~/.local/share/mojoui/look/omx (MOJOUI_LOOK); a scheme or accent
+#                                                         morphs the window (mojoui.transition), the orb and the mascot crossfade
+#                                                         (mojoui.mascot), the tiles reflow on their water spring (mojoui.livetiles)
 #   the features       mojoui.assistant.Assistant         to-do (a file; the voice and the tick boxes edit it), news (cards of links),
 #                                                         think-it-through jobs (the model's second sequence), the cloud lane (`claude
 #                                                         -p`, only when asked for)
@@ -342,12 +343,14 @@ struct Main(App):
 
     def personalized(mut self, c: LookChange):
         """A look change (the agent's personalize call, a knob, another person picked): the theme restyles, the presence
-        crossfades, the tiles reflow on their water spring, and the window morphs while it happens."""
+        crossfades, the tiles reflow on their water spring; only a new scheme or accent morphs the window."""
         self.out("OMX LOOK: " + self.look.profile + " " + self.look.prefs.json() + " ok=" + String(c.ok) + " " + c.message)
         if not c.moved():
             return
-        self.morph.morph()
+        var was = self.theme_key()
         self.restyle()
+        if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades and the tiles reflow
+            self.morph.morph()        # by themselves, D-8413)
         if c.before.presence != c.after.presence:
             _ = self.presence.show(PRESENCE_MASCOT if c.after.presence == "mascot" else PRESENCE_ORB)
         if c.before.density != c.after.density:

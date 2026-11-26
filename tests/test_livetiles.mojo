@@ -530,6 +530,46 @@ def test_parts() raises:
     print("pointer parts: ok")
 
 
+def test_join_and_leave() raises:
+    """Fewer tiles (a Stage going roomy, D-8413): the ones that stay glide to their new cells, the ones that go shrink away on
+    the water spring where they were (not in the record or the hit tests), and one that comes back grows in from nothing."""
+    var tiles = LiveTiles()
+    tiles.set_area(W, H)
+    tiles.set_tiles(sample(6))
+    assert_equal(len(tiles.leaving), 0)
+    var was = tiles.target_of("todo")
+    tiles.set_tiles(sample(4))  # (photos and weather leave; the rest reflow to l l w w)
+    assert_equal(len(tiles.leaving), 2)
+    assert_true(tiles.moving())
+    var last = 1.0
+    var us = 0
+    var shrank = True
+    while len(tiles.leaving) > 0 and us < 2_000_000:
+        _ = tiles.frame(FRAME_US)
+        us += FRAME_US
+        if len(tiles.leaving) > 0:
+            var g = tiles.leaving[0].grow.value
+            shrank = shrank and g <= last + 0.03  # (falls all the way; the water's 2 % overshoot at most)
+            last = g
+    print("  leaving: gone in", us // 1000, "ms")
+    assert_true(shrank, "a leaving tile only shrinks")
+    assert_true(us <= 1_200_000, "gone within the water's time")
+    var now = tiles.target_of("todo")
+    assert_true(now.w * now.h > was.w * was.h, "the tiles that stay get bigger")
+    tiles.set_tiles(sample(5))  # (one comes back: it grows in)
+    var k = tiles._anim("bday")
+    assert_true(k >= 0)
+    var back = tiles._anim(sample(5)[4].id)
+    assert_true(tiles.anims[back].grow.value < 0.05, "a joining tile starts from nothing")
+    for f in range(60):
+        _ = tiles.frame(FRAME_US)
+    assert_true(abs(tiles.anims[back].grow.value - 1.0) < 0.02, "and grows to full size")
+    tiles.set_reduced(True)
+    tiles.set_tiles(sample(3))
+    assert_equal(len(tiles.leaving), 0)  # (less motion: they go at once)
+    print("join and leave: ok")
+
+
 def main() raises:
     test_presets()
     test_dense()
@@ -546,4 +586,5 @@ def main() raises:
     test_actions_tap()
     test_big_and_overflow()
     test_parts()
+    test_join_and_leave()
     print("livetiles: ok")

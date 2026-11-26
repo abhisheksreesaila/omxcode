@@ -34,8 +34,9 @@
 #
 # Personalize (mojoui.personalize, D-8400…): Settings opens the four knobs the agent's `personalize` tool changes in omx (light
 # or dark, an accent from the palette's own colours, the orb or the mascot in the chat bar, compact or roomy tiles) and "Put it
-# back"; each person in the top bar (All, A, S, M) keeps their own. Every change morphs (mojoui.transition): the window as it
-# was fades over the new one while it settles, the presence crossfades, the tiles reflow on their water spring. In memory only
+# back"; each person in the top bar (All, A, S, M) keeps their own. Nothing snaps: a new scheme or accent morphs the window
+# (mojoui.transition: the window as it was fades over the new one while it settles), the presence crossfades, the tiles reflow
+# on their water spring (one that leaves shrinks away, one that joins grows in). In memory only
 # (the defaults every run, so the checks' pictures stay); STAGE_LOOK=dir keeps them in that folder.
 
 from mojoui.app import App, Event
@@ -341,13 +342,15 @@ struct Main(App):
 
     def personalized(mut self, c: LookChange):
         """A look change (a knob, a person picked in the top bar): the scheme and accent restyle, the presence crossfades, the
-        tiles reflow, and the window morphs while it happens."""
+        tiles reflow on their water spring; only a new scheme or accent morphs the window."""
         if not c.moved():
             if c.message != "":
                 self.log("LOOK refused " + c.message)
             return
-        self.morph.morph()
+        var was = self.theme_key()
         self.restyle()
+        if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades by itself and the
+            self.morph.morph()        # tiles reflow on their own water spring: no picture of the old screen over them, D-8413)
         if c.before.presence != c.after.presence:
             if c.after.presence == "mascot":
                 self.mascot_ready()
