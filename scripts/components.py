@@ -112,6 +112,7 @@ FEATURES = [
     ("Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)", "Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)", r"(?!)", "saas"),
     ("Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)", "DesktopSignIn(server) · .url · code() · token_request(msg, code)", r"(?!)", "saas"),
     ("Open in the system browser (an effect: App.opens, mojoui.browser)", "Browser.open(url) · def opens(mut self) -> List[String]", r"(?!)", "saas"),
+    ("View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)", "mojoui.transition.Morph · def transition(mut self) -> Int", r"take_transition|mojoui-morph", "stage"),
 ]
 
 # Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
@@ -136,6 +137,7 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
 COMPOSITES = [
+    ("Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, undo, per-person files, the personalize tool, Settings knobs)", "mojoui/personalize.mojo", ["Segmented", "Button", "View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)"], "look_knobs("),
     ("Ink stroke (pressure ink, round ends, the eraser's hit test)", "mojoui/ink.mojo", ["Canvas", "Canvas: pen pressure", "Scene: polygon fill"], "Stroke("),
     ("DataGrid", "mojoui/datagrid.mojo", ["Canvas", "Canvas: press, release, double", "Canvas: keys (focus on press)", "In-place editor", "TextField: Escape cancels", "Editor that echoes the grid's typing", "Board: drag, resize, snap"], "DataGrid("),
     ("Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)", "mojoui/freeboard.mojo", ["Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus)", "Board: drag, resize, snap", "Board: scrolls, reveals a child", "MenuBar"], "FreeCanvas("),

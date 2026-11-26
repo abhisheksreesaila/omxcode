@@ -169,8 +169,20 @@ def main() raises:
     pres.use_mascot("examples/stage/mascots/omx")
     assert_equal(pres.kind, PRESENCE_MASCOT)
     assert_true(pres.has_mascot())
+    assert_true(pres.crossfading())  # (a switch crossfades: no snap)
     pres.draw(s, p)
+    var start_snap = buf.copy()  # (the crossfade's first frame: still the orb, nothing jumps)
+    pres.blend.snap(0.5)  # (mid-way: both are there)
+    pres.blend.to(1.0)
+    pres.draw(s, p)
+    var mid_snap = buf.copy()
+    s.still = True  # (less motion: the crossfade lands at once)
+    pres.draw(s, p)
+    s.still = False
+    assert_false(pres.crossfading())
     assert_true(diff_count(orb_snap, buf) > 4000, "mascot renders differently from orb")
+    assert_true(diff_count(mid_snap, buf) > 1000, "mid-crossfade is not yet the mascot")
+    assert_true(diff_count(mid_snap, start_snap) > 1000, "mid-crossfade is no longer the orb")
     assert_false(pres.toggle())  # back to Orb
     assert_equal(pres.kind, PRESENCE_ORB)
     assert_true(pres.toggle())   # back to Mascot

@@ -671,8 +671,8 @@ def counter_gtk(p: Palette, cls: String) -> String:
     var sh1 = shadow_css(counter_sh1(p.dark))
     var out = (w + ".mui-tag-stage-side:first-child { border-top-left-radius: 0; } " + w + ".mui-tag-stage-side:last-child { border-top-right-radius: 0; }\n"  # (square where a band meets the window's edge)
                + w + ".mui-tag-stage-input entry { background: transparent; box-shadow: none; min-height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
-               + w + "button.mui-tag-stage-mic, " + w + "button.image-button.mui-tag-stage-mic, " + w + "button.flat.mui-tag-stage-mic { min-width: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; box-shadow: none; }\n"
-               + w + "button.mui-tag-stage-mic image { color: " + card + "; -gtk-icon-size: 22px; }\n"
+               + w + "button.mui-tag-stage-mic, " + w + "button.image-button.mui-tag-stage-mic, " + w + "button.flat.mui-tag-stage-mic { min-width: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + hex_of(p.accent) + "; box-shadow: none; }\n"
+               + w + "button.mui-tag-stage-mic image { color: " + hex_of(p.accent_ink) + "; -gtk-icon-size: 22px; }\n"
                + w + "button.mui-tag-stage-tool, " + w + "button.image-button.mui-tag-stage-tool, " + w + "button.flat.mui-tag-stage-tool { min-width: 40px; min-height: 40px; padding: 0; border-radius: 20px; background: " + css_color(p.line) + "; box-shadow: none; }\n"
                + w + "button.mui-tag-stage-tool image { color: " + ink + "; -gtk-icon-size: 20px; }\n"
                + w + "button.mui-tag-stage-pill, " + w + "button.flat.mui-tag-stage-pill { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
@@ -710,8 +710,8 @@ def counter_web(p: Palette, cls: String) -> String:
                + b + "[data-tag=stage-input] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 50px; padding: 0 6px; font-size: 17px; color: " + ink + "; }\n"
                + b + "[data-tag=stage-input] input[type=text]:focus { box-shadow: none; outline: none; } " + b + "[data-tag=stage-input] input::placeholder { color: " + hex_of(p.ink2) + "; }\n"
                + b + "[data-tag=stage-input] .field { flex: 1; }\n"
-               + b + "button[data-tag=stage-mic] { width: 50px; height: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + ink + "; color: " + card + "; box-shadow: none; }\n"
-               + b + "button[data-tag=stage-mic] svg { width: 22px; height: 22px; color: " + card + "; }\n"
+               + b + "button[data-tag=stage-mic] { width: 50px; height: 50px; min-height: 50px; padding: 0; border-radius: 25px; background: " + hex_of(p.accent) + "; color: " + hex_of(p.accent_ink) + "; box-shadow: none; }\n"
+               + b + "button[data-tag=stage-mic] svg { width: 22px; height: 22px; color: " + hex_of(p.accent_ink) + "; }\n"
                + b + "button[data-tag=stage-tool] { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 20px; background: " + css_color(p.line) + "; color: " + ink + "; box-shadow: none; }\n"
                + b + "button[data-tag=stage-tool] svg { width: 20px; height: 20px; }\n"
                + b + "[data-tag=stage-subtitle] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }\n"
@@ -729,10 +729,12 @@ def counter_web(p: Palette, cls: String) -> String:
     return out
 
 
-def omxqua_counter(dark: Bool = False) -> Theme:
+def omxqua_counter(dark: Bool = False, accent: UInt32 = 0) -> Theme:
     """omxqua's Counter family, light or night: omxqua's look (Geist, the press spring, its controls) over the Counter
-    palette, its type a step up (15 pt body), and mojoui.stage's roles. Ids omxqua-counter / omxqua-counter-dark."""
-    var pal = counter_palette(dark)
+    palette, its type a step up (15 pt body), and mojoui.stage's roles. Ids omxqua-counter / omxqua-counter-dark.
+    `accent`: one of the palette's own series colours a person picked (mojoui.personalize.accent_colour; 0: the family's ink):
+    the chat bar's mic, the controls' accent; the key changes with it, so hosts restyle."""
+    var pal = counter_palette(dark).with_accent(accent)
     var look = omxqua_look(pal)
     look.surfaces += counter_roles(pal)
     look.type.body = COUNTER_TEXT

@@ -31,7 +31,7 @@ from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCan
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
     global_block, data_block, block_data, new_class, add_method, add_protocol,
-    register_class, pool_push,
+    register_class, pool_push, layer_fade,
 )
 
 comptime NODE_BITS = 16
@@ -871,6 +871,9 @@ struct UIKitHost[A: App](Movable):
         self.focus = -1
 
     def apply(mut self, d: Diff, self_addr: Int):
+        var morph = self.rt.take_transition()
+        if morph > 0 and self.root != 0:  # (a view transition: the screen's layer crossfades into what this change makes)
+            layer_fade(msg(self.root, "layer"), morph)
         if d.rebuild:
             self.show(self_addr)
             return

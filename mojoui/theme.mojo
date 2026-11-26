@@ -504,6 +504,40 @@ struct ThemePair(Copyable, Movable):
         return self.dark.copy() if dark else self.light.copy()
 
 
+struct ThemeCache(Movable):
+    """Themes built once each, under a key the app makes ("dark/blue": a scheme and an accent a person picked,
+    mojoui.personalize). Building a theme writes its whole GTK and web style sheets, and rebuilding Theme objects per view
+    correlated with a rare crash (D-7887, D-7889): build each in update() the first time it's wanted (put), and theme()
+    returns get(key)."""
+    var keys: List[String]
+    var themes: List[Theme]
+
+    def __init__(out self):
+        self.keys = List[String]()
+        self.themes = List[Theme]()
+
+    def has(self, key: String) -> Bool:
+        for k in self.keys:
+            if k == key:
+                return True
+        return False
+
+    def put(mut self, key: String, var theme: Theme):
+        for i in range(len(self.keys)):
+            if self.keys[i] == key:
+                self.themes[i] = theme^
+                return
+        self.keys.append(key)
+        self.themes.append(theme^)
+
+    def get(self, key: String) -> Theme:
+        """The theme kept under `key` (the first one kept when there's none: never a theme built here)."""
+        for i in range(len(self.keys)):
+            if self.keys[i] == key:
+                return self.themes[i].copy()
+        return self.themes[0].copy() if len(self.themes) > 0 else Theme.native()
+
+
 def palette_css(p: Palette) -> String:
     """A palette as a page's CSS variables (the vocabulary every web theme reads): the web host's page and GTK's
     WebComponent views (goal 34 M3)."""

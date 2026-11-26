@@ -26,6 +26,7 @@ from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, 
 from mojoui.boardlook import board_gtk_css
 from mojoui.freeboard import handle_at, handle_cursor, handle_point, handle_of, handle_name, board_zoom, is_free, HANDLE_NONE, HANDLE_MOVE, NO_SNAP, FIRST_FRAME
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
+from mojoui.transition import MORPH_FROM_SCALE, MORPH_SETTLE_MS, MORPH_SETTLE_GTK, fade_ease
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate
@@ -811,6 +812,19 @@ struct GtkHost[A: App](Movable):
     var cpu_copied: Int  # drawn on the GPU but copied to the CPU (the old path: no interop, or it failed)
     var present_ns: Int
     var present_lag: Bool  # MOJOUI_PRESENT_LAG=1: an animating canvas's GPU picture is shown a frame later (D-747)
+    # View transitions (mojoui.transition, App.transition): the window's child is a GtkOverlay around the toast overlay; a
+    # morph lays the last frame's picture over it and fades it on the frame clock while the content settles (a CSS transform)
+    var morph_overlay: Int  # the GtkOverlay (0 until the first screen is up)
+    var morph_live: Int  # a GtkWidgetPaintable of the window, kept: its current image is the last frame drawn (a widget's own render
+    # node is dropped whenever anything inside queues a draw, as a breathing orb does every frame; the paintable keeps its image).
+    # The window's, not the overlay's: the window's background is in it (a translucent band, the Stage's side shade, would let
+    # the new window colour through the old picture at once)
+    var morph_pic: Int  # the old picture fading over the content (0: no morph running)
+    var morph_ms: Int  # its fade's length
+    var morph_t0: Int  # the frame clock (µs) at its first frame (-1 until then)
+    var morph_begin_ns: Int  # what the snapshot took (perf_counter ns)
+    var morph_frames: List[Int]  # the frame clock (µs) at each of its frames
+    var morph_count: Int  # morphs so far (the trace numbers them)
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -948,6 +962,14 @@ struct GtkHost[A: App](Movable):
         self.input_ended = False
         self.input_armed = False
         self.jobs_armed = False
+        self.morph_overlay = 0
+        self.morph_live = 0
+        self.morph_pic = 0
+        self.morph_ms = 0
+        self.morph_t0 = -1
+        self.morph_begin_ns = 0
+        self.morph_frames = List[Int]()
+        self.morph_count = 0
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -2343,7 +2365,12 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_set_margin_end", NoneType](root, c_int(32))
         if self.toast_overlay == 0:  # toasts float over whatever screen is up
             self.toast_overlay = external_call["adw_toast_overlay_new", Int]()
-            external_call["gtk_window_set_child", NoneType](self.window, self.toast_overlay)
+            self.morph_overlay = external_call["gtk_overlay_new", Int]()  # (a view transition's old picture lies over it: begin_morph)
+            external_call["gtk_overlay_set_child", NoneType](self.morph_overlay, self.toast_overlay)
+            add_class(self.toast_overlay, "mui-morph-root")
+            install_morph_css()
+            external_call["gtk_window_set_child", NoneType](self.window, self.morph_overlay)
+            self.morph_live = external_call["gtk_widget_paintable_new", Int](self.window)
             # (a screen taller than the window scrolls instead of growing the window past the size asked for, as the
             # web's page does; across, the screen's own minimum still holds: D-440)
             self.page = external_call["gtk_scrolled_window_new", Int]()
@@ -2801,7 +2828,98 @@ struct GtkHost[A: App](Movable):
                 var icon = String("mojoui-app-logo")
                 external_call["gtk_window_set_icon_name", NoneType](self.window, icon.as_c_string_span())  # (the window's icon, where the desktop shows one)
 
+    def begin_morph(mut self, ms: Int, self_addr: Int):
+        """A view transition (App.transition): the window as last drawn (its render node: GtkWidgetPaintable's current image,
+        no copy) laid over the content, which settles from MORPH_FROM_SCALE to 1 (a CSS transform transition: install_morph_css)
+        while the picture fades on the frame clock (on_morph_tick). Called before the change reaches the widgets or the style
+        sheet, so the picture is the old screen. A morph already running is caught mid-blend: the new picture includes it."""
+        var t0 = Int(perf_counter_ns())
+        var still = self.old_picture()
+        if self.morph_pic != 0:
+            self.end_morph()
+        var pic = external_call["gtk_picture_new_for_paintable", Int](still)
+        external_call["g_object_unref", NoneType](still)  # (the picture holds it)
+        external_call["gtk_picture_set_content_fit", NoneType](pic, c_int(0))  # GTK_CONTENT_FIT_FILL: the overlay's own size, 1:1
+        external_call["gtk_picture_set_can_shrink", NoneType](pic, c_int(1))
+        external_call["gtk_widget_set_can_target", NoneType](pic, c_int(0))  # (clicks reach the new screen at once)
+        _ = external_call["g_object_ref", Int](pic)  # (ours until an idle turn after it leaves: end_morph may run inside its own tick)
+        external_call["gtk_overlay_add_overlay", NoneType](self.morph_overlay, pic)
+        if getenv("MOJOUI_MORPH_SETTLE") != "0":
+            add_class(self.toast_overlay, "mui-morph-from")
+        self.morph_pic = pic
+        self.morph_ms = ms
+        self.morph_t0 = -1
+        self.morph_frames = List[Int]()
+        self.morph_count += 1
+        _ = external_call["gtk_widget_add_tick_callback", c_uint](pic, on_morph_tick[Self.A], self_addr, 0)
+        self.morph_begin_ns = Int(perf_counter_ns()) - t0
+
+    def old_picture(self) -> Int:
+        """The window's last frame cut to the overlay's rect, as a static paintable the overlay's size (no pixels copied: the
+        frame's render node, translated and clipped)."""
+        var img = external_call["gdk_paintable_get_current_image", Int](self.morph_live)
+        var wb = List[Float32](length=4, fill=0)  # the window's bounds in its own coordinates (the paintable's origin)
+        var ob = List[Float32](length=4, fill=0)  # the overlay's, in the window's
+        _ = external_call["gtk_widget_compute_bounds", c_int](self.window, self.window, Int(wb.unsafe_ptr()))
+        _ = external_call["gtk_widget_compute_bounds", c_int](self.morph_overlay, self.window, Int(ob.unsafe_ptr()))
+        var snap = external_call["gtk_snapshot_new", Int]()
+        var clip = List[Float32](length=4, fill=0)
+        clip[2] = ob[2]
+        clip[3] = ob[3]
+        external_call["gtk_snapshot_push_clip", NoneType](snap, Int(clip.unsafe_ptr()))
+        var shift = List[Float32](length=2, fill=0)
+        shift[0] = wb[0] - ob[0]
+        shift[1] = wb[1] - ob[1]
+        external_call["gtk_snapshot_translate", NoneType](snap, Int(shift.unsafe_ptr()))
+        external_call["gdk_paintable_snapshot", NoneType](img, snap, Float64(external_call["gdk_paintable_get_intrinsic_width", c_int](img)),
+                                                          Float64(external_call["gdk_paintable_get_intrinsic_height", c_int](img)))
+        external_call["gtk_snapshot_pop", NoneType](snap)
+        var size = List[Float32](length=2, fill=0)
+        size[0] = ob[2]
+        size[1] = ob[3]
+        var out = external_call["gtk_snapshot_free_to_paintable", Int](snap, Int(size.unsafe_ptr()))
+        external_call["g_object_unref", NoneType](img)
+        _ = len(wb) + len(ob) + len(clip) + len(shift) + len(size)  # (kept alive across the calls)
+        if out == 0:
+            return external_call["gdk_paintable_new_empty", Int](c_int(Int(ob[2])), c_int(Int(ob[3])))
+        # (Not rendered into a texture first: gsk_renderer_render_texture on the window's own renderer left a canvas showing its
+        # previous picture for ~1.8 s after the morph, D-8404; the node is drawn again each frame instead.)
+        return out
+
+    def morph_tick(mut self, clock: Int) -> Bool:
+        """One frame of the morph: the picture's opacity on the fade's ease; False once it has gone (the callback ends)."""
+        var now = Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock))
+        if self.morph_t0 < 0:
+            self.morph_t0 = now
+            remove_class(self.toast_overlay, "mui-morph-from")  # (the settle starts with the fade's first frame)
+        self.morph_frames.append(now)
+        var t = Float64(now - self.morph_t0) / Float64(max(self.morph_ms, 1) * 1000)
+        if t >= 1.0:
+            self.end_morph()
+            return False
+        external_call["gtk_widget_set_opacity", NoneType](self.morph_pic, Float64(1.0 - fade_ease(t)))
+        return True
+
+    def end_morph(mut self):
+        """The picture goes; what the morph measured is printed (MOJOUI_TRACE or MOJOUI_MORPH_TRACE)."""
+        if self.morph_pic == 0:
+            return
+        external_call["gtk_overlay_remove_overlay", NoneType](self.morph_overlay, self.morph_pic)
+        _ = external_call["g_idle_add", c_uint](on_unref_idle, self.morph_pic)
+        self.morph_pic = 0
+        remove_class(self.toast_overlay, "mui-morph-from")
+        var worst = 0
+        for k in range(1, len(self.morph_frames)):
+            worst = max(worst, self.morph_frames[k] - self.morph_frames[k - 1])
+        var ran = (self.morph_frames[len(self.morph_frames) - 1] - self.morph_frames[0]) // 1000 if len(self.morph_frames) > 1 else 0
+        if self.rt.trace or getenv("MOJOUI_MORPH_TRACE") != "":
+            print("MORPH: " + String(self.morph_count) + " fade " + String(self.morph_ms) + " ms ran " + String(ran) + " ms, " + String(len(self.morph_frames))
+                  + " frames, longest frame gap " + one_decimal(Float32(Float64(worst) / 1000.0)) + " ms, snapshot " + one_decimal(Float32(Float64(self.morph_begin_ns) / 1e6)) + " ms", flush=True)
+
     def apply(mut self, d: Diff, self_addr: Int):
+        var morph = self.rt.take_transition()
+        if morph > 0 and self.morph_overlay != 0 and animations_enabled() and getenv("MOJOUI_MORPH") != "0":
+            self.begin_morph(morph, self_addr)  # (before the change touches the widgets or the style sheet: the picture is the old screen)
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.send_commands(self_addr)  # (and the widget commands it asked for go to their pages)
         self.apply_design(self_addr)
@@ -4629,6 +4747,33 @@ def settle():
     var by = perf_counter_ns() + 1_000_000_000
     while external_call["g_main_context_pending", c_int](0) != 0 and perf_counter_ns() < by:
         _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+
+def install_morph_css():
+    """The view transition's settle (mojoui.transition): the content starts a little smaller (mui-morph-from: no transition, so
+    it is there at once) and springs back to full size when that class goes (MORPH_SETTLE_GTK: the soft spring as a cubic-bezier).
+    Once per display, over every theme (priority 802: the theme's sheet is 801)."""
+    if app_data("mojoui-morph-css") != 0:
+        return
+    var sheet = (".mui-morph-root { transform: scale(1); transition: transform " + String(MORPH_SETTLE_MS) + "ms " + String(MORPH_SETTLE_GTK) + "; }\n"
+                 + ".mui-morph-root.mui-morph-from { transform: scale(" + String(MORPH_FROM_SCALE) + "); transition: none; }\n")
+    var provider = external_call["gtk_css_provider_new", Int]()
+    external_call["gtk_css_provider_load_from_string", NoneType](provider, sheet.as_c_string_span())
+    external_call["gtk_style_context_add_provider_for_display", NoneType](external_call["gdk_display_get_default", Int](), provider, c_uint(802))
+    set_app_data("mojoui-morph-css", provider)
+
+
+def on_unref_idle(obj: Int) abi("C") -> c_int:
+    external_call["g_object_unref", NoneType](obj)
+    return 0  # G_SOURCE_REMOVE
+
+
+def on_morph_tick[A: App](widget: Int, clock: Int, host_addr: Int) abi("C") -> c_int:
+    """Each frame of a view transition (GtkHost.morph_tick); a picture a newer morph replaced stops by itself."""
+    var host = host_at[A](host_addr)
+    if host[].morph_pic != widget:
+        return 0  # G_SOURCE_REMOVE
+    return 1 if host[].morph_tick(clock) else 0
+
 
 def on_reveal_tick[A: App](widget: Int, clock: Int, host_addr: Int) abi("C") -> c_int:
     """Each frame until the Board is laid out: scroll its reveal child into view, then stop."""
