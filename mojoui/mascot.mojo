@@ -51,7 +51,10 @@ def mascot_pack_dir(override: String = "", name: String = "omx") -> String:
     if override != "":
         var own = getenv(override)
         if own != "" and own != "0" and own != "1" and own != name:
-            return own
+            if not exists(own + "/manifest.json"):  # (a typo in the variable: say so, then fall back to the shipped pack)
+                print("MASCOT: " + override + "=" + own + " has no manifest.json; using the default pack")
+            else:
+                return own
     var d = libc.exe_dir()
     var tries: List[String] = [d + "/mascots/" + name, d + "/../../../examples/stage/mascots/" + name, "examples/stage/mascots/" + name]
     for t in tries:

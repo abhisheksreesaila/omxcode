@@ -388,7 +388,7 @@ def raise_nofile() -> Int:
 
 def exe_path() -> String:
     """The running program's own path ("" if the system won't say): /proc/self/exe on Linux, _NSGetExecutablePath on
-    the Mac; both looked up at run time (no new symbols to link)."""
+    the Mac; both looked up at run time (no new symbols to link). The Mac branch is written, not yet run (no Mac here, D-8416)."""
     var buf = List[UInt8](length=4097, fill=0)
     var n = 0
     if CompilationTarget.is_macos():

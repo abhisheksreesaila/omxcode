@@ -440,7 +440,8 @@ struct Personalize(Movable):
 
     def begin_group(mut self):
         """The changes from now until end_group() are one undo step: an agent's turn ("use the mascot and make it dark" may come
-        as two calls), so "put it back" undoes the whole request."""
+        as two calls), so "put it back" undoes the whole request. A Settings knob tapped while that turn is still running joins
+        its group too: rare, and "put it back" then undoes a little more than the knob."""
         self._grouping = True
         self._grouped = False
 
