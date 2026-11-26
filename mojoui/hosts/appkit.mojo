@@ -4825,9 +4825,10 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             continue
         if seen:
             lats.append(Float64(Int(now_ns()) - t0) / 1e6)
+        if seen and drew:
+            cpu_lats.append(Float64(t_drew - t0) / 1e6)  # (D-8101: the gesture to its frame committed: the frame begun, the app's own code done)
         if split and drew:
             var t_seen = Int(now_ns())
-            cpu_lats.append(Float64(t_drew - t0) / 1e6)
             var gms = host[].g2d_done[len(host[].g2d_done) - 1] if len(host[].g2d_done) > 0 else 0.0
             print("SPLIT: " + what + " " + String(i) + " event " + one_decimal(Float64(t_ev - t0) / 1e6) + " to_tick " + one_decimal(Float64(tick_at - t_ev) / 1e6)
                   + " frame " + one_decimal(Float64(t_drew - tick_at) / 1e6) + " (scene " + one_decimal(parts[0]) + " batch " + one_decimal(parts[1]) + " encode " + one_decimal(parts[2])
@@ -4888,7 +4889,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
         print("SPLITSUM: " + what + " to_code_done_p95=" + one_decimal(pct(cpu_lats, 0.95)) + " to_code_done_max=" + one_decimal(pct(cpu_lats, 1.0)), flush=True)
     print("FRAMEBENCH: " + what + " n=" + String(n) + " missed=" + String(missed) + " unchanged=0 renderer=" + ("gpu2d-Metal" if on_cpu == 0 else "mixed") + " p95=0.0 max=0.0 gpu_frames=" + String(on_gpu)
           + " cpu_frames=" + String(on_cpu) + " gap_n=" + String(len(gaps)) + " gap_p50=" + one_decimal(pct(gaps, 0.5)) + " gap_p95=" + one_decimal(pct(gaps, 0.95)) + " gap_max=" + one_decimal(pct(gaps, 1.0))
-          + " gap_over20=" + String(over) + " lat_p95=" + one_decimal(pct(lats, 0.95)) + " lat_max=" + one_decimal(pct(lats, 1.0)) + " press_lat_n=" + String(len(press_lats))
+          + " gap_over20=" + String(over) + " lat_p95=" + one_decimal(pct(lats, 0.95)) + " lat_max=" + one_decimal(pct(lats, 1.0))
+          + " lat_code_p95=" + one_decimal(pct(cpu_lats, 0.95)) + " lat_code_max=" + one_decimal(pct(cpu_lats, 1.0)) + " press_lat_n=" + String(len(press_lats))
           + " press_lat_p95=" + one_decimal(pct(press_lats, 0.95)) + " press_lat_max=" + one_decimal(pct(press_lats, 1.0))
           + ((" during_n=" + String(len(gaps)) + " complete_p95=" + one_decimal(pct(completes, 0.95)) + " complete_p50=" + one_decimal(pct(completes, 0.5)) + " complete_max=" + one_decimal(pct(completes, 1.0))) if opens else String("")), flush=True)
 

@@ -1505,7 +1505,7 @@ def native_race(out):
                 continue
             res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
                          "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
-            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
+            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
                 if k in kv:
                     res[name][k] = float(kv[k])
             if what.group(1) == "openpress" and "press_lat_n" in kv:
@@ -1696,7 +1696,7 @@ def fair_rounds(race):
                         x = w.get(note, {}).get(step)
                         d["web"].append((x["p95"], x["max"], x.get("missed") or 0) if x else None)
                     v = n.get(step)
-                    a, b = ("lat_p95", "lat_max") if step in ("undo", "redo") else ("gap_p95", "gap_max")
+                    a, b = ("lat_code_p95", "lat_code_max") if step in ("undo", "redo") else ("gap_p95", "gap_max")  # (D-8101)
                     d["warm" if warm else "notwarm"].append((v[a], v[b], v.get("gap_over20", 0)) if v and a in v else None)
     return out
 
@@ -1851,6 +1851,8 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
     def mark(p95, mx):
         return "≤ 8.3 and ≤ 16.7" if p95 <= P95 and mx <= MAX else "over: " + ", ".join([x for x in ("p95 > 8.3" if p95 > P95 else "", "max > 16.7" if mx > MAX else "") if x])
 
+    shown_beside = []
+
     def add(note, label, w, n, work=None, gaps=False, extra="", need=True, missed=None):
         """One judged row: w and n are (p95, max) or None; missed: (web's, native's) or None."""
         if mac and n is None:
@@ -1908,8 +1910,9 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
                     add(note, label + f" (median of {FAIR_ROUNDS} runs)", got[0] if got else None, got[1] if got else None, work if d is pn else None,
                         gaps=step not in ("undo", "redo"), need=cpu, missed=got[2] if got and step not in ("undo", "redo") else None)
                     continue
-                if step in ("undo", "redo"):
-                    add(note, label + " (latency)", pair(w), pair(n, "lat_p95", "lat_max"), work if d is pn else None, need=cpu)
+                if step in ("undo", "redo"):  # (D-8101, the owner's ruling: both clocks stop at the frame begun and the app's own code done; native's picture on the screen beside)
+                    add(note, label + " (latency, to the frame begun)", pair(w), pair(n, "lat_code_p95", "lat_code_max"), work if d is pn else None, need=cpu)
+                    shown_beside.append((note, label, n))
                 else:
                     missed = (w["missed"], n["gap_over20"]) if w and n and w.get("missed") is not None and "gap_over20" in n else None
                     add(note, label + " (frames)", pair(w), pair(n, "gap_p95", "gap_max"), work if d is pn else None, gaps=True, need=cpu, missed=missed)
@@ -1918,6 +1921,8 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         need=(typed or {}).get("cpu", 0) == 0)
 
     lines += ["", "**Beside, not judged:**", "", "| note | what | web | native |", "|---|---|---|---|"]
+    for note_, label_, n_ in shown_beside:  # (D-8101) native's own picture handed to the screen, for information
+        lines.append(f"| {note_} | {label_}: native's picture handed to the screen p95 / max (the web isn't timed to it) | | {f'{n_['lat_p95']} / {n_['lat_max']}' if n_ and 'lat_p95' in n_ else '—'} |")
     for note in RACE_NOTES:
         wn, pn, si = web.get(note, {}), paced.get(note, {}), SNAPINFO.get(note, {})
         if "open" in wn:
