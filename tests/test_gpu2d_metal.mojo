@@ -138,7 +138,7 @@ def clip_scene(zoom: Float64) -> Scene:
         sc.push_clip(20 + Float64(q) * 90, 190 + Float64(q % 3) * 12, 40 + Float64(q) * 9, 60 + Float64(q) * 5)
         sc.rect(0, 180, 660, 180, rgba(40 + 20 * q, 120, 200 - 15 * q, 200), Float64(q) * 6)
         sc.rect_hole(10, 200, 640, 120, rgba(160, 60, 120, 120), 14, 22)
-        sc.image(img, 40, 30, 20 + Float64(q) * 88, 200, 120, 90)
+        sc.image(img, 40, 30, 20 + Float64(q) * 88, 200, 120, 90, False)  # (nearest, as when this was written: a scaled picture is filtered since goal 81 (D-8105), proven against a box filter by test_gpu2d_metal_image; here the clip is what is tested, D-8207)
         sc.run(TextStyle("Geist", 600, False, 22), "Clipped words that run past", 25 + Float64(q) * 88, 250, rgba(31, 27, 22), 0)
         sc.pop_clip()
     sc.push_clip(-5000, 320, 9000, 60)
