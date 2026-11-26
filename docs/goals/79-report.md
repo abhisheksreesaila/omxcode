@@ -23,6 +23,10 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 29 (2026-11-25, 20:50–21:10): the fairness probe, blocked on the Mac
+
+**Not measured.** The Mac was unlocked but a system notification dialog held its front (UserNotificationCenter, 20:59–21:07); pnote's window stayed inactive and mac-unlocked refused, rightly. Linux couldn't stand in (gpu-free: another project's job). No decision, no D-number, no race. **Found by reading the benches** (docs/goals/79/probe-c29.md): the web's undo/redo rows run no rAF loop, and they have no pause (redo starts straight after undo's last step), while native's steps settle until idle and the runner takes a picture between them. The probe that settles it (the web with native's 1 s idle, five interleaved runs each) is ready: docs/goals/79/probe-c29-f034.mjs.
+
 ## Continuation 28 (2026-11-25, 18:20–18:50): the tie rule at the measured refresh; the Mac's stress redo
 
 **1. The tie rule (D-8097, 272d530b).** One refresh is now the one both windows measured (the faster side's reading), with 60 Hz's slack: a latency ties within 1.1 refreshes, a frame gap within 1.2 (18.3 / 20 ms at 60 Hz, 7.6 / 8.3 ms at 144 Hz). judge_test has cases at 60 and 144 Hz. Rejudged (docs/goals/79/rejudge-c28.md): **Linux unchanged**; **the Mac's table goes from 58 ✓ 2 ✗ to 51 ✓ 9 ✗**:
