@@ -356,3 +356,12 @@ def prefer(view: Int, anchor: String, points: Float64):
     var c = msg(msg(view, anchor), "constraintEqualToConstant:", points)
     _ = msg(c, "setPriority:", Float32(480))
     _ = msg(c, "setActive:", 1)
+
+
+def common_modes_constant() -> Int:
+    """NSRunLoopCommonModes itself (D-8060): Core Foundation knows the common modes by address; a string that only reads
+    "kCFRunLoopCommonModes" is a mode of its own that no run loop runs (a display link, a timer, an observer or a
+    performSelector:…inModes: given one never fires). The AppKit and UIKit hosts both use it."""
+    var name = String("NSRunLoopCommonModes")
+    var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
+    return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")

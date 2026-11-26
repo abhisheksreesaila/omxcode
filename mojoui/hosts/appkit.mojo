@@ -58,7 +58,7 @@ from mojoui.macactivity import InputActivity
 from mojoui.hosts.framewatch import FrameWatch
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
-    new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT,
+    new_class, add_method, add_protocol, register_class, pool_push, fn_address, RTLD_DEFAULT, common_modes_constant,
 )
 
 comptime NODE_BITS = 16
@@ -338,6 +338,7 @@ struct AppKitHost[A: App](Movable):
     var clock_mode: String  # (goal 81) "" the screen's clock; "timer" the 60 Hz timer alone (MOJOUI_FRAME_CLOCK=timer, unshown windows); "dead" a screen's clock that never ticks (tests of the stand-in)
     var clock_log: Bool  # MOJOUI_FRAME_LOG=1
     var test_run: Bool  # MOJOUI_TEST: steps run, frames keep coming while the window can't be seen (the timer stands in)
+    var hidden_watch: Bool  # (goal 81, b9250c55) a look at a hidden window is due (watch_hidden)
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -452,6 +453,7 @@ struct AppKitHost[A: App](Movable):
             self.clock_mode = "timer"
         self.clock_log = env("MOJOUI_FRAME_LOG") == "1"
         self.test_run = env("MOJOUI_TEST") != ""
+        self.hidden_watch = False
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -3016,7 +3018,7 @@ struct AppKitHost[A: App](Movable):
         if self.resize_pending:
             return
         self.resize_pending = True
-        var modes = msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes"))  # (live: also while an edge is dragged)
+        var modes = msg(cls("NSArray"), "arrayWithObject:", common_modes_constant())  # (live: also while an edge is dragged; by the constant, as goal 81 found: the merge, D-8215)
         _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("windowResizeLater:"), ns_number(self_addr), Float64(0), modes)
 
     def resized(mut self, self_addr: Int):
@@ -3239,6 +3241,7 @@ struct AppKitHost[A: App](Movable):
             if self.on_screen():
                 self.seen_on_screen = True
             elif self.seen_on_screen and not self.test_run:
+                self.watch_hidden()  # (windowDidChangeOcclusionState: starts them again; a look every half second in case it came early)
                 return
             else:
                 screen = False  # (not up yet, or a locked screen from the start: the timer; the first frames don't wait for a screen)
@@ -3296,6 +3299,25 @@ struct AppKitHost[A: App](Movable):
             if self.clock_log:
                 print("FRAMES: the screen's clock doesn't tick: timer", flush=True)
             self.report.note("frames: the screen's clock doesn't tick, the timer stands in")
+
+    def watch_hidden(mut self):
+        """(goal 81, b9250c55) Frames wait for the window to be seen again: looked at every half second (macOS's notice can
+        come before the window counts as visible), until it is or nothing needs drawing."""
+        if self.hidden_watch or len(self.canvases) == 0:
+            return
+        self.hidden_watch = True
+        var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes)
+        _ = msg(self.canvases[0].view, "performSelector:withObject:afterDelay:inModes:", sel("hiddenCheck:"), 0, Float64(0.5), modes)
+
+    def hidden_checked(mut self):
+        """Half a second later: seen again yet?"""
+        self.hidden_watch = False
+        if self.link != 0 or self.idle():
+            return
+        if self.on_screen():
+            self.wake()
+        else:
+            self.watch_hidden()
 
     def occlusion_changed(mut self):
         """(goal 81) The window came on screen, or nothing of it shows any more."""
@@ -3987,14 +4009,6 @@ def on_run_loop(observer: Int, activity: Int, marks: Int) abi("C"):
         loop_wakes(marks)
 
 
-def common_modes_constant() -> Int:
-    """NSRunLoopCommonModes itself (D-8060): Core Foundation knows the common modes by address; a string that only reads
-    "kCFRunLoopCommonModes" is a mode of its own that no run loop runs."""
-    var name = String("NSRunLoopCommonModes")
-    var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
-    return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")
-
-
 def watch_hangs() -> Int:
     """Starts the hang monitor around the main run loop: its marks (0: off)."""
     var marks = hang_watch()
@@ -4031,6 +4045,10 @@ def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
 
 def on_frame_check[A: App](view: Int, cmd: Int, nothing: Int) abi("C"):
     host_at[A](from_tag(view)[0])[].frames_checked()
+
+
+def on_hidden_check[A: App](view: Int, cmd: Int, nothing: Int) abi("C"):
+    host_at[A](from_tag(view)[0])[].hidden_checked()
 
 
 def on_vsync_seen[A: App](view: Int, cmd: Int, link: Int) abi("C"):
@@ -6462,6 +6480,7 @@ def run[A: App]() -> c_int:
     var canvas = new_class("MojoCanvas", "NSImageView")
     add_method(canvas, "canvasFrame:", on_canvas_frame[A], "v@:@")
     add_method(canvas, "frameCheck:", on_frame_check[A], "v@:@")
+    add_method(canvas, "hiddenCheck:", on_hidden_check[A], "v@:@")
     add_method(canvas, "vsyncSeen:", on_vsync_seen[A], "v@:@")
     add_method(canvas, "canvasResized:", on_canvas_resized[A], "v@:@")
     add_method(canvas, "canvasPan:", on_canvas_pan[A], "v@:@")

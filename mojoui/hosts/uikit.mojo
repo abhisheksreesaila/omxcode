@@ -30,7 +30,7 @@ from mojoui.canvas import Surface
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCanvas
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
-    global_block, data_block, block_data, new_class, add_method, add_protocol,
+    global_block, data_block, block_data, new_class, add_method, add_protocol, common_modes_constant,
     register_class, pool_push,
 )
 
@@ -863,7 +863,7 @@ struct UIKitHost[A: App](Movable):
         self.commands = commands
         if len(self.canvases) > 0:  # one display link ticks every canvas
             self.link = msg(cls("CADisplayLink"), "displayLinkWithTarget:selector:", self.canvases[0].view, sel("canvasFrame:"))
-            _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), ns_string("kCFRunLoopCommonModes"))
+            _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), common_modes_constant())  # (by the constant's address, D-8060; never run on an iPhone)
         if 0 <= self.focus < len(self.widgets) and self.rt.shown.nodes[self.focus].kind == FIELD:
             # Keep the keyboard up on the new field, on the next run-loop turn (after
             # UIKit has finished with the old field).
