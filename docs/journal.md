@@ -1874,3 +1874,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 33)
 - GPU split of redo frames (composite 1.2 constant; rasters 0.8–5). Zoom: spikes are strip rasters; budget/ahead A/B within noise. End points: web 2nd rAF 14–16 ms; native ahead at both like-for-like pairs. My probe first read process.env inside the page (no numbers); fixed and rerun. No fix landed, no M6.
+
+## 2026-11-26 goal 79 (continuation 34) — D-8101
+- lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).

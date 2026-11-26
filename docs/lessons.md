@@ -113,3 +113,4 @@ One line per rule that prevents a mistake that happened.
 - A word that comes back in a two-app run is traced to the save that wrote it (record every revision; a control without our app) before it is called ours or theirs.
 - A rule sized for one display ("one refresh = 16.7 ms") is a number that must come from the measurement (refresh_of); a constant that names a refresh rate is a bug at the next one.
 - scripts/mac-unlocked (79-check M6) takes ~/.cache/omx-mac.lock itself and ignores OMX_MAC_LOCKED: never run it under an outer flock of the same lock.
+- Before a race, look for any 79-check M6 on the machine, not only this worktree's (another session's ran beside ours on 11-26).
