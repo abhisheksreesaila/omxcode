@@ -277,6 +277,22 @@ def test_failed_save_leaves_no_tmp() raises:
     assert_false(exists(d + "/m.json.tmp"))
 
 
+def test_group_is_one_undo() raises:
+    var look = Personalize("t", dir="")
+    look.begin_group()  # (one agent turn: two calls)
+    _ = look.ask('{"set":{"presence":"mascot"}}')
+    _ = look.ask('{"set":{"scheme":"dark"}}')
+    look.end_group()
+    assert_equal(len(look.undos), 1)
+    var c = look.undo()  # ("put it back": the whole request)
+    assert_true(c.ok)
+    assert_true(look.prefs.is_default())
+    assert_equal(len(c.changed), 2)
+    _ = look.set("accent", "red")  # (outside a group: one step each)
+    _ = look.set("density", "roomy")
+    assert_equal(len(look.undos), 2)
+
+
 def test_tool() raises:
     var t = personalize_tool()
     assert_equal(t.name, PERSONALIZE)
@@ -302,5 +318,6 @@ def main() raises:
     test_profile_names()
     test_corrupt_file_is_defaults()
     test_failed_save_leaves_no_tmp()
+    test_group_is_one_undo()
     test_tool()
-    print("test_look: 15 tests passed")
+    print("test_look: 16 tests passed")

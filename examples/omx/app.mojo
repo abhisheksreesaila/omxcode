@@ -736,6 +736,7 @@ struct Main(App):
         self.assist.turn_ns = self.run_ns
         self.assist.flush(self.llm.value())  # (what a job found joins the conversation here: the start of a turn)
         var input = self.client.local_input()
+        self.look.begin_group()  # (what this turn changes in the look is one "put it back")
         self.llm.value().set_tools(self.tools())
         for ev in self.llm.value().begin(input):
             self.take(ev)
@@ -813,6 +814,7 @@ struct Main(App):
             except:
                 pass
         elif kind == EV_RUN_FINISHED or kind == EV_RUN_ERROR:
+            self.look.end_group()
             self.client.end_chunks()
             self.client.running = False
             if not self.silent_run:

@@ -50,7 +50,8 @@ comptime PERSONALIZE_ABOUT = (
     "system is | light | dark | night: dark from 7 pm to 7 am), "
     "accent (default | violet | blue | teal | orange | red | gold: the theme's own colours only), presence (orb | mascot: who "
     "listens in the chat bar), density (compact: up to six tiles | roomy: fewer, bigger tiles). undo: true puts the last change "
-    "back. Nothing else can change: no other colours, sizes or code. The result says what changed, or why not, in a sentence to pass on."
+    "back. Change only the settings the person named, never others, and all of them in one call. Nothing else can change: no other "
+    "colours, sizes or code. The result says what changed, or why not, in a sentence to pass on."
 )
 comptime PERSONALIZE_PARAMS = (
     '{"type":"object","properties":{'
@@ -325,6 +326,8 @@ struct Personalize(Movable):
     var undos: List[LookPrefs]  # the current person's, oldest first
     var serial: Int
     var error: String  # why the last save failed ("" when it didn't)
+    var _grouping: Bool  # begin_group(): the changes until end_group() are one undo step
+    var _grouped: Bool  # (that step is on the stack already)
     var _names: List[String]  # every person met this run, with their look and undo stack
     var _prefs: List[LookPrefs]
     var _undos: List[List[LookPrefs]]
@@ -338,6 +341,8 @@ struct Personalize(Movable):
         self.undos = List[LookPrefs]()
         self.serial = 0
         self.error = ""
+        self._grouping = False
+        self._grouped = False
         self._names = List[String]()
         self._prefs = List[LookPrefs]()
         self._undos = List[List[LookPrefs]]()
@@ -433,6 +438,16 @@ struct Personalize(Movable):
             self.error = String(e)
             return False
 
+    def begin_group(mut self):
+        """The changes from now until end_group() are one undo step: an agent's turn ("use the mascot and make it dark" may come
+        as two calls), so "put it back" undoes the whole request."""
+        self._grouping = True
+        self._grouped = False
+
+    def end_group(mut self):
+        self._grouping = False
+        self._grouped = False
+
     def can_undo(self) -> Bool:
         return len(self.undos) > 0
 
@@ -440,9 +455,11 @@ struct Personalize(Movable):
         var before = self.prefs.copy()
         var c = LookChange(True, "", before, next)
         if len(c.changed) > 0:
-            self.undos.append(before.copy())
-            while len(self.undos) > UNDO_MAX:
-                _ = self.undos.pop(0)
+            if not (self._grouping and self._grouped):  # (inside a group, only its first change is an undo step)
+                self.undos.append(before.copy())
+                while len(self.undos) > UNDO_MAX:
+                    _ = self.undos.pop(0)
+            self._grouped = self._grouping
             self.prefs = next.copy()
             self.serial += 1
             _ = self.save()
@@ -465,6 +482,7 @@ struct Personalize(Movable):
             return LookChange(False, "There's nothing to put back.", self.prefs, self.prefs, undo=True)
         var before = self.prefs.copy()
         var back = self.undos.pop()
+        self._grouped = False  # (a change after it in the same turn is a step of its own)
         self.prefs = back.copy()
         self.serial += 1
         _ = self.save()
