@@ -1505,11 +1505,11 @@ def native_race(out):
                 continue
             res[name] = {"p95": float(kv["p95"]), "max": float(kv["max"]), "cpu": cpu, "shown_n": int(kv.get("shown_n", "0")),
                          "shown_p95": float(kv.get("shown_p95", "0")), "shown_max": float(kv.get("shown_max", "0"))}
-            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "press_lat_n", "press_lat_p95", "press_lat_max", "complete_p95"):
+            for k in ("gap_n", "gap_p95", "gap_max", "gap_over20", "lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "press_lat_n", "press_lat_p95", "press_lat_max", "press_lat_code_p95", "press_lat_code_max", "complete_p95"):
                 if k in kv:
                     res[name][k] = float(kv[k])
             if what.group(1) == "openpress" and "press_lat_n" in kv:
-                res.setdefault(opens, {}).update({k: float(kv[k]) for k in ("press_lat_n", "press_lat_p95", "press_lat_max")})
+                res.setdefault(opens, {}).update({k: float(kv[k]) for k in ("press_lat_n", "press_lat_p95", "press_lat_max", "press_lat_code_p95", "press_lat_code_max") if k in kv})
             if what.group(1) == "openpress":  # (review 2, D-7953) a press during the open: judged with the frames during it
                 o = res.setdefault(opens, {})
                 o.update(press_n=int(kv.get("press_n", "0")), press_p95=float(kv.get("press_p95", "0")), press_max=float(kv.get("press_max", "0")))
@@ -1770,12 +1770,14 @@ def web_race(f034, first_screen_text):
 
 
 def native_start(outs):
-    vals = {"first": [], "switch": [], "omnibar": [], "rss": [], "switch_max": [], "omnibar_max": [], "wswitch": [], "womnibar": [], "wswitch_max": [], "womnibar_max": []}
+    vals = {"first": [], "switch": [], "omnibar": [], "rss": [], "switch_max": [], "omnibar_max": [], "wswitch": [], "womnibar": [], "wswitch_max": [], "womnibar_max": [], "cswitch": [], "comnibar": [], "cswitch_max": [], "comnibar_max": []}
     for o in outs:
         for k, pat in [("first", r"^FIRSTSCREEN: ([\d.]+)"), ("switch", r"^NOTESWITCH: .* p95=([\d.]+)"), ("omnibar", r"^OMNIBAR: .* p95=([\d.]+)"),
                        ("wswitch", r"^NOTESWITCH: .*wall_p95=([\d.]+)"), ("womnibar", r"^OMNIBAR: .*wall_p95=([\d.]+)"),
                        ("wswitch_max", r"^NOTESWITCH: .*wall_max=([\d.]+)"), ("womnibar_max", r"^OMNIBAR: .*wall_max=([\d.]+)"),
                        ("switch_max", r"^NOTESWITCH: .* max=([\d.]+)"), ("omnibar_max", r"^OMNIBAR: .* max=([\d.]+)"),
+                       ("cswitch", r"^NOTESWITCH: .*wall_code_p95=([\d.]+)"), ("comnibar", r"^OMNIBAR: .*wall_code_p95=([\d.]+)"),  # (D-8102)
+                       ("cswitch_max", r"^NOTESWITCH: .*wall_code_max=([\d.]+)"), ("comnibar_max", r"^OMNIBAR: .*wall_code_max=([\d.]+)"),
                        ("rss", r"^RSS: ([\d.]+)")]:
             m = re.search(pat, o, re.M)
             if m:
@@ -1836,7 +1838,7 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
         "- *Latency* (opens, a press during one, undo, redo, note switch, omnibar): from the event to the frame that shows it painted by the app's "
         "thread and handed on. Web: a requestAnimationFrame, then a task after it; from the input event's own timestamp, undo and redo from the call "
         "(as benchmark-f034 times them). Native: to GTK's after-paint; undo and redo from the key event, the note switch and omnibar from the app's "
-        "own step (no pointer event in front: the one difference left, in native's favour by its hit test). **Undo and redo (D-8101, the owner's ruling, 2026-11-26): both clocks stop at the frame begun and the app's own code done** (web: as benchmark-f034, a rAF then a task; native: its frame committed on the Mac, the end of its own paint on Linux); native's picture handed to the screen is printed beside, not judged.",
+        "own step (no pointer event in front: the one difference left, in native's favour by its hit test). **Every latency row (D-8101 for undo and redo, D-8102 for the rest: the owner's rulings, 2026-11-26): both clocks stop at the frame begun and the app's own code done** (web: as benchmark-f034, a rAF then a task; native: its frame committed on the Mac, the end of its own paint on Linux); native's picture handed to the screen is printed beside, not judged.",
         "- *Opens*: the same note opened inside the running app from another note, first time in the process (native: nothing kept, the note "
         "parsed; and a new process opening it from the view the last one kept) and again. Web: webopen.mjs, the click to the frame after its canvas "
         "settled; native: the open request to the frame that completes the board. benchmark-f034's own open row (a page load in a new browser "
@@ -1885,17 +1887,19 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
                 label += " (NO kept view was used)"
             wk = SNAPINFO.get(note, {}).get(run_, {}).get("open")
             work = pair(wk) if wk else None
-            add(note, label + ": its first frame", pair(wo), pair(o, "lat_p95", "lat_max"), work)
+            add(note, label + ": its first frame", pair(wo), pair(o, "lat_code_p95", "lat_code_max"), work)  # (D-8102: the frame begun)
+            shown_beside.append((note, label + ": its first frame", o))
             add(note, label + ": complete", pair(wo), (o["complete_max"], o["complete_max"]) if "complete_max" in o else None)
         o = pn.get("open", {})
         wk = nat.get(note, {}).get("open")
         si = SNAPINFO.get(note, {})
-        add(note, "open again (cold: the row read each time): its first frame", pair(wn.get("web open again")), pair(o, "lat_p95", "lat_max"), pair(wk) if wk else None,
+        shown_beside.append((note, "open again: its first frame", o))
+        add(note, "open again (cold: the row read each time): its first frame", pair(wn.get("web open again")), pair(o, "lat_code_p95", "lat_code_max"), pair(wk) if wk else None,
             need=OPEN_TEST_OK[0], extra="tests/test_canvasload fails")
         add(note, "open again: complete", pair(wn.get("web open again")), pair(o, "complete_p95", "complete_max"))
         add(note, "open again: the frames while it comes in (gaps)", pair(wn.get("web open gaps")), pair(o, "gap_p95", "gap_max") if o.get("gap_n") else None,
             pair(wk, "during_p95", "during_max") if wk else None, gaps=True)
-        add(note, "a press during an open", pair(wn.get("web open press")), pair(o, "press_lat_p95", "press_lat_max") if o.get("press_lat_n") else None,
+        add(note, "a press during an open", pair(wn.get("web open press")), pair(o, "press_lat_code_p95", "press_lat_code_max") if o.get("press_lat_n") else None,
             pair(wk, "press_p95", "press_max") if wk and wk.get("press_n") else None)
         for step in RACE_STEPS[1:]:
             w = wn.get(step)
@@ -1917,7 +1921,9 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
                     missed = (w["missed"], n["gap_over20"]) if w and n and w.get("missed") is not None and "gap_over20" in n else None
                     add(note, label + " (frames)", pair(w), pair(n, "gap_p95", "gap_max"), work if d is pn else None, gaps=True, need=cpu, missed=missed)
 
-    add("page", "typing in the middle of a 20,000-character paragraph (key to its frame)", pair(web.get("type page")), pair(typed, "lat_p95", "lat_max"),
+    if typed:
+        shown_beside.append(("page", "typing in the middle of a 20,000-character paragraph", typed))
+    add("page", "typing in the middle of a 20,000-character paragraph (key to its frame)", pair(web.get("type page")), pair(typed, "lat_code_p95", "lat_code_max"),
         need=(typed or {}).get("cpu", 0) == 0)
 
     lines += ["", "**Beside, not judged:**", "", "| note | what | web | native |", "|---|---|---|---|"]
@@ -1977,8 +1983,9 @@ def race_table(web, nat, start, shown=None, machine="linux", paced=None, unwarm=
     sec = start.get("second") or {}
     for k in ["switch", "omnibar"]:  # (D-8001; D-8026: from the step to the frame painted, as the web's to the frame after)
         what = "note switch" if k == "switch" else "omnibar open"
-        line(f"{what} p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst)", two(web, k), two(start, "w" + k), "ms")
-        line(f"{what} p95 / max, the second start (the first one's glyphs readied, D-8002)", two(web, k), two(sec, "w" + k), "ms")
+        line(f"{what} p95 / max, the first start: nothing readied (5 runs of 5; p95 the median run's, max the worst; to the frame begun, D-8102)", two(web, k), two(start, "c" + k), "ms")
+        line(f"{what} p95 / max, the second start (the first one's glyphs readied, D-8002; to the frame begun)", two(web, k), two(sec, "c" + k), "ms")
+        lines.append(f"| {what}: native's picture handed to the screen p95 / max (first start · second), beside | | {start.get('w' + k)} / {start.get('w' + k + '_max')} · {sec.get('w' + k)} / {sec.get('w' + k + '_max')} ms | |")
         lines.append(f"| {what}: native work p95 / max (first start · second), beside | | {start.get(k)} / {start.get(k + '_max')} · {sec.get(k)} / {sec.get(k + '_max')} ms | "
                      f"{mark(start[k], start[k + '_max']) if start.get(k) is not None and start.get(k + '_max') is not None else ''} |")
     lines += ["", "Cold start (D-7950): every number runs from its process's start to its first screen. Web: docs/goals/79/webcold.mjs, the "

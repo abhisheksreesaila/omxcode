@@ -4322,7 +4322,9 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     if env("MOJOUI_BENCH_PACED") == "1":  # (the step to its picture handed over, drawn by the app's own tick: as GTK's wall_*)
         print_bench_state[A](host_addr, label)
         var walls = List[Float64]()
+        var code_walls = List[Float64]()  # (D-8102) the step to its frame committed
         for _ in range(n):
+            var code_seen = False
             var shown0 = len(host[].g2d_shown_ms) + len(host[].g2d_pk)
             var frames0 = host[].g2d_frames
             var t0 = Int(now_ns())
@@ -4334,11 +4336,15 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
             var by = t0 + 3_000_000_000
             while Int(now_ns()) < by:
                 pump_run_loop(0.0005)
+                if host[].g2d_frames != frames0 and not code_seen:
+                    code_walls.append(Float64(Int(now_ns()) - t0) / 1e6)
+                    code_seen = True
                 if host[].g2d_frames != frames0 and len(host[].g2d_shown_ms) > shown0:
                     walls.append(Float64(Int(now_ns()) - t0) / 1e6)
                     break
             bench_settle[A](host_addr, 300_000_000)
-        print(label + ": n=" + String(len(walls)) + " wall_p95=" + one_decimal(pct(walls, 0.95)) + " wall_max=" + one_decimal(pct(walls, 1.0)), flush=True)
+        print(label + ": n=" + String(len(walls)) + " wall_p95=" + one_decimal(pct(walls, 0.95)) + " wall_max=" + one_decimal(pct(walls, 1.0))
+              + " wall_code_p95=" + one_decimal(pct(code_walls, 0.95)) + " wall_code_max=" + one_decimal(pct(code_walls, 1.0)), flush=True)
         return
     var times = List[Float64]()
     for _ in range(n):
@@ -4770,6 +4776,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
     var gaps = List[Float64]()
     var lats = List[Float64]()
     var press_lats = List[Float64]()
+    var press_code_lats = List[Float64]()  # (D-8102) the press to its frame committed
+    var press_code_seen = False
     var completes = List[Float64]()
     var missed = 0
     var on_gpu = 0
@@ -4861,9 +4869,13 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
                         host[].canvas_send(node, PRESS, at[0], at[1], 0, 0, 1, host_addr)
                         host[].canvas_send(node, RELEASE, at[0], at[1], 0, 0, 1, host_addr)
                         host[].wake()
+                if press_ns > 0 and host[].g2d_frames != press_frames and not press_code_seen:
+                    press_code_lats.append(Float64(Int(now_ns()) - press_ns) / 1e6)
+                    press_code_seen = True
                 if press_ns > 0 and host[].g2d_frames != press_frames and len(host[].g2d_shown_ms) > press_shown:
                     press_lats.append(Float64(Int(now_ns()) - press_ns) / 1e6)
                     press_ns = 0
+                    press_code_seen = False
                 if done_shown < 0 and host[].rt.app.bench_step(host[].rt.shown.nodes[node].style, "bench:loading")[0] < 0.5:
                     done_shown = len(host[].g2d_shown_ms) + len(host[].g2d_pk)
                     done_frames = host[].g2d_frames
@@ -4892,6 +4904,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
           + " gap_over20=" + String(over) + " lat_p95=" + one_decimal(pct(lats, 0.95)) + " lat_max=" + one_decimal(pct(lats, 1.0))
           + " lat_code_p95=" + one_decimal(pct(cpu_lats, 0.95)) + " lat_code_max=" + one_decimal(pct(cpu_lats, 1.0)) + " press_lat_n=" + String(len(press_lats))
           + " press_lat_p95=" + one_decimal(pct(press_lats, 0.95)) + " press_lat_max=" + one_decimal(pct(press_lats, 1.0))
+          + " press_lat_code_p95=" + one_decimal(pct(press_code_lats, 0.95)) + " press_lat_code_max=" + one_decimal(pct(press_code_lats, 1.0))
           + ((" during_n=" + String(len(gaps)) + " complete_p95=" + one_decimal(pct(completes, 0.95)) + " complete_p50=" + one_decimal(pct(completes, 0.5)) + " complete_max=" + one_decimal(pct(completes, 1.0))) if opens else String("")), flush=True)
 
 
