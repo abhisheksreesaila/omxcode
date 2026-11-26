@@ -1864,3 +1864,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 30) — probe c29 run
 - 10:12 Mac front Finder, unlocked; probe built, 5 interleaved rounds 10:13–10:18 (web pause 0 / 1000, native paced). Web unaffected by idle; native slower. D-8098.
+
+## 2026-11-26 goal 79 (continuation 31) — split, prompt tick, Mac M6
+- 10:20 split built (MOJOUI_BENCH_SPLIT); 5 rounds: the wait for the next tick 0–5.7 ms in every step. prompt_tick for keys and presses (D-8099); A/B 5 rounds. 72166365.
+- 10:31 mac-unlocked under my flock deadlocked on the checker's own lock (38 min idle); killed, rerun 11:12–11:50: 54 ✓ 6 ✗.

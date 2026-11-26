@@ -112,3 +112,4 @@ One line per rule that prevents a mistake that happened.
 - A program's files are the packager's list, not the folder it was run from; a removal needs the list and the content, and data is refused even when listed (install_test, install_property).
 - A word that comes back in a two-app run is traced to the save that wrote it (record every revision; a control without our app) before it is called ours or theirs.
 - A rule sized for one display ("one refresh = 16.7 ms") is a number that must come from the measurement (refresh_of); a constant that names a refresh rate is a bug at the next one.
+- scripts/mac-unlocked (79-check M6) takes ~/.cache/omx-mac.lock itself and ignores OMX_MAC_LOCKED: never run it under an outer flock of the same lock.

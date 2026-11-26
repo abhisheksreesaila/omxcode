@@ -23,6 +23,12 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 31 (2026-11-26, 10:20–11:50): native's undo/redo split; a key drawn at once (D-8099)
+**Split** (Mac, 144 Hz, stress, MOJOUI_BENCH_SPLIT, five rounds; medians after the fix, undo / redo): event 0.8 / 1.0, wait for a tick 0.1 / 0.1 (before: 0–5.7 every step), frame 2.8 / 3.3 (scene 1.4 / 1.6, encode 1.0 / 1.2), GPU 1.2 / 2.1, to shown 2.0 / 2.8. Every step, not only the first two.
+**Cause and fix (72166365, mojoui/hosts/appkit.mojo):** a key waited for the display link's next tick while the clock ran; now a KEY, PRESS or RELEASE ticks at once. Paced p95, five A/B rounds: undo 10.2–14.3 → 7.0–11.4, redo 12.3–16.3 → 11.1–13.1. Diagnostic at the web's end point (the frame's own code done): undo 4.5–7.0, redo 7.4–9.8, web 7.0–11.5. Left: redo's GPU 2–4 ms against undo's 0.6–2.3 for the same rasters (the GPU's clock under a light paced load). GTK not changed, so Linux's M6 wasn't rerun.
+**Mac M6 (full mac-unlocked at 72166365, D-8097's rule): 54 ✓ 6 ✗** (was 51 ✓ 9 ✗): 600 redo (5.8 / 9.6 vs 8.9 / 8.9: the max), stress zoom from 30 % not warmed (8.6 / 10.6 vs 7.9 / 48.7), stress undo (7.8 / 16.9 vs 9.3 / 10.3: the max), undo not warmed (10.5 / 12.6), redo (12.5 / 12.6 vs 9.0 / 9.5), redo not warmed (12.0 / 13.3).
+My first M6 attempt deadlocked: I held the Mac lock around mac-unlocked and the checker's own MacLock waited on it (nothing ran on the Mac, ~38 minutes); stopped and run without the outer lock.
+
 ## Continuation 30 (2026-11-26, 10:12–10:25): the probe run (D-8098)
 Web after 1 s idle: undo/redo p95 7.0–9.5 ms; web with no pause 7.1–11.5; native 11.6–16.8 (five interleaved rounds each, docs/goals/79/probe-c29.md). The pause isn't the asymmetry; native is slower in this measure. The end points still differ (web: frame begun, CPU done; native: picture handed over). Mac M6 not rerun yet.
 
