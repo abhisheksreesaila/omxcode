@@ -7727,7 +7727,7 @@ def show_test_window(window: Int):
 
 
 def burst[A: App](host_addr: Int, line: String):
-    """The burst: step. A canvas's value: kX = the key X, wN = the wheel N points down, p = a press; ^Ctrl+F (no tag): the
+    """The burst: step. A canvas's value: kX = the key X, iX = its input method commits X, wN = the wheel N points down, p = a press; ^Ctrl+F (no tag): the
     window's shortcut; a field's value "!" = Return; a Board's card's "drop" = dragged and let go."""
     var host = host_at[A](host_addr)
     var what = List[Tuple[Int, Int, String]]()  # (kind, widget, value), found before any of them goes
@@ -7750,7 +7750,7 @@ def burst[A: App](host_addr: Int, line: String):
             w = host[].outers[found]
         if kind == CANVAS:
             var ci = host[].canvas_at(found)
-            w = host[].canvases[ci].keys if kv[1].startswith("k") else (host[].canvases[ci].scroll if kv[1].startswith("w") else host[].canvases[ci].drag)
+            w = host[].canvases[ci].keys if kv[1].startswith("k") else (host[].canvases[ci].scroll if kv[1].startswith("w") else (host[].canvases[ci].im if kv[1].startswith("i") else host[].canvases[ci].drag))
         _ = external_call["g_object_ref", Int](w)
         what.append((kind, w, kv[1]))
     for ref item in what:
@@ -7798,6 +7798,10 @@ def burst[A: App](host_addr: Int, line: String):
             var handled = List[c_int](length=1, fill=0)
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), c_uint(gdk_keyval(String(value[byte=1:]))), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
             _ = len(handled)
+        elif kind == CANVAS and value.startswith("i"):  # (the input method commits X: words held like keys while a rebuild waits; the merge of goals 79 and 81)
+            var sig = String("commit")
+            var text = String(value[byte=1:])
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), text.as_c_string_span())
         elif kind == CANVAS and value.startswith("w"):
             var sig = String("scroll")
             var handled = List[c_int](length=1, fill=0)
