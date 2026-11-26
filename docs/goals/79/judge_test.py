@@ -87,7 +87,7 @@ t, ok = judged(_code({"lat_p95": 40, "lat_max": 41}, 10, 11))
 assert ok and "undo: native's picture handed to the screen p95 / max (the web isn't timed to it) | | 40 / 41" in t, [l for l in t.splitlines() if "handed" in l][:2]
 
 
-fails(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_max=40), "undo")
+fails(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_code_max=40), "undo")  # (D-8101: the frame-begun number is the judged one)
 fails(lambda w, n, s, p, u, o: u["stress"]["zoom from 30%"].update(gap_max=40), "not warmed")
 fails(lambda w, n, s, p, u, o: p["600"]["pan 30%"].update(gap_over20=3), "more missed frames")
 fails(lambda w, n, s, p, u, o: n["600"]["pen"].update(cpu=2), "CPU frames")
@@ -110,7 +110,7 @@ assert not ok and "work only, not like-for-like" in t and "| ✓" not in "\n".jo
 # the Mac with its frames shown (unlocked, in front: live): judged as Linux's, and fails as Linux's
 t, ok = judged(machine="mac", live=True)
 assert ok and "work only" not in t and "| ✓" in t, [l for l in t.splitlines() if "✗" in l]
-t, ok = judged(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_max=40), machine="mac", live=True)
+t, ok = judged(lambda w, n, s, p, u, o: p["stress"]["undo"].update(lat_code_max=40), machine="mac", live=True)
 assert not ok and any("undo" in l and "✗" in l for l in t.splitlines())
 for out, good in [("BENCHSTATE: undo active=1 key=1 locked=0 activity=0 not held", True), ("BENCHSTATE: a active=1 key=1 locked=1", False), ("BENCHSTATE: a active=0 key=1 locked=0", False),
                   ("BENCHSTATE: a active=1 key=1 locked=-1", False), ("", False), ("BENCHSTATE: a active=1 key=1 locked=0\nBENCHSTATE: b active=1 key=0 locked=0", False)]:
