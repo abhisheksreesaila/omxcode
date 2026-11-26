@@ -3253,7 +3253,10 @@ struct AppKitHost[A: App](Movable):
                 print("FRAMEWATCH: the screen's clock doesn't tick: timer", flush=True)
 
     def ticked_by(mut self, clock: Int):
-        """Which clock this tick is from (0: the one right after the event that started it)."""
+        """Which clock this tick is from (0: the one right after the event that started it). A tick right after an input draws
+        lean (c32: the tiles' background work waits for the clock's next tick; MOJOUI_INPUT_LEAN=0: as before)."""
+        if self.g2d != 0:
+            Pointer[MetalCanvas2D, MutUntrackedOrigin](unsafe_from_address=self.g2d)[].tiles.lean = clock == 0 and env("MOJOUI_INPUT_LEAN") != "0"
         if clock == 0:
             self.prompt_due = False
         elif clock == self.link:
@@ -4787,11 +4790,14 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
         var t0 = Int(now_ns())
         bench_gesture[A](host_addr, node, k, what, i, count, x, y, drag_x0, drag_y0, w, h, keys)
         var t_ev = Int(now_ns())
+        if split:
+            print("STEPSTART: " + what + " " + String(i), flush=True)
         host[].wake()
         var by = t0 + 2_000_000_000
         var drew = False
         var seen = False
         var t_drew = 0
+        var tick_at = 0
         var parts = (0.0, 0.0, 0.0)
         while Int(now_ns()) < by:  # (the tick that draws it; then its picture handed over, which the next tick may do)
             pump_run_loop(0.0005)
@@ -4800,6 +4806,7 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             if not drew and (host[].g2d_frames != frames0 or (k >= 0 and host[].canvases[k].drawn != drawn0)):
                 drew = True
                 t_drew = Int(now_ns())
+                tick_at = host[].drew_tick_ns  # (now: a later tick, the background work a lean frame left, would move it)
                 parts = (host[].g2d_parts[0], host[].g2d_parts[1], host[].g2d_parts[2])
                 if host[].g2d_frames != frames0:
                     on_gpu += 1
@@ -4822,8 +4829,8 @@ def frame_bench_paced[A: App](host_addr: Int, rest: String):
             var t_seen = Int(now_ns())
             cpu_lats.append(Float64(t_drew - t0) / 1e6)
             var gms = host[].g2d_done[len(host[].g2d_done) - 1] if len(host[].g2d_done) > 0 else 0.0
-            print("SPLIT: " + what + " " + String(i) + " event " + one_decimal(Float64(t_ev - t0) / 1e6) + " to_tick " + one_decimal(Float64(host[].drew_tick_ns - t_ev) / 1e6)
-                  + " frame " + one_decimal(Float64(t_drew - host[].drew_tick_ns) / 1e6) + " (scene " + one_decimal(parts[0]) + " batch " + one_decimal(parts[1]) + " encode " + one_decimal(parts[2])
+            print("SPLIT: " + what + " " + String(i) + " event " + one_decimal(Float64(t_ev - t0) / 1e6) + " to_tick " + one_decimal(Float64(tick_at - t_ev) / 1e6)
+                  + " frame " + one_decimal(Float64(t_drew - tick_at) / 1e6) + " (scene " + one_decimal(parts[0]) + " batch " + one_decimal(parts[1]) + " encode " + one_decimal(parts[2])
                   + ") gpu " + one_decimal(gms) + " to_shown " + one_decimal(Float64(t_seen - t_drew) / 1e6) + " total " + one_decimal(Float64(t_seen - t0) / 1e6), flush=True)
         if opens:
             var pressed = False

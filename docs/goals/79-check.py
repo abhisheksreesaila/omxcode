@@ -2213,9 +2213,36 @@ def keys():
         md = page_markdown(dbm, "Weekly review") if dbm else None
         if e or md is None or " hé q1 t" not in md:
             probs.append(f"Mac: pnote's page after real keys: {e or (md or '')[-60:]!r}")
+    probs += prompt_tick_check()
     if probs:
         return "FAIL", "; ".join(probs)
-    return "PASS", "Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote"
+    return "PASS", "Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote; a key drawn at once while the clock runs (D-8099)"
+
+
+def prompt_tick_check():
+    """(c32, D-8099) On the Mac, a key while the frame clock runs is drawn right after it, not at the clock's next tick: twelve
+    paced undos on the stress note, each step's wait from the key to the tick that draws it (MOJOUI_BENCH_SPLIT). With the rule
+    p95 under 1 ms; with it off (MOJOUI_PROMPT_INPUT=0) the same run must show the wait (over 1 ms), or this test can't see the
+    fault. Problems, or []."""
+    db = OUT / "race" / "race-stress.db"
+    if not db.exists():
+        return [f"prompt tick: no {db} (Linux's M6 seeds it)"]
+    waits = {}
+    for on in ("1", "0"):
+        out, e = mac_run(f"prompt-{on}", ["wait:800", "window:1440x900", "framebench:desk=open,2", "appbench:desk=zoom100", "framebench:desk=undo,12", "quit"],
+                         {"PNOTE_DB": "{data}/race-stress.db", "OMX_CONFIG": "{data}/cfg-prompt-" + on + "-" + str(int(time.time())), "MOJOUI_BENCH_PACED": "1",
+                          "MOJOUI_BENCH_SPLIT": "1", "MOJOUI_PROMPT_INPUT": on}, [db])
+        w = sorted(float(x) for x in re.findall(r"^SPLIT: undo \d+ event [\d.]+ to_tick ([\d.]+)", out, re.M))
+        if e or len(w) < 10:
+            return [f"prompt tick: the Mac's run ({on}): {e or 'no SPLIT lines'}"]
+        waits[on] = w[min(len(w) - 1, int(0.95 * len(w)))]
+    bad = []
+    if waits["1"] > 1.0:
+        bad.append(f"Mac: a key waits {waits['1']:.1f} ms (p95) for the frame clock's tick (D-8099)")
+    if waits["0"] <= 1.0:
+        bad.append(f"prompt tick: with the rule off the wait is {waits['0']:.1f} ms: this test can't see the fault")
+    print(f"  prompt tick: wait p95 {waits['1']:.1f} ms with the rule, {waits['0']:.1f} without", flush=True)
+    return bad
 
 
 CHECKS = {"BUILDS": builds, "KEYS": keys, "PACKAGE": package, "M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}
