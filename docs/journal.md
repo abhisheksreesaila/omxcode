@@ -1861,3 +1861,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 ## 2026-11-25 goal 79 (continuation 29) — fairness probe, blocked
 - 20:50 from 8053d6e1. The Mac answered and was unlocked, but a system dialog (UserNotificationCenter) held the front for the whole window; pnote inactive (active=0 key=0), mac-unlocked refused twice. Linux: gpu-free NO (another project's job). Stopped as the brief says.
 - Found by reading: benchmark-f034's undo/redo have no rAF loop and no pause; native settles and is photographed between steps. Probe script written (PAUSE_MS), not run. My caffeinate on the Mac stopped.
+
+## 2026-11-26 goal 79 (continuation 30) — probe c29 run
+- 10:12 Mac front Finder, unlocked; probe built, 5 interleaved rounds 10:13–10:18 (web pause 0 / 1000, native paced). Web unaffected by idle; native slower. D-8098.

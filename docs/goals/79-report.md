@@ -23,6 +23,9 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 30 (2026-11-26, 10:12–10:25): the probe run (D-8098)
+Web after 1 s idle: undo/redo p95 7.0–9.5 ms; web with no pause 7.1–11.5; native 11.6–16.8 (five interleaved rounds each, docs/goals/79/probe-c29.md). The pause isn't the asymmetry; native is slower in this measure. The end points still differ (web: frame begun, CPU done; native: picture handed over). Mac M6 not rerun yet.
+
 ## Continuation 29 (2026-11-25, 20:50–21:10): the fairness probe, blocked on the Mac
 
 **Not measured.** The Mac was unlocked but a system notification dialog held its front (UserNotificationCenter, 20:59–21:07); pnote's window stayed inactive and mac-unlocked refused, rightly. Linux couldn't stand in (gpu-free: another project's job). No decision, no D-number, no race. **Found by reading the benches** (docs/goals/79/probe-c29.md): the web's undo/redo rows run no rAF loop, and they have no pause (redo starts straight after undo's last step), while native's steps settle until idle and the runner takes a picture between them. The probe that settles it (the web with native's 1 s idle, five interleaved runs each) is ready: docs/goals/79/probe-c29-f034.mjs.

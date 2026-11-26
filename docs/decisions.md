@@ -2113,3 +2113,6 @@ files.sha256 is "sha256  mode path" (644 or 755) and the installer sets the mode
 
 ## D-8097: a tie at the display's refresh is the refresh both windows measured (main session's ruling, continuation 28; strictens D-8025)
 One refresh = 1000 / the faster of the two windows' measured refresh rates (refresh_of: their BENCHSTATE and WEBSTATE readings); a latency ties within 1.1 refreshes, a frame gap within 1.2: at 60 Hz exactly the 18.3 and 20 ms of before, at 144 Hz 7.6 and 8.3 ms. Before, 60 Hz's limits held at any refresh, so at 144 Hz two refreshes against one passed. Rejudged (docs/goals/79/rejudge-c28.md): Linux's table unchanged; the Mac's 7 tie rows fail now (stress undo warmed and not, stress zoom from 30 %, drag one warmed and not, typing; 600 redo not warmed). judge_test: cases at 60 and 144 Hz.
+
+## D-8098: the web's undo/redo are not faster because of the bench's pause (ours; probe c29/c30)
+Five interleaved rounds on the Mac (docs/goals/79/probe-c29.md): the web after a 1 s idle 7.0–9.5 ms p95, without it 7.1–11.5; native 11.6–16.8. The pause isn't the asymmetry; native's undo/redo are slower in this measure. Left to split: the end points differ (the web's frame begun and its CPU done; native's picture handed over after its GPU). Nothing in the bench or the judge changed.
