@@ -1853,3 +1853,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - 10:37 from 64254923. S1–S4 and five one-line NITs, tests first (docbase red at `emptied`, install_test at the list's form); D-8096. 52 mutants.
 - 11:09–12:33 M0–M5, M6 Linux 60 ✓ 0 ✗ at 8206e754 (Mac locked), tests, both-open, KEYS, PACKAGE, BUILDS, both packages.
 - 12:40–13:38 both-open seed 101 BAD: reproduced with a recorder, the web's late save brought the object back; control without native 5 of 5. Harness not changed; seed 103 ok.
+
+## 2026-11-25 goal 79 (continuation 28) — tie rule, the Mac's stress redo
+- 18:20 the main session's race (b44257f2: 58 ✓ 2 ✗). Mac runs 18:24–18:31, each checked locked=0: per-frame parts of undo/redo; A/Bs (tile ahead, budget, warming, snapshots, a busy core). Redo's own steps cost as undo's; its first two frames after the settle are 3–4× slow. Not fixed.
+- 18:40 D-8097: ties at the measured refresh; judge_test 60/144 Hz; rejudged: Linux unchanged, Mac 51 ✓ 9 ✗ (272d530b).

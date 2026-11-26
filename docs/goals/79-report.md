@@ -23,6 +23,27 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 28 (2026-11-25, 18:20–18:50): the tie rule at the measured refresh; the Mac's stress redo
+
+**1. The tie rule (D-8097, 272d530b).** One refresh is now the one both windows measured (the faster side's reading), with 60 Hz's slack: a latency ties within 1.1 refreshes, a frame gap within 1.2 (18.3 / 20 ms at 60 Hz, 7.6 / 8.3 ms at 144 Hz). judge_test has cases at 60 and 144 Hz. Rejudged (docs/goals/79/rejudge-c28.md): **Linux unchanged**; **the Mac's table goes from 58 ✓ 2 ✗ to 51 ✓ 9 ✗**:
+
+| note | row | web | native | was | now |
+|---|---|---|---|---|---|
+| stress | undo (latency) | 8.9 / 13.0 | 14.4 / 14.9 | ✓ tie | ✗ |
+| stress | undo, not warmed | 8.9 / 13.0 | 16.5 / 17.5 | ✓ tie | ✗ |
+| stress | redo (latency) | 8.9 / 9.0 | 17.7 / 18.4 | ✗ | ✗ |
+| stress | redo, not warmed | 8.9 / 9.0 | 13.5 / 18.6 | ✗ | ✗ |
+| stress | zoom from 30 % (frames) | 8.5 / 48.6 | 9.1 / 10.6 | ✓ tie | ✗ |
+| stress | drag one (frames) | 7.1 / 8.8 | 7.0 / 11.0 | ✓ tie | ✗ |
+| stress | drag one, not warmed | 7.1 / 8.8 | 7.0 / 12.1 | ✓ tie | ✗ |
+| stress | typing (frames) | 8.7 / 8.7 | 7.0 / 9.1 | ✓ tie | ✗ |
+| 600 | redo, not warmed (latency) | 9.0 / 9.0 | 8.7 / 11.4 | ✓ tie | ✗ |
+
+race-mac.md itself is as the run printed it (its verdict column is the old rule's); the next M6 on the Mac judges with the new one.
+
+**2. Where stress redo's time goes (Mac, unlocked, 8 runs of undo,25 / redo,25 ×2 with per-frame parts, build/mac-ssh/pnote-20261125-1824*–1830*).** Not redo's own work: from its third frame on a redo step costs what an undo step does (≈2–3 ms: CPU 1.5, GPU 0.7–1.0). The p95 of 25 is the second-worst frame, and redo's first two frames cost 10–14 ms (CPU 8–9: event 1.5–2.0, scene 2.5–3.5, Metal encode 2.6–3.3; GPU 2.8–4.7), undo's first 5–9. Each rasters the same 2–4 damaged tiles as every later frame (TILE_TRACE), but their tile time is 1.8–3.0 ms against 0.3–0.7. The same work, 3–4× slower: the first frames after the bench's one-second settle. Undo hides part of it because its setup (thirty moves and a save) runs right before its first timed frame; redo's setup does nothing. Ruled out by A/B: the tile ring and extension (TILE_AHEAD=0, TILE_BUDGET=1), idle warming (SCENEWARM=0, GLYPHWARM=0), the kept-view save (no SNAP save ran in the steps), CPU clocks alone (one core kept busy: later frames faster, the first two still 10–14 ms).
+**Not fixed.** What it costs: the first undo or redo after a pause shows 2–3 refreshes after the key at 144 Hz (14–18 ms) where the web shows it in about one (9 ms); later steps of a run show in one refresh. At 60 Hz (Linux, and the Mac's own Retina at 60) it is inside one refresh. Why not fixed: the cause is the machine's state after idle (both CPU and GPU parts slow), not a step of ours that can be removed; the candidates (keeping the GPU and CPU awake while a note is open, as the web's own rAF loop does; doing the first frame's work in a cheaper order) each need a Mac build and an unlocked race to prove, more than the Mac's awake time held. No rows rerun (nothing changed to rerun).
+
 ## Continuation 27 (2026-11-25, 10:37–13:40): review round 9 (PASS), its four SHOULDs
 
 **The judged code is 8206e754** (later commits: the race's table, documents).
