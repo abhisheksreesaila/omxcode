@@ -2916,6 +2916,15 @@ struct GtkHost[A: App](Movable):
             print("MORPH: " + String(self.morph_count) + " fade " + String(self.morph_ms) + " ms ran " + String(ran) + " ms, " + String(len(self.morph_frames))
                   + " frames, longest frame gap " + one_decimal(Float32(Float64(worst) / 1000.0)) + " ms, snapshot " + one_decimal(Float32(Float64(self.morph_begin_ns) / 1e6)) + " ms", flush=True)
 
+    def idle_soon(self, f: def(Int) thin abi("C") -> c_int, self_addr: Int):
+        """A rebuild on the next idle turn; while a morph runs, just above the frame clock's priority (G_PRIORITY_HIGH_IDLE):
+        at idle priority the morph's frames starved it on a busy machine, the host stayed busy and the canvases stood still
+        until the morph ended, then jumped (D-8412)."""
+        if self.morph_pic != 0:
+            _ = external_call["g_idle_add_full", c_uint](c_int(100), f, self_addr, 0)
+        else:
+            _ = external_call["g_idle_add", c_uint](f, self_addr)
+
     def apply(mut self, d: Diff, self_addr: Int):
         var morph = self.rt.take_transition()
         if morph > 0 and self.morph_overlay != 0 and animations_enabled() and getenv("MOJOUI_MORPH") != "0":
@@ -2932,14 +2941,14 @@ struct GtkHost[A: App](Movable):
             self.pending = d.copy()
             self.has_pending = True
             set_busy(True)
-            _ = external_call["g_idle_add", c_uint](on_idle_partial[Self.A], self_addr)
+            self.idle_soon(on_idle_partial[Self.A], self_addr)
             return
         if d.rebuild:
             # Rebuild on the next idle turn, never inside a signal handler: the widget
             # that sent the signal would be destroyed while GTK is still using it.
             self.has_pending = False  # (the full rebuild covers it)
             set_busy(True)  # ignore events until the new widgets are up
-            _ = external_call["g_idle_add", c_uint](on_idle_rebuild[Self.A], self_addr)
+            self.idle_soon(on_idle_rebuild[Self.A], self_addr)
             return
         if self.has_pending:  # the widgets are still the old screen's: these patches wait for the partial rebuild
             for p in d.patches:

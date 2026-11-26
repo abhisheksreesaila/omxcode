@@ -94,7 +94,13 @@ def main():
               f"worst frame outside old..new {100 * worst:.1f} %; {' | '.join(morphs)}; looks: {looks}")
         if len(morphs) == 0:
             bad.append(f"{name}: no morph ran")
-        if snapped > (0.05 if name in ("dark", "undo", "person", "accent") else 0.25):  # (moving tiles and a growing mascot leave pixels that jump)
+        ims = frames(out, region)
+        moving = sum(1 for k in range(s, min(s + 72, len(ims) - 1)) if (np.abs(ims[k + 1] - ims[k]).sum(axis=2) > 40).mean() > 0.002)
+        print(f"   {name}: the region changed on {moving} frames after the start")
+        if name == "roomy":  # (tiles glide on the water spring: a pixel a tile passes over jumps, so motion is counted in frames, not pixels)
+            if moving < 4 or blended < 0.3:
+                bad.append(f"{name}: the tiles changed on {moving} frames only, {100 * blended:.1f} % blended")
+        elif snapped > (0.05 if name in ("dark", "undo", "person") else 0.10):  # (the presence and the mic: a growing shape leaves edge pixels that jump)
             bad.append(f"{name}: {100 * snapped:.1f} % of the changing pixels snapped")
     for m in ("0", "1"):
         gaps = []
