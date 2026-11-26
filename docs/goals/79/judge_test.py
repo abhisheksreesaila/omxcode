@@ -14,6 +14,15 @@ assert c.verdict(18.0, 16.7) == "tie at the display's refresh" and c.verdict(19,
 assert c.verdict(19.9, 16.7, True) == "tie at the display's refresh" and c.verdict(20.1, 16.7, True) == ""
 assert c.verdict(33.4, 33.0) == "within 3 %" and c.verdict(40, 33) == ""  # (two refreshes are no tie)
 assert c.verdict(200, 280) == "better"  # (no absolute bar)
+# (continuation 28) one refresh is the display's both windows measured, the slack as at 60 Hz
+assert c.verdict(18.3, 16.7, False, 60) == "tie at the display's refresh" and c.verdict(18.4, 16.7, False, 60) == ""
+assert c.verdict(14.4, 8.9, False, 144) == "" and c.verdict(17.7, 8.9, False, 144) == ""  # (two refreshes against one: the Mac's stress undo, redo)
+assert c.verdict(7.6, 7.0, False, 144) == "tie at the display's refresh" and c.verdict(7.7, 7.0, False, 144) == ""
+assert c.verdict(8.3, 7.0, True, 144) == "tie at the display's refresh" and c.verdict(8.4, 7.0, True, 144) == ""
+assert c.verdict(19.9, 16.7, True, 60) == "tie at the display's refresh" and c.verdict(20.1, 16.7, True, 60) == ""
+assert c.verdicts([(14.4, 8.9)], False, 144) == (False, "worse than the web")
+assert c.refresh_of({"web": [("a", 1.0, 143.4, (1440, 900), True)], "native": [("b", 1.0, 144.0, (1440, 900), True)]}) == 144.0
+assert c.refresh_of({"web": [], "native": []}) == 60.0 and c.refresh_of(None) == 60.0
 assert c.verdict(None, 10) == "" and c.verdict(10, None) == ""
 assert c.verdicts([(5, 10), (120, 100)]) == (False, "worse than the web")
 assert c.verdicts([(5, 10), (10.1, 10)]) == (True, "within 3 %")
