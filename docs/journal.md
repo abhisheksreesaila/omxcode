@@ -1871,3 +1871,6 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 32)
 - prompt_tick_check in KEYS (0.6 vs 3.6 ms). Tile trace with STEPSTART: same rasters for undo and redo; lean input frames (D-8100). Split's tick stamp read at draw (a later tick moved it). Mac M6 at c7c00801: 56 ✓ 4 ✗.
+
+## 2026-11-26 goal 79 (continuation 33)
+- GPU split of redo frames (composite 1.2 constant; rasters 0.8–5). Zoom: spikes are strip rasters; budget/ahead A/B within noise. End points: web 2nd rAF 14–16 ms; native ahead at both like-for-like pairs. My probe first read process.env inside the page (no numbers); fixed and rerun. No fix landed, no M6.

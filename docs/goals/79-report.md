@@ -23,6 +23,12 @@ Places where a proof, a checker or a test of this goal changed, or where a claim
 - **The Apple Color Emoji rule (D-7998)** was derived from Chrome's whole-size table (31 sizes, 10–40 px). Verified since on the Mac (D-8004): 63 sizes, 6–96 px, whole and fractional, no disagreement with the Mac's Chrome; zoomed, Chrome keeps the layout advance (as pnote does) or follows the rule at the used size.
 - **"0 of 20 kept" (D-8016, continuation 18) overstated it.** Of those 20 boards and views, 7 are big enough to be tiled, the only ones a view is kept of. Before the fix none of the 7 was kept; after it all were (15 of 15 with more sizes).
 
+## Continuation 33 (2026-11-26, 12:20–13:05): the last 4 Mac rows looked into; no fix landed; the end points measured
+**Stress redo (2 rows):** a redo frame's GPU, split (MOJOUI_GPU_SPLIT: the tile rasters as their own command buffer): the composite pass 1.2 ms every frame (the whole window, constant); the 1–4 partial tile rasters 0.8–5 ms, not in proportion to their count (4 rasters: 0.78 and 5.14 ms). Each raster is its own render pass (its tile loaded, scissored to the stale part, a memoryless accumulator cleared). Not fixed: what in a raster costs 5 ms some frames and 0.8 others is next (its ops per part, pipeline switches).
+**Stress zoom from 30 % (2 rows):** per frame 2–3 ms, one in six 5–7 ms: those are the frames that raster strips ahead (D-8019; 18 frames, 54 rasters in 60); layers rebuilt cost ≤ 0.6 ms. A/B paced, twice each: as now gap p95 8.1 / 10.1, budget 400: 10.6 / 10.3, ahead off: 8.8 / 9.0, against the web's 8.5: within the runs' noise; nothing changed (no tuning to a number).
+**End points (docs/goals/79/endpoint-c33.md, for the owner):** at the web's own end point native is ahead on undo and level-to-ahead on redo; with the web timed to the second rAF (about shown) native's race numbers are ahead on both. The race's rule unchanged.
+**Mac M6 not rerun** (no fix landed: it stands at 56 ✓ 4 ✗, c7c00801).
+
 ## Continuation 32 (2026-11-26, 11:40–12:35): the prompt tick tested; an input's frame lean (D-8100); Mac 56 ✓ 4 ✗
 **Test:** KEYS' prompt_tick_check (Mac): a key's wait for the tick p95 0.6 ms with D-8099, 3.6 ms with it off; it fails either way round.
 **GTK:** not the same fault: GTK delivers input and paints in its frame clock's cycle; Linux's undo latency is one refresh (16.7–16.8 against the web's 16.9). GTK has no way to paint outside its clock; not changed, Linux M6 not rerun (gpu2d_tiles' lean is set by AppKit only; test_gpu2d_tiles, test_zoomreach ok).

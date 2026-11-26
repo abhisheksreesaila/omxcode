@@ -1,0 +1,31 @@
+R1 web second_raf=0 12:37:45
+WEBSTATE: when=start headed=1 dpr=1 raf=143.91 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R1 web second_raf=1 12:37:57
+WEBSTATE: when=start headed=1 dpr=1 raf=142.94 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R1 native build/mac-ssh/pnote-20261126-123757
+locked=0 SPLITSUM: undo to_code_done_p95=3.1 to_code_done_max=11.9 FRAMEBENCH: undo lat_p95=5.0 lat_max=13.1 lat_p95=0.0 lat_max=0.0 locked=0 SPLITSUM: redo to_code_done_p95=8.2 to_code_done_max=8.8 FRAMEBENCH: redo lat_p95=12.2 lat_max=12.2 lat_p95=0.0 lat_max=0.0
+R2 web second_raf=0 12:38:29
+WEBSTATE: when=start headed=1 dpr=1 raf=143.38 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R2 web second_raf=1 12:38:42
+WEBSTATE: when=start headed=1 dpr=1 raf=143.81 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R2 native build/mac-ssh/pnote-20261126-123842
+locked=0 SPLITSUM: undo to_code_done_p95=4.4 to_code_done_max=13.1 FRAMEBENCH: undo lat_p95=7.3 lat_max=14.3 lat_p95=0.0 lat_max=0.0 locked=0 SPLITSUM: redo to_code_done_p95=6.4 to_code_done_max=8.2 FRAMEBENCH: redo lat_p95=10.2 lat_max=13.4 lat_p95=0.0 lat_max=0.0
+R3 web second_raf=0 12:39:38
+WEBSTATE: when=start headed=1 dpr=1 raf=143.89 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R3 web second_raf=1 12:39:51
+WEBSTATE: when=start headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R3 native build/mac-ssh/pnote-20261126-123951
+locked=0 SPLITSUM: undo to_code_done_p95=4.3 to_code_done_max=6.6 FRAMEBENCH: undo lat_p95=6.7 lat_max=7.8 lat_p95=0.0 lat_max=0.0 locked=0 SPLITSUM: redo to_code_done_p95=6.6 to_code_done_max=7.2 FRAMEBENCH: redo lat_p95=9.4 lat_max=13.0 lat_p95=0.0 lat_max=0.0
+R4 web second_raf=0 12:40:23
+WEBSTATE: when=start headed=1 dpr=1 raf=142.31 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R4 web second_raf=1 12:40:35
+WEBSTATE: when=start headed=1 dpr=1 raf=143.41 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R4 native build/mac-ssh/pnote-20261126-124035
+locked=0 SPLITSUM: undo to_code_done_p95=3.7 to_code_done_max=13.3 FRAMEBENCH: undo lat_p95=7.2 lat_max=14.6 lat_p95=0.0 lat_max=0.0 locked=0 SPLITSUM: redo to_code_done_p95=8.9 to_code_done_max=9.0 FRAMEBENCH: redo lat_p95=12.1 lat_max=14.0 lat_p95=0.0 lat_max=0.0
+R5 web second_raf=0 12:41:17
+WEBSTATE: when=start headed=1 dpr=1 raf=143.50 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R5 web second_raf=1 12:41:30
+WEBSTATE: when=start headed=1 dpr=1 raf=143.51 inner=1500x993 screen=2560x1440 visible=visible focus=1 browser=158.0.8127.88 renderer=ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)
+R5 native build/mac-ssh/pnote-20261126-124130
+locked=0 SPLITSUM: undo to_code_done_p95=4.4 to_code_done_max=8.4 FRAMEBENCH: undo lat_p95=7.1 lat_max=9.6 lat_p95=0.0 lat_max=0.0 locked=0 SPLITSUM: redo to_code_done_p95=7.7 to_code_done_max=10.2 FRAMEBENCH: redo lat_p95=11.8 lat_max=15.3 lat_p95=0.0 lat_max=0.0
+C33B done

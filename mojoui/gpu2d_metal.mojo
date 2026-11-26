@@ -1907,6 +1907,14 @@ struct MetalCanvas2D(Movable):
                   + " more " + String(self.more) + " tile_ms " + String(self.tile_ms), flush=True)
         if len(self.metal.skip) > 0:
             self.metal.layer_names = self.scene.layer_keys.copy()
+        if self.metal.cb_open != 0 and getenv("MOJOUI_GPU_SPLIT") == "1":  # (c33, diagnostic: the tile rasters as a command buffer of their own, waited for and timed; the pass then times alone)
+            var rcb = self.metal.cb_open
+            self.metal.cb_open = 0
+            _send[NoneType](self.metal.f, rcb, self.metal.s_commit)
+            _send[NoneType](self.metal.f, rcb, self.metal.s_wait)
+            var r0 = _send[Float64](self.metal.f, rcb, self.metal.s_gpu_start)
+            var r1 = _send[Float64](self.metal.f, rcb, self.metal.s_gpu_end)
+            print("GPUSPLIT: rasters " + String(self.tiles.rastered) + " gpu " + String(Float64(Int((r1 - r0) * 100000.0)) / 100.0) + " ms", flush=True)
         var ok = self.metal.render_layers(self.layers, n, io, w, h, drawable, wait, tiled, tile_draws)
         if self.metal.cb_open != 0:  # (not taken by a pass: its tile rasters still go to the GPU, the tiles stay true)
             _send[NoneType](self.metal.f, self.metal.cb_open, self.metal.s_commit)
