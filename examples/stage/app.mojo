@@ -28,15 +28,23 @@
 # STAGE_CLEAN=1: the stage as it would stand on a counter, for pictures and recordings: no demo controls (the top bar keeps the
 # people and Settings; no Try a day). STAGE_CLOCK=7:45: what the clock reads (the demo's clock stands still; default 10:59).
 # STAGE_DARK=1: the night look whatever the system says.
+# STAGE_MASCOT=1 (or a pack dir): perch a lightweight 3D Companion pack in the bottom-left rail under Pinned
+# (tap to poke, hover to lean; Settings toggles Mascot/Orb; STAGE_MASCOT_STATE=rest|listen|think|speak|hype|nap;
+# STAGE_MASCOT_CLOUD=1 previews the cloud warning aura).
 
 from mojoui.app import App, Event
-from mojoui.view import View, Node, VStack, HStack, Canvas, Spacer, Text, CENTER, START, SPACE_S, SPACE_M, PRESS
+from mojoui.view import View, Node, VStack, HStack, Canvas, Spacer, Text, CENTER, START, SPACE_S, SPACE_M, PRESS, TAP, HOVER
 from mojoui.canvas import Surface
 from mojoui.effects import Every
 from mojoui.geometry import rect_of
 from mojoui.text import Font
 from mojoui.theme import Theme, Palette, ThemePair
-from mojoui.orb import Orb, OrbView, ORB_LISTEN
+from mojoui.orb import Orb, OrbView, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
+from mojoui.mascot import (
+    MascotView, Presence, PRESENCE_MASCOT,
+    MASCOT_REST, MASCOT_LISTEN, MASCOT_THINK, MASCOT_SPEAK, MASCOT_HYPE,
+    mascot_state_id,
+)
 from mojoui.livetiles import LiveTiles, Tile, Face, TileLook, Box, DROPPED, size_name, tile_icon
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote
 from mojoui.stage import stage_compact, stage_layout
@@ -52,6 +60,7 @@ from days import Moment, moments, ranked, day_tiles, clock_text, TIMER_START
 
 comptime TILES_CANVAS = 1
 comptime ORB_CANVAS = 2
+comptime MASCOT_CANVAS = 5
 comptime TYPE = 1
 comptime SEND = 2
 comptime MIC = 3
@@ -61,6 +70,7 @@ comptime TICK = 6  # each second: the Live rows tick
 comptime PERSON = 10  # PERSON + 0 … 3: the avatars
 comptime SETTINGS = 20
 comptime CHARMS = 21
+comptime MASCOT_GESTURE = 22
 comptime TV_CANVAS = 3  # the TV's box (over the centre column)
 comptime TV_VEIL = 4  # the TV body's veil
 comptime TV_FRAME = 30
@@ -89,6 +99,8 @@ struct Main(App):
     var height: Int
     var text: String
     var orb: Orb
+    var presence: Presence
+    var mascot_side: Int
     var tiles: LiveTiles
     var font: Font
     var person: Int
@@ -121,6 +133,22 @@ struct Main(App):
         self.height = 820
         self.text = ""
         self.orb = Orb()
+        self.presence = Presence()
+        self.mascot_side = 184
+        var pack = environment("STAGE_MASCOT")
+        if pack != "" and pack != "0":
+            var pack_dir = String("examples/stage/mascots/omx") if (pack == "1" or pack == "omx") else pack
+            try:
+                self.presence.use_mascot(pack_dir)
+                var init_state = environment("STAGE_MASCOT_STATE")
+                if init_state != "":
+                    var sid = mascot_state_id(init_state)
+                    if sid >= 0:
+                        self.presence.mode(sid)
+                if environment("STAGE_MASCOT_CLOUD") == "1":
+                    self.presence.lane(True)
+            except e:
+                print("stage mascot load failed:", e)
         self.tiles = LiveTiles()
         self.font = Font()
         self.person = 0
@@ -259,6 +287,8 @@ struct Main(App):
             self.tv.open(now, "Today's conversation", "")
         self.tv.speaking(now, False)  # (no voice here: she has finished as soon as she answers)
         self.mark = now
+        self.presence.mode(MASCOT_SPEAK)
+        self.orb.mode(ORB_SPEAK)
         self.log("OPEN " + (self.tv.next_card if self.tv.leave_t0 >= 0 else self.tv.card) + " " + question)
 
     def appearance(mut self, dark: Bool):
@@ -272,6 +302,7 @@ struct Main(App):
     def update(mut self, event: Event):
         if event.message == TYPE:
             self.text = event.text
+            self.presence.mode(MASCOT_LISTEN if self.text != "" else MASCOT_REST)
         elif event.message == SEND:
             if self.text != "":
                 var q = self.text
@@ -289,6 +320,8 @@ struct Main(App):
             self.ask(Q_WORD if event.message == CHIP else Q_ISO)
         elif event.message == TV_CLOSE:
             self.tv.close(tv_now(), "x")
+            self.presence.mode(MASCOT_REST)
+            self.orb.mode(ORB_IDLE)
             self.mark = tv_now()
             self.log("CLOSE x")
         elif event.message == TV_FRAME:
@@ -298,7 +331,9 @@ struct Main(App):
                 self.mark = tv_now()
                 self.log("CLOSE " + self.tv.closed_by)
         elif event.message == MIC:
-            self.orb.mode(ORB_LISTEN)
+            var next_m = ORB_IDLE if self.orb.current() == ORB_LISTEN else ORB_LISTEN
+            self.orb.mode(next_m)
+            self.presence.mode(next_m)
         elif event.message == GESTURE:
             if event.number == PRESS:
                 self.drop_zones()
@@ -314,7 +349,10 @@ struct Main(App):
                 self.mark = tv_now()
                 self.log("CLOSE " + self.tv.closed_by)
         elif event.message == TICK:
+            var prev_timer = self.timer_s
             self.timer_s = max(self.timer_s - 1, 0)
+            if prev_timer > 0 and self.timer_s == 0:
+                self.presence.mode(MASCOT_HYPE)
             self.log("LIVE timer=" + clock_text(self.timer_s))
             var m = self.moment()  # (the tiles' words again: the Live row reads them; nothing moves)
             self.all = day_tiles(m, self.timer_s)
@@ -331,6 +369,24 @@ struct Main(App):
             self.tv.touch(tv_now())
         elif PERSON <= event.message < PERSON + 4:
             self.person = event.message - PERSON
+            if self.presence.has_mascot():
+                self.presence.poke()
+        elif event.message == SETTINGS:
+            if self.presence.has_mascot():
+                var on = self.presence.toggle()
+                self.log("PRESENCE " + ("mascot" if on else "orb"))
+        elif event.message == MASCOT_GESTURE:
+            if event.number == TAP:
+                self.presence.poke()
+                self.log("MASCOT poke")
+            elif event.number == HOVER:
+                if event.x < 0 or event.y < 0:
+                    self.presence.look(0.0, 0.0, 0.0)
+                else:
+                    var half = Float64(self.mascot_side) * 0.5
+                    var gx = (event.x - half) / max(half, 1.0)
+                    var gy = (event.y - half) / max(half, 1.0)
+                    self.presence.look(gx, gy, 0.75)
         elif event.message == CHARMS:
             self.charms_on = not self.charms_on
             self.log("CHARMS_ON " + ("1" if self.charms_on else "0"))
@@ -389,6 +445,15 @@ struct Main(App):
         left_items.append(pinned^)
         if not wide and not compact and not self.clean:
             left_items.append(self.days())
+        if self.presence.kind == PRESENCE_MASCOT and self.presence.has_mascot() and not compact:
+            var perch = HStack(
+                Spacer(),
+                MascotView(MASCOT_CANVAS, self.presence.version(), side=self.mascot_side,
+                              on_gesture=MASCOT_GESTURE, hover=True),
+                Spacer(),
+                spacing=0,
+            ).align(CENTER).padding(12, 0).fill().tag("stage-mascot")
+            left_items.append(perch^)
         var left = VStack(left_items^, spacing=SPACE_M).align(START)
         # right: Live (rows that keep ticking), then the sample days
         var live = List[View]()
@@ -418,6 +483,9 @@ struct Main(App):
         var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
             self.orb.draw(surface, p.with_accent(p.series[1]))  # (the Counter's accent is ink: the orb in the family's blue)
+            return
+        if canvas == MASCOT_CANVAS:
+            self.presence.mascot.draw(surface, p.with_accent(p.series[1]))
             return
         if self.tv.draws(canvas):
             self.tv.draw(canvas, surface, counter_tv_look(self.dark))
