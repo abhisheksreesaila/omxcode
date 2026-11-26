@@ -14,7 +14,9 @@ from std.collections import Dict
 from std.math import cos, sin, sqrt
 from mojoui.canvas import Surface
 from std.memory import bitcast
+from mojoui.bitmap import Bitmap, Sampler, make_bitmap, ready
 from mojoui.draw import rect, line, circle, hline, polygon, blend
+from mojoui.shadow import draw_shadow, shadow_reach
 from mojoui.text import Font, REGULAR, LEFT
 from mojoui.clock import now_ns
 from mojoui.shared import serial
@@ -28,9 +30,10 @@ comptime OP_FILL = 5  # the whole canvas, one colour (set, not blended)
 comptime OP_CLIP = 6  # x, y, w, h: what follows (until OP_UNCLIP) is cut to this rect
 comptime OP_UNCLIP = 7
 comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a video frame), scaled to the rect
-comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
+comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40); 2–5: its bounds x0, y0, x1, y1 (goal 80)
 comptime OP_STROKE = 11  # first point, points, width (the points in Scene.path): a polyline with round caps and joins (D-7940)
 comptime OP_RUN = 10  # x, baseline, size, weight, align·2 + italic, letter spacing (+ "family\x1ftext"): a run in a real face (mojoui.fonttext, goal 79)
+comptime OP_SHADOW = 12  # x, y, w, h, radius, blur (CSS's blur radius, 2 sigma): a rounded box's Gaussian shadow (goal 80, mojoui.shadow)
 comptime STRIDE = 6  # floats per op
 
 
@@ -67,7 +70,7 @@ struct KeptOps(Copyable, Movable):
     var colors: List[UInt32]
     var text_of: List[Int32]
     var texts: List[String]
-    var images: List[List[UInt32]]
+    var images: List[Bitmap]
     var path: List[Float32]
     var note_ops: List[Int]
     var notes: List[String]
@@ -83,7 +86,7 @@ struct KeptOps(Copyable, Movable):
         self.colors = List[UInt32]()
         self.text_of = List[Int32]()
         self.texts = List[String]()
-        self.images = List[List[UInt32]]()
+        self.images = List[Bitmap]()
         self.path = List[Float32]()
         self.note_ops = List[Int]()
         self.notes = List[String]()
@@ -92,11 +95,12 @@ struct KeptOps(Copyable, Movable):
         return len(self.kinds)
 
 
-def _copy_ops(sk: List[UInt8], sn: List[Float32], sc: List[UInt32], st: List[Int32], stexts: List[String], simgs: List[List[UInt32]], spath: List[Float32],
+def _copy_ops(sk: List[UInt8], sn: List[Float32], sc: List[UInt32], st: List[Int32], stexts: List[String], simgs: List[Bitmap], spath: List[Float32],
               a: Int, b: Int, mut dk: List[UInt8], mut dn: List[Float32], mut dc: List[UInt32], mut dt: List[Int32], mut dtexts: List[String],
-              mut dimgs: List[List[UInt32]], mut dpath: List[Float32]):
+              mut dimgs: List[Bitmap], mut dpath: List[Float32]):
     """Ops [a, b) appended to another op list (D-7999: in bulk): numbers as they are, their texts and path points copied
-    run by run (ops name them in order) and renumbered, an image copied once however many ops draw it."""
+    run by run (ops name them in order) and renumbered, an image's handle copied once however many ops draw it (a Bitmap
+    is shared: its pixels aren't copied, goal 81)."""
     var nb = len(dn)
     dk.extend(Span(sk)[a:b])
     dn.extend(Span(sn)[a * STRIDE : b * STRIDE])
@@ -236,8 +240,14 @@ trait Painter:
     def pop_clip(mut self):
         ...
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-        """Pixels made elsewhere (a GPU kernel's output: the lens, a heat map, a video frame), scaled into the rect."""
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        """Pixels made elsewhere (a GPU kernel's output, a video frame), scaled into the rect: filtered, or (smooth=False)
+        each pixel a hard-edged block (a heat map's cells). They're copied and hashed each time: a picture that stays the
+        same is a Bitmap (mojoui.bitmap), drawn with bitmap()."""
+        ...
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        """A picture made once (make_bitmap), scaled into the rect; nothing is copied, hashed or sent again."""
         ...
 
     def note(mut self, meaning: String):
@@ -248,6 +258,11 @@ trait Painter:
         ...
 
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
+        ...
+
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        """(goal 80) The Gaussian shadow of the rounded box (x, y, w, h): `blur` is CSS's blur radius (2 sigma); the
+        shadow reaches 1.5 × blur past the box. Offsets and spread are the caller's: pass the shadow's own box."""
         ...
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
@@ -328,21 +343,22 @@ def stroke_outline(pts: List[Float64], width: Float64) -> List[Float64]:
     return out^
 
 
-def blit(mut s: Surface, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-    """Pixels scaled (nearest) into a rect of the surface."""
-    if pw <= 0 or ph <= 0 or w <= 0 or h <= 0:
+def draw_bitmap(mut s: Surface, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool):
+    """A picture scaled into a rect of the surface (straight alpha over what's there: icons, glyph-like pictures; goal 79)."""
+    if w <= 0 or h <= 0 or b[].w <= 0 or b[].h <= 0:
         return
+    ready(b, w, h, smooth)
+    var at = Sampler(b, w, h, smooth)
     var x0 = Int(x)
     var y0 = Int(y)
     for dy in range(Int(h)):
-        var sy = min(ph - 1, Int(Float64(dy) * Float64(ph) / h))
+        var v = (Float64(dy) if at.plain else Float64(dy) + 0.5) / h
         for dx in range(Int(w)):
-            var sx = min(pw - 1, Int(Float64(dx) * Float64(pw) / w))
-            var src = pixels[sy * pw + sx]
+            var src = at.at((Float64(dx) if at.plain else Float64(dx) + 0.5) / w, v)
             var a = (src >> 24) & 0xFF
             if a == 255:
                 s.set(x0 + dx, y0 + dy, src)
-            elif a > 0:  # (straight alpha over what's there: icons, glyph-like pictures; goal 79)
+            elif a > 0:
                 s.set(x0 + dx, y0 + dy, blend(s.get(x0 + dx, y0 + dy), src, 1.0))
 
 
@@ -452,8 +468,13 @@ struct SurfacePainter(Painter, Movable):
         var k = self.tk
         draw_run(self.s, r, run_x(r, x, align) * k + self.tx, baseline * k + self.ty, k, color, self.clip())
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-        blit(self.s, pixels, pw, ph, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk)
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        if pw <= 0 or ph <= 0 or len(pixels) < pw * ph:
+            return
+        self.bitmap(make_bitmap(pixels.copy(), pw, ph), x, y, w, h, smooth)
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        draw_bitmap(self.s, b, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk, smooth)
 
     def note(mut self, meaning: String):
         pass
@@ -464,6 +485,10 @@ struct SurfacePainter(Painter, Movable):
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
         var k = self.tk
         rect(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, color, radius * k)
+
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        var k = self.tk
+        draw_shadow(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, radius * k, blur / 2 * k, color)
 
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         self.rect(x, y, w, h, color, radius)
@@ -588,7 +613,7 @@ struct Scene(Painter, Movable, Copyable):
     var layer_keys: List[String]
     var layer_starts: List[Int]  # the first op of each layer
     var layer_versions: List[Int]  # each layer's version (-1: compare its items)
-    var images: List[List[UInt32]]  # OP_IMAGE's pixels (num 4 = which, num 5 = its width; height = len / width)
+    var images: List[Bitmap]  # OP_IMAGE's pictures (num 4 = which, num 5 = its width, negative: not smooth)
     var path: List[Float32]  # OP_POLY's points, x, y interleaved (num 0 = the first point's index, num 1 = how many)
     var layer_tx: List[Float64]  # each layer's transform (layer_transform; not part of its picture: same_layer ignores it)
     var layer_ty: List[Float64]
@@ -625,7 +650,7 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_keys = List[String]()
         self.layer_starts = List[Int]()
         self.layer_versions = List[Int]()
-        self.images = List[List[UInt32]]()
+        self.images = List[Bitmap]()
         self.path = List[Float32](capacity=4096)
         self.layer_tx = List[Float64]()
         self.layer_ty = List[Float64]()
@@ -907,14 +932,16 @@ struct Scene(Painter, Movable, Copyable):
     def pop_clip(mut self):
         self._op(OP_UNCLIP, 0, 0, 0, 0, 0, 0, 0, -1)
 
-    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
+    def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
         if pw <= 0 or ph <= 0 or len(pixels) < pw * ph:
             return
-        var exact = List[UInt32](capacity=pw * ph)  # (exactly pw × ph: a replay reads the height back as len / pw)
-        for k in range(pw * ph):
-            exact.append(pixels[k])
-        self.images.append(exact^)
-        self._op(OP_IMAGE, x, y, w, h, Float64(len(self.images) - 1), Float64(pw), 0, -1)
+        self.bitmap(make_bitmap(pixels.copy(), pw, ph), x, y, w, h, smooth)
+
+    def bitmap(mut self, b: Bitmap, x: Float64, y: Float64, w: Float64, h: Float64, smooth: Bool = True):
+        if b[].w <= 0 or b[].h <= 0:
+            return
+        self.images.append(b.copy())
+        self._op(OP_IMAGE, x, y, w, h, Float64(len(self.images) - 1), Float64(b[].w) if smooth else -Float64(b[].w), 0, -1)
 
     def note(mut self, meaning: String):
         if len(self.kinds) > 0:
@@ -958,6 +985,11 @@ struct Scene(Painter, Movable, Copyable):
             return
         self._op(OP_RECT, x, y, w, h, radius, 0, color, -1)
 
+    def shadow(mut self, x: Float64, y: Float64, w: Float64, h: Float64, radius: Float64, blur: Float64, color: UInt32):
+        if w <= 0 or h <= 0:
+            return
+        self._op(OP_SHADOW, x, y, w, h, radius, max(blur, 0.0), color, -1)
+
     def rect_hole(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64, hole: Float64):
         if w <= 0 or h <= 0:
             return
@@ -994,9 +1026,23 @@ struct Scene(Painter, Movable, Copyable):
         if n < 3:
             return
         var first = len(self.path) // 2
-        for v in pts:
-            self.path.append(Float32(v))
-        self._op(OP_POLY, Float64(first), Float64(n), 0, 0, 0, 0, color, -1)
+        var at = len(self.path)
+        var total = at + 2 * n
+        if total > self.path.capacity():
+            self.path.reserve(total + total // 2)
+        self.path.resize(unsafe_uninit_length=total)
+        var q = self.path.unsafe_ptr()
+        var p = pts.unsafe_ptr()
+        # (goal 80: the bounds are taken while the points go by, in pairs; batching and culling read them)
+        var lo = SIMD[DType.float32, 2](Float32(pts[0]), Float32(pts[1]))
+        var hi = lo
+        for z in range(n):
+            var v = SIMD[DType.float32, 2](Float32(p.unsafe_offset(2 * z)[]), Float32(p.unsafe_offset(2 * z + 1)[]))
+            lo = min(lo, v)
+            hi = max(hi, v)
+            q.unsafe_offset(at + 2 * z)[] = v[0]
+            q.unsafe_offset(at + 2 * z + 1)[] = v[1]
+        self._op(OP_POLY, Float64(first), Float64(n), Float64(lo[0]), Float64(lo[1]), Float64(hi[0]), Float64(hi[1]), color, -1)
 
     def stroke(mut self, pts: List[Float64], width: Float64, color: UInt32):
         var n = len(pts) // 2
@@ -1072,7 +1118,7 @@ struct Scene(Painter, Movable, Copyable):
             return False
         if self.text_of[p] < 0 and self.text_of[p] != other.text_of[q]:  # (a holed rect's corner)
             return False
-        if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))] != other.images[Int(other.num(q, 4))]:
+        if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))][].hash != other.images[Int(other.num(q, 4))][].hash:
             return False
         return True
 
@@ -1143,6 +1189,9 @@ struct Scene(Painter, Movable, Copyable):
             out = [x0 - hw, y0 - hw, x1 + hw, y1 + hw]
         elif kind == OP_RECT or kind == OP_IMAGE:
             out = [self.num(op, 0), self.num(op, 1), self.num(op, 0) + self.num(op, 2), self.num(op, 1) + self.num(op, 3)]
+        elif kind == OP_SHADOW:
+            var g = shadow_reach(self.num(op, 5) / 2)
+            out = [self.num(op, 0) - g, self.num(op, 1) - g, self.num(op, 0) + self.num(op, 2) + g, self.num(op, 1) + self.num(op, 3) + g]
         elif kind == OP_CIRCLE:
             var r = self.num(op, 2)
             out = [self.num(op, 0) - r, self.num(op, 1) - r, self.num(op, 0) + r, self.num(op, 1) + r]
@@ -1275,6 +1324,24 @@ struct Scene(Painter, Movable, Copyable):
                     h = y1 - y
                 if w > 0 and h > 0:
                     rect(s, x, y, w, h, c, self.num(op, 4) * tk)
+            elif kind == OP_SHADOW:
+                var cut = len(clips) > 0
+                var keep0 = s.clip_x0
+                var keep1 = s.clip_y0
+                var keep2 = s.clip_x1
+                var keep3 = s.clip_y1
+                if cut:
+                    ref q = clips[len(clips) - 1]
+                    s.clip_x0 = max(keep0, Int(q[0] + 0.5))
+                    s.clip_y0 = max(keep1, Int(q[1] + 0.5))
+                    s.clip_x1 = min(keep2, Int(q[2] + 0.5))
+                    s.clip_y1 = min(keep3, Int(q[3] + 0.5))
+                draw_shadow(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk, self.num(op, 4) * tk,
+                            self.num(op, 5) / 2 * tk, c)
+                s.clip_x0 = keep0
+                s.clip_y0 = keep1
+                s.clip_x1 = keep2
+                s.clip_y1 = keep3
             elif kind == OP_CIRCLE:
                 circle(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c)
             elif kind == OP_LINE:
@@ -1294,9 +1361,7 @@ struct Scene(Painter, Movable, Copyable):
                 for z in range(m):
                     circle(s, self.poly_x(op, z) * tk + tx, self.poly_y(op, z) * tk + ty, sw / 2, c)
             elif kind == OP_IMAGE:
-                var pw = Int(self.num(op, 5))
-                ref px = self.images[Int(self.num(op, 4))]
-                blit(s, px, pw, len(px) // pw, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk)
+                draw_bitmap(s, self.images[Int(self.num(op, 4))], self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk, self.num(op, 5) > 0)
             elif kind == OP_TEXT:
                 font.draw(s, self.text_at(op), self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c, Int(self.num(op, 4)), Int(self.num(op, 5)),
                           self.num(op, 3))

@@ -1,6 +1,6 @@
 # Compare the screen before and after an update, so hosts change only what changed.
 
-from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START, DRAG, EMBED, WEBCOMP
+from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START, DRAG, EMBED, WEBCOMP, IMAGE
 
 comptime SET_TEXT = 1  # label text, button title, field contents, toggle label
 comptime SET_MSG = 2
@@ -89,8 +89,8 @@ def same_shape(a: View, b: View) -> Bool:
                 return False
         elif not x.same_layout(y):  # layout settings changed: lay it out again
             return False
-        # A Back button appearing or going, or an alert's question changing, is a new layout.
-        if x.kind == NAVBAR and (x.msg == 0) != (y.msg == 0):
+        # A Back button appearing or going, a picture becoming tappable or not, or an alert's question changing, is a new layout.
+        if (x.kind == NAVBAR or x.kind == IMAGE) and (x.msg == 0) != (y.msg == 0):
             return False
         if x.kind == ALERT and (x.text != y.text or x.hint != y.hint):
             return False
@@ -144,8 +144,8 @@ def compatible(x: Node, y: Node, x_on_board: Bool, y_on_board: Bool) -> Bool:
         return False
     if x.kind == WEBCOMP and x.value != y.value:  # (another widget id: another widget)
         return False
-    # A Back button appearing or going, or an alert's question changing, is a new layout.
-    if x.kind == NAVBAR and (x.msg == 0) != (y.msg == 0):
+    # A Back button appearing or going, a picture becoming tappable or not, or an alert's question changing, is a new layout.
+    if (x.kind == NAVBAR or x.kind == IMAGE) and (x.msg == 0) != (y.msg == 0):
         return False
     if x.kind == ALERT and (x.text != y.text or x.hint != y.hint):
         return False
@@ -157,7 +157,8 @@ def resizable(x: Node, y: Node) -> Bool:
     there was none changes how the view takes space, which is a new layout)."""
     var x_cap = x.max_w if x.max_w != 0 else x.w
     var y_cap = y.max_w if y.max_w != 0 else y.w
-    return (x.w == 0) == (y.w == 0) and (x.h == 0) == (y.h == 0) and (x_cap == 0) == (y_cap == 0)
+    return ((x.w == 0) == (y.w == 0) and (x.h == 0) == (y.h == 0) and (x_cap == 0) == (y_cap == 0)
+            and (max(x.w, x.min_w) == 0) == (max(y.w, y.min_w) == 0))
 
 
 def sized_differently(a: Node, b: Node) -> Bool:
@@ -175,35 +176,163 @@ def same_key(a: Node, b: Node) -> Bool:
     return a.kind == b.kind and a.style == b.style and a.name == b.name
 
 
+comptime MAX_EDITS = 1000  # _run_of looks for the exact run up to this many inserted and removed children
+
+
 def pairs_of(old: View, new: View, oc: List[Int], nc: List[Int]) -> List[Tuple[Int, Int]]:
-    """Old and new children paired in order (the longest common run of same_key children): (old position, new position)."""
+    """Old and new children paired in order (the longest common run of same_key children): (old position, new position).
+    Linear for a list that didn't change or changed in a few places, however long (goal 81, M2)."""
     var n = len(oc)
     var m = len(nc)
-    var out = List[Tuple[Int, Int]]()
-    if n * m > 250_000:  # (huge lists: pair by position, as far as they agree)
-        for k in range(min(n, m)):
-            if same_key(old.nodes[oc[k]], new.nodes[nc[k]]):
-                out.append((k, k))
-        return out^
-    var t = List[Int](length=(n + 1) * (m + 1), fill=0)  # t[a][b]: the longest run in oc[a:] and nc[b:]
-    for a in range(n - 1, -1, -1):
-        for b in range(m - 1, -1, -1):
-            if same_key(old.nodes[oc[a]], new.nodes[nc[b]]):
-                t[a * (m + 1) + b] = t[(a + 1) * (m + 1) + b + 1] + 1
-            else:
-                t[a * (m + 1) + b] = max(t[(a + 1) * (m + 1) + b], t[a * (m + 1) + b + 1])
-    var a = 0
-    var b = 0
-    while a < n and b < m:
-        if same_key(old.nodes[oc[a]], new.nodes[nc[b]]) and t[a * (m + 1) + b] == t[(a + 1) * (m + 1) + b + 1] + 1:
-            out.append((a, b))
-            a += 1
-            b += 1
-        elif t[(a + 1) * (m + 1) + b] >= t[a * (m + 1) + b + 1]:
-            a += 1
-        else:
-            b += 1
+    var out = List[Tuple[Int, Int]](capacity=min(n, m))
+    var head = 0
+    while head < n and head < m and same_key(old.nodes[oc[head]], new.nodes[nc[head]]):
+        out.append((head, head))
+        head += 1
+    var tail = 0
+    while tail < n - head and tail < m - head and same_key(old.nodes[oc[n - 1 - tail]], new.nodes[nc[m - 1 - tail]]):
+        tail += 1
+    if head + tail < n and head + tail < m:  # (what's between: each distinct key numbered)
+        var ids = Dict[String, Int]()
+        var a = _numbered(old, oc, head, n - tail, ids)
+        var b = _numbered(new, nc, head, m - tail, ids)
+        for p in _run_of(a, b, len(ids)):
+            out.append((head + p[0], head + p[1]))
+    for k in range(tail):
+        out.append((n - tail + k, m - tail + k))
     return out^
+
+
+def _numbered(v: View, children: List[Int], start: Int, end: Int, mut ids: Dict[String, Int]) -> List[Int]:
+    """Children start..end by their same_key, as numbers."""
+    var out = List[Int](capacity=end - start)
+    for k in range(start, end):
+        ref n = v.nodes[children[k]]
+        var key = String(n.kind) + "/" + String(n.style) + "/" + n.name
+        var id = ids.get(key, len(ids))
+        if id == len(ids):
+            ids[key] = id
+        out.append(id)
+    return out^
+
+
+def _run_of(a: List[Int], b: List[Int], keys: Int) -> List[Tuple[Int, Int]]:
+    """The longest common run of a and b (numbers below `keys`), as positions. Exact when no number comes twice on a side
+    (a sort, however large) or when at most MAX_EDITS were inserted and removed; past that, the k-th of a number pairs
+    with the k-th (in order, maybe not the longest)."""
+    var old_at = List[Int](length=keys, fill=-1)
+    var seen_b = List[Int](length=keys, fill=0)
+    var unique = True
+    for i in range(len(a)):
+        if old_at[a[i]] >= 0:
+            unique = False
+        old_at[a[i]] = i
+    for x in b:
+        seen_b[x] += 1
+        if seen_b[x] > 1:
+            unique = False
+    if unique:
+        var at = List[Int](capacity=len(b))
+        for x in b:
+            at.append(old_at[x])
+        return _rising(at)
+    var exact = List[Tuple[Int, Int]]()
+    if _edits(a, b, exact):
+        return exact^
+    var next = List[Int](length=len(a), fill=-1)  # next[i]: the next place of a[i]'s number in a
+    var first = List[Int](length=keys, fill=-1)
+    for i in range(len(a) - 1, -1, -1):
+        next[i] = first[a[i]]
+        first[a[i]] = i
+    var at = List[Int](capacity=len(b))
+    for x in b:
+        at.append(first[x])
+        if first[x] >= 0:
+            first[x] = next[first[x]]
+    return _rising(at)
+
+
+def _rising(at: List[Int]) -> List[Tuple[Int, Int]]:
+    """The longest rising run of at (-1: no place): (value, position)."""
+    var ends = List[Int]()  # ends[l]: the position that ends the best run of length l + 1
+    var before = List[Int](length=len(at), fill=-1)
+    for j in range(len(at)):
+        if at[j] < 0:
+            continue
+        var lo = 0
+        var hi = len(ends)
+        while lo < hi:
+            var mid = (lo + hi) // 2
+            if at[ends[mid]] < at[j]:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo > 0:
+            before[j] = ends[lo - 1]
+        if lo == len(ends):
+            ends.append(j)
+        else:
+            ends[lo] = j
+    var out = List[Tuple[Int, Int]]()
+    if len(ends) > 0:
+        var j = ends[len(ends) - 1]
+        while j >= 0:
+            out.append((at[j], j))
+            j = before[j]
+    out.reverse()
+    return out^
+
+
+def _edits(a: List[Int], b: List[Int], mut out: List[Tuple[Int, Int]]) -> Bool:
+    """Myers' shortest edit script ("An O(ND) Difference Algorithm", 1986): the pairs it leaves alone, or False past
+    MAX_EDITS edits."""
+    var n = len(a)
+    var m = len(b)
+    var most = min(n + m, MAX_EDITS)
+    var off = most + 1
+    var v = List[Int](length=2 * most + 3, fill=0)  # v[off + k]: how far along a, on diagonal k = x - y
+    var trace = List[Int]()  # v[off - d .. off + d] as it was before step d, one after another
+    var found = -1
+    for d in range(most + 1):
+        for k in range(-d, d + 1):
+            trace.append(v[off + k])
+        for k in range(-d, d + 1, 2):
+            var x: Int
+            if k == -d or (k != d and v[off + k - 1] < v[off + k + 1]):
+                x = v[off + k + 1]
+            else:
+                x = v[off + k - 1] + 1
+            while x < n and x - k < m and a[x] == b[x - k]:
+                x += 1
+            v[off + k] = x
+            if x >= n and x - k >= m:
+                found = d
+                break
+        if found >= 0:
+            break
+    if found < 0:
+        return False
+    var x = n
+    var y = m
+    for d in range(found, 0, -1):
+        var at = d * d + d  # (step d's saved row starts at d*d; its diagonal 0 is d further)
+        var k = x - y
+        var down = k == -d or (k != d and trace[at + k - 1] < trace[at + k + 1])
+        var pk = k + 1 if down else k - 1
+        var px = trace[at + pk]
+        var sx = px if down else px + 1  # (where the straight run of this step began)
+        while x > sx:
+            x -= 1
+            y -= 1
+            out.append((x, y))
+        x = px
+        y = px - pk
+    while x > 0:
+        x -= 1
+        y -= 1
+        out.append((x, y))
+    out.reverse()
+    return True
 
 
 def unkeep(new: View, n: Int, mut kept: List[Int]):
@@ -241,8 +370,11 @@ struct Reconciler:
         if resyncable(new.nodes[n]):
             var pairs = pairs_of(old, new, oc, nc)
             var changed = len(pairs) != len(oc) or len(pairs) != len(nc)
+            ref grid = new.nodes[n]
+            var ends = grid.kind == GRID and (grid.style == 1 or grid.hint == "E")  # (its last column is placed another way: an item that comes into it or leaves it is built again)
             for p in pairs:
-                if not self.keep(old, new, oc[p[0]], nc[p[1]]):
+                var moved = ends and (p[0] % max(grid.value, 1) == grid.value - 1) != (p[1] % max(grid.value, 1) == grid.value - 1)
+                if moved or not self.keep(old, new, oc[p[0]], nc[p[1]]):
                     unkeep(new, nc[p[1]], self.kept)
                     changed = True
             if changed:

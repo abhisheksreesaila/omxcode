@@ -1,0 +1,682 @@
+{
+ "nanoui_runs": [
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.0861,
+    "frame_p95": 0.0924,
+    "gpu_med": 0.2052,
+    "gpu_p95": 0.2249,
+    "instances": 1201,
+    "raster_med": 40.681
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.1698,
+    "frame_p95": 0.1793,
+    "gpu_med": 0.0912,
+    "gpu_p95": 0.0958,
+    "instances": 1201,
+    "raster_med": 2.33
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.6621,
+    "frame_p95": 0.6884,
+    "gpu_med": 0.0963,
+    "gpu_p95": 0.1037,
+    "instances": 1221,
+    "raster_med": 2.633
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0652,
+    "frame_p95": 0.0754,
+    "gpu_med": 0.1126,
+    "gpu_p95": 0.1302,
+    "instances": 813,
+    "raster_med": 2.477
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.0279,
+    "frame_p95": 0.0286,
+    "gpu_med": 0.1396,
+    "gpu_p95": 0.1421,
+    "instances": 325,
+    "raster_med": 33.099
+   }
+  },
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.0891,
+    "frame_p95": 0.0942,
+    "gpu_med": 0.2069,
+    "gpu_p95": 0.2101,
+    "instances": 1201,
+    "raster_med": 41.512
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.1762,
+    "frame_p95": 0.1886,
+    "gpu_med": 0.0908,
+    "gpu_p95": 0.0975,
+    "instances": 1201,
+    "raster_med": 2.342
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.6803,
+    "frame_p95": 0.7586,
+    "gpu_med": 0.0941,
+    "gpu_p95": 0.1087,
+    "instances": 1221,
+    "raster_med": 2.691
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0609,
+    "frame_p95": 0.0679,
+    "gpu_med": 0.0976,
+    "gpu_p95": 0.1048,
+    "instances": 813,
+    "raster_med": 2.602
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.029,
+    "frame_p95": 0.0357,
+    "gpu_med": 0.1402,
+    "gpu_p95": 0.1551,
+    "instances": 325,
+    "raster_med": 33.346
+   }
+  },
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.0875,
+    "frame_p95": 0.0934,
+    "gpu_med": 0.2074,
+    "gpu_p95": 0.214,
+    "instances": 1201,
+    "raster_med": 40.837
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.172,
+    "frame_p95": 0.1819,
+    "gpu_med": 0.0924,
+    "gpu_p95": 0.0957,
+    "instances": 1201,
+    "raster_med": 2.356
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.6778,
+    "frame_p95": 0.7011,
+    "gpu_med": 0.0923,
+    "gpu_p95": 0.1016,
+    "instances": 1221,
+    "raster_med": 2.713
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0589,
+    "frame_p95": 0.0641,
+    "gpu_med": 0.0983,
+    "gpu_p95": 0.103,
+    "instances": 813,
+    "raster_med": 2.61
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.0273,
+    "frame_p95": 0.0279,
+    "gpu_med": 0.1392,
+    "gpu_p95": 0.1421,
+    "instances": 325,
+    "raster_med": 33.44
+   }
+  }
+ ],
+ "omx_runs": [
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.0625,
+    "frame_p95": 0.0701,
+    "gpu_med": 0.2349,
+    "gpu_p95": 0.2386,
+    "raster_med": 27.5953,
+    "instances": 1201,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.1812,
+    "gpu_resolve": 0.0041
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.0827,
+    "frame_p95": 0.088,
+    "gpu_med": 0.1065,
+    "gpu_p95": 0.1093,
+    "raster_med": 0.8974,
+    "instances": 1201,
+    "gpu_upload": 0.0154,
+    "gpu_draw": 0.043,
+    "gpu_resolve": 0.0051
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.1755,
+    "frame_p95": 0.1827,
+    "gpu_med": 0.0925,
+    "gpu_p95": 0.098,
+    "raster_med": 0.5762,
+    "instances": 553,
+    "gpu_upload": 0.0154,
+    "gpu_draw": 0.0338,
+    "gpu_resolve": 0.0051
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0351,
+    "frame_p95": 0.039,
+    "gpu_med": 0.0856,
+    "gpu_p95": 0.0889,
+    "raster_med": 0.5724,
+    "instances": 583,
+    "gpu_upload": 0.0143,
+    "gpu_draw": 0.0307,
+    "gpu_resolve": 0.0041
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.0375,
+    "frame_p95": 0.041,
+    "gpu_med": 0.1394,
+    "gpu_p95": 0.1447,
+    "raster_med": 7.2029,
+    "instances": 325,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.0881,
+    "gpu_resolve": 0.0041
+   },
+   "whiteboard": {
+    "scene": "whiteboard",
+    "frame_med": 0.7395,
+    "frame_p95": 0.7725,
+    "gpu_med": 0.9755,
+    "gpu_p95": 1.0092,
+    "raster_med": 13.1284,
+    "instances": 201,
+    "gpu_upload": 0.0195,
+    "gpu_draw": 0.6892,
+    "gpu_resolve": 0.0051
+   },
+   "canvas": {
+    "scene": "canvas",
+    "frame_med": 1.054,
+    "frame_p95": 1.0916,
+    "gpu_med": 0.6259,
+    "gpu_p95": 0.9424,
+    "raster_med": 5.2804,
+    "instances": 2230,
+    "gpu_upload": 0.0451,
+    "gpu_draw": 0.1864,
+    "gpu_resolve": 0.0113
+   },
+   "mindmap": {
+    "scene": "mindmap",
+    "frame_med": 0.423,
+    "frame_p95": 0.4404,
+    "gpu_med": 0.5285,
+    "gpu_p95": 0.561,
+    "raster_med": 2.1366,
+    "instances": 2070,
+    "gpu_upload": 0.0276,
+    "gpu_draw": 0.2161,
+    "gpu_resolve": 0.0082
+   },
+   "document": {
+    "scene": "document",
+    "frame_med": 0.0736,
+    "frame_p95": 0.0791,
+    "gpu_med": 0.1111,
+    "gpu_p95": 0.1142,
+    "raster_med": 1.3213,
+    "instances": 1551,
+    "gpu_upload": 0.0143,
+    "gpu_draw": 0.0451,
+    "gpu_resolve": 0.0041
+   },
+   "table": {
+    "scene": "table",
+    "frame_med": 0.138,
+    "frame_p95": 0.1813,
+    "gpu_med": 0.1161,
+    "gpu_p95": 0.1364,
+    "raster_med": 1.0675,
+    "instances": 1179,
+    "gpu_upload": 0.0133,
+    "gpu_draw": 0.0553,
+    "gpu_resolve": 0.0041
+   }
+  },
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.069,
+    "frame_p95": 0.0748,
+    "gpu_med": 0.234,
+    "gpu_p95": 0.2597,
+    "raster_med": 27.3021,
+    "instances": 1201,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.1802,
+    "gpu_resolve": 0.0041
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.0827,
+    "frame_p95": 0.0872,
+    "gpu_med": 0.1007,
+    "gpu_p95": 0.1057,
+    "raster_med": 0.8954,
+    "instances": 1201,
+    "gpu_upload": 0.0143,
+    "gpu_draw": 0.0389,
+    "gpu_resolve": 0.0041
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.1746,
+    "frame_p95": 0.1823,
+    "gpu_med": 0.093,
+    "gpu_p95": 0.0984,
+    "raster_med": 0.6048,
+    "instances": 553,
+    "gpu_upload": 0.0164,
+    "gpu_draw": 0.0338,
+    "gpu_resolve": 0.0051
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0341,
+    "frame_p95": 0.0379,
+    "gpu_med": 0.102,
+    "gpu_p95": 0.1074,
+    "raster_med": 0.5905,
+    "instances": 583,
+    "gpu_upload": 0.0184,
+    "gpu_draw": 0.041,
+    "gpu_resolve": 0.0051
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.0382,
+    "frame_p95": 0.042,
+    "gpu_med": 0.14,
+    "gpu_p95": 0.1458,
+    "raster_med": 7.1934,
+    "instances": 325,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.0881,
+    "gpu_resolve": 0.0041
+   },
+   "whiteboard": {
+    "scene": "whiteboard",
+    "frame_med": 0.741,
+    "frame_p95": 0.7569,
+    "gpu_med": 0.9751,
+    "gpu_p95": 0.9866,
+    "raster_med": 12.5682,
+    "instances": 201,
+    "gpu_upload": 0.0195,
+    "gpu_draw": 0.6871,
+    "gpu_resolve": 0.0051
+   },
+   "canvas": {
+    "scene": "canvas",
+    "frame_med": 1.0441,
+    "frame_p95": 1.067,
+    "gpu_med": 0.6166,
+    "gpu_p95": 0.843,
+    "raster_med": 5.1532,
+    "instances": 2230,
+    "gpu_upload": 0.044,
+    "gpu_draw": 0.1812,
+    "gpu_resolve": 0.0102
+   },
+   "mindmap": {
+    "scene": "mindmap",
+    "frame_med": 0.419,
+    "frame_p95": 0.4259,
+    "gpu_med": 0.4673,
+    "gpu_p95": 0.5321,
+    "raster_med": 2.0572,
+    "instances": 2070,
+    "gpu_upload": 0.0256,
+    "gpu_draw": 0.2109,
+    "gpu_resolve": 0.0082
+   },
+   "document": {
+    "scene": "document",
+    "frame_med": 0.0738,
+    "frame_p95": 0.0955,
+    "gpu_med": 0.1265,
+    "gpu_p95": 0.1494,
+    "raster_med": 1.3375,
+    "instances": 1551,
+    "gpu_upload": 0.0174,
+    "gpu_draw": 0.0553,
+    "gpu_resolve": 0.0051
+   },
+   "table": {
+    "scene": "table",
+    "frame_med": 0.1352,
+    "frame_p95": 0.143,
+    "gpu_med": 0.115,
+    "gpu_p95": 0.1222,
+    "raster_med": 0.9448,
+    "instances": 1179,
+    "gpu_upload": 0.0133,
+    "gpu_draw": 0.0553,
+    "gpu_resolve": 0.0041
+   }
+  },
+  {
+   "boxes": {
+    "scene": "boxes",
+    "frame_med": 0.0732,
+    "frame_p95": 0.1088,
+    "gpu_med": 0.2382,
+    "gpu_p95": 0.274,
+    "raster_med": 28.7133,
+    "instances": 1201,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.1812,
+    "gpu_resolve": 0.0041
+   },
+   "text": {
+    "scene": "text",
+    "frame_med": 0.0843,
+    "frame_p95": 0.0898,
+    "gpu_med": 0.1092,
+    "gpu_p95": 0.1137,
+    "raster_med": 0.9229,
+    "instances": 1201,
+    "gpu_upload": 0.0164,
+    "gpu_draw": 0.0451,
+    "gpu_resolve": 0.0051
+   },
+   "scroll": {
+    "scene": "scroll",
+    "frame_med": 0.1763,
+    "frame_p95": 0.1836,
+    "gpu_med": 0.0922,
+    "gpu_p95": 0.0969,
+    "raster_med": 0.5839,
+    "instances": 553,
+    "gpu_upload": 0.0154,
+    "gpu_draw": 0.0338,
+    "gpu_resolve": 0.0051
+   },
+   "list": {
+    "scene": "list",
+    "frame_med": 0.0354,
+    "frame_p95": 0.0373,
+    "gpu_med": 0.0986,
+    "gpu_p95": 0.1023,
+    "raster_med": 0.6721,
+    "instances": 583,
+    "gpu_upload": 0.0174,
+    "gpu_draw": 0.0379,
+    "gpu_resolve": 0.0051
+   },
+   "dashboard": {
+    "scene": "dashboard",
+    "frame_med": 0.0382,
+    "frame_p95": 0.0399,
+    "gpu_med": 0.1403,
+    "gpu_p95": 0.1437,
+    "raster_med": 7.2867,
+    "instances": 325,
+    "gpu_upload": 0.0123,
+    "gpu_draw": 0.0891,
+    "gpu_resolve": 0.0041
+   },
+   "whiteboard": {
+    "scene": "whiteboard",
+    "frame_med": 0.7454,
+    "frame_p95": 0.7638,
+    "gpu_med": 1.0092,
+    "gpu_p95": 1.0403,
+    "raster_med": 13.1858,
+    "instances": 201,
+    "gpu_upload": 0.0215,
+    "gpu_draw": 0.7209,
+    "gpu_resolve": 0.0061
+   },
+   "canvas": {
+    "scene": "canvas",
+    "frame_med": 1.0533,
+    "frame_p95": 1.0853,
+    "gpu_med": 0.6073,
+    "gpu_p95": 0.8802,
+    "raster_med": 5.2408,
+    "instances": 2230,
+    "gpu_upload": 0.041,
+    "gpu_draw": 0.17,
+    "gpu_resolve": 0.0102
+   },
+   "mindmap": {
+    "scene": "mindmap",
+    "frame_med": 0.425,
+    "frame_p95": 0.4462,
+    "gpu_med": 0.5317,
+    "gpu_p95": 0.5645,
+    "raster_med": 2.1876,
+    "instances": 2070,
+    "gpu_upload": 0.0266,
+    "gpu_draw": 0.2171,
+    "gpu_resolve": 0.0082
+   },
+   "document": {
+    "scene": "document",
+    "frame_med": 0.0726,
+    "frame_p95": 0.0779,
+    "gpu_med": 0.1104,
+    "gpu_p95": 0.116,
+    "raster_med": 1.3144,
+    "instances": 1551,
+    "gpu_upload": 0.0143,
+    "gpu_draw": 0.0451,
+    "gpu_resolve": 0.0041
+   },
+   "table": {
+    "scene": "table",
+    "frame_med": 0.1366,
+    "frame_p95": 0.1427,
+    "gpu_med": 0.1157,
+    "gpu_p95": 0.1191,
+    "raster_med": 0.9459,
+    "instances": 1179,
+    "gpu_upload": 0.0133,
+    "gpu_draw": 0.0553,
+    "gpu_resolve": 0.0041
+   }
+  }
+ ],
+ "nanoui": {
+  "boxes": {
+   "scene": "boxes",
+   "frame_med": 0.0861,
+   "frame_p95": 0.0924,
+   "gpu_med": 0.2052,
+   "gpu_p95": 0.2101,
+   "instances": 1201,
+   "raster_med": 40.681
+  },
+  "text": {
+   "scene": "text",
+   "frame_med": 0.1698,
+   "frame_p95": 0.1793,
+   "gpu_med": 0.0908,
+   "gpu_p95": 0.0957,
+   "instances": 1201,
+   "raster_med": 2.33
+  },
+  "scroll": {
+   "scene": "scroll",
+   "frame_med": 0.6621,
+   "frame_p95": 0.6884,
+   "gpu_med": 0.0923,
+   "gpu_p95": 0.1016,
+   "instances": 1221,
+   "raster_med": 2.633
+  },
+  "list": {
+   "scene": "list",
+   "frame_med": 0.0589,
+   "frame_p95": 0.0641,
+   "gpu_med": 0.0976,
+   "gpu_p95": 0.103,
+   "instances": 813,
+   "raster_med": 2.477
+  },
+  "dashboard": {
+   "scene": "dashboard",
+   "frame_med": 0.0273,
+   "frame_p95": 0.0279,
+   "gpu_med": 0.1392,
+   "gpu_p95": 0.1421,
+   "instances": 325,
+   "raster_med": 33.099
+  }
+ },
+ "omx": {
+  "boxes": {
+   "scene": "boxes",
+   "frame_med": 0.0625,
+   "frame_p95": 0.0701,
+   "gpu_med": 0.234,
+   "gpu_p95": 0.2386,
+   "raster_med": 27.3021,
+   "instances": 1201,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.1802,
+   "gpu_resolve": 0.0041
+  },
+  "text": {
+   "scene": "text",
+   "frame_med": 0.0827,
+   "frame_p95": 0.0872,
+   "gpu_med": 0.1007,
+   "gpu_p95": 0.1057,
+   "raster_med": 0.8954,
+   "instances": 1201,
+   "gpu_upload": 0.0143,
+   "gpu_draw": 0.0389,
+   "gpu_resolve": 0.0041
+  },
+  "scroll": {
+   "scene": "scroll",
+   "frame_med": 0.1746,
+   "frame_p95": 0.1823,
+   "gpu_med": 0.0922,
+   "gpu_p95": 0.0969,
+   "raster_med": 0.5762,
+   "instances": 553,
+   "gpu_upload": 0.0154,
+   "gpu_draw": 0.0338,
+   "gpu_resolve": 0.0051
+  },
+  "list": {
+   "scene": "list",
+   "frame_med": 0.0341,
+   "frame_p95": 0.0373,
+   "gpu_med": 0.0856,
+   "gpu_p95": 0.0889,
+   "raster_med": 0.5724,
+   "instances": 583,
+   "gpu_upload": 0.0143,
+   "gpu_draw": 0.0307,
+   "gpu_resolve": 0.0041
+  },
+  "dashboard": {
+   "scene": "dashboard",
+   "frame_med": 0.0375,
+   "frame_p95": 0.0399,
+   "gpu_med": 0.1394,
+   "gpu_p95": 0.1437,
+   "raster_med": 7.1934,
+   "instances": 325,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0881,
+   "gpu_resolve": 0.0041
+  },
+  "whiteboard": {
+   "scene": "whiteboard",
+   "frame_med": 0.7395,
+   "frame_p95": 0.7569,
+   "gpu_med": 0.9751,
+   "gpu_p95": 0.9866,
+   "raster_med": 12.5682,
+   "instances": 201,
+   "gpu_upload": 0.0195,
+   "gpu_draw": 0.6871,
+   "gpu_resolve": 0.0051
+  },
+  "canvas": {
+   "scene": "canvas",
+   "frame_med": 1.0441,
+   "frame_p95": 1.067,
+   "gpu_med": 0.6073,
+   "gpu_p95": 0.843,
+   "raster_med": 5.1532,
+   "instances": 2230,
+   "gpu_upload": 0.041,
+   "gpu_draw": 0.17,
+   "gpu_resolve": 0.0102
+  },
+  "mindmap": {
+   "scene": "mindmap",
+   "frame_med": 0.419,
+   "frame_p95": 0.4259,
+   "gpu_med": 0.4673,
+   "gpu_p95": 0.5321,
+   "raster_med": 2.0572,
+   "instances": 2070,
+   "gpu_upload": 0.0256,
+   "gpu_draw": 0.2109,
+   "gpu_resolve": 0.0082
+  },
+  "document": {
+   "scene": "document",
+   "frame_med": 0.0726,
+   "frame_p95": 0.0779,
+   "gpu_med": 0.1104,
+   "gpu_p95": 0.1142,
+   "raster_med": 1.3144,
+   "instances": 1551,
+   "gpu_upload": 0.0143,
+   "gpu_draw": 0.0451,
+   "gpu_resolve": 0.0041
+  },
+  "table": {
+   "scene": "table",
+   "frame_med": 0.1352,
+   "frame_p95": 0.1427,
+   "gpu_med": 0.115,
+   "gpu_p95": 0.1191,
+   "raster_med": 0.9448,
+   "instances": 1179,
+   "gpu_upload": 0.0133,
+   "gpu_draw": 0.0553,
+   "gpu_resolve": 0.0041
+  }
+ }
+}

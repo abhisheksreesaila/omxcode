@@ -1,0 +1,105 @@
+1 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1150, "frame_p95": 0.1203, "gpu_med": 0.9604, "gpu_p95": 1.4740, "instances": 1201}
+1 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1147, "frame_p95": 0.1192, "gpu_med": 0.9613, "gpu_p95": 1.2480, "instances": 1201}
+1 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1143, "frame_p95": 0.1190, "gpu_med": 0.9602, "gpu_p95": 1.2475, "instances": 1201}
+1 NANOUI RESULT {"scene": "text", "frame_med": 0.1364, "frame_p95": 0.1662, "gpu_med": 0.0640, "gpu_p95": 0.0659, "instances": 1201}
+1 NANOUI RESULT {"scene": "text", "frame_med": 0.1362, "frame_p95": 0.1732, "gpu_med": 0.0643, "gpu_p95": 0.0662, "instances": 1201}
+1 NANOUI RESULT {"scene": "text", "frame_med": 0.1362, "frame_p95": 0.1690, "gpu_med": 0.0641, "gpu_p95": 0.0658, "instances": 1201}
+1 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5222, "frame_p95": 0.5543, "gpu_med": 0.0507, "gpu_p95": 0.0572, "instances": 1221}
+1 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5194, "frame_p95": 0.5549, "gpu_med": 0.0508, "gpu_p95": 0.0570, "instances": 1221}
+1 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5178, "frame_p95": 0.5509, "gpu_med": 0.0507, "gpu_p95": 0.0572, "instances": 1221}
+1 NANOUI RESULT {"scene": "list", "frame_med": 0.0380, "frame_p95": 0.0433, "gpu_med": 0.0515, "gpu_p95": 0.0583, "instances": 813}
+1 NANOUI RESULT {"scene": "list", "frame_med": 0.0380, "frame_p95": 0.0435, "gpu_med": 0.0512, "gpu_p95": 0.0578, "instances": 813}
+1 NANOUI RESULT {"scene": "list", "frame_med": 0.0379, "frame_p95": 0.0430, "gpu_med": 0.0516, "gpu_p95": 0.0585, "instances": 813}
+1 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0576, "frame_p95": 0.0607, "gpu_med": 0.6259, "gpu_p95": 0.7769, "instances": 325}
+1 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0564, "frame_p95": 0.0607, "gpu_med": 0.6260, "gpu_p95": 0.8976, "instances": 325}
+1 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0574, "frame_p95": 0.0607, "gpu_med": 0.6269, "gpu_p95": 0.7828, "instances": 325}
+1 OMX RESULT {"scene": "boxes", "frame_med": 0.062, "frame_p95": 0.068, "gpu_med": 0.8006, "gpu_p95": 1.0927, "instances": 1201}
+1 OMX RESULT {"scene": "text", "frame_med": 0.081, "frame_p95": 0.103, "gpu_med": 0.0713, "gpu_p95": 0.0754, "instances": 1201}
+1 OMX RESULT {"scene": "scroll", "frame_med": 0.191, "frame_p95": 0.216, "gpu_med": 0.0598, "gpu_p95": 0.0626, "instances": 553}
+1 OMX RESULT {"scene": "list", "frame_med": 0.022, "frame_p95": 0.028, "gpu_med": 0.0585, "gpu_p95": 0.0603, "instances": 583}
+1 OMX RESULT {"scene": "dashboard", "frame_med": 0.041, "frame_p95": 0.047, "gpu_med": 0.3291, "gpu_p95": 0.3971, "instances": 325}
+2 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1145, "frame_p95": 0.1193, "gpu_med": 0.9615, "gpu_p95": 1.4831, "instances": 1201}
+2 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1126, "frame_p95": 0.1188, "gpu_med": 0.9603, "gpu_p95": 1.2426, "instances": 1201}
+2 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1122, "frame_p95": 0.1186, "gpu_med": 0.9620, "gpu_p95": 1.4916, "instances": 1201}
+2 NANOUI RESULT {"scene": "text", "frame_med": 0.1374, "frame_p95": 0.1700, "gpu_med": 0.0638, "gpu_p95": 0.0654, "instances": 1201}
+2 NANOUI RESULT {"scene": "text", "frame_med": 0.1368, "frame_p95": 0.1689, "gpu_med": 0.0642, "gpu_p95": 0.0660, "instances": 1201}
+2 NANOUI RESULT {"scene": "text", "frame_med": 0.1363, "frame_p95": 0.1697, "gpu_med": 0.0641, "gpu_p95": 0.0659, "instances": 1201}
+2 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5480, "frame_p95": 0.5703, "gpu_med": 0.0507, "gpu_p95": 0.0578, "instances": 1221}
+2 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5492, "frame_p95": 0.5663, "gpu_med": 0.0509, "gpu_p95": 0.0581, "instances": 1221}
+2 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5481, "frame_p95": 0.5654, "gpu_med": 0.0508, "gpu_p95": 0.0574, "instances": 1221}
+2 NANOUI RESULT {"scene": "list", "frame_med": 0.0386, "frame_p95": 0.0458, "gpu_med": 0.0514, "gpu_p95": 0.0581, "instances": 813}
+2 NANOUI RESULT {"scene": "list", "frame_med": 0.0385, "frame_p95": 0.0459, "gpu_med": 0.0513, "gpu_p95": 0.0584, "instances": 813}
+2 NANOUI RESULT {"scene": "list", "frame_med": 0.0385, "frame_p95": 0.0447, "gpu_med": 0.0514, "gpu_p95": 0.0580, "instances": 813}
+2 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0567, "frame_p95": 0.0607, "gpu_med": 0.6271, "gpu_p95": 0.7737, "instances": 325}
+2 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0562, "frame_p95": 0.0605, "gpu_med": 0.6264, "gpu_p95": 0.9057, "instances": 325}
+2 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0566, "frame_p95": 0.0608, "gpu_med": 0.6265, "gpu_p95": 0.9050, "instances": 325}
+2 OMX RESULT {"scene": "boxes", "frame_med": 0.064, "frame_p95": 0.068, "gpu_med": 0.8007, "gpu_p95": 1.0836, "instances": 1201}
+2 OMX RESULT {"scene": "text", "frame_med": 0.081, "frame_p95": 0.101, "gpu_med": 0.0711, "gpu_p95": 0.0749, "instances": 1201}
+2 OMX RESULT {"scene": "scroll", "frame_med": 0.19, "frame_p95": 0.213, "gpu_med": 0.0595, "gpu_p95": 0.0626, "instances": 553}
+2 OMX RESULT {"scene": "list", "frame_med": 0.022, "frame_p95": 0.046, "gpu_med": 0.0585, "gpu_p95": 0.0606, "instances": 583}
+2 OMX RESULT {"scene": "dashboard", "frame_med": 0.044, "frame_p95": 0.047, "gpu_med": 0.3299, "gpu_p95": 0.4012, "instances": 325}
+3 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1157, "frame_p95": 0.1197, "gpu_med": 0.9591, "gpu_p95": 1.2591, "instances": 1201}
+3 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1147, "frame_p95": 0.1190, "gpu_med": 0.9605, "gpu_p95": 1.4780, "instances": 1201}
+3 NANOUI RESULT {"scene": "boxes", "frame_med": 0.1130, "frame_p95": 0.1180, "gpu_med": 0.9600, "gpu_p95": 1.4870, "instances": 1201}
+3 NANOUI RESULT {"scene": "text", "frame_med": 0.1355, "frame_p95": 0.1670, "gpu_med": 0.0635, "gpu_p95": 0.0655, "instances": 1201}
+3 NANOUI RESULT {"scene": "text", "frame_med": 0.1355, "frame_p95": 0.1717, "gpu_med": 0.0642, "gpu_p95": 0.0658, "instances": 1201}
+3 NANOUI RESULT {"scene": "text", "frame_med": 0.1355, "frame_p95": 0.1662, "gpu_med": 0.0642, "gpu_p95": 0.0658, "instances": 1201}
+3 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5550, "frame_p95": 0.5744, "gpu_med": 0.0507, "gpu_p95": 0.0568, "instances": 1221}
+3 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5572, "frame_p95": 0.5758, "gpu_med": 0.0507, "gpu_p95": 0.0570, "instances": 1221}
+3 NANOUI RESULT {"scene": "scroll", "frame_med": 0.5545, "frame_p95": 0.5740, "gpu_med": 0.0507, "gpu_p95": 0.0571, "instances": 1221}
+3 NANOUI RESULT {"scene": "list", "frame_med": 0.0385, "frame_p95": 0.0443, "gpu_med": 0.0512, "gpu_p95": 0.0581, "instances": 813}
+3 NANOUI RESULT {"scene": "list", "frame_med": 0.0385, "frame_p95": 0.0438, "gpu_med": 0.0512, "gpu_p95": 0.0576, "instances": 813}
+3 NANOUI RESULT {"scene": "list", "frame_med": 0.0384, "frame_p95": 0.0468, "gpu_med": 0.0514, "gpu_p95": 0.0581, "instances": 813}
+3 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0575, "frame_p95": 0.0605, "gpu_med": 0.6268, "gpu_p95": 0.9037, "instances": 325}
+3 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0572, "frame_p95": 0.0606, "gpu_med": 0.6267, "gpu_p95": 0.8969, "instances": 325}
+3 NANOUI RESULT {"scene": "dashboard", "frame_med": 0.0578, "frame_p95": 0.0605, "gpu_med": 0.6268, "gpu_p95": 0.9005, "instances": 325}
+3 OMX RESULT {"scene": "boxes", "frame_med": 0.062, "frame_p95": 0.068, "gpu_med": 0.8001, "gpu_p95": 1.0716, "instances": 1201}
+3 OMX RESULT {"scene": "text", "frame_med": 0.081, "frame_p95": 0.101, "gpu_med": 0.0711, "gpu_p95": 0.0748, "instances": 1201}
+3 OMX RESULT {"scene": "scroll", "frame_med": 0.19, "frame_p95": 0.208, "gpu_med": 0.0596, "gpu_p95": 0.0623, "instances": 553}
+3 OMX RESULT {"scene": "list", "frame_med": 0.022, "frame_p95": 0.028, "gpu_med": 0.0552, "gpu_p95": 0.0589, "instances": 583}
+3 OMX RESULT {"scene": "dashboard", "frame_med": 0.043, "frame_p95": 0.047, "gpu_med": 0.3309, "gpu_p95": 0.4002, "instances": 325}
+== tshadow
+  Metal vs CPU blur 0.0 radius 0.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.1 levels off
+  Metal vs CPU blur 0.0 radius 6.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.11 levels off
+  Metal vs CPU blur 0.0 radius 24.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.3 levels off
+  Metal vs CPU blur 2.0 radius 0.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.11 levels off
+  Metal vs CPU blur 2.0 radius 6.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.12 levels off
+  Metal vs CPU blur 2.0 radius 24.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.29 levels off
+  Metal vs CPU blur 6.0 radius 0.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.13 levels off
+  Metal vs CPU blur 6.0 radius 6.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.15 levels off
+  Metal vs CPU blur 6.0 radius 24.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.3 levels off
+  Metal vs CPU blur 16.0 radius 0.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.49 levels off
+  Metal vs CPU blur 16.0 radius 6.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.49 levels off
+  Metal vs CPU blur 16.0 radius 24.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 11.52 levels off
+  Metal vs CPU blur 32.0 radius 0.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 13.09 levels off
+  Metal vs CPU blur 32.0 radius 6.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 13.07 levels off
+  Metal vs CPU blur 32.0 radius 24.0 : mean 0.0 levels, 0.0 % far; 0 of 43200 pixels differ at all; without the shadows 12.91 levels off
+  Metal vs CPU clipped, zoom 1.6 : mean 0.0 levels, 0.0 % far; 0 of 66000 pixels differ at all; without the shadows 12.25 levels off
+metal shadow: ok
+== tmetal
+Metal device: Apple M4
+   rect : mean 0.0019 levels, 0.0 % far; 70 of 24000 pixels differ at all; 11322 inked; render 0.283 ms (GPU 0.032 ms)
+   rounded rect : mean 0.0009 levels, 0.0 % far; 42 of 24000 pixels differ at all; 12099 inked; render 0.279 ms (GPU 0.033 ms)
+   circle : mean 0.0 levels, 0.0 % far; 2 of 24000 pixels differ at all; 7250 inked; render 0.233 ms (GPU 0.027 ms)
+   line : mean 0.0038 levels, 0.0 % far; 271 of 24000 pixels differ at all; 2240 inked; render 0.303 ms (GPU 0.027 ms)
+   text regular : mean 0.0013 levels, 0.0 % far; 33 of 24000 pixels differ at all; 3781 inked; render 0.264 ms (GPU 0.038 ms)
+   text medium : mean 0.0001 levels, 0.0 % far; 2 of 24000 pixels differ at all; 3868 inked; render 0.301 ms (GPU 0.046 ms)
+   text mono : mean 0.0001 levels, 0.0 % far; 5 of 24000 pixels differ at all; 3595 inked; render 0.259 ms (GPU 0.023 ms)
+   text mono bold : mean 0.0002 levels, 0.0 % far; 7 of 24000 pixels differ at all; 4155 inked; render 0.265 ms (GPU 0.021 ms)
+   slanted text : mean 0.0001 levels, 0.0 % far; 5 of 24000 pixels differ at all; 3141 inked; render 0.26 ms (GPU 0.019 ms)
+   image : mean 0.0 levels, 0.0 % far; 0 of 24000 pixels differ at all; 6000 inked; render 0.259 ms (GPU 0.017 ms)
+   polygon : mean 0.0018 levels, 0.0 % far; 4 of 24000 pixels differ at all; 6659 inked; render 0.269 ms (GPU 0.024 ms)
+   clipped : mean 0.0014 levels, 0.0 % far; 5 of 24000 pixels differ at all; 17960 inked; render 0.285 ms (GPU 0.029 ms)
+   transformed layer : mean 0.0041 levels, 0.0 % far; 70 of 24000 pixels differ at all; 23532 inked; render 0.288 ms (GPU 0.024 ms)
+   fonttext runs and icons (zoom 1.0) : mean 0.0 levels, 0.0 % far; 0 of 168000 pixels differ at all; 22862 inked; render 0.277 ms (GPU 0.03 ms)
+   fonttext runs and icons (zoom 4.0) : mean 0.0 levels, 0.0 % far; 0 of 672000 pixels differ at all; 88636 inked; render 0.269 ms (GPU 0.055 ms)
+   whiteboard : mean 0.0055 levels, 0.0041 % far; 1321 of 700000 pixels differ at all; 117708 inked; render 0.763 ms (GPU 0.261 ms)
+   canvas (seeded note, k 1.0) : mean 0.0002 levels, 0.0 % far; 331 of 1024000 pixels differ at all; 361659 inked; render 0.48 ms (GPU 0.144 ms)
+   canvas (seeded note, k 0.45) : mean 0.0011 levels, 0.0 % far; 1482 of 1024000 pixels differ at all; 249846 inked; render 0.774 ms (GPU 0.338 ms)
+   mindmap (100 topics) : mean 0.0018 levels, 0.0 % far; 4459 of 1260000 pixels differ at all; 131058 inked; render 0.424 ms (GPU 0.106 ms)
+   mindmap pan (300 topics, 1699x1384 at 1.6x): layers rebuilt in 29 pan frames 0 ; build per frame p50 0.042 ms, max 0.052 ms; last frame mean 0.001 levels, 0.0 % far
+   a kept text layer zoomed 1 → 2: rebuilt 1 ; vs the CPU executor mean 0.0
+   pages reset between frames: rebuilt 1 ; vs the CPU executor mean 0.0
+   pages reset mid-frame (resets 1 ): vs the CPU executor mean 0.0
+   ink in flight (16 frames, two in flight, GPU 3.162 ms a frame): page grown 15 ; wet layer rebuilt while busy (into its spare) 1 ; drains 0 ; frames checked 16 , worst mean 0.0002 levels
+gpu2d metal: ok

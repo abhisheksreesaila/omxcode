@@ -26,3 +26,12 @@ Vendored source (vendor/, each with its licence in vendor/LICENSES/):
 - Flare v0.13.1, Copyright (c) 2025 Ehsan M. Kermani, MIT License: vendor/flare, licence in vendor/LICENSES/flare.txt.
 - json v0.4.2, Copyright (c) 2025 Ehsan M. Kermani, MIT License: vendor/json, licence in vendor/LICENSES/json.txt
   (its own third-party notice in vendor/LICENSES/json-NOTICE.txt).
+
+Ideas and adapted code (goal 80):
+- nanoui (github.com/justrach/nanoui), Copyright (c) 2026 Rach Pradhan, MIT License (vendor/LICENSES/nanoui.txt):
+  bench/nanoui/scenes.mojo is a Mojo version of its hillclimb scenes, bench/nanoui/glrun.zig and nanoui-gl.patch are
+  adapted from its harness and tests (used only to time it); mojoui.fonttext's ASCII fast path follows the idea of its
+  shaper.zig (the code is our own).
+- GPUI (Copyright 2022-2025 Zed Industries, Inc., Apache License 2.0, vendor/LICENSES/gpui-Apache-2.0.txt): the rounded-box
+  shadow of mojoui.shadow, gpu2d_gl and gpu2d_metal is adapted from its shader (changed: exact along the straight middle,
+  exact-weight slices at the corners, columns above the diagonal), after Evan Wallace's "Fast Rounded Rectangle Shadows" (madebyevan.com/shaders).

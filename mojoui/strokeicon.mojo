@@ -13,6 +13,7 @@ from std.math import sqrt, cos, sin, atan2, pi
 from mojoui.lucide_nodes import lucide_node
 from mojoui.shared import get_shared, put_shared
 from mojoui.scene import Painter
+from mojoui.bitmap import Bitmap, make_bitmap
 
 comptime SLOT_ICONS = 231
 
@@ -20,7 +21,7 @@ comptime SLOT_ICONS = 231
 @fieldwise_init
 struct IconImage(Copyable, Movable):
     var w: Int
-    var px: List[UInt32]
+    var px: Bitmap
 
 
 struct IconCache(Movable):
@@ -381,7 +382,7 @@ def icon_pixels(name: String, size_dev: Int, color: UInt32, stroke: Float64) -> 
             if cov > 0:
                 var al = Int(min(cov, 1.0) * a + 0.5)
                 px[yy * size_dev + xx] = (color & 0x00FFFFFF) | (UInt32(al) << 24)
-    c[].store.append(IconImage(size_dev, px^))
+    c[].store.append(IconImage(size_dev, make_bitmap(px^, size_dev, size_dev)))
     c[].images[key] = len(c[].store) - 1
     return len(c[].store) - 1
 
@@ -396,4 +397,4 @@ def draw_icon[P: Painter](mut p: P, name: String, x: Float64, y: Float64, size: 
     # whole device pixels, as the browser places an svg box
     var xd = Float64(Int(x * k + 0.5)) / k
     var yd = Float64(Int(y * k + 0.5)) / k
-    p.image(c[].store[i].px, dev, dev, xd, yd, Float64(dev) / k, Float64(dev) / k)
+    p.bitmap(c[].store[i].px, xd, yd, Float64(dev) / k, Float64(dev) / k)

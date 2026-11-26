@@ -18,8 +18,8 @@
 # Within a group runs keep their order; groups keep the order of their first run. A group is searched for at most
 # SEARCH groups back (the cost stays linear).
 
-from mojoui.gpu2d import (Frame2D, Run, Layer2D, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
-                          IMAGE_FLOATS, POLY_FLOATS, SHAPE_CAPSULE, NO_CLIP)
+from mojoui.gpu2d import (_grow, Frame2D, Run, Layer2D, PIPE_QUAD, PIPE_GLYPH, PIPE_IMAGE, PIPE_POLY, QUAD_FLOATS, GLYPH_FLOATS,
+                          IMAGE_FLOATS, POLY_FLOATS, SHAPE_CAPSULE, SHAPE_SHADOW, NO_CLIP)
 
 comptime PAD = 4.0  # pixels around each instance's box (see above)
 comptime SEARCH = 64  # groups looked back through for one to join
@@ -51,6 +51,12 @@ def _box(f: Frame2D, pipe: Int, i: Int, pad: Float32) -> SIMD[DType.float32, 4]:
             y0 = min(f.quads[at + 1], f.quads[at + 3]) - hw
             x1 = max(f.quads[at], f.quads[at + 2]) + hw
             y1 = max(f.quads[at + 1], f.quads[at + 3]) + hw
+        elif Int(f.quads[at + 5]) == SHAPE_SHADOW:  # (goal 80: a shadow reaches 3 sigma past its box)
+            var g = 3 * f.quads[at + 7] + 1
+            x0 = f.quads[at] - g
+            y0 = f.quads[at + 1] - g
+            x1 = f.quads[at] + f.quads[at + 2] + g
+            y1 = f.quads[at + 1] + f.quads[at + 3] + g
         else:
             x0 = f.quads[at]
             y0 = f.quads[at + 1]
@@ -136,6 +142,8 @@ struct _Plan(Movable):
 def _plan(f: Frame2D, layer: Layer2D) -> _Plan:
     var p = _Plan()
     var pad = Float32(PAD / layer.k) if layer.k > 0 else Float32(PAD)
+    p.box_first.reserve(layer.runs + 1)
+    p.hull.reserve(layer.runs)
     for r in range(layer.runs):
         var run = f.runs[layer.first_run + r]
         p.box_first.append(len(p.boxes))
@@ -180,8 +188,10 @@ def _plan(f: Frame2D, layer: Layer2D) -> _Plan:
 
 
 def _copy(mut dst: List[Float32], src: List[Float32], first: Int, n: Int):
-    for i in range(first, first + n):
-        dst.append(src[i])
+    var p = _grow(dst, n)
+    var q = src.unsafe_ptr()
+    for i in range(n):
+        p.unsafe_offset(i)[] = q.unsafe_offset(first + i)[]
 
 
 def merge_runs(mut src: Frame2D, mut dst: Frame2D):
@@ -199,7 +209,7 @@ def merge_runs(mut src: Frame2D, mut dst: Frame2D):
     dst.width = src.width
     dst.height = src.height
     dst.scale = src.scale
-    swap(dst.pixels, src.pixels)
+    swap(dst.pics, src.pics)
     for li in range(len(src.layers)):
         ref layer = src.layers[li]
         var first_run = len(dst.runs)

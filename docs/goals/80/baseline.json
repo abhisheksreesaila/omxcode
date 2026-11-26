@@ -1,0 +1,126 @@
+{
+ "commit": "3686e45b",
+ "protocol": "goal 80 D-8012: base mojoui/ (3686e45b) with bench/nanoui/scenes.mojo of 184973be (300 ms warm-up), 3 runs, the lowest of each metric; replaces the cold-GPU single run of c9fbd9bb",
+ "scenes": {
+  "boxes": {
+   "scene": "boxes",
+   "frame_med": 0.0492,
+   "frame_p95": 0.0519,
+   "gpu_med": 0.1425,
+   "gpu_p95": 0.1457,
+   "raster_med": 24.7201,
+   "instances": 1201,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0901,
+   "gpu_resolve": 0.0041
+  },
+  "text": {
+   "scene": "text",
+   "frame_med": 0.6215,
+   "frame_p95": 0.6389,
+   "gpu_med": 0.1035,
+   "gpu_p95": 0.123,
+   "raster_med": 533.9913,
+   "instances": 1201,
+   "gpu_upload": 0.0133,
+   "gpu_draw": 0.0369,
+   "gpu_resolve": 0.0041
+  },
+  "scroll": {
+   "scene": "scroll",
+   "frame_med": 4.7933,
+   "frame_p95": 5.042,
+   "gpu_med": 0.3973,
+   "gpu_p95": 0.6337,
+   "raster_med": 190.1605,
+   "instances": 24791,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0379,
+   "gpu_resolve": 0.0041
+  },
+  "list": {
+   "scene": "list",
+   "frame_med": 0.1135,
+   "frame_p95": 0.1194,
+   "gpu_med": 0.0828,
+   "gpu_p95": 0.0881,
+   "raster_med": 189.6678,
+   "instances": 583,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0266,
+   "gpu_resolve": 0.0041
+  },
+  "dashboard": {
+   "scene": "dashboard",
+   "frame_med": 0.0943,
+   "frame_p95": 0.1,
+   "gpu_med": 0.1232,
+   "gpu_p95": 0.1282,
+   "raster_med": 178.6616,
+   "instances": 325,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0737,
+   "gpu_resolve": 0.0041
+  },
+  "whiteboard": {
+   "scene": "whiteboard",
+   "frame_med": 0.6978,
+   "frame_p95": 1.2018,
+   "gpu_med": 1.2421,
+   "gpu_p95": 2.3147,
+   "raster_med": 131.0805,
+   "instances": 201,
+   "gpu_upload": 0.0133,
+   "gpu_draw": 0.2826,
+   "gpu_resolve": 0.0051
+  },
+  "canvas": {
+   "scene": "canvas",
+   "frame_med": 0.9918,
+   "frame_p95": 1.2235,
+   "gpu_med": 0.4405,
+   "gpu_p95": 0.9016,
+   "raster_med": 54.943,
+   "instances": 2840,
+   "gpu_upload": 0.0133,
+   "gpu_draw": 0.0686,
+   "gpu_resolve": 0.0041
+  },
+  "mindmap": {
+   "scene": "mindmap",
+   "frame_med": 0.3363,
+   "frame_p95": 0.4101,
+   "gpu_med": 0.3215,
+   "gpu_p95": 0.3383,
+   "raster_med": 22.7077,
+   "instances": 2070,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.1044,
+   "gpu_resolve": 0.0041
+  },
+  "document": {
+   "scene": "document",
+   "frame_med": 0.1265,
+   "frame_p95": 0.136,
+   "gpu_med": 0.1435,
+   "gpu_p95": 0.1597,
+   "raster_med": 927.6365,
+   "instances": 1568,
+   "gpu_upload": 0.0123,
+   "gpu_draw": 0.0389,
+   "gpu_resolve": 0.0041
+  },
+  "table": {
+   "scene": "table",
+   "frame_med": 0.6913,
+   "frame_p95": 1.2558,
+   "gpu_med": 0.1364,
+   "gpu_p95": 0.2652,
+   "raster_med": 375.75,
+   "instances": 1180,
+   "gpu_upload": 0.0133,
+   "gpu_draw": 0.0584,
+   "gpu_resolve": 0.0041
+  }
+ }
+}

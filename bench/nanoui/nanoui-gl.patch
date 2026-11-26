@@ -1,0 +1,26 @@
+diff --git i/hillclimb/src/main.zig w/hillclimb/src/main.zig
+index 30fd130..4e4b12b 100644
+--- i/hillclimb/src/main.zig
++++ w/hillclimb/src/main.zig
+@@ -102,6 +102,7 @@ pub fn p99Of(xs: []f64) f64 {
+ }
+ 
+ fn runNanoui(gpa: std.mem.Allocator, scene: scenes.Scene, frames: usize) !Result {
++    if (builtin.os.tag == .linux and std.c.getenv("HC_GL") != null) return @import("glrun.zig").run(gpa, scene, frames);
+     return nanoui_run.run(gpa, scene, frames);
+ }
+ 
+diff --git i/src/ui/ui.zig w/src/ui/ui.zig
+index 9a05b76..071fb4e 100644
+--- i/src/ui/ui.zig
++++ w/src/ui/ui.zig
+@@ -292,6 +292,9 @@ pub const Pen = @import("pen.zig").Pen;
+ pub const PixelCanvas = @import("canvas.zig").Canvas;
+ /// CPU raster (Linux/Windows). `raster.shapes.shadow_samples` is 8 to match Metal.
+ pub const raster = @import("raster.zig");
++// [omxcode benchmark patch] the OpenGL renderer and its loader, for a headless GL hill-climb run.
++pub const opengl_renderer = @import("opengl.zig");
++pub const gl_loader = @import("gl.zig");
+ 
+ /// What a window of native UI shows: `build` runs on every frame.
+ pub const View = struct {

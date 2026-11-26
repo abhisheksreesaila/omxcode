@@ -66,6 +66,7 @@ FEATURES = [
     ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
     ("Scene: polygon fill", "Painter.polygon (non-zero, antialiased)", r"OP_POLY|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
     ("Scene: layer transform", "Painter.layer_transform (pan/zoom moves a kept layer)", r"layer_tx|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
+    ("Scene: Gaussian shadow", "Painter.shadow(x, y, w, h, radius, blur, color): GPUI's analytic rounded-box blur (gpu2d GL/Metal/CPU; GTK's blur node); tests/test_gpu2d_shadow, no app draws one yet", r"OP_SHADOW|rt\.draw\(|web_draw|mod\.draw\(", ""),  # (goal 80 M4)
     ("Canvas: keys (focus on press)", "on_gesture: KEY (event.text, modifiers)", r"\"key-pressed\"|addEventListener\('keydown'|\"keyDown:\", on_canvas_key", "mxstudio"),  # (AppKit: its canvas view's keyDown:, goal 75 review)
     ("TextField: Escape cancels", "TextField(on_cancel=)", r"on_field_key|second: 2", "mxstudio"),
     ("Editor that echoes the grid's typing", "TextField(…).echo()", r"\.echo\(\): the canvas typing|value\"\] == 3", "mxstudio"),

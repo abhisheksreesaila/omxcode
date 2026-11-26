@@ -13,6 +13,7 @@ from mojoui.webcomponent import Command, is_event_name, is_widget_tag
 from mojoui.json import Json, json_string
 from mojoui.embed import is_web_url
 from mojoui.clock import now_ns
+from mojoui.hangmarks import begin, end, MARK_UPDATE, MARK_VIEW, MARK_DRAW
 from std.os import getenv
 
 
@@ -321,6 +322,7 @@ struct Runtime[A: App](Movable):
 
     var app: Self.A
     var shown: View
+    var before: View  # the screen before `shown` (a host that updates its widgets a turn later still knows what they show)
     var trace: Bool  # MOJOUI_TRACE=1: hosts print each change's time and kind (TRACE: lines); the runtime keeps no clock (Android and iOS link no timing symbols here)
     var inflight: List[InFlight]  # HTTP requests out on their workers
     var undeliverable: List[Event]  # replies made without sending (an app with HTTP = False), handed over at the next poll
@@ -332,6 +334,7 @@ struct Runtime[A: App](Movable):
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
     var closed: Bool  # App.closing was told
+    var marks: Int  # the hang monitor's marks (mojoui.hangmarks; 0: no monitor)
     var changes: Int  # the app's state changed this many times (every update but a timer's that changed no part of the screen, resize, appearance): a host that drew a
     var pan_msg: Int  # a drag's points not delivered yet (queue_pan), and whose message they are
     var pan_points: List[PanPoint]
@@ -340,6 +343,7 @@ struct Runtime[A: App](Movable):
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
         resolve_layout(self.shown, app.theme().look)
+        self.before = View([])
         self.app = app^
         self.trace = False  # (hosts that can read the environment turn it on: GTK reads MOJOUI_TRACE; iOS has no getenv)
         self.inflight = List[InFlight]()
@@ -352,6 +356,7 @@ struct Runtime[A: App](Movable):
         self.budget_ns = 0
         self.armed_at = 0
         self.closed = False
+        self.marks = 0
         self.changes = 0
         self.pan_msg = 0
         self.pan_points = List[PanPoint]()
@@ -382,7 +387,9 @@ struct Runtime[A: App](Movable):
         self._drain_pans()
         var t0 = self._t0()
         self.changes += 1
+        begin(self.marks, MARK_UPDATE, event.message)
         self.app.update(event)
+        end(self.marks)
         self._slow("update", "msg=" + String(event.message) + ("" if event.name == "" else "/" + event.name), t0)
 
     def take_effects(mut self):
@@ -634,9 +641,12 @@ struct Runtime[A: App](Movable):
     def _refresh(mut self, cause: String) -> Diff:
         """view() and its diff against the screen shown, timed by the watchdog (named by its cause)."""
         var t0 = self._t0()
+        begin(self.marks, MARK_VIEW)
         var next = self.view()
         var d = diff(self.shown, next)
-        self.shown = next^
+        end(self.marks)
+        swap(self.shown, next)
+        self.before = next^
         self._slow("view", cause, t0)
         return d^
 
@@ -657,7 +667,9 @@ struct Runtime[A: App](Movable):
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return (False, Diff(False, []))
         var t0 = self._t0()
+        begin(self.marks, MARK_DRAW, self.shown.nodes[node].style)
         var drew = self.app.draw_scene(self.shown.nodes[node].style, scene)
+        end(self.marks)
         self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         if not drew:
             return (False, Diff(False, []))
@@ -668,7 +680,9 @@ struct Runtime[A: App](Movable):
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return Diff(False, [])
         var t0 = self._t0()
+        begin(self.marks, MARK_DRAW, self.shown.nodes[node].style)
         self.app.draw(self.shown.nodes[node].style, surface)
+        end(self.marks)
         self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         return self.refresh()
 

@@ -83,6 +83,23 @@ Mac stress zoom p95 8.4 → 4.1–5.5, note switch 22–25 → 6–9 ms, omnibar
   - One M7 run was void: the Mac reference had been replaced by Linux's (fixed, D-7997).
 - **Next.** The Mac's first frame (layer builds on open), redo and zoom on Metal, glyph warm-up, the emoji rule.
 
+## Goal 81 (2026-11-24): what the GPUI study found in our app layer
+Setup: Linux (4 cores, GTK headless) and the owner's M4. What worked: random screens, patched against built fresh, found
+eight faults nobody knew of besides the study's; Myers' diff plus a rising run keeps every row's widgets at any length; input
+that comes while a rebuild waits is held by widget and sent after; a hang monitor always on; pictures shared and
+filtered; Metal sends only new glyph rows. What broke: our own proofs first (a counter that couldn't fail, a check that ran
+less than it said: the review caught both); the picture counter wrote the environment (not thread safe), dropped. The Mac's
+new clock isn't measured (screen locked). New symbols in the Mac stub: _pipe, _usleep. Next small step: run
+`scripts/check M7` with the Mac unlocked, then merge. Report: docs/goals/81-report.md.
+
+## Goal 80 (2026-11-23): the 2D renderer raced against nanoui
+Setup: Linux, Ryzen 5900X, RTX 3090; nanoui cfe6000 (Zig 0.17) on its own five scenes, both headless GL. What worked:
+culling before shaping, learned ASCII text, block-written batches, polygon bounds, Gaussian shadows, CPU executor on
+threads: frame CPU and the no-GPU fallback ahead on all five scenes, GPU level. What broke: two of our own changes slowed
+our apps' scenes and were caught by them (walking ink points; mapped buffers), the first baseline was unfair, the machine
+hard-stopped twice. Not done: M6 by the letter, the Mac (unreachable), a second review. Next small step: the owner's
+ruling on how the held-out scenes are compared, then the Mac. Report: docs/goals/80-report.md.
+
 ## Goal 79, continuation 15: the Mac's web side, its race, its fonts (2026-11-22, night)
 - **Setup.** Ruling B on the Mac: node, Playwright and PN's backend in ~/omxcode-g79-web (every path and a removal line in docs/goals/79/mac-setup.md). The Mac reference now comes from the Mac's own Chrome (made-by.json).
 - **Worked.**

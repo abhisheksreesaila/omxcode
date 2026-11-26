@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The Mac's side of scripts/mac81 (run there, in ~/omxcode-g81).
+set -uo pipefail
+export PATH=$HOME/.pixi/bin:$PATH
+E=$HOME/omxcode-g54/pixi.toml
+cd ~/omxcode-g81/src
+F="-Xlinker -lobjc -Xlinker -framework -Xlinker Metal -Xlinker -framework -Xlinker Foundation -Xlinker -framework -Xlinker IOSurface"
+mojo() { pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && $1" 2>&1; }
+metal() { # metal <test>: built and run; its output, or the errors
+  mojo "mojo build -O3 -I . -I vendor tests/test_gpu2d_metal$1.mojo -o ../t$1 $F" > ../t$1.log || { grep -E 'error' -A3 ../t$1.log | head -20; return 1; }
+  mojo "../t$1"
+}
+case $1 in
+  glyphs)
+    old=0
+    metal "" | tee ../old1.log | tail -3; grep -q 'ok' ../old1.log && old=$((old + 1))
+    metal _clear | tee ../old2.log | tail -2; grep -q 'metal clear: ok' ../old2.log && old=$((old + 1))
+    echo "FACT old_tests $old"
+    metal _glyphs ;;
+  image) metal _image ;;
+  apps) # (the AppKit examples built natively and run unshown: each ends by itself with exit 0)
+    failed=0
+    for a in kitchen expenses gallery; do
+      mojo "mojo build -I examples/$a -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../app-$a -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../app-$a.log || { echo "$a: build"; grep error -A2 ../app-$a.log | head -6; failed=$((failed + 1)); continue; }
+      MOJOUI_REPORT_DIR=$PWD/../reports MOJOUI_OFFSCREEN=1 MOJOUI_STATE=$PWD/../state MOJOUI_TEST="pause:500;quit" ../app-$a > ../app-$a.out 2>&1 & p=$!
+      for _ in $(seq 60); do kill -0 $p 2>/dev/null || break; sleep 1; done
+      if kill -0 $p 2>/dev/null; then kill $p; echo "$a: didn't end"; failed=$((failed + 1)); else wait $p; rc=$?; echo "$a: exit $rc"; [ $rc = 0 ] || { tail -3 ../app-$a.out; failed=$((failed + 1)); }; fi
+    done
+    echo "FACT mac_apps 3"; echo "FACT mac_apps_failed $failed"; [ $failed = 0 ] && echo "mac_apps: ok" ;;
+  clock) bash scripts/mac81-clock ;;
+esac

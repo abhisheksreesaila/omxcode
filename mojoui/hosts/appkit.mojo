@@ -42,7 +42,8 @@ from mojoui.canvas import Surface, MAC_GPU
 from mojoui.gpu2d import fill_batches, execute_cpu
 from mojoui.gpu2d_metal import MetalCanvas2D, metal_device_name, read_iosurface
 from mojoui.gpu2d_backend import set_backend_name
-from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, io_surface, AppleCanvas, MISSES
+from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, io_surface, AppleCanvas, MISSES  # (RTLD_DEFAULT from objc: both sides imported it, the merge of goals 79 and 81)
+from mojoui.hosts.hangwatch import hang_watch, loop_wakes, loop_waits
 from mojoui.hosts.mac_report import MacReport, MAX_SHOTS, pts
 from mojoui.hosts.appkit_webview import (
     MacWebViews, mac_at, start as webviews_start, new_view as webview_new, send as webview_send, drop as webview_drop,
@@ -329,6 +330,10 @@ struct AppKitHost[A: App](Movable):
     var common_modes: Int  # NSRunLoopCommonModes itself (Core Foundation knows it by address: a string that only reads the same is a mode of its own, never run)
     var activity: InputActivity
     var watch: FrameWatch
+    var seen_on_screen: Bool  # (goal 81) the window has been on screen: from then on no frames while it's hidden or covered (not in test runs)
+    var clock_mode: String  # (goal 81) "" the screen's clock; "timer" the 60 Hz timer alone (MOJOUI_FRAME_CLOCK=timer, unshown windows); "dead" a screen's clock that never ticks (tests of the stand-in)
+    var clock_log: Bool  # MOJOUI_FRAME_LOG=1
+    var test_run: Bool  # MOJOUI_TEST: steps run, frames keep coming while the window can't be seen (the timer stands in)
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
@@ -437,6 +442,12 @@ struct AppKitHost[A: App](Movable):
         self.common_modes = 0
         self.activity = InputActivity()
         self.watch = FrameWatch(env("MOJOUI_FRAME_WATCH") == "1")
+        self.seen_on_screen = False
+        self.clock_mode = env("MOJOUI_FRAME_CLOCK")
+        if self.clock_mode == "" and env("MOJOUI_OFFSCREEN") == "1":  # (the merge of goals 79 and 81: a test run alone keeps the screen's clock, D-8201)
+            self.clock_mode = "timer"
+        self.clock_log = env("MOJOUI_FRAME_LOG") == "1"
+        self.test_run = env("MOJOUI_TEST") != ""
         self.fx_due = -1
         self.resize_pending = False
         self.asked_w = 0
@@ -3135,7 +3146,7 @@ struct AppKitHost[A: App](Movable):
             elif Int(now_ns()) - self.idle_from > LINGER_NS:
                 self.finish_gpu2d(0)  # (the last frame is shown now: no tick follows)
                 self.stop_frames()
-        if self.link != 0 and not self.link_is_screen and self.ticks % 30 == 0 and env("MOJOUI_FRAME_CLOCK") != "timer" and self.on_screen():  # (the window can be seen again: the screen's clock)
+        if self.link != 0 and not self.link_is_screen and self.ticks % 30 == 0 and self.clock_mode != "timer" and self.on_screen():  # (the window can be seen again: the screen's clock)
             self.stop_frames()
             self.start_frames()
 
@@ -3173,6 +3184,8 @@ struct AppKitHost[A: App](Movable):
         self.link = 0
         self.idle_from = 0
         self.drop_backup()
+        if self.clock_log:
+            print("FRAMES: stopped at " + String(self.ticks) + " ticks", flush=True)
 
     def drop_backup(mut self):
         if self.backup != 0:
@@ -3190,21 +3203,30 @@ struct AppKitHost[A: App](Movable):
         if self.link != 0:
             return
         if self.common_modes == 0:
-            var name = String("NSRunLoopCommonModes")
-            var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
-            self.common_modes = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")
-        if env("MOJOUI_FRAME_CLOCK") != "timer" and self.on_screen():
+            self.common_modes = common_modes_constant()
+        var screen = self.clock_mode != "timer"
+        if screen:  # (goal 81: no frames while a window that was seen can't be seen; windowDidChangeOcclusionState: starts them again)
+            if self.on_screen():
+                self.seen_on_screen = True
+            elif self.seen_on_screen and not self.test_run:
+                return
+            else:
+                screen = False  # (not up yet, or a locked screen from the start: the timer; the first frames don't wait for a screen)
+        if screen:
             self.link = msg(self.window, "displayLinkWithTarget:selector:", self.canvases[0].view, sel("canvasFrame:"))
             if self.link != 0:
                 self.link = msg(self.link, "retain")
                 self.link_is_screen = True
-                _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), self.common_modes)
+                if self.clock_mode != "dead":  # (dead: made and never run, so the stand-in is tested: goal 81 M7)
+                    _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), self.common_modes)
                 self.link_seen = self.link_ticks
                 self.check_frames()
         if self.link == 0:
             self.link_is_screen = False
             self.link = self.frame_timer()
         self.watch.started()
+        if self.clock_log:
+            print("FRAMES: started " + ("screen" if self.link_is_screen else "timer") + " at " + String(self.ticks) + " ticks", flush=True)
         if not self.prompt_due:
             self.prompt_due = True
             var modes = msg(cls("NSArray"), "arrayWithObject:", self.common_modes)
@@ -3230,6 +3252,10 @@ struct AppKitHost[A: App](Movable):
         self.check_due = False
         if self.link == 0 or not self.link_is_screen or len(self.canvases) == 0:
             return
+        if self.seen_on_screen and not self.test_run and not self.on_screen():  # (goal 81: it can't be seen: no frames, not the timer's)
+            self.finish_gpu2d(0)
+            self.stop_frames()
+            return
         self.check_frames()
         if self.link_ticks != self.link_seen:
             self.link_seen = self.link_ticks
@@ -3237,6 +3263,22 @@ struct AppKitHost[A: App](Movable):
             self.backup = self.frame_timer()
             if self.watch.on:
                 print("FRAMEWATCH: the screen's clock doesn't tick: timer", flush=True)
+            if self.clock_log:
+                print("FRAMES: the screen's clock doesn't tick: timer", flush=True)
+            self.report.note("frames: the screen's clock doesn't tick, the timer stands in")
+
+    def occlusion_changed(mut self):
+        """(goal 81) The window came on screen, or nothing of it shows any more."""
+        if self.clock_mode == "timer":
+            return
+        if self.on_screen():
+            self.seen_on_screen = True
+            if self.link != 0 and not self.link_is_screen:  # (the first frames' timer: the screen's clock now)
+                self.stop_frames()
+            self.wake()
+        elif self.seen_on_screen and not self.test_run:
+            self.finish_gpu2d(0)
+            self.stop_frames()
 
     def ticked_by(mut self, clock: Int):
         """Which clock this tick is from (0: the one right after the event that started it)."""
@@ -3901,6 +3943,54 @@ def in_view(view: Int, p: CGPoint) -> CGPoint:
 def on_gpu2d_done[A: App](host_addr: Int) abi("C"):
     """On the main queue: a GPU frame committed without waiting has completed; it's shown now (D-7555)."""
     host_at[A](host_addr)[].finish_ready()
+
+
+def on_occlusion[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
+    host_at[A](msg(msg(msg(notification, "object"), "identifier"), "longLongValue"))[].occlusion_changed()
+
+
+def on_run_loop(observer: Int, activity: Int, marks: Int) abi("C"):
+    """The main run loop is about to wait, or has woken (the hang monitor, goal 81 M5)."""
+    if (activity & 32) != 0:  # kCFRunLoopBeforeWaiting
+        loop_waits(marks)
+    else:
+        loop_wakes(marks)
+
+
+def common_modes_constant() -> Int:
+    """NSRunLoopCommonModes itself (D-8060): Core Foundation knows the common modes by address; a string that only reads
+    "kCFRunLoopCommonModes" is a mode of its own that no run loop runs."""
+    var name = String("NSRunLoopCommonModes")
+    var at = external_call["dlsym", Int](RTLD_DEFAULT, name.as_c_string_span())
+    return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[] if at != 0 else ns_string("kCFRunLoopCommonModes")
+
+
+def watch_hangs() -> Int:
+    """Starts the hang monitor around the main run loop: its marks (0: off)."""
+    var marks = hang_watch()
+    if marks == 0:
+        return 0
+    var create = String("CFRunLoopObserverCreate")
+    var add = String("CFRunLoopAddObserver")
+    var main = String("CFRunLoopGetMain")
+    var fc = external_call["dlsym", Int](RTLD_DEFAULT, create.as_c_string_span())
+    var fa = external_call["dlsym", Int](RTLD_DEFAULT, add.as_c_string_span())
+    var fm = external_call["dlsym", Int](RTLD_DEFAULT, main.as_c_string_span())
+    if fc == 0 or fa == 0 or fm == 0:
+        return 0
+    var context = List[Int](length=5, fill=0)  # CFRunLoopObserverContext {version, info, retain, release, copyDescription}
+    context[1] = marks
+    var rc = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=fc)
+    var ra = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=fa)
+    var rm = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=fm)
+    var observer = Pointer(to=rc).unsafe_bitcast[def(Int, Int, UInt8, Int, Int, Int) thin abi("C") -> Int]()[](
+        0, 32 | 64, 1, 0, fn_address(on_run_loop), Int(context.unsafe_ptr()))  # kCFRunLoopBeforeWaiting | AfterWaiting, repeats
+    _ = len(context)
+    if observer == 0:
+        return 0
+    var loop = Pointer(to=rm).unsafe_bitcast[def() thin abi("C") -> Int]()[]()
+    Pointer(to=ra).unsafe_bitcast[def(Int, Int, Int) thin abi("C") -> None]()[](loop, observer, common_modes_constant())  # (by address: the string only reads the same, the merge of goals 79 and 81)
+    return marks
 
 
 def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
@@ -6312,6 +6402,7 @@ def run[A: App]() -> c_int:
     add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")
     add_method(c, "appearanceLater:", on_appearance_later[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
+    add_method(c, "windowDidChangeOcclusionState:", on_occlusion[A], "v@:@")
     add_method(c, "jobsEnded:", on_jobs_ended[A], "v@:@")  # (mojoui.uijobs: a background job ended → App.jobs_message)
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
@@ -6387,6 +6478,7 @@ def run[A: App]() -> c_int:
     host[].follow_appearance(addr)  # (light or dark, before the first screen: App.appearance, D-673)
     _ = msg(msg(cls("NSDistributedNotificationCenter"), "defaultCenter"), "addObserver:selector:name:object:", host[].target,
             sel("systemAppearance:"), ns_string("AppleInterfaceThemeChangedNotification"), 0)
+    host[].rt.marks = watch_hangs()
     host[].show(addr)
     host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")

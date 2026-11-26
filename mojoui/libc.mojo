@@ -252,6 +252,11 @@ def pthread_detach(tid: Int) -> Int:
     return Int(Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](tid))
 
 
+def pthread_join(tid: Int) -> Int:
+    var f = _sym("pthread_join")
+    return Int(Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](tid, 0))
+
+
 def pthread_mutex_init(mu: Int) -> Int:
     return Int(external_call["pthread_mutex_init", Int32](Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=mu), Int(0)))
 

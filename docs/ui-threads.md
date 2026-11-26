@@ -67,6 +67,21 @@ it: SwiftUI, Jetpack Compose and React all share that limit (see "What's next" f
 The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), with the CPU build. The Mac's GPU
 (Metal) build has the same switch but hasn't run with it yet; real-hardware numbers need the owner's MacBook.
 
+## The hang monitor (always on, goal 81)
+
+Linux and Mac apps watch themselves: when the main loop has been at one thing for half a second, a thread says so **while
+it hangs** and again when it ends, on stdout and in `hangs.log` (`~/.local/state/omxcode/<app>`; on the Mac
+`~/Library/Logs/omxcode/<app>`; at most 200 lines):
+
+    HANG: 542 ms and counting: update msg=77
+    HANG: ended after 1204 ms: update msg=77 (1200 ms)
+
+It names an `update()` by its message, a canvas by its number, the host's own work (building the window, changing widgets),
+or "the main loop" for anything else. Numbers only: none of the app's words or paths. It costs 0.17 µs an event; an idle app
+woke 0 times a second with it on (counted over 6 s). `MOJOUI_HANGS=0` turns it off, `MOJOUI_HANGS_MS=200` makes it stricter. A `MOJOUI_TEST` run
+is one long turn, so it's off there unless `MOJOUI_HANGS=1`. Checked on GTK (`tests/test_hang.py`); on the Mac it is built and
+runs, but no hang has been measured there yet. Start-up (the first turn) isn't watched.
+
 ## How it's checked
 
 - The watchdog (`MOJOUI_BUDGET_MS=N`, see "What's next" 1) names any update, view or draw over N ms; goal 41's checks
