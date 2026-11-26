@@ -998,6 +998,8 @@ struct GtkHost[A: App](Movable):
     var morph_begin_ns: Int  # what the snapshot took (perf_counter ns)
     var morph_frames: List[Int]  # the frame clock (µs) at each of its frames
     var morph_count: Int  # morphs so far (the trace numbers them)
+    var morph_addr: Int  # the host's address for the settle's end (morph_settled), from begin_morph
+    var settle_end_ns: Int  # when the last morph's settle is over (perf_counter ns): then the root takes off mui-morph-root
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -1169,6 +1171,8 @@ struct GtkHost[A: App](Movable):
         self.morph_begin_ns = 0
         self.morph_frames = List[Int]()
         self.morph_count = 0
+        self.morph_addr = 0
+        self.settle_end_ns = 0
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -2648,8 +2652,8 @@ struct GtkHost[A: App](Movable):
             self.toast_overlay = external_call["adw_toast_overlay_new", Int]()
             self.morph_overlay = external_call["gtk_overlay_new", Int]()  # (a view transition's old picture lies over it: begin_morph)
             external_call["gtk_overlay_set_child", NoneType](self.morph_overlay, self.toast_overlay)
-            add_class(self.toast_overlay, "mui-morph-root")
-            install_morph_css()
+            install_morph_css()  # (the root wears mui-morph-root only while a morph settles: a transform and a transition left on every
+            # app's content root all the time made pnote's GPU canvas miss a refresh now and then, D-8220)
             external_call["gtk_window_set_child", NoneType](self.window, self.morph_overlay)
             self.morph_live = external_call["gtk_widget_paintable_new", Int](self.window)
             # (a screen taller than the window scrolls instead of growing the window past the size asked for, as the
@@ -3228,7 +3232,9 @@ struct GtkHost[A: App](Movable):
         _ = external_call["g_object_ref", Int](pic)  # (ours until an idle turn after it leaves: end_morph may run inside its own tick)
         external_call["gtk_overlay_add_overlay", NoneType](self.morph_overlay, pic)
         if getenv("MOJOUI_MORPH_SETTLE") != "0":
+            add_class(self.toast_overlay, "mui-morph-root")  # (its transform and transition only while it settles: morph_settled takes it off)
             add_class(self.toast_overlay, "mui-morph-from")
+        self.morph_addr = self_addr
         self.morph_pic = pic
         self.morph_ms = ms
         self.morph_t0 = -1
@@ -3291,6 +3297,10 @@ struct GtkHost[A: App](Movable):
         _ = external_call["g_idle_add", c_uint](on_unref_idle, self.morph_pic)
         self.morph_pic = 0
         remove_class(self.toast_overlay, "mui-morph-from")
+        # the settle runs MORPH_SETTLE_MS from the fade's first frame; the root keeps its transition until then (and a little after)
+        self.settle_end_ns = Int(perf_counter_ns()) + MORPH_SETTLE_MS * 1_000_000
+        if self.morph_addr != 0:
+            _ = external_call["g_timeout_add", c_uint](c_uint(MORPH_SETTLE_MS + 60), on_morph_settled[Self.A], self.morph_addr)
         var worst = 0
         for k in range(1, len(self.morph_frames)):
             worst = max(worst, self.morph_frames[k] - self.morph_frames[k - 1])
@@ -6526,6 +6536,15 @@ def install_morph_css():
     external_call["gtk_css_provider_load_from_string", NoneType](provider, sheet.as_c_string_span())
     external_call["gtk_style_context_add_provider_for_display", NoneType](external_call["gdk_display_get_default", Int](), provider, c_uint(802))
     set_app_data("mojoui-morph-css", provider)
+
+
+def on_morph_settled[A: App](host_addr: Int) abi("C") -> c_int:
+    """A morph's settle is over: the content root takes off mui-morph-root (no transform, no transition left on it), unless
+    another morph runs or settles still (its own end comes later)."""
+    var host = host_at[A](host_addr)
+    if host[].morph_pic == 0 and Int(perf_counter_ns()) >= host[].settle_end_ns and host[].toast_overlay != 0:
+        remove_class(host[].toast_overlay, "mui-morph-root")
+    return 0  # G_SOURCE_REMOVE
 
 
 def on_unref_idle(obj: Int) abi("C") -> c_int:
