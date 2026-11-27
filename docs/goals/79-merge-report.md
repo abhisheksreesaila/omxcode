@@ -83,3 +83,16 @@ input methods; AppKit hover by hand.
 ### Still open
 - KEYS' Mac prompt-tick check (D-8099) at the merge: 2 of 7 runs had one step of twelve waiting 2.6–3.5 ms (the check's "p95" of twelve is the maximum); goal 79 alone 0 of 3 (maxima 0.4–0.7 ms). Cause not found (the hang monitor is off under MOJOUI_TEST).
 - The redo row on Linux: step 2's own build is late in 14 % of runs; after D-8220 the merge is 31 % (5 of 16), not told apart at these numbers. The owner has closed speed work (main session): recorded, not chased.
+
+### Final checks (code b801cd0c; run at 1f7a753d, which adds only this report)
+| Check | Linux | Mac (M4) |
+|---|---|---|
+| builds (scripts/build-all) | 52/52 | — |
+| goal 79 M0–M5 | PASS | M1 (0.03 px), M5 halves PASS |
+| goal 79 KEYS | PASS (six apps) | PASS, prompt tick 0.4 ms with the rule, 2.1 without |
+| goal 79 PACKAGE, judge_test (with D-8102) | PASS, ok | — |
+| goal 81 M1–M5 | PASS | — |
+| goal 81 M6, M7, M8 | M8 GL/CPU PASS | M6 PASS; M7 PASS 143.99 ticks/s at 144 Hz, hidden 0, idle 0, fallback 1; M8 Metal PASS |
+| test_gesture_numbers, test_gtk_input_im | ok, ok | — |
+| goal 81 M9 (held-out GPU timing) | not run now (the main session: no GPU timing runs); last at ad48b5f3: PASS, 1.0273× | 3 AppKit apps run (ad48b5f3) |
+| goal 79 M6 race | **deferred** (hard stops) | not raced (the Mac locks) |
