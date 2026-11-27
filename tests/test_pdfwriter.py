@@ -16,7 +16,9 @@ if not re.search(r"^Pages:\s+2$", info, re.M) or "645 x 810 pts" not in info:
     bad.append("pdfinfo: " + info.replace("\n", " | ")[:300])
 p1 = subprocess.run(["pdftotext", "-f", "1", "-l", "1", str(pdf), "-"], capture_output=True, text=True).stdout
 p2 = subprocess.run(["pdftotext", "-f", "2", "-l", "2", str(pdf), "-"], capture_output=True, text=True).stdout
-for words in ["Garden plan: beds by the south wall", "Tomatoes, Basil and Marigolds", "漢字"]:
+for words in ["Garden plan: beds by the south wall", "Tomatoes, Basil and Marigolds", "漢字", "नमस्ते"]:
+    if "नमस्तेते" in p1:
+        bad.append("a cluster's letters repeated (नमस्तेते)")
     if words not in p1:
         bad.append(f"page 1 lacks {words!r}: {p1!r}")
 if "Second page words" not in p2:
