@@ -58,6 +58,12 @@ def build_test(name):
 
 
 def build_linux():
+    """pnote, unless the binary is newer than every source it is built from (the machine builds one thing at a time)."""
+    if APP.exists():
+        newest = max(f.stat().st_mtime for d in ["mojoui", "examples/pnote", "themes", "hosts"] for f in (ROOT / d).rglob("*") if f.is_file())
+        real = APP.with_name("pnote.bin") if APP.with_name("pnote.bin").exists() else APP
+        if real.stat().st_mtime > newest:
+            return ""
     r = run(BUILD + ["nice", "-n", "5", "taskset", "-c", "0-5", "bash", "scripts/build.sh", "pnote", "linux"], 3600)
     if r.returncode or not APP.exists():
         return "pnote didn't build: " + tail(r.stdout + r.stderr, 800)

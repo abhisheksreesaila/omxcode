@@ -252,7 +252,7 @@ struct SettingsForm(Movable):
                     px += pw + 8
             else:
                 var typing = self.editing == r.id
-                draw_bordered(p, fx, cy, fw, 36, 10, sk.panel, sk.ink if typing else sk.line, 2 if typing else 1)
+                draw_bordered(p, fx, cy, fw, 36, 10, sk.panel, sk.ink if typing else sk.line, 2.0 if typing else 1.0)
                 var shown = self.draft if typing else r.value
                 var col = sk.ink
                 if r.kind == ROW_SECRET:
