@@ -56,3 +56,30 @@ input methods; AppKit hover by hand.
 4. fonttext (D-8203): 80's cache with 79's widths; declare() clears every cache.
 5. gpu2d culling (D-8204): one region for clip, canvas and tile part.
 6. Hover (D-8211): main's design; a leave held during a rebuild; AppKit hover only with Canvas(hover=True), unchecked by hand.
+
+## Step 2b (2026-11-26): what moved after step 2
+| Commit | What |
+|---|---|
+| d2b8746d | goal-81-quality 08197483: b9250c55's clock parts already in by D-8215; 08197483 = D-8210 (D-8216) |
+| 70ed1d24 | goal 79 f6a3fa5b: D-8097's refresh-relative tie, rejudge.py (D-8217) |
+| 4b8fbed3 | main a2652b13: view transitions start in goal 81's apply(); rebuilds keep goal 81's G_PRIORITY_HIGH, which already covers D-8412's starvation; main's idle_soon left out (D-8218) |
+| dbf5349b | the step-2 race rejudged under D-8097 by goal 79's rejudge.py, unchanged: Linux 60 ✓ 0 ✗, Mac 52 ✓ 8 ✗ (D-8219) |
+| ff99cff4 | **GTK fix (D-8220):** the content root wears mui-morph-root (transform + transition) only while a morph settles. Always on, it made pnote's stress redo miss a refresh in 8 of 13 runs (step 2's build: 3 of 21; fixed: 5 of 16); main's personalize_check PASS. docs/goals/79-merge/late-redo-ab.md |
+| ad48b5f3 | goal 79 b6c78275: D-8098–D-8101 (prompt tick, lean input frames, undo/redo at the frame begun); prompt_tick's mode by the constant (D-8221) |
+| b801cd0c | goal 79 a12e8326: D-8102 (every latency row at the frame begun), gaps 89/90, goal 82's draft (D-8222) |
+
+### The races (records, docs/goals/79-merge/)
+| Table | Commit | Result |
+|---|---|---|
+| race-linux-b42cd6d4.md, race-mac-b42cd6d4.md | b42cd6d4 (step 2) | judged then 60/60 and 60/60; rejudged under D-8097: Linux 60 ✓ 0 ✗, Mac 52 ✓ 8 ✗ (rejudge-b42cd6d4.md). **The last valid tables.** Goal 79 alone: Mac 57 ✓ 3 ✗ under D-8101 |
+| race-linux-dbf5349b.md, -2.md | dbf5349b | 59 ✓ 1 ✗ twice (stress redo max 18.8 ms): led to D-8220. Mac BLOCKED (locked) |
+| race-linux-ff99cff4-blocked.md | ff99cff4 | refused, not judged: the web's window at 58 Hz against 60 (not like-for-like) |
+| race-linux-ff99cff4-disturbed.md | ff99cff4 | 50 ✓ 10 ✗, disturbed: the web's open script timed out (8 rows "not measured: the web"), both sides missed frames in one pan and one drag; the redo row passed. Mac BLOCKED (locked at a step) |
+| — | ff99cff4 | a third run cut by the machine's hard stop at 15:27 |
+| — | b801cd0c | the judged run under the exclusive quiet lock (ten idle minutes before, 17:21) cut by the hard stop at 17:39:18 |
+
+**The Linux race after D-8102 is deferred:** two hard stops in a row came during a Linux M6 race (15:27, 17:39); the main session holds the race until the owner checks the hardware. The Mac race: `scripts/mac-unlocked --probe` passed twice, and both times the Mac locked itself within minutes (BLOCKED, nothing raced). Not a push blocker (the main session).
+
+### Still open
+- KEYS' Mac prompt-tick check (D-8099) at the merge: 2 of 7 runs had one step of twelve waiting 2.6–3.5 ms (the check's "p95" of twelve is the maximum); goal 79 alone 0 of 3 (maxima 0.4–0.7 ms). Cause not found (the hang monitor is off under MOJOUI_TEST).
+- The redo row on Linux: step 2's own build is late in 14 % of runs; after D-8220 the merge is 31 % (5 of 16), not told apart at these numbers. The owner has closed speed work (main session): recorded, not chased.
