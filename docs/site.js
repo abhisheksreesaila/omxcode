@@ -1,3 +1,4 @@
+if (location.hostname === "abhisheksreesaila.github.io") { location.replace("https://omxlabs.tech" + location.pathname + location.search + location.hash); }
 // Shared by the site's pages: words that rise, sections that reveal, numbers that count, the nav's sliding pill,
 // the product that unfolds, copy buttons, and scenes that play only while they're on screen (window.omx.scene).
 (() => {
@@ -73,4 +74,29 @@
     addEventListener("resize", () => { const i = bs.findIndex(b => b.classList.contains("on")); if (i >= 0) pick(i, false); });
     return pick;
   };
+
+  // Unified omxlabs suite strip across omxplorer, omxcore, omxcode, omxqua, Gallery
+  if (!document.querySelector(".ox-bar")) {
+    const p = location.pathname;
+    const isGal = /\/gallery(\/|$)/.test(location.pathname);
+  const BASE = location.pathname.startsWith("/omxcode/") ? "" : "https://omxlabs.tech";
+  const items = [
+    { u: BASE + "/", n: "omxplorer", r: "", c: "#30d158", on: false },
+    null,
+    { u: BASE + "/omxcore/", n: "omxcore", r: "Engine", c: "#4aa8ff", on: false },
+    { u: BASE + "/omxcode/", n: "omxcode", r: "Framework", c: "#ff5d6c", on: !isGal },
+    { u: BASE + "/omxqua/", n: "omxqua", r: "Design", c: "#c084fc", on: false },
+    null,
+    { u: BASE + "/omxcode/gallery/", n: "Gallery", r: "", c: "#ff9f40", on: isGal },
+  ];
+    const bar = document.createElement("div");
+    bar.className = "ox-bar";
+    bar.setAttribute("role", "navigation");
+    bar.setAttribute("aria-label", "omxlabs suite");
+    bar.innerHTML =
+      `<a class="ox-bar-brand" href="${BASE}/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>omxlabs</a>` +
+      `<div class="ox-bar-links">` + items.map(it => it ? `<a href="${it.u}" style="--ox:${it.c}"${it.on ? ' class="on" aria-current="page"' : ""}><i></i>${it.n}${it.r ? `<em>${it.r}</em>` : ""}</a>` : `<span class="ox-bar-sep" aria-hidden="true"></span>`).join("") + `</div>` +
+      `<a class="ox-bar-gh" href="https://github.com/abhisheksreesaila/omxcode">GitHub ↗</a>`;
+    document.body.prepend(bar);
+  }
 })();

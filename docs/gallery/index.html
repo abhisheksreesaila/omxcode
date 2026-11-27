@@ -77,7 +77,7 @@ footer a { color: var(--ink2); }
 <body>
 <nav class="lnav">
   <a class="brand" href="../"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode</a>
-  <div class="links"><a href="../#vision">Vision</a><a href="../#roadmap">Roadmap</a><a class="on" href="./">Gallery</a><a href="../components.html">Components</a><a href="../#numbers">Numbers</a></div>
+  <div class="links"><a href="../">omxcode</a><a class="on" href="./">Gallery</a><a href="../components.html">Components</a></div>
   <div class="right"><a class="cta" href="../#get">Build your own</a></div>
 </nav>
 <main>
@@ -85,7 +85,7 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>omxplorer, and what else it builds.</h1>
-    <p class="lede">Three flagships: omxplorer, the data explorer; omxconsole, local models on Modular's MAX; and omxome, a home assistant that shows you. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every smaller app downloads for Linux; most for the Mac too.</p>
+    <p class="lede">Apps and demos built from one Mojo codebase with omxcode: omxplorer for robot &amp; multimodal data, omxconsole for local models on MAX, omxome (experimental), and five focused native framework demos below.</p>
   </div>
   <div class="grid">
 <article class="card star" id="omxplorer">
@@ -98,7 +98,7 @@ footer a { color: var(--ink2); }
     <div class="kind">The product · data explorer</div>
     <h3>omxplorer</h3>
     <p class="line">A spreadsheet, the video behind every row and the documents that explain it, on one page, on your own GPU.</p>
-    <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz" download><b>Download for Linux</b><span>x86_64 · GTK 4</span></a><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip" download><b>Download for Mac</b><span>Apple Silicon · macOS 26</span></a></div><div class="links"><a class="cta" href="../omxplorer.html">See omxplorer</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omxplorer">examples/omxplorer</a></div>
+    <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz" download><b>Download for Linux</b><span>x86_64 · GTK 4</span></a><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip" download><b>Download for Mac</b><span>Apple Silicon · macOS 26</span></a></div><div class="links"><a class="cta" href="https://omxlabs.tech/">See omxplorer</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omxplorer">examples/omxplorer</a></div>
   </div>
 </article>
 <article class="card star" id="omxconsole">
@@ -107,7 +107,7 @@ footer a { color: var(--ink2); }
     <div class="th"><button type="button" aria-label="Add a model: the MAX catalog and Hugging Face, each result checked against this GPU&#x27;s memory" class=on data-src="img/omxconsole-find.png" data-cap="Add a model: the MAX catalog and Hugging Face, each result checked against this GPU&#x27;s memory"><img src="img/omxconsole-find.png" alt="" loading="lazy"></button><button type="button" aria-label="Ready after the model answered a first question: its endpoint and a curl line" data-src="img/omxconsole-ready.png" data-cap="Ready after the model answered a first question: its endpoint and a curl line"><img src="img/omxconsole-ready.png" alt="" loading="lazy"></button><button type="button" aria-label="My models" data-src="img/omxconsole-models.png" data-cap="My models"><img src="img/omxconsole-models.png" alt="" loading="lazy"></button><button type="button" aria-label="Keys: one per app, shown by prefix" data-src="img/omxconsole-keys.png" data-cap="Keys: one per app, shown by prefix"><img src="img/omxconsole-keys.png" alt="" loading="lazy"></button></div>
   </div>
   <div class="info">
-    <div class="kind">The second flagship · local models on MAX</div>
+    <div class="kind">App · local models on MAX</div>
     <h3>omxconsole</h3>
     <p class="line">Find a model on Hugging Face, download it and serve it on your own GPU through Modular&#x27;s MAX: one OpenAI-style endpoint with a key per app, and benchmarks. All omxcode.</p>
     <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz" download><b>Download for Linux</b><span>x86_64 · GTK 4</span></a><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip" download><b>Download for Mac</b><span>Apple Silicon · macOS 15 or later</span></a></div><p class="needs">Needs MAX installed (docs.modular.com/max/packages). Mac: it opens and starts its service on GitHub&#x27;s Mac runners; no model has been served on a Mac yet.</p><div class="links"><a class="cta" href="../omxconsole.html">See omxconsole</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console">examples/console</a></div>
@@ -119,7 +119,7 @@ footer a { color: var(--ink2); }
     <div class="th"><button type="button" aria-label="Ask anything: the chat takes the stage with a map that flies to each stop" class=on data-src="../img/omx/clip-map.jpg" data-cap="Ask anything: the chat takes the stage with a map that flies to each stop"><img src="../img/omx/clip-map.jpg" alt="" loading="lazy"></button><button type="button" aria-label="The Stage: pinned on the left, what matters in the middle, live on the right" data-src="../img/omx/stage-day.jpg" data-cap="The Stage: pinned on the left, what matters in the middle, live on the right"><img src="../img/omx/stage-day.jpg" alt="" loading="lazy"></button><button type="button" aria-label="Pin what you want at your side" data-src="../img/omx/clip-pin.jpg" data-cap="Pin what you want at your side"><img src="../img/omx/clip-pin.jpg" alt="" loading="lazy"></button><button type="button" aria-label="Live: a game&#x27;s score, a landing, the pasta timer" data-src="../img/omx/clip-live.jpg" data-cap="Live: a game&#x27;s score, a landing, the pasta timer"><img src="../img/omx/clip-live.jpg" alt="" loading="lazy"></button><button type="button" aria-label="A card the model built: how a heat pump works" data-src="../img/omx/clip-cards.jpg" data-cap="A card the model built: how a heat pump works"><img src="../img/omx/clip-cards.jpg" alt="" loading="lazy"></button><button type="button" aria-label="On a Mac, at night" data-src="../img/omx/mac-heatpump.jpg" data-cap="On a Mac, at night"><img src="../img/omx/mac-heatpump.jpg" alt="" loading="lazy"></button></div>
   </div>
   <div class="info">
-    <div class="kind">The third flagship · a home assistant that shows you</div>
+    <div class="kind">Experimental · a home assistant that shows you</div>
     <h3>omxome</h3>
     <p class="line">Ask out loud and it shows you: live tiles on a three-column Stage, a chat bar that grows into a visual explanation and points at what it means, cards the model builds as it talks. Local most of the time, your own subscription when you ask.</p>
     <p class="needs">Build from source for now (examples/omx/README.md): Linux with NVIDIA GPUs; the Stage alone also runs on the Mac.</p><div class="links"><a class="cta" href="../omxome.html">See omxome</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omx">examples/omx</a></div>
@@ -139,28 +139,6 @@ footer a { color: var(--ink2); }
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Mac</b> runs on CI Macs</span></div>
     <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/sketch-linux-x86_64.tar.gz" download><b>Download for Linux</b></a><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/sketch-mac-arm64.zip" download><b>Download for Mac</b></a></div>
     <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/sketch">examples/sketch</a>
-  </div>
-</article>
-<article class="card" id="jot">
-  <figure class="pic"><img src="img/jot-gtk.png" alt="Jot: Linux" loading="lazy"></figure>
-  <div class="info">
-    <div class="kind">Notes in a database</div>
-    <h3>Jot</h3>
-    <p class="line">Notes in a SQLite file, searched as you type, still there tomorrow. Quit mid-sentence and the words are saved.</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Mac</b> runs on CI Macs</span></div>
-    <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/jot-linux-x86_64.tar.gz" download><b>Download for Linux</b></a><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/jot-mac-arm64.zip" download><b>Download for Mac</b></a></div>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/jot">examples/jot</a>
-  </div>
-</article>
-<article class="card" id="keeper">
-  <figure class="pic"><img src="img/keeper-gtk.png" alt="Keeper: Linux: found with the window closed" loading="lazy"></figure>
-  <div class="info">
-    <div class="kind">Works when closed</div>
-    <h3>Keeper</h3>
-    <p class="line">Keeps a folder searchable with its window shut: a tray item, notifications, and a watcher on its own thread.</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="am"><i></i><b>Mac</b> coming</span></div>
-    <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/keeper-linux-x86_64.tar.gz" download><b>Download for Linux</b></a></div>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/keeper">examples/keeper</a>
   </div>
 </article>
 <article class="card" id="data-lens">
@@ -207,22 +185,15 @@ footer a { color: var(--ink2); }
     <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/widgets">examples/widgets</a>
   </div>
 </article>
-<article class="card" id="saas-blocks">
-  <figure class="pic"><img src="img/saas.png" alt="SaaS blocks: Linux: ada on Pro, ben on Free" loading="lazy"></figure>
-  <div class="info">
-    <div class="kind">Sign-in and payments</div>
-    <h3>SaaS blocks</h3>
-    <p class="line">Sign in with Google, a tenant and SQLite file of your own, Stripe checkout and its webhooks: SaaS building blocks written in Mojo, server and app.</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Mac</b> runs</span></div>
-    <div class="get"><a class="dl" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/saas-linux-x86_64.tar.gz" download><b>Download for Linux</b></a></div><p class="needs">Its server needs a Google client and Stripe test keys (docs/saas.md)</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/saas">examples/saas</a>
-  </div>
-</article>
     </div>
   </div>
   <div class="soon">
-    <div class="eyebrow">Coming next</div>
-    <div class="sgrid"><div><i>soon</i><b>Agent chat</b><p>Ask for a map, get a map: an agent answers with native screens. A download once it carries its agent inside.</p></div><div><i>soon</i><b>Dictate</b><p>Talk, and words appear, Whisper on the GPU in the app&#x27;s own process. A download once the model ships with it.</p></div><div><i>soon</i><b>Ask your data</b><p>Type a question; a model writes the chart and the query; the GPU runs it; omxcode draws it.</p></div></div>
+    <div class="eyebrow">More examples on GitHub</div>
+    <div class="sgrid">
+      <div><i>SQLite</i><b><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/jot" style="text-decoration:none;color:inherit">Jot ›</a></b><p>Local notes in SQLite searched as you type. <a href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/jot-linux-x86_64.tar.gz">Linux</a> · <a href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/jot-mac-arm64.zip">Mac</a></p></div>
+      <div><i>Tray</i><b><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/keeper" style="text-decoration:none;color:inherit">Keeper ›</a></b><p>Background folder watcher with tray icon and notifications. <a href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/keeper-linux-x86_64.tar.gz">Linux</a></p></div>
+      <div><i>SaaS</i><b><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/saas" style="text-decoration:none;color:inherit">SaaS blocks ›</a></b><p>Google sign-in, per-tenant SQLite, and Stripe webhooks in Mojo. <a href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/saas-linux-x86_64.tar.gz">Linux</a></p></div>
+    </div>
   </div>
 </div></section>
 </main>
@@ -241,5 +212,6 @@ document.querySelectorAll(".card").forEach(card => {
 });
 if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelectorAll("video[autoplay]").forEach(v => { v.removeAttribute("autoplay"); v.pause(); });
 </script>
+<script src="../site.js"></script>
 </body>
 </html>
