@@ -5994,6 +5994,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     var during = List[Float64]()  # (open, D-7944) the frames after an open's first, while it is still coming in
     var completes = List[Float64]()  # (open) request → the frame that completes it (ms, wall clock)
     var press_lats = List[Float64]()  # (paced) a press during the open to its frame painted (wall)
+    var press_code_lats = List[Float64]()  # (D-8102) the same, to the end of that paint (on its own clock)
     var presses = List[Float64]()  # (openpress) the frame showing a press made during the open
     var shown = List[Float64]()  # (D-7572) each timed frame's paint end → the compositor presenting it (ms; beside the work)
     var shown_wait = List[Int]()  # (frame counter, paint end µs) pairs whose presentation time hasn't come back yet
@@ -6233,6 +6234,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
                     frame_paint.append(pm_)
                     if paced and press_ns > 0 and len(host[].canvases[ci].draw_log) > press_draw:
                         press_lats.append(Float64(Int(perf_counter_ns()) - press_ns) / 1e6)
+                        press_code_lats.append(max(press_lats[len(press_lats) - 1] - Float64(Int(external_call["g_get_monotonic_time", Int64]()) - host[].paint_end_us[(pd_seen - 1) % 64]) / 1000.0, 0.0))
                         press_ns = 0
                     last_done = perf_counter_ns()
                     if done_at >= 0 and pd_seen > done_at:
@@ -6305,6 +6307,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         counts += " lat_p95=" + one_decimal(Float32(pct(lats, 0.95))) + " lat_max=" + one_decimal(Float32(pct(lats, 1.0)))
         counts += " lat_code_p95=" + one_decimal(Float32(pct(code_lats, 0.95))) + " lat_code_max=" + one_decimal(Float32(pct(code_lats, 1.0)))
         counts += " press_lat_n=" + String(len(press_lats)) + " press_lat_p95=" + one_decimal(Float32(pct(press_lats, 0.95))) + " press_lat_max=" + one_decimal(Float32(pct(press_lats, 1.0)))
+        counts += " press_lat_code_p95=" + one_decimal(Float32(pct(press_code_lats, 0.95))) + " press_lat_code_max=" + one_decimal(Float32(pct(press_code_lats, 1.0)))
     print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
           + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
           + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
@@ -6364,6 +6367,7 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     bench_wait[A](host_addr, ci, 500_000_000)
     var times = List[Float64]()  # the work: the app's step and view, plus the canvas's draw of the frame that shows it
     var walls = List[Float64]()  # to that frame painted (includes waiting for the frame clock): the page's "frame after"
+    var code_walls = List[Float64]()  # (D-8102) to the end of that frame's own paint
     if not host[].paint_timed:
         var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
         if clock != 0:
@@ -6386,11 +6390,13 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
             while host[].paint_timed and host[].paints_done <= shown_in and perf_counter_ns() < by:
                 _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
             walls.append(Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6)
+            code_walls.append(max(walls[len(walls) - 1] - Float64(Int(external_call["g_get_monotonic_time", Int64]()) - host[].paint_end_us[shown_in % 64]) / 1000.0, 0.0))  # (D-8102: to the end of that paint)
             times.append(ev + dms)
             if getenv("MOJOUI_TRACE_FRAMES") == "1":
                 print("TRACE: " + label + " step: event " + String(round(ev, 2)) + " draw " + String(round(host[].canvases[ci].draw_ms, 2)), flush=True)
         settle()
     sort(walls)
+    sort(code_walls)
     var srt = times.copy()
     sort(srt)
     var k = len(srt)
@@ -6398,7 +6404,8 @@ def app_step_bench[A: App](host_addr: Int, label: String, what: String, n: Int):
     var p95 = srt[min(k - 1, Int(Float64(k) * 0.95))] if k > 0 else 0.0
     var mx = srt[k - 1] if k > 0 else 0.0
     var wall95 = walls[min(len(walls) - 1, Int(Float64(len(walls)) * 0.95))] if len(walls) > 0 else 0.0
-    print(label + ": n=" + String(k) + " wall_p95=" + String(round(wall95, 2)) + " wall_max=" + String(round(walls[len(walls) - 1] if len(walls) > 0 else 0.0, 2)) + " p50=" + String(round(p50, 2)) + " p95=" + String(round(p95, 2))
+    var cw95 = code_walls[min(len(code_walls) - 1, Int(Float64(len(code_walls)) * 0.95))] if len(code_walls) > 0 else 0.0
+    print(label + ": n=" + String(k) + " wall_code_p95=" + String(round(cw95, 2)) + " wall_code_max=" + String(round(code_walls[len(code_walls) - 1] if len(code_walls) > 0 else 0.0, 2)) + " wall_p95=" + String(round(wall95, 2)) + " wall_max=" + String(round(walls[len(walls) - 1] if len(walls) > 0 else 0.0, 2)) + " p50=" + String(round(p50, 2)) + " p95=" + String(round(p95, 2))
           + " max=" + String(round(mx, 2)), flush=True)
 
 

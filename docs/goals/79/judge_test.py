@@ -36,7 +36,7 @@ def world():
     web = {"cold_desktop_ms": 700, "cold_chromium_ms": 500, "rss_mb": 800, "switch": 50, "switch_max": 60, "omnibar": 30, "omnibar_max": 31, "type page": {"p95": 19.4, "max": 20.3}}
     nat, paced, unwarm, opens = {}, {}, {}, {}
     n = {"p95": 4.0, "max": 5.0, "cpu": 0, "gap_n": 100, "gap_p95": 16.7, "gap_max": 16.8, "gap_over20": 0, "lat_p95": 12, "lat_max": 13, "lat_code_p95": 10, "lat_code_max": 11}
-    o = dict(n, complete_max=200, complete_p95=190, complete_p50=100, press_lat_n=10, press_lat_p95=12, press_lat_max=13, during_p95=3, during_max=4, press_n=10, press_p95=3, press_max=3)
+    o = dict(n, complete_max=200, complete_p95=190, complete_p50=100, press_lat_n=10, press_lat_p95=12, press_lat_max=13, press_lat_code_p95=10, press_lat_code_max=11, during_p95=3, during_max=4, press_n=10, press_p95=3, press_max=3)
     for note in c.RACE_NOTES:
         web[note] = {s: W() for s in c.RACE_STEPS}
         web[note].update({"web open first": {"p95": 280, "max": 280}, "web open again": {"p95": 270, "max": 270}, "web open gaps": {"p95": 80, "max": 100}, "web open press": {"p95": 14, "max": 14}})
@@ -44,12 +44,12 @@ def world():
         paced[note] = dict({s: dict(n) for s in c.RACE_STEPS}, open=dict(o))
         unwarm[note] = {s: dict(n) for s in c.RACE_STEPS}
         opens[note] = {"A": dict(o, snap=False), "B": dict(o, snap=True)}
-    start = {"first": 270, "rss": 200, "switch": 4, "switch_max": 5, "omnibar": 2, "omnibar_max": 2, "wswitch": 14, "wswitch_max": 15, "womnibar": 12, "womnibar_max": 13}
+    start = {"first": 270, "rss": 200, "switch": 4, "switch_max": 5, "omnibar": 2, "omnibar_max": 2, "wswitch": 14, "wswitch_max": 15, "womnibar": 12, "womnibar_max": 13, "cswitch": 10, "cswitch_max": 11, "comnibar": 9, "comnibar_max": 10}
     start["second"] = dict(start)
     return web, nat, start, paced, unwarm, opens
 
 
-TYPED = {"p95": 2.0, "max": 3.0, "cpu": 0, "lat_p95": 16.8, "lat_max": 16.9}
+TYPED = {"p95": 2.0, "max": 3.0, "cpu": 0, "lat_p95": 16.8, "lat_max": 16.9, "lat_code_p95": 15.0, "lat_code_max": 15.5}
 
 
 def judged(change=None, machine="linux", live=False, typed=TYPED):
@@ -94,10 +94,10 @@ fails(lambda w, n, s, p, u, o: n["600"]["pen"].update(cpu=2), "CPU frames")
 fails(lambda w, n, s, p, u, o: o["stress"]["A"].update(complete_max=400), "first open ever")
 fails(lambda w, n, s, p, u, o: p["600"].pop("drag one"), "not measured")
 fails(lambda w, n, s, p, u, o: w.update(rss_mb=None), "RSS")
-fails(lambda w, n, s, p, u, o: s.update(wswitch_max=90), "note switch")
+fails(lambda w, n, s, p, u, o: s.update(cswitch_max=90), "note switch")  # (D-8102: the frame-begun number is judged)
 # (continuation 22) typing in a long paragraph: both sides measured, the web's worst key included, no CPU frame
 fails(lambda w, n, s, p, u, o: w.update({"type page": None}), "20,000-character")
-for typed in (None, dict(TYPED, lat_max=40), dict(TYPED, cpu=3)):
+for typed in (None, dict(TYPED, lat_code_max=40), dict(TYPED, cpu=3)):  # (D-8102)
     t, ok = judged(typed=typed)
     assert not ok and any("20,000-character" in l and "✗" in l for l in t.splitlines()), typed
 assert c.web_type("WEBTYPE p95: 19.4 max: 20.3 n: 80\n") == {"p95": 19.4, "max": 20.3} and c.web_type("WEBTYPE p95: 1.0 max: 2.0 n: 80 (no editor)") is None and c.web_type("") is None
@@ -169,3 +169,24 @@ with tempfile.TemporaryDirectory() as t:
         p.kill()
         p.wait()
 print("judge: ok")
+
+
+# (D-8102) every latency row: the frame begun judged, the picture on the screen beside
+def _start(**kw):
+    def f(web, nat, start, paced, unwarm, opens):
+        start.update(kw)
+        start["second"].update(kw)
+    return f
+
+
+t, ok = judged(_start(wswitch=90, wswitch_max=95))  # (on the screen later than the web: beside only)
+assert ok and "note switch: native's picture handed to the screen" in t, [l for l in t.splitlines() if "switch" in l][:3]
+fails(_start(cswitch=None), "note switch")
+fails(_start(comnibar=40, comnibar_max=41), "omnibar")
+fails(lambda w, n, s, p, u, o: [o[k]["A"].pop("lat_code_p95") for k in c.RACE_NOTES], "first open ever")
+fails(lambda w, n, s, p, u, o: [p[k]["open"].pop("press_lat_code_p95") for k in c.RACE_NOTES], "a press during an open")
+t, ok = judged(typed=dict(TYPED, lat_p95=40, lat_max=41))
+assert ok, "typing: the picture on the screen later doesn't decide"
+t, ok = judged(typed=dict(TYPED, lat_code_p95=40, lat_code_max=41))
+assert not ok and any("20,000" in l and "✗" in l for l in t.splitlines())
+print("judge D-8102: ok")
