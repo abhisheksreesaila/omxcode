@@ -47,13 +47,19 @@ struct _Inflater(Movable):
     var bitbuf: Int
     var bitcnt: Int
     var out: List[UInt8]
+    var limit: Int  # the most bytes it may make (-1: no bound): past it, it raises (a zip bomb ends here)
 
-    def __init__(out self, var src: List[UInt8], start: Int, expect: Int):
+    def __init__(out self, var src: List[UInt8], start: Int, expect: Int, limit: Int = -1):
         self.src = src^
         self.pos = start
         self.bitbuf = 0
         self.bitcnt = 0
-        self.out = List[UInt8](capacity=max(expect, 1024))
+        self.limit = limit
+        self.out = List[UInt8](capacity=max(min(expect, limit) if limit >= 0 else expect, 1024))
+
+    def room(self, n: Int) raises:
+        if self.limit >= 0 and len(self.out) + n > self.limit:
+            raise Error("inflate: more than the " + String(self.limit) + " bytes allowed")
 
     def bits(mut self, need: Int) raises -> Int:
         var val = self.bitbuf
@@ -94,6 +100,7 @@ struct _Inflater(Movable):
         self.pos += 4
         if self.pos + n > len(self.src):
             raise Error("inflate: a stored block ends early")
+        self.room(n)
         for i in range(n):
             self.out.append(self.src[self.pos + i])
         self.pos += n
@@ -102,6 +109,7 @@ struct _Inflater(Movable):
         while True:
             var sym = self.decode(lencode)
             if sym < 256:
+                self.room(1)
                 self.out.append(UInt8(sym))
             elif sym == 256:
                 return
@@ -117,6 +125,7 @@ struct _Inflater(Movable):
                 var at = len(self.out) - dist
                 if at < 0:
                     raise Error("inflate: a distance before the start")
+                self.room(n)
                 for i in range(n):
                     self.out.append(self.out[at + i])
 
@@ -201,6 +210,16 @@ def inflate_zlib(var data: List[UInt8], expect: Int = 0) raises -> List[UInt8]:
     if (Int(data[1]) & 0x20) != 0:
         raise Error("zlib: a preset dictionary")
     var inf = _Inflater(data^, 2, expect)
+    inf.run()
+    var out = List[UInt8]()
+    swap(out, inf.out)
+    return out^
+
+
+def inflate_raw(var data: List[UInt8], expect: Int = 0, limit: Int = -1) raises -> List[UInt8]:
+    """The bytes of raw deflate blocks (RFC 1951, no zlib header: a ZIP entry's method 8). `limit`: the most it may make
+    (-1: no bound); past it, it raises, having made no more than that."""
+    var inf = _Inflater(data^, 0, expect, limit)
     inf.run()
     var out = List[UInt8]()
     swap(out, inf.out)
