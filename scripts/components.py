@@ -483,7 +483,7 @@ def feature_cell(host, src, pattern, example, name=""):
 SERVICES = [
     ("Microphone", "mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread", "dictate",
      {"Linux (GTK)": None, "Web": ("✅", "tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too"),
-      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "goal 82 M5: AVAudioEngine's input tapped and resampled to 16 kHz; builds and runs a recorded voice (file:) on the M4; a live microphone waits for macOS's permission (the owner's click)"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "goal 82 M5: AVAudioEngine's input tapped and resampled to 16 kHz; pnote builds and asks for it on the M4; a live microphone waits for macOS's permission (the owner's click)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
     ("Speech model in process", "mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)", "dictate",
      {"Linux (GTK)": None, "Web": ("❌", "the model needs CPython + torch in the app's process"),
@@ -493,7 +493,7 @@ SERVICES = [
     ("Dictation (hold to talk, words at the caret)", "mojoui.dictation: PressToTalk press/release -> TALK_START / TALK_STOP (450 ms hold); DictationText.hear(e) -> Put(commit, preedit); Dictation(source, engine).start() / tick() / stop(); word_errors(); use_python_env()", "pnote",
      {"Linux (GTK)": ("✅", "tests/test_dictation (WER 2/86, first words 0.53-0.59 s after the voice starts) and docs/goals/82-check.py M5: pnote's page and canvas mics with recorded clips"),
       "Web": ("❌", "the model needs CPython + onnxruntime in the app's process"), "Android": ("❌", "not built"),
-      "Mac (AppKit)": ("🔨", "goal 82 M5: Apple's on-device recogniser (mojoui.applespeech); the rules run on the M4, recognition waits for Speech Recognition permission (the owner's click)"),
+      "Mac (AppKit)": ("🔨", "goal 82 M5: Apple's on-device recogniser (mojoui.applespeech); tests/test_dictation's rules run on the M4 and pnote's mic asks macOS; recognition waits for Speech Recognition permission (the owner's click)"),
       "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
     ("Secret store", "mojoui.secrets: SecretStore(service[, keychain]).save(account, value) / load / has / forget (libsecret's secret-tool; the keychain's security; stdin/stdout pipes, never argv or a file)", "",
      {"Linux (GTK)": ("✅", "tests/test_secrets: round trip, replace, forget, a refused value's message without it (GNOME Keyring)"), "Web": ("❌", "not built"),

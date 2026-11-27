@@ -147,6 +147,11 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 |---|---|---|---|---|---|---|---|
 | Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ✅ | ❌ | 🔨 | ❌ | — |
 | Speech model in process | `mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Dictation (hold to talk, words at the caret) | `mojoui.dictation: PressToTalk press/release -> TALK_START / TALK_STOP (450 ms hold); DictationText.hear(e) -> Put(commit, preedit); Dictation(source, engine).start() / tick() / stop(); word_errors(); use_python_env()` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Secret store | `mojoui.secrets: SecretStore(service[, keychain]).save(account, value) / load / has / forget (libsecret's secret-tool; the keychain's security; stdin/stdout pipes, never argv or a file)` | ✅ | ❌ | ❌ | ✅ | ❌ | — |
+| AI settings and brain calls | `mojoui.aisettings: AiSettings load/save/validate (the web's ai-settings.json and words); save_settings(s, folder, key); BrainCall.start(s, system, user).poll() -> ASK_DONE/ASK_FAILED (claude -p; OpenAI-compatible, Azure and local through curl, the key on stdin); $MOJOUI_BRAIN_REPLAY` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Jam brain (map edits) | `mojoui.jam: JAM_SYSTEM, jam_prompt(map, said, waiting), parse_jam(reply, map) -> JamEdits (add_branch / react / ghost, refused whole in the web's words), apply_jam, answer_ghost, start_jam, is_jam` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Agent edit take-back | `mojoui.agentedit: merge_text(after, now, before) -> Optional (three-way, refuses when the person changed those words), changed_span(before, after)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
 | Language model in process | `mojoui.llm: Llm(gguf, gpu).chat(messages, tools) -> id, poll(id) -> TEXT / REASONING / TOOL_CALLS / DONE events, cancel(id); two sequences; prompt cache (llama.cpp library through bridge/llm_shim.cpp)` | ✅ | ❌ | ❌ | ❌ | ❌ | — |
 | Speaker | `mojoui.speaker: Speaker().play(samples, rate), stop() (barge-in), playing(), first_ns(); 24 kHz mono on its own thread` | ✅ | ✅ | ❌ | 🔨 | ❌ | — |
 | Voice (text to speech) | `mojoui.voice: Voice().say(text), poll()/pump(speaker), cancel(); Kokoro-82M in process, clause by clause` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
@@ -175,12 +180,37 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 
 - Microphone (Web): tests/test_web_audio.py: the browser's microphone reaches the app (examples/echo): 100 % match with the fake mic's .wav, over https on the tailnet too.
 - Microphone (Android): not built.
-- Microphone (Mac (AppKit)): builds; start() reports "no microphone on this host yet" (AVAudioEngine planned).
+- Microphone (Mac (AppKit)): goal 82 M5: AVAudioEngine's input tapped and resampled to 16 kHz; pnote builds and asks for it on the M4; a live microphone waits for macOS's permission (the owner's click).
 - Microphone (iPhone (UIKit)): not built.
 - Speech model in process (Web): the model needs CPython + torch in the app's process.
 - Speech model in process (Android): not built.
 - Speech model in process (Mac (AppKit)): builds; needs CPython with torch beside the app (MPS), never run.
 - Speech model in process (iPhone (UIKit)): no CPython on the phone.
+- Dictation (hold to talk, words at the caret) (Linux (GTK)): tests/test_dictation (WER 2/86, first words 0.53-0.59 s after the voice starts) and docs/goals/82-check.py M5: pnote's page and canvas mics with recorded clips.
+- Dictation (hold to talk, words at the caret) (Web): the model needs CPython + onnxruntime in the app's process.
+- Dictation (hold to talk, words at the caret) (Android): not built.
+- Dictation (hold to talk, words at the caret) (Mac (AppKit)): goal 82 M5: Apple's on-device recogniser (mojoui.applespeech); tests/test_dictation's rules run on the M4 and pnote's mic asks macOS; recognition waits for Speech Recognition permission (the owner's click).
+- Dictation (hold to talk, words at the caret) (iPhone (UIKit)): not built.
+- Secret store (Linux (GTK)): tests/test_secrets: round trip, replace, forget, a refused value's message without it (GNOME Keyring).
+- Secret store (Web): not built.
+- Secret store (Android): not built.
+- Secret store (Mac (AppKit)): tests/test_secrets on the M4 against a keychain file of the check's own (the login keychain is locked to SSH, D-8703).
+- Secret store (iPhone (UIKit)): not built.
+- AI settings and brain calls (Linux (GTK)): tests/test_ai (a loopback fake of an OpenAI endpoint saw the key only as the bearer header) and goal 82 M6: pnote's Settings → AI page.
+- AI settings and brain calls (Web): not built.
+- AI settings and brain calls (Android): not built.
+- AI settings and brain calls (Mac (AppKit)): builds (curl and security ship with macOS); not run there yet.
+- AI settings and brain calls (iPhone (UIKit)): not built.
+- Jam brain (map edits) (Linux (GTK)): tests/test_jam vs the web's jam_brain.py + mindmap/jam.js on 18 recorded replies; goal 82 M6: a jam turn in pnote.
+- Jam brain (map edits) (Web): not built.
+- Jam brain (map edits) (Android): not built.
+- Jam brain (map edits) (Mac (AppKit)): pure Mojo, builds; not run there.
+- Jam brain (map edits) (iPhone (UIKit)): not built.
+- Agent edit take-back (Linux (GTK)): goal 82 M6: 7 cases vs the web's agent_edit.py; pnote's Show / Undo of the web CLI's write.
+- Agent edit take-back (Web): not built.
+- Agent edit take-back (Android): not built.
+- Agent edit take-back (Mac (AppKit)): pure Mojo, builds; not run there.
+- Agent edit take-back (iPhone (UIKit)): not built.
 - Language model in process (Linux (GTK)): tests/test_llm.mojo: Qwen3.8-27B on a 3090 (goal 72 M1); examples/omx runs it in the app (M4).
 - Language model in process (Web): needs libllama in the app's process.
 - Language model in process (Android): not built.
