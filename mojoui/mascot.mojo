@@ -56,7 +56,8 @@ def mascot_pack_dir(override: String = "", name: String = "omx") -> String:
             else:
                 return own
     var d = libc.exe_dir()
-    var tries: List[String] = [d + "/mascots/" + name, d + "/../../../examples/stage/mascots/" + name, "examples/stage/mascots/" + name]
+    var tries: List[String] = [d + "/mascots/" + name, d + "/../Resources/mascots/" + name,
+                               d + "/../../../examples/stage/mascots/" + name, "examples/stage/mascots/" + name]
     for t in tries:
         if exists(t + "/manifest.json"):
             return t
