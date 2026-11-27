@@ -49,7 +49,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console, jot |
+| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console, jot, pnote |
 | `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit, jot |
 | `WebComponent` | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | widgets |
@@ -122,6 +122,12 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252) | `DesktopSignIn(server) · .url · code() · token_request(msg, code)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Open in the system browser (an effect: App.opens, mojoui.browser) | `Browser.open(url) · def opens(mut self) -> List[String]` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition) | `mojoui.transition.Morph · def transition(mut self) -> Int` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
+| System dialogs asked from update (mojoui.systemask: file picker, save dialog, print a PDF, share, full screen) | `SystemAsks.pick_file · save_file · print_pdf · share · full_screen · def asks(mut self)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Pictures and files pasted (PASTE_FILE: a clipboard picture as a PNG, files copied in the file manager) | `def takes_paste_files(self, canvas) → PASTE_FILE events` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG) | `MediaStore(dir).put(bytes, ext) · prepare_picture(path) · place_picture(w, h, x, y, i)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform) | `encode_jpeg(pixels, w, h, quality)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| Vector PDF (mojoui.pdfwriter: a Painter; shapes as paths, words from their glyph outlines with ToUnicode, pictures) | `PdfPainter().page(w_pt, h_pt) · any Painter calls · save(path)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Focus mode rules (mojoui.focusmode; PageSheet.focus: words only, a 680 px column) | `focus_shortcut(name, mods) · focus_view(…) · count_words(text)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -138,7 +144,13 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 - One instance (a second launch opens the running app): GTK: registers dev.mojoui.bg.<name> on the session bus before building anything; a second launch sends activate and exits without building its App (goal 45 M1, D-1706); elsewhere each launch is its own.
 - Tray item (StatusNotifierItem; NSStatusItem): Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window), a minimal com.canonical.dbusmenu with Open and Quit, registered again whenever a panel's watcher appears; checked on a private bus with a pretend watcher, no real panel; Mac: NSStatusItem not built yet; the web has no tray API.
 - Notifications (mojoui.notify): Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not run, and it doesn't ask the person's permission yet (that needs a block).
-- Save dialog: the app writes the file at the path it's given; on the web that path is the page's downloads folder and the page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker).
+- Save dialog: the app writes the file at the path it's given; on the web that path is the page's downloads folder and the page downloads it; the Mac's NSSavePanel and NSOpenPanel come through mojoui.systemask (goal 82), not yet behind the FileSaver/FilePicker buttons.
+- System dialogs asked from update (mojoui.systemask: file picker, save dialog, print a PDF, share, full screen): goal 82 M4: GTK's print dialog (GtkPrintDialog printing the PDF file) and save dialog opened for real on the hidden screen (GDK_DEBUG=no-portals) and closed; the Mac's print panel (PDFKit) and NSSavePanel seen modal and aborted (MOJOUI_ASK_CLOSE_MS), its NSSharingServicePicker shown; the file picker's own dialog is answered by the answer: step (M2); Linux 'share' shows the file in the file manager (no share sheet there); full screen built, not driven.
+- Pictures and files pasted (PASTE_FILE: a clipboard picture as a PNG, files copied in the file manager): goal 82 M2: a picture on the clipboard pasted on GTK (GdkTexture → PNG) and the Mac (NSPasteboard PNG/TIFF → PNG); files copied in a file manager (GdkFileList, Finder's file URLs) built, not driven; opt-in per canvas (takes_paste_files).
+- Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG): goal 82 M2: the web app opens pnote's notes file and media/ and shows the pictures in place (SSIM 0.986); a picture kept as it came has the web's very name; a re-encoded one has the web's kind and size (its bytes differ: another encoder); decoding is mojoui.picture's (ffmpeg on Linux, ImageIO on the Mac), on a thread when a canvas opens, on the UI thread when one is added.
+- JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform): baseline, 4:2:0, libjpeg's quality scale and Annex K tables; PSNR equal to libjpeg's at quality 85 (tests/test_jpeg.py); not run on the Mac yet (its M2 pictures were small enough to be kept as they came).
+- Vector PDF (mojoui.pdfwriter: a Painter; shapes as paths, words from their glyph outlines with ToUnicode, pictures): goal 82 M4: pnote's print sheets on Linux and the Mac read back by poppler (words found, page vs the web's sheet SSIM 0.990); glyphs are Type 3 outlines (FreeType; CoreText), so a variable face prints at its weight; shadows and colour emoji aren't printed; on the Mac a run's letters map glyph i to letter i (CoreText gives no clusters, D-8516).
+- Focus mode rules (mojoui.focusmode; PageSheet.focus: words only, a 680 px column): goal 82 M1: pnote's canvas and page focus vs the web's at the same note SSIM 0.992 / 0.986 (Linux); state equal after leaving on Linux and the Mac (Cmd+.); no real full screen (D-8501).
 - Scene: layer transform: GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a big page at a big zoom it's softer than the strokes until the zoom comes back within the cap.
 
 ## Native services (the machine, not a widget)
@@ -345,10 +357,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, agenttiles, console, consolekit, omx, stage |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, agenttiles, console, consolekit, omx, stage, widgets |
 | `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, agenttiles, omx, stage |
-| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer |
+| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer, pnote |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | media, omxplorer |
 | `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omx, omxplorer |
+| `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omx, omxplorer, pnote |
 | `Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)` | `mojoui/album.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat, agenttiles, omx |
 | `Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | media, omxplorer |
@@ -442,7 +454,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `A fleet of bags (runs, every topic joined on time at 10 Hz, stops, story.json; read off the UI thread)` | `mojoui/fleet.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer |
+| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omx, omxplorer, pnote |
 | `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
@@ -479,12 +491,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 235 | 16 | 0 |
-| Web | 181 | 53 | 17 |
-| Android | 19 | 100 | 132 |
-| Mac (AppKit) | 9 | 213 | 29 |
-| iPhone (UIKit) | 0 | 176 | 75 |
-| Agent (MCP) | 67 | 79 | 105 |
+| Linux (GTK) | 241 | 16 | 0 |
+| Web | 181 | 53 | 23 |
+| Android | 19 | 100 | 138 |
+| Mac (AppKit) | 14 | 214 | 29 |
+| iPhone (UIKit) | 0 | 176 | 81 |
+| Agent (MCP) | 67 | 79 | 111 |
 
 ## Inside one app, not components yet (the debt)
 
