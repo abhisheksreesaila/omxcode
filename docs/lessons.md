@@ -122,3 +122,8 @@ One line per rule that prevents a mistake that happened.
 
 - scripts/mac-unlocked (79-check M6) takes ~/.cache/omx-mac.lock itself and ignores OMX_MAC_LOCKED: never run it under an outer flock of the same lock.
 - Before a race, look for any 79-check M6 on the machine, not only this worktree's (another session's ran beside ours on 11-26).
+- 2026-11-26 · GTK stacks a box-shadow list the other way round from CSS (the last one on top): a ring with a gap drawn as two spread shadows lost its gap on GTK only. Draw rings with `outline` + `outline-offset`, which both hosts draw alike (D-8420), and look at the pixels on both hosts.
+- 2026-11-26 · Test steps that count controls (`segment:N`) renumber when a control is replaced by other views: personalize_check's "segment:2=Mascot" quietly tapped Tiles once the accent became swatches. After changing a control's kind, grep every step that counts that kind.
+- 2026-11-26 · The web host flattens every pressable canvas to RGB (JPEG); only `.passthrough()` and `.see_through()` canvases keep their alpha (D-8426). A canvas that takes presses and must show what's beneath is proven in the browser too: the perch was a black square there and fine on GTK.
+- 2026-11-26 · An x11grab recording runs on after the app quits: a check reads the last frame the app was on screen, not the recording's last (personalize_check's first pixel reads were all black).
+- 2026-11-26 · A filter over people's words splits on every non-ASCII byte (a phone's curly quotes glued onto "mascot" and the guard dropped it), and a mark's colour is checked at 3:1 against what it sits on for every accent, not only the default (review of D-8418 and D-8420).

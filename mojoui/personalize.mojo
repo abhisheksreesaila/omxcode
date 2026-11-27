@@ -156,19 +156,22 @@ def _synonym(key: String, value: String) -> String:
 # "density": "roomy", D-8417). A prompt can't make that deterministic, so the request is checked against the person's own
 # words: a setting whose concept they never mentioned is left as it is. Words, not substrings ("red" is not in "ordered"),
 # matched by their start so "darker", "colours" and "tiles" count. A request that names no concept at all ("surprise me",
-# "make it cozy") or asks for everything ("reset it", "back to the defaults") passes whole.
+# "make it cozy", "reset it", "back to the defaults") passes whole; one that names some concepts changes only those, however
+# it goes on ("…and don't change anything else", "whatever, make it dark").
 
 
 def _words(text: String) -> List[String]:
-    """The words of `text`, lower case: runs of letters (a-z, A-Z and any non-ASCII byte, so "café" stays one word)."""
+    """The words of `text`, lower case: runs of ASCII letters. Anything else parts them, a non-ASCII byte too, so curly
+    quotes and dashes from a phone's keyboard never stick to a word ("“mascot”—dark" is mascot, dark; the concept words are
+    all ASCII)."""
     var out = List[String]()
     var cur = String("")
     for b in text.as_bytes():
         var c = Int(b)
         if c >= 65 and c <= 90:
             cur += chr(c + 32)
-        elif (c >= 97 and c <= 122) or c >= 128:
-            cur += chr(c) if c < 128 else String("_")  # (a non-ASCII byte keeps the word whole; never matched)
+        elif c >= 97 and c <= 122:
+            cur += chr(c)
         elif cur != "":
             out.append(cur)
             cur = ""
@@ -195,13 +198,13 @@ def _concept_stems(key: String) -> List[String]:
     """Word starts that name a setting's concept ("dark" also counts "darker", "darken")."""
     if key == "scheme":
         return ["dark", "light", "night", "tonight", "bright", "dim", "auto", "system", "theme", "black", "white",
-                "evening", "contrast", "glare", "sun", "moon"]
+                "evening", "contrast", "glare", "moon"]
     if key == "accent":
         return ["colo", "accent", "tint", "hue", "violet", "purpl", "indigo", "lavender", "lilac", "blue", "navy", "azure",
                 "teal", "turquoise", "aqua", "green", "cyan", "mint", "orange", "amber", "crimson", "scarlet", "pink", "rose",
                 "gold", "yellow", "ink"]
     if key == "presence":
-        return ["mascot", "companion", "character", "creature", "owl", "fox", "pet", "orb", "ball", "circle", "sphere",
+        return ["mascot", "companion", "character", "creature", "owl", "fox", "orb", "ball", "circle", "sphere",
                 "presence", "avatar", "buddy", "critter", "spirit", "blob"]
     if key == "density":
         return ["tile", "card", "room", "compact", "dens", "spaci", "space", "big", "small", "larg", "few", "crowd", "clutter",
@@ -210,19 +213,15 @@ def _concept_stems(key: String) -> List[String]:
 
 
 def _concept_words(key: String) -> List[String]:
-    """Whole words that name a concept but would match too much as a start ("red" would count "redo", "mode" "model")."""
+    """Whole words that name a concept but would match too much as a start ("red" would count "redo", "mode" "model", "sun"
+    "sunday", "pet" "petition")."""
     if key == "scheme":
-        return ["day", "days", "daytime", "dusk", "dawn", "mode", "modes"]
+        return ["day", "days", "daytime", "dusk", "dawn", "mode", "modes", "sun", "sunny", "sunlight", "sunshine"]
     if key == "accent":
-        return ["red", "reds", "redder", "reddish"]
+        return ["red", "reds", "redder", "reddish", "bluish", "greenish"]
+    if key == "presence":
+        return ["pet", "pets"]
     return List[String]()
-
-
-def _everything(word: String) -> Bool:
-    """A word that asks for the whole look ("reset it", "back to the defaults", "surprise me"): nothing is filtered."""
-    var whole: List[String] = ["everything", "reset", "default", "defaults", "normal", "original", "surprise", "random", "randomize",
-                               "randomise", "whatever", "anything", "personalize", "personalise", "makeover", "overhaul", "plain"]
-    return _is(word, whole)
 
 
 def _concept_name(key: String) -> String:
@@ -239,13 +238,10 @@ def _concept_name(key: String) -> String:
 
 
 def asked_settings(utterance: String) -> List[String]:
-    """The settings the person's words are about (look_keys() order); every key when they name none or ask for everything
-    (a broad request: the model's choice stands)."""
+    """The settings the person's words are about (look_keys() order); every key when they name none ("surprise me", "reset
+    it": a broad request, the model's choice stands)."""
     var words = _words(utterance)
     var out = List[String]()
-    for w in words:
-        if _everything(w):
-            return look_keys()
     for key in look_keys():
         var stems = _concept_stems(key)
         var whole = _concept_words(key)

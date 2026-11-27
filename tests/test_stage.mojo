@@ -9,7 +9,8 @@ from mojoui.stage import stage_layout, stage_compact, STAGE_PHONE, STAGE_NARROW
 from mojoui.accents import ACCENT_VALUES, accent_colour, swatch_role
 from mojoui.theme import contrast_ratio
 from mojoui.look import css_color
-from themes.omxqua import omxqua_counter, counter_ground, counter_shade, counter_palette, counter_tv_look, readable_on, ring_css
+from themes.omxqua import omxqua_counter, counter_ground, counter_shade, counter_palette, counter_tv_look, readable_on, ring_css, avatar_ring
+from mojoui.accents import SWATCH_SIDE
 
 
 def tagged(v: View, name: String) -> List[Int]:
@@ -199,12 +200,15 @@ def test_active_avatar_and_accent() raises:
             assert_true(you.fill != p.ink, "their bubbles wear " + values[k])
             assert_true(contrast_ratio(you.fill, you.ink) >= 4.5, "their words read on " + values[k] + ": " + String(contrast_ratio(you.fill, you.ink)))
             var t = omxqua_counter(dark, acc)
-            assert_true(rule(t.gtk_css, "button.flat.mui-tag-stage-avatar-3-on").find(ring_css(acc)) >= 0, "the active ring in " + values[k])
+            var ring_c = avatar_ring(t.palette)
+            assert_true(rule(t.gtk_css, "button.flat.mui-tag-stage-avatar-3-on").find(ring_css(ring_c)) >= 0, "the active ring in " + values[k])
+            assert_true(contrast_ratio(ring_c, p.page) >= 3.0, "the ring reads on the room: " + values[k] + " " + String(contrast_ratio(ring_c, p.page)))
+            assert_true(contrast_ratio(ring_c, acc) < 1.6, "the ring is still " + values[k])
             for i in range(6):  # (the tiles' kinds keep their own colours)
                 assert_equal(look.surfaces[look.surface("stage-kind-" + String(i + 1))].fill, p.series[i])
             for v in values:  # (every swatch styled; the chosen one ringed in its own colour, its tick readable)
                 var sw = look.surfaces[look.surface(swatch_role(v, True))].copy()
-                assert_true(sw.width == 32 and sw.height == 32, swatch_role(v, True))
+                assert_true(sw.width == SWATCH_SIDE and sw.height == SWATCH_SIDE, swatch_role(v, True))
                 assert_true(rule(t.gtk_css, "button.image-button.mui-tag-" + swatch_role(v, True)).find(ring_css(sw.fill)) >= 0, "GTK rings " + v)
                 assert_true(rule(t.web_css, "button.subtle.icon-only[data-tag=" + swatch_role(v, True) + "]").find(ring_css(sw.fill)) >= 0, "the web rings " + v)
                 assert_equal(rule(t.gtk_css, "button.image-button.mui-tag-" + swatch_role(v, False)).find("outline"), -1)

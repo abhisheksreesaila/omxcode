@@ -526,6 +526,17 @@ def counter_ground(dark: Bool, accent: UInt32 = 0) -> UInt32:
     return mix(g, accent, COUNTER_TINT_NIGHT if dark else COUNTER_TINT_LIGHT)
 
 
+def avatar_ring(p: Palette) -> UInt32:
+    """The active avatar's ring colour: the accent (the ink unless a person picked one), pulled toward the ink just as far as it
+    takes to read at 3:1 against the room it sits on (WCAG's mark contrast: teal, orange and gold by day are 2.7–3.0 alone)."""
+    var c = p.accent
+    var t = 0.0
+    while contrast_ratio(c, p.page) < 3.0 and t < 1.0:
+        t += 0.05
+        c = mix(p.accent, p.ink, t)
+    return c
+
+
 def ring_css(colour: UInt32) -> String:
     """A ring round a round control: 2 pt wide, 2 pt out from its edge, in `colour` (the active avatar: the accent; a chosen
     swatch: its own colour). A CSS outline, which GTK and the web draw alike and which follows the corners; what is behind
@@ -635,7 +646,7 @@ def counter_roles(p: Palette, accent: UInt32 = 0) -> List[Surface]:
         var k = Surface("stage-kind-" + String(i + 1), p.series[i], 6, 6, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, icon_size=12, icon_stroke=2.4, icon_ink=p.accent_ink)
         out.append(k^)
     var everyone = Surface("stage-avatar", p.ink, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 13, p.card, 650, 0, 0, 0, 0, False)
-    var everyone_on = everyone.copy()  # (the active one: ringed in the accent, ring_css in counter_gtk / counter_web)
+    var everyone_on = everyone.copy()  # (the active one: ringed in the accent, avatar_ring and ring_css in counter_gtk / counter_web)
     everyone_on.role = "stage-avatar-on"
     out.append(everyone^)
     out.append(everyone_on^)
@@ -787,7 +798,7 @@ def counter_gtk(p: Palette, cls: String, accent: UInt32 = 0) -> String:
         if s.role.startswith("stage-avatar"):
             var r = s.role
             out += w + "button.mui-tag-" + r + ", " + w + "button.flat.mui-tag-" + r + " { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; }\n"
-            out += w + "button.flat.mui-tag-" + r + " { background: " + css_color(s.fill) + ";" + (" " + ring_css(p.accent) if r.endswith("-on") else String("")) + " } "
+            out += w + "button.flat.mui-tag-" + r + " { background: " + css_color(s.fill) + ";" + (" " + ring_css(avatar_ring(p)) if r.endswith("-on") else String("")) + " } "
             out += w + "button.flat.mui-tag-" + r + " label { color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n"
     out += swatch_gtk(p, cls)
     return out
@@ -822,7 +833,7 @@ def counter_web(p: Palette, cls: String, accent: UInt32 = 0) -> String:
         if s.role.startswith("stage-avatar"):
             out += (b + "button.subtle[data-tag=" + s.role + "], " + b + "button[data-tag=" + s.role + "] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: "
                     + css_color(s.fill) + "; color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px;"
-                    + (" " + ring_css(p.accent) if s.role.endswith("-on") else String("")) + " }\n")
+                    + (" " + ring_css(avatar_ring(p)) if s.role.endswith("-on") else String("")) + " }\n")
     out += swatch_web(p, cls)
     return out
 

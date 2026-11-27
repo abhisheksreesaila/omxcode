@@ -326,6 +326,17 @@ def test_asked_settings_words() raises:
     var e = asked_settings("try another model")
     assert_equal(len(e), 4)  # (no concept: everything may change)
     assert_equal(len(asked_settings("dark mode at night")), 1)
+    var quoted = asked_settings("use the “mascot”—and make it dark")  # (a phone keyboard's curly quotes and dash part words)
+    assert_equal(len(quoted), 2)
+    assert_equal(quoted[0], "scheme")
+    assert_equal(quoted[1], "presence")
+    var rest = asked_settings("Whatever, make it dark and don't change anything else")  # (a named concept: only it, however it goes on)
+    assert_equal(len(rest), 1)
+    assert_equal(rest[0], "scheme")
+    var orb = asked_settings("use the normal orb")
+    assert_equal(len(orb), 1)
+    assert_equal(orb[0], "presence")
+    assert_equal(len(asked_settings("see you on sunday")), 4)  # ("sun" is a whole word now, "sunday" names nothing)
 
 
 def test_fade_curve() raises:

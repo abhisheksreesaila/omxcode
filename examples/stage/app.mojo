@@ -217,8 +217,7 @@ struct Main(App):
         self.clock = environment("STAGE_CLOCK", "10:59")
         self.charms_on = True
         self.log("START")
-        self.refeed()
-        self.place_presence()
+        self.refeed()  # (the presence is placed by the first resize, at the real width: a phone never perches for a frame)
 
     def title(self) -> String:
         return "Stage"

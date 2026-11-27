@@ -10,7 +10,7 @@ from mojoui.theme import Palette
 
 comptime ACCENT_VALUES: List[String] = ["default", "violet", "blue", "teal", "orange", "red", "gold"]  # (the default first; then
 # Palette.series 0..5 in its order)
-comptime SWATCH_SIDE = 32  # a swatch's round button, points (a touch target on the Counter)
+comptime SWATCH_SIDE = 34  # a swatch's round button, points (omxqua's control target; seven in a row keep the popover ~314 wide)
 comptime SWATCH_ROLE = "look-swatch-"  # + the value, + "-on" when chosen
 
 
