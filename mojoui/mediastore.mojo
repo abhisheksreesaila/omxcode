@@ -12,8 +12,18 @@
 # source pixel counted, as a browser's high-quality smoothing does) and written again: with see-through pixels as PNG, else as
 # a JPEG at quality 85 on white (mojoui.jpeg; a GIF frozen at its first frame). Decoding goes through mojoui.picture (ffmpeg on
 # Linux, ImageIO on the Mac); the PNG is deflated by the system's zlib.
+#
+# Moving pictures in and out of documents (goal 82 M3, folded in from mojoui.mediafiles at the integration, D-8902):
+#   var name = put_media(dir, bytes, "png")     # MediaStore(dir).put for a known picture type (raises for any other)
+#   var b = read_media(dir, "media/<sha>.png")  # Optional bytes (a name that isn't <64 hex>.<png|jpg|webp|gif|svg>: None)
+#   var url = data_url(bytes, "png")            # "data:image/png;base64,…"
+#   var d = decode_data_url(url)                # Optional (bytes, ext): base64 or percent-encoded png/jpeg/webp/gif/svg+xml,
+#                                               # at most MAX_MEDIA_BYTES; anything else None
+#   is_picture_file(path)                       # a dropped file a canvas takes as a picture (by its name; its bytes decide later)
 
+from std.collections import Optional
 from mojoui.zlibc import zlib_compress
+from mojoui.crypto import b64
 from mojoui.hash import sha256, hex
 from mojoui.jpeg import encode_jpeg
 from mojoui.png import encode_png
@@ -331,13 +341,14 @@ struct MediaStore(Movable):
         var n = String(name[byte=6:]) if name.startswith("media/") else name
         return self.root + "/" + n if media_name_ok(n) else String("")
 
-    def put(self, data: List[UInt8], ext: String) raises -> String:
-        """The bytes stored (unless the same are already there): "media/<sha256>.<ext>"."""
+    def put(self, data: List[UInt8], ext: String, durable: Bool = True) raises -> String:
+        """The bytes stored (unless the same are already there): "media/<sha256>.<ext>". durable: they reach the disk before
+        the name does (mojoui.files.private_write_parts)."""
         var name = hex(sha256(Span(data))) + "." + ext
         var path = self.root + "/" + name
         if not file_exists(path):
             make_dir(self.root)
-            if not private_write_parts(path, [(Int(data.unsafe_ptr()), len(data))], True):
+            if not private_write_parts(path, [(Int(data.unsafe_ptr()), len(data))], durable):
                 raise Error("Could not store that picture")
             _ = len(data)
         return "media/" + name
@@ -360,3 +371,156 @@ def place_picture(w: Int, h: Int, x: Float64, y: Float64, index: Int = 0) -> Pla
     var scale = Float64(shown[0]) / Float64(w) if w > 0 else 1.0
     var off = Float64(index) * PLACE_OFFSET
     return Placed(x + off - Float64(w) / 2, y + off - Float64(h) / 2, Float64(w), Float64(h), scale)
+
+
+def put_media(dir: String, data: List[UInt8], ext: String) raises -> String:
+    """The bytes as `dir/<sha256>.<ext>` through MediaStore (written whole under a name of its own, then renamed; left as it is
+    when there); "media/<sha256>.<ext>", as notes name it. Raises for an extension that isn't a picture type's. (Imports write
+    many: not durable, as goal 82 B wrote it.)"""
+    if mime_of(ext) == "":
+        raise Error("not a picture type: " + ext)
+    return MediaStore(dir).put(data, ext, durable=False)
+
+
+def mime_of(ext: String) -> String:
+    if ext == "png":
+        return "image/png"
+    if ext == "jpg":
+        return "image/jpeg"
+    if ext == "webp":
+        return "image/webp"
+    if ext == "gif":
+        return "image/gif"
+    if ext == "svg":
+        return "image/svg+xml"
+    return ""
+
+
+def ext_of_suffix(suffix: String) -> String:
+    """A file name's suffix as a media extension ("jpeg" → "jpg"; "": not a picture)."""
+    var s = suffix.lower()
+    if s == "png" or s == "webp" or s == "gif" or s == "svg":
+        return s
+    if s == "jpg" or s == "jpeg":
+        return "jpg"
+    return ""
+
+
+def read_media(dir: String, ref_name: String) -> Optional[List[UInt8]]:
+    """The bytes of "media/<name>" (or a bare "<name>") in `dir`; None when the name isn't a media name or there's no file."""
+    var name = String(ref_name[byte=6:]) if ref_name.startswith("media/") else ref_name
+    if not media_name_ok(name) or not file_exists(dir + "/" + name):
+        return None
+    try:
+        with open(dir + "/" + name, "r") as f:
+            return f.read_bytes()
+    except:
+        return None
+
+
+def data_url(data: List[UInt8], ext: String) -> String:
+    return "data:" + mime_of(ext) + ";base64," + b64(data)
+
+
+def _sextet(c: UInt8) -> Int:
+    var x = Int(c)
+    if 65 <= x <= 90:
+        return x - 65
+    if 97 <= x <= 122:
+        return x - 71
+    if 48 <= x <= 57:
+        return x + 4
+    if x == 43:  # +
+        return 62
+    if x == 47:  # /
+        return 63
+    return -1
+
+
+def b64_decode(text: String) -> Optional[List[UInt8]]:
+    """Standard base64 (+ and /, '=' padding at the end only); None for anything else (Python's validate=True)."""
+    var b = text.as_bytes()
+    var n = len(b)
+    while n > 0 and b[n - 1] == UInt8(ord("=")):
+        n -= 1
+    if len(b) % 4 != 0 or len(b) - n > 2:
+        return None
+    var out = List[UInt8](capacity=n * 3 // 4)
+    var acc = 0
+    var bits = 0
+    for k in range(n):
+        var v = _sextet(b[k])
+        if v < 0:
+            return None
+        acc = ((acc << 6) | v) & 0xFFFFFF
+        bits += 6
+        if bits >= 8:
+            bits -= 8
+            out.append(UInt8((acc >> bits) & 0xFF))
+    return out^
+
+
+def _hexval(c: UInt8) -> Int:
+    var x = Int(c)
+    if 48 <= x <= 57:
+        return x - 48
+    if 97 <= x <= 102:
+        return x - 87
+    if 65 <= x <= 70:
+        return x - 55
+    return -1
+
+
+def decode_data_url(url: String) -> Optional[Tuple[List[UInt8], String]]:
+    """(bytes, extension) of a base64 or percent-encoded picture data URL (png, jpeg/jpg, webp, gif, svg+xml; a charset
+    allowed), at most MAX_MEDIA_BYTES; None for anything else."""
+    var t = String(url.strip())
+    if not t.lower().startswith("data:image/"):
+        return None
+    var comma = t.find(",")
+    if comma < 0:
+        return None
+    var head = String(t[byte=11:comma]).lower()  # "png;base64", "svg+xml;charset=utf-8"
+    var parts = head.split(";")
+    var kind = String(parts[0])
+    var ext = String("svg") if kind == "svg+xml" else ext_of_suffix(kind)
+    if ext == "":
+        return None
+    var base64 = False
+    for k in range(1, len(parts)):
+        var p = String(parts[k])
+        if p == "base64" and k == len(parts) - 1:
+            base64 = True
+        elif not p.startswith("charset="):
+            return None
+    var payload = String(t[byte = comma + 1 :])
+    var data: List[UInt8]
+    if base64:
+        var d = b64_decode(payload)
+        if not d:
+            return None
+        data = d.take()
+    else:
+        var b = payload.as_bytes()
+        data = List[UInt8](capacity=len(b))
+        var k = 0
+        while k < len(b):
+            if b[k] == UInt8(ord("%")) and k + 2 < len(b) and _hexval(b[k + 1]) >= 0 and _hexval(b[k + 2]) >= 0:
+                data.append(UInt8(_hexval(b[k + 1]) * 16 + _hexval(b[k + 2])))
+                k += 3
+            else:
+                data.append(b[k])
+                k += 1
+    if len(data) == 0 or len(data) > MAX_MEDIA_BYTES:
+        return None
+    return (data^, ext)
+
+
+def is_picture_file(path: String) -> Bool:
+    """A file a canvas takes as a picture when it is dropped (png, jpg/jpeg, webp, gif, and svg, which add_pictures then refuses
+    with the web's words); anything else dropped (a backup, a vault zip or folder, a .canvas) goes to import (D-8903)."""
+    var slash = path.rfind("/")
+    var dot = path.rfind(".")
+    if dot <= slash + 1:
+        return False
+    return ext_of_suffix(String(path[byte = dot + 1 :])) != ""

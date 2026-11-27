@@ -33,7 +33,7 @@ from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
-from webshell import WebShell, MSG_PICKED, MSG_DROPPED, MSG_PRINTED, MSG_SAVED_AS, MSG_SHARED
+from webshell import WebShell, MSG_PICKED, MSG_DROPPED, MSG_PRINTED, MSG_SAVED_AS, MSG_SHARED, MSG_IMPORT_PICKED
 from mojoui.view import PASTE_FILE
 from mojoui.systemask import SystemAsk
 from mojoui.dragdrop import DropTarget
@@ -63,7 +63,6 @@ comptime WARM_TICK = 11  # (D-8002: glyphs readied while nothing happens)
 comptime FEED_TICK = 12  # the notes file looked at for what another app did
 comptime FEED_TICK_MS = 2000  # (only when the notes file can't be watched, or another app's change waits for words typed here)
 comptime FEED_RETRY_MS = 100  # (goal 82 M7) a file event that came during a save of ours or a gesture: looked at again this soon
-comptime IMPORT_DROP = 14  # (goal 82 M3) a file or folder dropped on the window: imported (a backup, a vault, a .canvas)
 comptime JOBS_WAKE = 13  # (goal 82 M7) App.jobs_message: the notes file was written (mojoui.filewatch), or a job ended
 comptime VOICE_TICK = 82  # (goal 82 M5) every 30 ms while dictating: samples over, words back
 comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
@@ -859,9 +858,12 @@ struct Main(App):
                 if self.web[0].file_event() or self.web[0].refresh():
                     self.version += 1
                 return
-            if m == IMPORT_DROP:
-                if self.web[0].import_path(event.text):
-                    self.version += 1
+            if m == MSG_DROPPED:  # (the one drop target, D-8903: a picture goes on the canvas, anything else is imported)
+                _ = self.web[0].dropped(event.text)
+                self.version += 1
+                return
+            if m == MSG_IMPORT_PICKED:  # (Settings → Advanced → Import backup, the Mac's File → Import: the file picker's answer)
+                _ = self.web[0].import_path(event.text)
                 self.version += 1
                 return
             if m == JOBS_WAKE:  # (the notes file was written: mojoui.filewatch woke the host)
@@ -886,7 +888,7 @@ struct Main(App):
                 if self.web[0].key(event.text, Int(event.dx)):
                     self.version += 1
                 return
-            if (m == GESTURE and event.number == PASTE_FILE) or m == MSG_PICKED or m == MSG_DROPPED:  # (goal 82: a picture pasted, picked or dropped)
+            if (m == GESTURE and event.number == PASTE_FILE) or m == MSG_PICKED:  # (goal 82: a picture pasted or picked; a dropped one comes through dropped())
                 self.web[0].queue_picture(event.text)
                 self.version += 1
                 return
@@ -1030,11 +1032,11 @@ struct Main(App):
     def view(self) -> View:
         if len(self.web) > 0:
             var canvas = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu().grow().fill().tag("desk")  # (hover: the web look draws hover states)
-            var desk = DropTarget(canvas^, 0, on_file=MSG_DROPPED).grow().fill().tag("desk-drop")  # (goal 82: pictures dropped from the file manager)
+            var desk = DropTarget(canvas^, 0, on_file=MSG_DROPPED).grow().fill().tag("drop")  # (goal 82, D-8903: one drop target for files from outside: pictures and imports; tagged for the dropfile: test step)
             comptime if CompilationTarget.is_macos():  # (the system menu bar: Personal Note's own menus, desktop_menu.py; Edit is the system's)
                 var bar = MenuBar([
                     Menu("File", [Item("New note", MENU0 + 0, shortcut="Ctrl+N"), Item("Quick note", MENU0 + 1), Separator(),
-                                  Item("Export backup…", MENU0 + 2), Item("Export Markdown…", MENU0 + 3)]),
+                                  Item("Export backup…", MENU0 + 2), Item("Export Markdown…", MENU0 + 3), Item("Import backup…", MENU0 + 10)]),
                     Menu("View", [Item("Zoom In", MENU0 + 4, shortcut="Ctrl+="), Item("Zoom Out", MENU0 + 5, shortcut="Ctrl+-"), Item("Fit", MENU0 + 6, shortcut="Ctrl+0"), Separator(),
                                   Item("Crayon", MENU0 + 7, checked=self.web[0].panel.skin_name == "crayon"), Item("Paper", MENU0 + 8, checked=self.web[0].panel.skin_name == "paper"),
                                   Item("Night", MENU0 + 9, checked=self.web[0].panel.skin_name == "night")]),
@@ -1042,10 +1044,9 @@ struct Main(App):
                 if self.web[0].clip_version > 0:
                     return VStack(bar^, HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill(), spacing=0).grow().fill()
                 return VStack(bar^, desk^, spacing=0).grow().fill()
-            var dropped = DropTarget(desk^, 0, IMPORT_DROP).grow().fill().tag("drop")  # (goal 82 M3: files from outside: imported; tagged for the dropfile: test step)
             if self.web[0].clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
-                return HStack(dropped^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
-            return dropped^
+                return HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
+            return desk^
         var side = List[View]()
         side.append(SidebarHead("Notes", String(len(self.rows))))
         side.append(TextField(self.query, "Search notes", on_change=SEARCH).fill().tag("search"))

@@ -1,9 +1,9 @@
-# mojoui.mediafiles (goal 82 M3): content-addressed pictures and data URLs by Personal Note's rules (media_store.py): the
+# mojoui.mediastore's document side (goal 82 M3, from mojoui.mediafiles, folded in at the integration, D-8902): content-addressed pictures and data URLs by Personal Note's rules (media_store.py): the
 # same bytes the same name, written once; names that aren't <sha256>.<ext> are never read; data URLs both ways (base64 and
 # percent-encoded SVG), sizes and types refused as the web refuses them. mediafiles: ok
 from std.testing import assert_true, assert_equal
 from std.os import makedirs
-from mojoui.mediafiles import put_media, read_media, data_url, decode_data_url, sniff_image, media_name_ok, b64_decode, MAX_MEDIA_BYTES
+from mojoui.mediastore import put_media, read_media, data_url, decode_data_url, sniff_image, media_name_ok, b64_decode, MAX_MEDIA_BYTES, is_picture_file
 from mojoui.files import remove_tree
 from mojoui.hash import sha256_hex
 
@@ -36,4 +36,9 @@ def main() raises:
     var b = b64_decode("aGVsbG8=")
     assert_true(b and String(from_utf8_lossy=Span(b.value())) == "hello", "base64")
     assert_true(not b64_decode("aGVsbG8"), "unpadded is refused, as Python's validate=True")
+    # (D-8903) one drop target: a file a canvas takes as a picture by its name; everything else goes to import
+    assert_true(is_picture_file("/home/me/Pictures/a.PNG") and is_picture_file("b.jpeg") and is_picture_file("x/c.webp") and is_picture_file("d.gif"), "pictures")
+    assert_true(is_picture_file("e.svg"), "svg goes to pictures, which refuse it with the web's words")
+    assert_true(not is_picture_file("personal-note-backup.json") and not is_picture_file("vault.zip") and not is_picture_file("Board.canvas"), "imports")
+    assert_true(not is_picture_file("/tmp/vault.png.d/notes") and not is_picture_file("/home/me/.png") and not is_picture_file("noext"), "folders and dotfiles")
     print("mediafiles: ok", flush=True)

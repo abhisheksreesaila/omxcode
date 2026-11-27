@@ -9,7 +9,7 @@
 #                    its Markdown, a map a Markdown outline, a secure note only its title
 #   import_vault     a vault (a folder or a zip: mojoui.archive) as new notes in new notebooks: each .canvas a canvas, each .md
 #                    a canvas with one text card, as the web imports them
-# The generic parts are the framework's: mojoui.archive (zip and folders), mojoui.mediafiles (pictures and data URLs),
+# The generic parts are the framework's: mojoui.archive (zip and folders), mojoui.mediastore (pictures and data URLs),
 # mojoui.json / jsonedit (reading and rewriting documents). This file only knows Personal Note's own fields.
 
 from std.collections import Dict
@@ -19,8 +19,8 @@ from mojoui.json import Json, json_string, J_OBJECT, J_ARRAY, J_STRING, J_NUMBER
 from mojoui.jsonedit import members, elements, find_member
 from mojoui.archive import FileSet, safe_relative
 from mojoui.files import file_exists
-from mojoui.mediafiles import MAX_MEDIA_BYTES
-from mojoui.mediafiles import put_media, read_media, data_url, decode_data_url, ext_of_suffix
+from mojoui.mediastore import MAX_MEDIA_BYTES
+from mojoui.mediastore import put_media, read_media, data_url, decode_data_url, ext_of_suffix
 from mojoui.objectlayer import import_json_canvas, reading_text
 from mojoui.hash import sha256, hex
 from mojoui.schedule import iso_utc

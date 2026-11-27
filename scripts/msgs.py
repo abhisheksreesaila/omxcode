@@ -17,6 +17,10 @@ def collisions(path):
     for lib in sorted((root / "mojoui").glob("*.mojo")):  # (constants the app imports: ALIGN_RIGHT, TILE_LAST…); the app's own win
         for name, value in re.findall(r"^comptime ([A-Z][A-Z0-9_]*) = ([0-9_]+)\b", lib.read_text(), re.M):
             consts.setdefault(name, int(value.replace("_", "")))
+    for sib in sorted(Path(path).resolve().parent.glob("*.mojo")):  # (the app's own modules: pnote's MSG_PICKED lives in webshell.mojo
+        if sib.resolve() != Path(path).resolve():  # and equalled app.mojo's JOBS_WAKE, unseen, at goal 82's merge, D-8901)
+            for name, value in re.findall(r"^comptime ([A-Z][A-Z0-9_]*) = ([0-9_]+)\b", sib.read_text(), re.M):
+                consts[name] = int(value.replace("_", ""))
     for name, value in re.findall(r"^comptime ([A-Z][A-Z0-9_]*) = ([0-9_]+)\b", src, re.M):
         consts[name] = int(value.replace("_", ""))
 

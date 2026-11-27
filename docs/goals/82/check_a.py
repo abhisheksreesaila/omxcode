@@ -350,10 +350,10 @@ def m2():
         dock_more = center(nb, "#dock-more")
     except Exception as e:
         return "FAIL", f"the dock's Add image wasn't drawn ({e})"
-    steps = (open_steps(panel, "Garden plan") + ["gpushot:desk={out}/before.png", "dropfile:desk-drop=" + ",".join(str(p) for p in drop), "wait:6000",
+    steps = (open_steps(panel, "Garden plan") + ["gpushot:desk={out}/before.png", "dropfile:drop=" + ",".join(str(p) for p in drop), "wait:6000",
              "key:desk=Escape", "wait:400", "gpushot:desk={out}/after-drop.png", f"clipboardimage:{pics / 'a2.png'}", "key:desk=ctrl+v", "wait:2500",
              f"tapat:desk={dock_more}", "wait:500", f"tapat:desk={add_image}", "wait:500", f"answer:{pics / 'b2.jpg'}", "wait:2500",
-             f"dropfile:desk-drop={pics / 'e.svg'}", "wait:1500", "gpushot:desk={out}/after-all.png", "wait:1500"])
+             f"dropfile:drop={pics / 'e.svg'}", "wait:1500", "gpushot:desk={out}/after-all.png", "wait:1500"])
     log, d = native("m2", ref / "pn.db", steps, {"MOJOUI_ASK_DRY": "1"})
     placed = re.findall(r"^PNOTE PICTURE: (media/\S+) (\d+)x(\d+) (\d+) bytes", log, re.M)
     refused = re.findall(r"^PNOTE PICTURE: refused (\S+): (.*)$", log, re.M)

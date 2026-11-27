@@ -102,7 +102,6 @@ FEATURES = [
     ("Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)", "FolderWatcher(path, wake=True) · start() · take()", r"(?!)", "keeper"),
     ("File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)", "FileWatch([paths], wake=True) · start() · changed() · count() · last_ns()", r"(?!)", "pnote"),
     ("ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)", "read_zip(bytes) · zip_bytes(FileSet) · read_folder(path) · write_folder(set, path)", r"(?!)", "pnote"),
-    ("Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)", "put_media(dir, bytes, ext) · read_media · data_url · decode_data_url · sniff_image", r"(?!)", "pnote"),
     ("Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)", "merge_keyed(base, mine, theirs, [\"nodes\", \"edges\"]) -> Merged", r"(?!)", "pnote"),
     ("Background mode (keeps running with the window closed)", "def background(self) -> Bool · window_shown(shown)", r"app\.background\(\)", "keeper"),
     ("One instance (a second launch opens the running app)", "@staticmethod def one_instance() -> String", r"A\.one_instance\(\)", "keeper"),
@@ -120,7 +119,7 @@ FEATURES = [
     ("View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)", "mojoui.transition.Morph · def transition(mut self) -> Int", r"take_transition|mojoui-morph", "stage"),
     ("System dialogs asked from update (mojoui.systemask: file picker, save dialog, print a PDF, share, full screen)", "SystemAsks.pick_file · save_file · print_pdf · share · full_screen · def asks(mut self)", r"(?!)", "pnote"),
     ("Pictures and files pasted (PASTE_FILE: a clipboard picture as a PNG, files copied in the file manager)", "def takes_paste_files(self, canvas) → PASTE_FILE events", r"(?!)", "pnote"),
-    ("Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG)", "MediaStore(dir).put(bytes, ext) · prepare_picture(path) · place_picture(w, h, x, y, i)", r"(?!)", "pnote"),
+    ("Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG)", "MediaStore(dir).put(bytes, ext) · prepare_picture(path) · place_picture(w, h, x, y, i) · put_media · read_media · data_url · decode_data_url · is_picture_file", r"(?!)", "pnote"),
     ("JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform)", "encode_jpeg(pixels, w, h, quality)", r"(?!)", "pnote"),
     ("Vector PDF (mojoui.pdfwriter: a Painter; shapes as paths, words from their glyph outlines with ToUnicode, pictures)", "PdfPainter().page(w_pt, h_pt) · any Painter calls · save(path)", r"(?!)", "pnote"),
     ("Focus mode rules (mojoui.focusmode; PageSheet.focus: words only, a 680 px column)", "focus_shortcut(name, mods) · focus_view(…) · count_words(text)", r"(?!)", "pnote"),
@@ -130,25 +129,10 @@ FEATURES = [
 # (reasons in NOTES). Hosts not listed: ❌.
 BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
            {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"},
-           "File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)":
-             "goal 82 M7: a write to a file its writer keeps open (SQLite's WAL) is heard in under 2 ms (tests/test_filewatch: in place, "
-             "a rename onto the name, a second SQLite connection's commits; others in the folder not counted). Linux: inotify IN_MODIFY on "
-             "the files' folders; the Mac: kqueue EVFILT_VNODE on each file and its folder (FSEvents reports an open file's writes only "
-             "at its close: tried first, it missed them). pnote's live updates are built on it (no poll)",
-         "ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)":
-             "goal 82 M3: reads Python's deflated zips (the Mojo inflater of mojoui.pngread, bounded by each entry's declared size: a zip "
-             "bomb stops there), leaves out absolute, climbing and hidden names, raises past Personal Note's limits before inflating; "
-             "writes stored entries Python's zipfile and unzip -t accept; write_folder never overwrites (tests/test_archive)",
-         "Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)":
-             "goal 82 M3: Personal Note's media_store rules (names, types, 20 MB, base64 and percent-encoded data URLs); tests/test_mediafiles",
-         "Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)":
-             "goal 82 M7: a JSON document's arrays of items with ids (a JSON Canvas, a mind map) merged base/mine/theirs; 2,000 random "
-             "seeds against an oracle, 4 of 4 mutants caught (tests/test_merge3); pnote merges a save that met another writer's with it",
-         "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
-           # goal 82 B: tests/test_filewatch, test_archive, test_mediafiles, test_merge3 on Linux and on the M4 (scripts/mac82); pnote uses all four
+           "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           # goal 82 B: tests/test_filewatch, test_archive, test_mediafiles (mojoui.mediastore since D-8902), test_merge3 on Linux and on the M4 (scripts/mac82); pnote uses all four
            "File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
-           "Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
            # goal 50: run by tests/test_https, test_serve, test_process and consoled on Linux; Flare targets macOS too (not built here yet)
@@ -465,7 +449,19 @@ UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with th
 
 
 # What a reader should know about a feature row beyond its cells (limits, not states).
-NOTES = {"Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)":
+NOTES = {"File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)":
+             "goal 82 M7: a write to a file its writer keeps open (SQLite's WAL) is heard in under 2 ms (tests/test_filewatch: in place, "
+             "a rename onto the name, a second SQLite connection's commits; others in the folder not counted). Linux: inotify IN_MODIFY on "
+             "the files' folders; the Mac: kqueue EVFILT_VNODE on each file and its folder (FSEvents reports an open file's writes only "
+             "at its close: tried first, it missed them). pnote's live updates are built on it (no poll)",
+         "ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)":
+             "goal 82 M3: reads Python's deflated zips (the Mojo inflater of mojoui.pngread, bounded by each entry's declared size: a zip "
+             "bomb stops there), leaves out absolute, climbing and hidden names, raises past Personal Note's limits before inflating; "
+             "writes stored entries Python's zipfile and unzip -t accept; write_folder never overwrites (tests/test_archive)",
+         "Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)":
+             "goal 82 M7: a JSON document's arrays of items with ids (a JSON Canvas, a mind map) merged base/mine/theirs; 2,000 random "
+             "seeds against an oracle, 4 of 4 mutants caught (tests/test_merge3); pnote merges a save that met another writer's with it",
+         "Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)":
          "a server piece (mojoui.serve, Flare: Linux and macOS); proved against the checker's OAuth stand-in (goal 57 M2) and, with "
          "the owner's keys, Google itself (M5); one tenant per user, invites join new people only (D-5712); docs/saas.md maps fh-saas",
          "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)":
@@ -512,7 +508,9 @@ NOTES = {"Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessi
          "Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG)":
              "goal 82 M2: the web app opens pnote's notes file and media/ and shows the pictures in place (SSIM 0.986); a picture kept as it "
              "came has the web's very name; a re-encoded one has the web's kind and size (its bytes differ: another encoder); decoding is "
-             "mojoui.picture's (ffmpeg on Linux, ImageIO on the Mac), on a thread when a canvas opens, on the UI thread when one is added",
+             "mojoui.picture's (ffmpeg on Linux, ImageIO on the Mac), on a thread when a canvas opens, on the UI thread when one is added. "
+             "The document side (goal 82 M3: put_media, read_media, data URLs both ways by media_store.py's rules; tests/test_mediafiles) "
+             "was mojoui.mediafiles, folded in at the integration (D-8902); is_picture_file routes one drop target (D-8903)",
          "JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform)":
              "baseline, 4:2:0, libjpeg's quality scale and Annex K tables; PSNR equal to libjpeg's at quality 85 (tests/test_jpeg.py); not "
              "run on the Mac yet (its M2 pictures were small enough to be kept as they came)",

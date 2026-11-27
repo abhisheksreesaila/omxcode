@@ -80,18 +80,19 @@ from mojoui.focusmode import focus_shortcut, focus_view, count_words, word_label
 from mojoui.notesshell import draw_focus_strip, draw_focus_hint
 from mojoui.objectlayer import Obj, PICTURE
 from mojoui.systemask import SystemAsks
-from mojoui.mediastore import MediaStore, prepare_picture, place_picture
+from mojoui.mediastore import MediaStore, prepare_picture, place_picture, is_picture_file
 from mojoui.picture import Picture
 from mojoui.pdfwriter import PdfPainter, PT_PER_PX
 from mojoui.scene import SurfacePainter
 from mojoui.canvas import Surface
 from mojoui.mediastore import encode_png_small
 
-comptime MSG_PICKED = 13  # (goal 82) the system's file picker chose a picture (app.mojo routes it: numbers past every range there)
-comptime MSG_DROPPED = 14  # a file dropped on the window from the file manager
-comptime MSG_PRINTED = 15  # the print dialog closed
+comptime MSG_PRINTED = 15  # (goal 82) the print dialog closed (app.mojo routes these: numbers past every one there, scripts/msgs.py reads them)
 comptime MSG_SAVED_AS = 16  # the save dialog chose where the PDF or PNG goes
 comptime MSG_SHARED = 17  # the share sheet was shown
+comptime MSG_PICKED = 18  # the system's file picker chose a picture (13 at worker A's: app.mojo's JOBS_WAKE, D-8901)
+comptime MSG_DROPPED = 19  # a file or folder dropped on the window from the file manager: a picture or an import (dropped(), D-8903)
+comptime MSG_IMPORT_PICKED = 20  # the file picker of Settings → Advanced → Import backup (and the Mac's File menu) chose a file
 from mojoui.filewatch import FileWatch
 from mojoui.merge3 import merge_keyed
 from mojoui.clock import now_ns
@@ -586,6 +587,7 @@ struct WebShell(Movable):
     var settings_page: Int  # (goal 82 M6) the settings window's page (SETTINGS_PAGES)
     var ai_form: SettingsForm  # Settings → AI
     var voice_form: SettingsForm  # Settings → Voice
+    var adv_form: SettingsForm  # (goal 82 integration) Settings → Advanced: backup, Markdown, Import backup (the web's portability actions)
     var ai_draft: AiSettings  # the AI page's choices while edited
     var pending_key: String  # a key typed into the AI page, until Save (never anywhere else)
     var ai_calls: List[BrainCall]  # a brain call in flight (0 or 1): the AI page's Test, or a jam turn
@@ -608,6 +610,7 @@ struct WebShell(Movable):
         self.settings_page = 0
         self.ai_form = SettingsForm()
         self.voice_form = SettingsForm()
+        self.adv_form = SettingsForm()
         self.ai_draft = AiSettings.load(config_dir("pnote"))
         self.pending_key = ""
         self.ai_calls = List[BrainCall]()
@@ -1422,7 +1425,7 @@ struct WebShell(Movable):
             g2.append(SettingsPage("X bookmarks", "bookmark", "Not in the native app yet.", "Not connected"))
             var g3 = List[SettingsPage]()
             g3.append(SettingsPage("Locked notes", "lock", "Not in the native app yet.", ""))
-            g3.append(SettingsPage("Advanced", "gauge", "Not in the native app yet.", ""))
+            g3.append(SettingsPage("Advanced", "gauge", "Backups and imports: every note as a file you keep, or notes brought in.", ""))
             sw.groups.append(g1^)
             sw.groups.append(g2^)
             sw.groups.append(g3^)
@@ -1434,6 +1437,8 @@ struct WebShell(Movable):
                 _ = self.ai_form.draw(p, self.boxes, body[0], body[1], body[2], k, self.sk)
             elif self.settings_page == 4:
                 _ = self.voice_form.draw(p, self.boxes, body[0], body[1], body[2], k, self.sk)
+            elif self.settings_page == 8:
+                _ = self.adv_form.draw(p, self.boxes, body[0], body[1], body[2], k, self.sk)
 
     def readying(self) -> Bool:
         """Something is left to ready while nothing happens (the glyphs drawn last time, the screens likely next)."""
@@ -2932,6 +2937,8 @@ struct WebShell(Movable):
         elif item >= 7 and item <= 9:
             var names: List[String] = ["crayon", "paper", "night"]
             self.set_skin(names[item - 7])
+        elif item == 10:
+            self.pick_import()
 
     def secondary(mut self, x: Float64, y: Float64) -> Bool:
         """The other button (or a long press): on Quick note, what kind of note."""
@@ -3459,6 +3466,14 @@ struct WebShell(Movable):
                 continue
             k += 1
         return len(self.decoding) > 0
+
+    def dropped(mut self, path: String) -> Bool:
+        """(D-8903) A file or folder dropped on the window, the one drop target: a picture file goes on the open canvas (with the
+        others of its gesture); a backup, a vault zip or folder, a .canvas or .md file is imported. True when it changed something."""
+        if not isdir(path) and is_picture_file(path):
+            self.queue_picture(path)
+            return True
+        return self.import_path(path)
 
     def queue_picture(mut self, path: String):
         """A file dropped, pasted or picked: placed with the others of its gesture at the next frame (one drop of three: 28 apart)."""
@@ -4583,6 +4598,11 @@ struct WebShell(Movable):
             if item != "":
                 self.settings_go(String(item[byte = item.find(":") + 1 :]))  # (the app's name for it: ".sw-item:AIClaude Code")
                 return True
+            if self.settings_page == 8:
+                var ah = self.adv_form.tap(self.boxes, x, y)
+                if ah != "":
+                    self.settings_act(ah)
+                    return True
             if self.settings_page == 2 or self.settings_page == 4:
                 ref form = self.ai_form if self.settings_page == 2 else self.voice_form
                 var was = form.editing
@@ -4846,6 +4866,8 @@ struct WebShell(Movable):
             self.build_ai_form("")
         elif self.settings_page == 4:
             self.build_voice_form("")
+        elif self.settings_page == 8:
+            self.build_adv_form("")
 
     def ai_provider_index(self) -> Int:
         if self.ai_draft.provider == "claude-code":
@@ -4926,8 +4948,32 @@ struct WebShell(Movable):
         f.rows.append(FormRow(ROW_STATUS, "status", "", status))
         self.voice_form = f^
 
+    def build_adv_form(mut self, status: String):
+        """Settings → Advanced's portability actions, as the web's settings window has them (Download backup, Markdown + assets,
+        Import backup; the Obsidian vault beside them, as the share menu has it)."""
+        var f = SettingsForm()
+        f.rows.append(FormRow(ROW_NOTE, "port", "", "A backup keeps every note, its pictures inside; the web app imports it. Import takes a backup (.json), an Obsidian vault (.zip) or a .canvas file, as new notes; nothing you have changes. Dropping one on the window does the same."))
+        var buttons: List[String] = ["Download backup", "Markdown + assets", "Obsidian vault", "Import backup"]
+        f.rows.append(FormRow(ROW_BUTTONS, "port-actions", "", "", "", buttons))
+        f.rows.append(FormRow(ROW_STATUS, "status", "", status))
+        self.adv_form = f^
+
+    def pick_import(mut self):
+        """The system's file picker for an import (its answer: MSG_IMPORT_PICKED → import_path)."""
+        self.sys.pick_file(MSG_IMPORT_PICKED, "Import backup", ".json,.zip,.canvas,.md")
+
     def settings_act(mut self, hit: String):
-        """What a tap or a key in the AI / Voice page meant."""
+        """What a tap or a key in the AI / Voice / Advanced page meant."""
+        if self.settings_page == 8:
+            if hit == "button:port-actions:0":
+                self.export_backup()
+            elif hit == "button:port-actions:1":
+                self.export_markdown()
+            elif hit == "button:port-actions:2":
+                self.export_vault()
+            elif hit == "button:port-actions:3":
+                self.pick_import()
+            return
         if self.settings_page == 4:
             if hit == "button:voice-actions:0" or hit == "field-done:models-dir":
                 var d = String(self.voice_form.value("models-dir").strip())
