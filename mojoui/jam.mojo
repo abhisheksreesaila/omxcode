@@ -141,7 +141,8 @@ def _extract(raw: String) raises -> Json:
     if text.startswith("```") and text.endswith("```") and text.byte_length() >= 6:  # ^```(?:json)?\s*(.*?)\s*```$
         var inner = String(text[byte = 3 : text.byte_length() - 3])
         if inner.startswith("json"):
-            inner = String(inner[byte = 4:])
+            var _cut1 = String(inner[byte = 4:])
+            inner = _cut1^
         text = _strip(inner)
     try:
         return Json.parse(text)

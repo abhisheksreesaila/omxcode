@@ -7,7 +7,7 @@ This file holds worker C's milestones (M5 Voice, M6 AI); its functions are named
 checkers (M1/M2/M4, M3/M7) merge beside them. Written from the draft's words before each milestone was called done; a
 check is never weakened to pass (a checker bug is logged in docs/decisions.md with why its fix is not a weakening).
 
-Machine rules: every Mojo build, GPU model run and GUI test runs under `flock -s ~/.cache/omx-quiet.lock`; a GPU model
+Machine rules: every Mojo build runs alone under `flock ~/.cache/omx-build.lock` (6 cores); GPU model runs and GUI tests under `flock -s ~/.cache/omx-quiet.lock`; a GPU model
 run starts only when scripts/gpu-free says yes; GUI tests run on the hidden test screen (scripts/testscreen); the Mac
 half holds ~/.cache/omx-mac.lock (scripts/mac-test, scripts/mac-ssh). Scratch databases only (build/g82/).
 """
@@ -25,7 +25,8 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pixi.toml").exi
 OUT = ROOT / "build" / "g82"
 APP = ROOT / "build" / "pnote" / "linux" / "pnote"
 CLIPS = ROOT / "docs" / "goals" / "43" / "clips"
-QUIET = ["flock", "-s", os.path.expanduser("~/.cache/omx-quiet.lock")]
+QUIET = ["flock", "-s", os.path.expanduser("~/.cache/omx-quiet.lock")]  # tests and GUI runs
+BUILD = ["flock", os.path.expanduser("~/.cache/omx-build.lock")]  # (11-26, the main session) one Mojo build at a time on the machine, 6 cores
 PN = Path(os.path.expanduser("~/Projects/personalnotev2"))  # the web app: read and run only
 
 # ---- the bars, from the draft ----
@@ -50,14 +51,14 @@ def gpu_free():
 def build_test(name):
     """tests/<name>.mojo → build/g82/<name> (6 cores at most, under the quiet lock); "" or why not."""
     OUT.mkdir(parents=True, exist_ok=True)
-    r = run(QUIET + ["pixi", "run", "mojo", "build", "-j", "6", "-I", ".", "-I", "vendor", f"tests/{name}.mojo", "-o", str(OUT / name)], 1800)
+    r = run(BUILD + ["pixi", "run", "mojo", "build", "-j", "6", "-I", ".", "-I", "vendor", f"tests/{name}.mojo", "-o", str(OUT / name)], 1800)
     if r.returncode or not (OUT / name).exists():
         return f"{name} didn't build: " + tail("\n".join(l for l in (r.stdout + r.stderr).splitlines() if " error" in l or "error:" in l), 800)
     return ""
 
 
 def build_linux():
-    r = run(QUIET + ["nice", "-n", "5", "bash", "scripts/build.sh", "pnote", "linux"], 3600)
+    r = run(BUILD + ["nice", "-n", "5", "taskset", "-c", "0-5", "bash", "scripts/build.sh", "pnote", "linux"], 3600)
     if r.returncode or not APP.exists():
         return "pnote didn't build: " + tail(r.stdout + r.stderr, 800)
     return ""
@@ -250,7 +251,7 @@ def m6_secrets_linux():
     err = build_test("test_secrets")
     if err:
         return "FAIL", err
-    r = run([str(OUT / "test_secrets")], 120)
+    r = run(QUIET + [str(OUT / "test_secrets")], 120)
     out = r.stdout + r.stderr
     if r.returncode or "round trip ok" not in out:
         return "FAIL", "test_secrets: " + tail(out)
@@ -279,7 +280,7 @@ def m6_jam():
     err = build_test("test_jam")
     if err:
         return "FAIL", err
-    ours = json_lines(run([str(OUT / "test_jam")], 120).stdout)
+    ours = json_lines(run(QUIET + [str(OUT / "test_jam")], 120).stdout)
     w = run([str(PN_PY), "-I", "-B", str(ROOT / "docs/goals/82/web_jam.py"), str(PN), str(JAM_CASES)], 120)
     a = subprocess.run(["node", str(ROOT / "docs/goals/82/web_jam_apply.mjs"), str(PN), str(JAM_CASES)], input="\n".join(l for l in w.stdout.splitlines() if '"case"' in l),
                        capture_output=True, text=True, timeout=120, cwd=ROOT)
@@ -344,7 +345,7 @@ def m6_ai_linux():
     try:
         port = int(fake.stdout.readline())
         env = dict(os.environ, AI_TEST_DIR=str(d), AI_TEST_KEY=key, AI_TEST_URL=f"http://127.0.0.1:{port}/v1", AI_TEST_REPLY=str(reply), MOJOUI_AI_SERVICE=TEST_SERVICE)
-        r = run([str(OUT / "test_ai")], 300, env=env)
+        r = run(QUIET + [str(OUT / "test_ai")], 300, env=env)
     finally:
         fake.kill()
     out = r.stdout + r.stderr

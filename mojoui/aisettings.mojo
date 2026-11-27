@@ -65,7 +65,8 @@ def _host_of(url: String) -> String:
 def check_url(value_in: String, label: String) raises -> String:
     var value = String(value_in.strip())
     while value.endswith("/"):
-        value = String(value[byte = 0 : value.byte_length() - 1])
+        var _cut2 = String(value[byte = 0 : value.byte_length() - 1])
+        value = _cut2^
     if value.byte_length() > MAX_URL:
         raise Error("The " + label + " is too long.")
     if value != "":

@@ -281,7 +281,8 @@ struct SettingsForm(Movable):
         var name = String(hit[byte = 9:])  # (after "settings.")
         var at = name.find("@")  # (a name drawn twice this frame: Boxes adds @2)
         if at >= 0:
-            name = String(name[byte = 0:at])
+            var _cut3 = String(name[byte = 0:at])
+            name = _cut3^
         if name.startswith("field:"):
             var id = String(name[byte = 6:])
             if self.editing != id:

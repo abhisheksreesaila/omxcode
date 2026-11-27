@@ -4218,7 +4218,8 @@ struct WebShell(Movable):
             return
         var low = words.lower()
         while low.endswith(".") or low.endswith("!"):
-            low = String(low[byte = 0 : low.byte_length() - 1])
+            var _cut4 = String(low[byte = 0 : low.byte_length() - 1])
+            low = _cut4^
         var ghosts = jam_ghosts(self.page_src)
         if (low == "yes" or low == "yeah" or low == "yep" or low == "yes please") and len(ghosts) > 0:
             self.jam_answer(len(ghosts) - 1, True)
@@ -4227,7 +4228,8 @@ struct WebShell(Movable):
         var rest = words
         var t = low
         while t.endswith("?") or t.endswith(","):
-            t = String(t[byte = 0 : t.byte_length() - 1])
+            var _cut5 = String(t[byte = 0 : t.byte_length() - 1])
+            t = _cut5^
         if t == "jam" or t.endswith(" jam"):
             ending = True
             var cut = words.lower().rfind("jam")
@@ -4332,7 +4334,8 @@ struct WebShell(Movable):
                 self.agent_edit = q.int(0)
                 var who = q.text(1)
                 if who.endswith(" Code"):
-                    who = String(who[byte = 0 : who.byte_length() - 5])
+                    var _cut6 = String(who[byte = 0 : who.byte_length() - 5])
+                    who = _cut6^
                 self.say((who if who != "" else String("An agent")) + " edited this note", "Undo", TOAST_AGENT)
                 self.toast_action2 = "Show"
                 print("PNOTE AGENT: offered edit " + String(self.agent_edit) + " by " + q.text(1), flush=True)
