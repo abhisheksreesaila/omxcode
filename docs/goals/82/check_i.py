@@ -39,6 +39,13 @@ RACE = next((d for d in [Path(os.path.expanduser("~/.abode/home/worktrees/mojo-u
 TYPE_ROWS = ["wait:800", "window:1440x900", "wait:1500", "appbench:desk=zoom100", "framebench:desk=typing,80"]  # (worker A's TYPING rows)
 PAGE_ROWS = ["wait:800", "window:1440x900", "wait:1500", "framebench:desk=typing,80"]
 WORSE = 1.03
+KEYS = ("lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "gap_p95", "gap_max")  # (the Mac's FRAMEBENCH on Metal: frame times read 0, D-8911)
+
+
+def framebench(out):
+    """The numbers of the typing FRAMEBENCH line ({} when none)."""
+    m = re.search(r"^FRAMEBENCH: type (.*)$", out, re.M)
+    return {k: float(v) for k, v in re.findall(r"(\w+)=([\d.]+)", m.group(1))} if m else {}
 
 
 def run(cmd, timeout, env=None, lock=True, build=False, cwd=None):
@@ -207,23 +214,19 @@ def integ():
 
 def typing_runs(folder, label, nobuild, rounds=1):
     """The typing rows on the M4 with the build in `folder`: {row: [ {p95, max, lat_p95, lat_max}, … ]}."""
-    sys.path.insert(0, str(ROOT / "docs/goals"))
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("g79i", ROOT / "docs/goals/79-check.py")
-    g79 = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(g79)
     rows = [("600", "race-600.db", TYPE_ROWS, {}), ("600 not warmed", "race-600.db", TYPE_ROWS, {"MOJOUI_SCENEWARM": "0", "MOJOUI_GLYPHWARM": "0"}),
             ("stress", "race-stress.db", TYPE_ROWS, {}), ("stress not warmed", "race-stress.db", TYPE_ROWS, {"MOJOUI_SCENEWARM": "0", "MOJOUI_GLYPHWARM": "0"}),
             ("page 20,000 chars", "race-page.db", PAGE_ROWS, {})]
     got = {}
     for name, db, steps, extra in rows:
         env = dict({"PNOTE_DB": "{data}/" + db, "OMX_CONFIG": "{data}/cfg-type-" + label + "-" + str(int(time.time() * 1000)), "MOJOUI_BENCH_PACED": "1", "MOJOUI_BENCHSTATE": "1"}, **extra)
-        out, e, blocked = mac_pnote(f"type-{label}-{name.replace(' ', '_').replace(',', '')}", steps, env, [RACE / db], nobuild=nobuild, folder=folder)
+        out, e, blocked = mac_pnote(f"type-{label}-{name.replace(' ', '_').replace(',', '')}-{int(time.time())}", steps, env, [RACE / db], nobuild=nobuild, folder=folder)
         nobuild = True
         if e:
             return None, e, blocked
-        t = g79.native_race(out).get("typing") or {}
-        got[name] = {k: float(t.get(k, 0.0)) for k in ("p95", "max", "lat_p95", "lat_max")}
+        got[name] = framebench(out)
+        if not got[name]:
+            return None, f"{label} {name}: no FRAMEBENCH line: {tail(out, 300)}", False
         print(f"  {label} {name}: {got[name]}", flush=True)
     return got, "", False
 
@@ -251,10 +254,11 @@ def typing_mac():
     for name in data["before"][0]:
         med = {}
         for side in ("before", "after"):
-            med[side] = {k: sorted(r[name][k] for r in data[side][:3])[1] for k in ("p95", "max", "lat_p95", "lat_max")}
+            med[side] = {k: sorted(r[name].get(k, 0.0) for r in data[side][:3])[1] for k in KEYS}
         b, a = med["before"], med["after"]
-        table.append(f"{name}: frames p95/max {b['p95']:.2f}/{b['max']:.2f} → {a['p95']:.2f}/{a['max']:.2f}; key to paint p95/max {b['lat_p95']:.2f}/{b['lat_max']:.2f} → {a['lat_p95']:.2f}/{a['lat_max']:.2f}")
-        for k in ("p95", "max", "lat_p95", "lat_max"):
+        table.append(f"{name}: key to paint p95/max {b['lat_p95']:.1f}/{b['lat_max']:.1f} → {a['lat_p95']:.1f}/{a['lat_max']:.1f}; key to frame begun {b['lat_code_p95']:.1f}/{b['lat_code_max']:.1f} → {a['lat_code_p95']:.1f}/{a['lat_code_max']:.1f}; "
+                     f"frame gaps p95/max {b['gap_p95']:.1f}/{b['gap_max']:.1f} → {a['gap_p95']:.1f}/{a['gap_max']:.1f}")
+        for k in KEYS:
             if b[k] > 0 and a[k] > b[k] * WORSE:
                 worse.append(f"{name} {k} {b[k]:.2f} → {a[k]:.2f} (+{(a[k] / b[k] - 1) * 100:.1f} %)")
     (OUT / "typing-mac.md").write_text("# Goal 82 integration: Mac typing, before vs after the CoreText cluster fix (middle of 3 alternated runs, ms)\n\n"

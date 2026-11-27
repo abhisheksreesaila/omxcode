@@ -83,6 +83,7 @@ comptime _M_RGBFILL = 42
 comptime _M_CGTABLE = 43
 comptime _M_DATAPTR = 44
 comptime _M_DATALEN = 45
+comptime _M_RUNIDX = 46  # CTRunGetStringIndices (D-8907: each glyph's cluster, as HarfBuzz gives it on Linux)
 
 # alignment of a run at x
 comptime ALIGN_LEFT = 0
@@ -1192,6 +1193,7 @@ struct FontEngine(Movable):
             "CGContextSetShouldSubpixelPositionFonts", "CGContextRelease", "CFStringCreateWithBytes", "CFAttributedStringCreate",
             "CFDictionaryCreate", "CFDictionaryGetValue", "CFNumberCreate", "CFArrayGetCount", "CFArrayGetValueAtIndex", "CFRelease",
             "CFStringGetCString", "CGFontGetLeading", "CGContextSetRGBFillColor", "CGFontCopyTableForTag", "CFDataGetBytePtr", "CFDataGetLength",
+            "CTRunGetStringIndices",
         ]
         for n in names:
             var lib = ct if n.startswith("CT") else (cg if n.startswith("CG") else cf)
@@ -1469,6 +1471,16 @@ struct FontEngine(Movable):
         var face = self.insts[inst].face
         var k = st.size / Float64(self.faces[face].upem)
         var pen = pen0
+        # (D-8907) CoreText names each glyph's place in `part` in UTF-16 units: as byte offsets in the whole text, they are the
+        # glyph's cluster, as HarfBuzz's on Linux (goal 80's typing fast path and the PDF's words read them; all 0 before)
+        var byte_of = List[Int]()
+        var pb = 0
+        for c in part.codepoints():
+            byte_of.append(start + pb)
+            if Int(c.to_u32()) >= 0x10000:
+                byte_of.append(start + pb)
+            pb += c.utf8_byte_length()
+        byte_of.append(start + pb)
         for ri in range(nr):
             var r = _fn[def(Int, Int) thin abi("C") -> Int](self._m(_M_ARRAT))(runs, ri)
             var n = _fn[def(Int) thin abi("C") -> Int](self._m(_M_RUNCOUNT))(r)
@@ -1478,6 +1490,8 @@ struct FontEngine(Movable):
             _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNGLYPHS))(r, 0, 0, Int(glyphs.unsafe_ptr()))
             _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNPOS))(r, 0, 0, Int(pos.unsafe_ptr()))
             _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNADV))(r, 0, 0, Int(adv.unsafe_ptr()))
+            var idx = List[Int](length=n, fill=0)  # (CFIndex each)
+            _fn[def(Int, Int, Int, Int) thin abi("C") -> NoneType](self._m(_M_RUNIDX))(r, 0, 0, Int(idx.unsafe_ptr()))
             # the run's own font (CoreText may substitute): its face, as fallback does on Linux
             var rinst = inst
             var rattrs = _fn[def(Int) thin abi("C") -> Int](self._m(_M_RUNATTRS))(r)
@@ -1501,7 +1515,9 @@ struct FontEngine(Movable):
                 if gid == 0:
                     run.missing += 1
                 var xo = pos[2 * g] - unrounded
-                run.glyphs.append(Glyph(self.insts[rinst].face, rinst, gid, pen + xo + track / 2, -pos[2 * g + 1], 0))
+                var u = idx[g]
+                var cl = byte_of[u] if 0 <= u < len(byte_of) else start
+                run.glyphs.append(Glyph(self.insts[rinst].face, rinst, gid, pen + xo + track / 2, -pos[2 * g + 1], cl))
                 var fa = Float64(self._mac_advance_units(rinst, gid)) * rk
                 var kern = adv[2 * g] - fa
                 var a = fa + kern
@@ -1516,6 +1532,7 @@ struct FontEngine(Movable):
             _ = glyphs
             _ = pos
             _ = adv
+            _ = idx
         self._release(line)
         self._release(astr)
         self._release(attrs)
