@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-26: goal 82, worker A: focus mode, pictures, print and export in pnote (branch goal-82-a, from ad48b5f3)
+- **Worked.** `scripts/check 82 M1 M2 M4`: all PASS on Linux and the owner's M4 Mac. Focus mode (Ctrl+. / Cmd+.) shows only the words as the web does (SSIM 0.992 canvas, 0.986 page) and puts everything back exactly. Pictures dropped, pasted (a screenshot on the clipboard) and picked are stored as `media/<sha256>.<ext>` by the web's rules, placed where the web places them, and the web app opens pnote's notes file and shows them in place (0.986). Print makes a real vector PDF (searchable words, 0.990 against the web's sheet) and opens the system's print dialog (GTK's, the Mac's); Picture saves a PNG (0.990 against the web's); Export PDF and Share (the Mac's share sheet; Linux shows the file in Files).
+- **New in mojoui.** focusmode, jpeg (plain Mojo, libjpeg's quality), mediastore, zlibc, pdfwriter (a Painter), systemask (App.asks: file picker, save dialog, print, share, full screen on GTK and AppKit), PASTE_FILE (clipboard pictures and copied files), PageSheet.focus, pictures in ObjectLayer (the web's image node both ways), glyph outlines in fonttext (FreeType; CoreText).
+- **Broke.** The focus frame drew blank on the GPU path (no fill op: D-8502); a freed GError buffer in a test step; checker slips (state count, a regex on spaces, copying media/), each fixed toward checking more (D-8511–D-8515). A hard stop at 17:39 and a long shared-lock wait cost about an hour; nothing was lost (WIP commit).
+- **Found.** CoreText glyphs all carry cluster 0 on the Mac: the PDF now maps glyph i to letter i there (D-8516), and the same bug keeps goal 80's typing fast path off on the Mac (its pair test needs cluster 1). Left for the main session: fixing it changes Mac typing.
+- **Not done.** The typing guard (79's typing rows, base vs this branch) is written (`scripts/check 82 TYPING`) but not run: the main session holds timing runs until the machine is fit.
+
 ## 2026-11-26: merging goals 79, 80, 81 and main (branch merge-79-81, steps 1 and 2 of docs/goals/79-merge.md)
 - **Worked.** Both steps merged and proven: goal 79's M0–M6 (60 of 60 race rows on Linux and on the unlocked M4), KEYS, PACKAGE; goal 81's M1–M9 (M7 at 144 ticks/s on the merged clock); main's goals 73, 76, 78, 77's Stage; 52 builds. docs/goals/79-merge-report.md.
 - **Broke.** The auto-merge kept a check that dropped keys during a waiting rebuild; goal 81's held input kept its own HOVER = 11 (main's BOARD_LIVE); main's code read 79's old Json fields; my own step-2 edit commented out pnote's canvas tag (M2–M4 caught it). All fixed, with tests for the first two.

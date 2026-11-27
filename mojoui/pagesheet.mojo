@@ -30,6 +30,8 @@ from mojoui.json import Json, json_string
 
 comptime PAGE_DESK: UInt32 = 0xFFDAE4E9  # #e9e4da
 comptime PAGE_PAPER: UInt32 = 0xFFF8FDFF  # #fffdf8
+comptime FOCUS_TOP = 96.0  # (goal 82) where the text starts under the paper's top (the web's .page-paper padding-top, focus or not)
+comptime FOCUS_COLUMN = 680.0  # (goal 82) focus mode's column (the web's .focus-mode .page-stage width)
 comptime PAGE_INK: UInt32 = 0xFF161B1F  # #1f1b16
 comptime PAGE_MUTED: UInt32 = 0xFF57636B  # #6b6357
 comptime PAGE_LINE: UInt32 = 0xFFCDDBE2  # #e2dbcd
@@ -234,6 +236,9 @@ struct PageSheet(Movable):
     var paper_y: Float64
     var draw_mode: Bool  # Draw (a press on the page makes a pen mark) or Write
     var wet: List[Float64]  # the mark being drawn (layout px), empty: none
+    var focus_fill: UInt32  # what focus mode fills the host with (the app's paper; PAGE_PAPER by default)
+    var focus: Bool  # (goal 82, focus mode) only the words: the host fills its box with paper, a column FOCUS_COLUMN wide, the text
+    # FOCUS_TOP down; no border, toolbar, sheet marks, icon or ink (the marks stay in the document, only not drawn)
 
     def __init__(out self):
         self.ed = TextEdit()
@@ -271,6 +276,8 @@ struct PageSheet(Movable):
         self.paper_y = 0
         self.draw_mode = False
         self.wet = List[Float64]()
+        self.focus = False
+        self.focus_fill = PAGE_PAPER
 
     def set_markdown(mut self, md: String):
         """Another text: the caret at its end (CodeMirror keeps the text's last newline as an empty last line), nothing
@@ -1292,17 +1299,22 @@ struct PageSheet(Movable):
         """The page host filling (x0, y0)–(x1, y1) (its border inside), the desk, toolbar, sheet and text."""
         var w = x1 - x0
         var h = y1 - y0
-        draw_bordered(p, x0, y0, w, h, radius, PAGE_DESK, PAGE_LINE)
+        var focus = self.focus
+        if focus:  # (the web's focus mode: .page-host inset 0, no border or radius, the paper's colour)
+            p.rect(x0, y0, w, h, self.focus_fill, 0)
+        else:
+            draw_bordered(p, x0, y0, w, h, radius, PAGE_DESK, PAGE_LINE)
         bx.add("page.host", x0, y0, w, h)
-        var dx = x0 + 1
-        var dy = y0 + 1
-        var dw = w - 2
-        var dh = h - 2
+        var edge = 0.0 if focus else 1.0
+        var dx = x0 + edge
+        var dy = y0 + edge
+        var dw = w - 2 * edge
+        var dh = h - 2 * edge
         bx.add("page.desk", dx, dy, dw, dh)
         p.push_clip(dx, dy, dw, dh)
-        var stage_w = min(860.0, dw - 32)
+        var stage_w = min(FOCUS_COLUMN if focus else 860.0, dw - 32)
         var sx = dx + 16 + (dw - 32 - stage_w) / 2
-        self.text_w = stage_w - 220
+        self.text_w = stage_w if focus else stage_w - 220
         var t0 = Int(perf_counter_ns())
         _ = self.lay(self.ed.caret.para)
         # what the window shows is always laid out; the rest as there is time (a 300 KB page took 0.8 s at once)
@@ -1323,7 +1335,7 @@ struct PageSheet(Movable):
             p.set_again()
         var text_h = self._text_height()
         # the sheet (behind the toolbar); in Draw a hint sits under the toolbar and the sheet moves down by its height
-        var sheet_at = 28.0 + 44 + 14 - 16 + (27.0 if self.draw_mode else 0.0)
+        var sheet_at = 0.0 if focus else 28.0 + 44 + 14 - 16 + (27.0 if self.draw_mode else 0.0)
         var paper_h = max(1080.0, text_h + 96 + 360)
         self.content_h = sheet_at + paper_h + 120
         self.view_h = dh
@@ -1342,10 +1354,11 @@ struct PageSheet(Movable):
         var paper_shadow = List[Shadow]()
         paper_shadow.append(Shadow(0, 1, 0, 0, rgba(31, 27, 22, 15)))
         paper_shadow.append(Shadow(0, 18, 40, -18, rgba(60, 40, 10, 89)))
-        draw_lifted(p, sx, paper_y, stage_w, paper_h, 3, paper_shadow, PAGE_PAPER)
+        if not focus:
+            draw_lifted(p, sx, paper_y, stage_w, paper_h, 3, paper_shadow, PAGE_PAPER)
         bx.add("page.paper", sx, paper_y, stage_w, paper_h)
         var sheet = 1
-        while Float64(sheet) * 1080 < paper_h:  # (where paper would break)
+        while not focus and Float64(sheet) * 1080 < paper_h:  # (where paper would break)
             var my = paper_y + Float64(sheet) * 1080
             if my > dy - 30 and my < dy + dh:
                 var dash = sx
@@ -1357,12 +1370,12 @@ struct PageSheet(Movable):
                 var words = "PAGE " + String(sheet + 1)
                 text_normal(p, mst, words, sx + stage_w - 14 - measure(mst, words), my + 5, PAGE_FAINT)
             sheet += 1
-        if emoji != "":
+        if emoji != "" and not focus:
             draw_emoji_tile(p, emoji, sx + 110, paper_y + 18, 64, 18, 38, mix(tint, 36, PAGE_PAPER))
             bx.add("page.icon", sx + 110, paper_y + 18, 64, 64)
         # the text
-        var tx = sx + 110
-        var ty = paper_y + 96
+        var tx = sx if focus else sx + 110
+        var ty = paper_y + FOCUS_TOP
         self.text_x = tx
         self.paper_x = sx
         self.paper_y = paper_y
@@ -1392,7 +1405,7 @@ struct PageSheet(Movable):
             self.tops.append(at_y)
             at_y += self.laid[para].height
         for i in range(len(self.ink.marks)):  # (the highlighter under the words: the web multiplies it over them)
-            if self.ink.marks[i].tool == "highlight":
+            if self.ink.marks[i].tool == "highlight" and not focus:
                 self._draw_mark(p, i)
         for para in range(len(self.ed.paras)):
             var ph = self.laid[para].height
@@ -1445,9 +1458,9 @@ struct PageSheet(Movable):
             ty += ph
         # the marks, over the words
         for i in range(len(self.ink.marks)):
-            if self.ink.marks[i].tool != "highlight":
+            if self.ink.marks[i].tool != "highlight" and not focus:
                 self._draw_mark(p, i)
-        if len(self.wet) >= 4:
+        if len(self.wet) >= 4 and not focus:
             var rel = List[Float64]()
             for i in range(0, len(self.wet), 2):
                 rel.append(self.wet[i] - self.wet[0])
@@ -1458,8 +1471,9 @@ struct PageSheet(Movable):
             else:
                 _polyline(p, self.wet[0], self.wet[1], rel, look[1], look[0])
         # the toolbar, sticky at the desk's top
-        self._toolbar(p, bx, sx, max(top, dy), stage_w, mode_draw or self.draw_mode)
-        if self.draw_mode:
+        if not focus:
+            self._toolbar(p, bx, sx, max(top, dy), stage_w, mode_draw or self.draw_mode)
+        if self.draw_mode and not focus:
             var hst = TextStyle(UI_FACE, 400, False, 12.5)
             var words = String("Drawing. Press Esc or Write to type again.")
             var hw = measure(hst, words) + 28

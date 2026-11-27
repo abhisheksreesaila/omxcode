@@ -163,6 +163,10 @@ def pn_actions() -> List[PnAction]:
     a.append(PnAction("new-page", "New page", "file-pen", "create words write", True))
     a.append(PnAction("new-map", "New mind map", "git-fork", "create brainstorm", True))
     a.append(PnAction("link-note", "Link to a note…", "link", "drop card reference", False))
+    a.append(PnAction("focus", "Focus mode", "focus", "write quiet distraction full screen words only", True))  # (goal 82 M1)
+    a.append(PnAction("print", "Print…", "printer", "paper sheets pdf printer", False))  # (goal 82 M4: the native app's own)
+    a.append(PnAction("export-pdf", "Export PDF…", "file-down", "save pdf vector document", False))
+    a.append(PnAction("share", "Share as PDF…", "share", "send mail messages airdrop", False))
     a.append(PnAction("settings", "Open settings", "sliders-horizontal", "preferences", False))
     for k in range(3):
         var ids: List[String] = ["crayon", "paper", "night"]
@@ -201,6 +205,7 @@ def canvas_more_items() -> List[DockItem]:
     out.append(DockItem("[Hand]", "hand", DOCK_TOOL, 0))
     out.append(DockItem("[Highlighter]", "path d=M9 15l-3 5h6l1-2|path d=M9 15l8-11 4 3-8 11z", DOCK_TOOL, 0))
     out.append(DockItem("[Connect]", "circle cx=5.5 cy=18.5 r=2|circle cx=18.5 cy=5.5 r=2|path d=M7.5 16.5c4-1 3-8 9-9", DOCK_TOOL, 0))
+    out.append(DockItem("[Add image]", "image", DOCK_TOOL, 0))  # (goal 82 M2: the web's #add-image, "choose a file, or drop one on the page")
     return out^
 
 

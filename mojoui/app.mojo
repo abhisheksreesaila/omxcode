@@ -10,6 +10,7 @@ from mojoui.theme import Theme
 from mojoui.http import Request
 from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
 from mojoui.webcomponent import Command, is_event_name, is_widget_tag
+from mojoui.systemask import SystemAsk
 from mojoui.json import Json, json_string
 from mojoui.embed import is_web_url
 from mojoui.clock import now_ns
@@ -156,6 +157,11 @@ trait App(Movable, Deinitable):
         the KEY alone."""
         return False
 
+    def takes_paste_files(self, canvas: Int) -> Bool:
+        """(goal 82) True: a paste on Canvas `canvas` whose clipboard holds a picture or copied files brings them instead (PASTE_FILE,
+        a path each; a picture written to a PNG first). The default: no (the text, as before)."""
+        return False
+
     def hears_key_ups(self) -> Bool:
         """True: a modifier let go comes as a KEY of its own ("KeyUp:Control_L"; mojoui.doubletap), and on a Mac pressed
         ("Meta_L"), as GTK sends it. The default: no."""
@@ -265,6 +271,12 @@ trait App(Movable, Deinitable):
         mojoui.webcomponent.Widgets outbox and return its take(). Each answer comes back to update() as an Event."""
         return List[Command]()
 
+    def asks(mut self) -> List[SystemAsk]:
+        """(goal 82) The system dialogs and actions asked for since the runtime last looked (after every update()): keep a
+        mojoui.systemask.SystemAsks outbox and return its take(). Hosts open the platform's own (file picker, save dialog,
+        print dialog for a PDF, share sheet, full screen) and answer with an Event. The default: none."""
+        return List[SystemAsk]()
+
     def opens(mut self) -> List[String]:
         """Pages to open in the system browser, asked for since the runtime last looked (after every update()): keep a
         mojoui.browser.Browser outbox and return its take(). http:// and https:// only; hosts open them (goal 57)."""
@@ -330,6 +342,7 @@ struct Runtime[A: App](Movable):
     var timers: List[Timer]
     var commands_out: List[Command]  # widget commands for the host to take (take_commands)
     var opens_out: List[String]  # pages for the host to open in the browser (take_opens)
+    var asks_out: List[SystemAsk]  # (goal 82) system dialogs for the host to open (take_asks)
     var awaiting: List[Command]  # sent, waiting for their answer (reply)
     var command_seq: Int
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
@@ -353,6 +366,7 @@ struct Runtime[A: App](Movable):
         self.timers = List[Timer]()
         self.commands_out = List[Command]()
         self.opens_out = List[String]()
+        self.asks_out = List[SystemAsk]()
         self.awaiting = List[Command]()
         self.command_seq = 0
         self.budget_ns = 0
@@ -423,6 +437,8 @@ struct Runtime[A: App](Movable):
             if not kept:
                 next.append(Timer(w.ms, w.msg))
         self.timers = next^
+        for a in self.app.asks():
+            self.asks_out.append(a.copy())
         for url in self.app.opens():
             if is_web_url(url):
                 self.opens_out.append(url)
@@ -459,6 +475,12 @@ struct Runtime[A: App](Movable):
         """The pages the app asked to open since the host last took them (each once): the host opens them."""
         var out = self.opens_out^
         self.opens_out = List[String]()
+        return out^
+
+    def take_asks(mut self) -> List[SystemAsk]:
+        """(goal 82) The system dialogs the app asked for since the host last took them (each once)."""
+        var out = self.asks_out^
+        self.asks_out = List[SystemAsk]()
         return out^
 
     def take_commands(mut self) -> List[Command]:

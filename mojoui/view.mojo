@@ -76,6 +76,8 @@ comptime IME_COMMIT = 16  # an input method committed text (event.text) into the
 comptime IME_PREEDIT = 17  # an input method's text being composed (event.text, "" when it ends): draw it underlined at the caret;
 #   event.zoom = its cursor (bytes); event.x, y, dx, dy = where the host put the candidate window (App.caret's rect)
 comptime PASTE = 18  # the system clipboard's text pasted into the focused canvas (Ctrl+V / Cmd+V): event.text
+comptime PASTE_FILE = 19  # (goal 82) a picture or file pasted instead (the clipboard held an image, or files copied in the file manager):
+#   event.text = a file's path (an image is written to a PNG of its own first); one event per file, in place of PASTE
 comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT

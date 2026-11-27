@@ -47,6 +47,9 @@ from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
 from mojoui.view import NO_MSG, HOLD_MS, is_file_saver
 from mojoui.view import FIELD_SECRET
+from mojoui.view import PASTE_FILE
+from mojoui.systemask import SystemAsk, ASK_PICK, ASK_SAVE, ASK_PRINT, ASK_SHARE, ASK_FULLSCREEN
+from mojoui.libc import getpid as _getpid
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
@@ -942,6 +945,8 @@ struct GtkHost[A: App](Movable):
     var editor_open: Bool  # the last build showed an in-place editor
     var picker_node: Int  # the FilePicker whose dialog is open
     var picker_msg: Int  # its on_pick / on_save message (the answer goes by message: a rebuild meanwhile may renumber nodes)
+    var ask_msg: Int  # (goal 82) the last system ask's answer message (the test step answer: answers it)
+    var print_msg: Int  # a print dialog's answer message
     var editor_node: Int  # (its node there)
     var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
@@ -1150,6 +1155,8 @@ struct GtkHost[A: App](Movable):
         self.editor_open = False
         self.picker_node = -1
         self.picker_msg = 0
+        self.ask_msg = 0
+        self.print_msg = 0
         self.editor_node = -1
         self.fx_source = 0
         self.fx_due = 0
@@ -3612,6 +3619,8 @@ struct GtkHost[A: App](Movable):
         answered with an error (through the inbox, on the next idle turn, as a page's reply is)."""
         for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
             open_url(url)
+        for a in self.rt.take_asks():  # (goal 82: the system's dialogs the app asked for)
+            self.ask(a, self_addr)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return
@@ -5256,6 +5265,54 @@ struct GtkHost[A: App](Movable):
             var d = self.rt.dispatch(Event(message, String(""), -1))
             self.apply(d, self_addr)
         return True
+
+    def ask(mut self, a: SystemAsk, self_addr: Int):
+        """(goal 82) A system ask (mojoui.systemask) with GTK's own dialogs: GtkFileDialog (pick, save), GtkPrintDialog printing
+        the PDF file (print), GtkFileLauncher showing the file in the file manager (share: Linux has no share sheet), full
+        screen. Prints `ASK: <kind> <title>`; MOJOUI_ASK_DRY=1 opens nothing (the test step answer: answers)."""
+        print("ASK: " + a.kind_name() + " " + a.title + (" " + a.path if a.path != "" else ""), flush=True)
+        if a.msg != 0:
+            self.ask_msg = a.msg
+        if a.kind == ASK_FULLSCREEN:
+            if a.accept == "1":
+                external_call["gtk_window_fullscreen", NoneType](self.window)
+            else:
+                external_call["gtk_window_unfullscreen", NoneType](self.window)
+            return
+        if getenv("MOJOUI_ASK_DRY") == "1":
+            return
+        if a.kind == ASK_PICK or a.kind == ASK_SAVE:
+            self.picker_node = -1
+            self.picker_msg = a.msg
+            var dialog = external_call["gtk_file_dialog_new", Int]()
+            var title = a.title
+            external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
+            if a.kind == ASK_PICK:
+                accept_filter(dialog, a.accept, "Files it opens")
+                external_call["gtk_file_dialog_open", NoneType](dialog, self.window, 0, on_file_picked[Self.A], self_addr)
+            else:
+                var suggested = a.path
+                if suggested != "":
+                    external_call["gtk_file_dialog_set_initial_name", NoneType](dialog, suggested.as_c_string_span())
+                external_call["gtk_file_dialog_save", NoneType](dialog, self.window, 0, on_file_saved[Self.A], self_addr)
+            return
+        if a.kind == ASK_PRINT:
+            self.print_msg = a.msg
+            var pd = external_call["gtk_print_dialog_new", Int]()
+            var title = a.title
+            external_call["gtk_print_dialog_set_title", NoneType](pd, title.as_c_string_span())
+            var path = a.path
+            var file = external_call["g_file_new_for_path", Int](path.as_c_string_span())
+            external_call["gtk_print_dialog_print_file", NoneType](pd, self.window, 0, file, 0, on_printed[Self.A], self_addr)
+            external_call["g_object_unref", NoneType](file)
+            return
+        if a.kind == ASK_SHARE:
+            var path = a.path
+            var file = external_call["g_file_new_for_path", Int](path.as_c_string_span())
+            var launcher = external_call["gtk_file_launcher_new", Int](file)
+            external_call["gtk_file_launcher_open_containing_folder", NoneType](launcher, self.window, 0, 0, 0)
+            external_call["g_object_unref", NoneType](file)
+            self.answer(a.msg, "shown", self_addr)
 
     def answer(mut self, msg: Int, text: String, self_addr: Int):
         """A message with a path from outside the widgets (a file dialog's answer, a dropped file): to update() now, or,
@@ -7013,8 +7070,18 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     var pn = host[].shown_at(host[].canvases[ci].node) if ci < len(host[].canvases) else -1  # (while a rebuild waits: the old screen's numbering)
     if (mods & CTRL) != 0 and (name == "v" or name == "V") and pn >= 0 and host[].rt.app.takes_paste(host[].rt.shown.nodes[pn].style):  # (goal 79) a paste: the system clipboard's text, read for the canvas
         var display = external_call["gdk_display_get_default", Int]()
-        external_call["gdk_clipboard_read_text_async", NoneType](external_call["gdk_display_get_clipboard", Int](display), 0, on_paste_read[A], host_addr)
+        var clip = external_call["gdk_display_get_clipboard", Int](display)
+        var formats = external_call["gdk_clipboard_get_formats", Int](clip)
         host[].paste_node = host[].canvases[ci].node
+        # (goal 82) a picture on the clipboard (a screenshot, an image copied in another app) or files copied in the file manager
+        # come as PASTE_FILE in place of the text, as a browser hands a page the clipboard's files first
+        var files_ok = host[].rt.app.takes_paste_files(host[].rt.shown.nodes[pn].style)
+        if files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_file_list_get_type", Int]()) != 0:
+            external_call["gdk_clipboard_read_value_async", NoneType](clip, external_call["gdk_file_list_get_type", Int](), c_int(0), 0, on_paste_files[A], host_addr)
+        elif files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_texture_get_type", Int]()) != 0:
+            external_call["gdk_clipboard_read_texture_async", NoneType](clip, 0, on_paste_texture[A], host_addr)
+        else:
+            external_call["gdk_clipboard_read_text_async", NoneType](clip, 0, on_paste_read[A], host_addr)
     if not busy():
         im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
@@ -7102,6 +7169,66 @@ def on_paste_read[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
     var ci = host[].canvas_at(host[].paste_node)
     host[].paste_node = -1
     host[].canvas_words(ci, PASTE, text, host_addr)
+
+
+
+
+def paste_png_path() -> String:
+    """A fresh file for a pasted picture: <tmp>/mojoui-paste-<pid>-<n>.png (the app copies what it keeps)."""
+    var tmp = c_str(external_call["g_get_tmp_dir", Int]())
+    var n = Int(external_call["g_get_monotonic_time", Int64]())
+    return tmp + "/mojoui-paste-" + String(_getpid()) + "-" + String(n) + ".png"
+
+
+def on_paste_texture[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
+    """(goal 82) The clipboard's picture, read for a paste: written as a PNG, its path to the canvas as PASTE_FILE."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var tex = external_call["gdk_clipboard_read_texture_finish", Int](clipboard, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])
+    var ci = host[].canvas_at(host[].paste_node)
+    host[].paste_node = -1
+    if tex == 0:
+        return
+    var path = paste_png_path()
+    var ok = external_call["gdk_texture_save_to_png", c_int](tex, path.as_c_string_span())
+    external_call["g_object_unref", NoneType](tex)
+    if ok == 0:
+        print("mojoui: the pasted picture couldn't be written to " + path, flush=True)
+        return
+    print("PASTE: picture " + path, flush=True)
+    host[].canvas_words(ci, PASTE_FILE, path, host_addr)
+
+
+def on_paste_files[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
+    """(goal 82) Files copied in the file manager, read for a paste: each path to the canvas as PASTE_FILE."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var value = external_call["gdk_clipboard_read_value_finish", Int](clipboard, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])
+    var ci = host[].canvas_at(host[].paste_node)
+    host[].paste_node = -1
+    if value == 0:
+        return
+    var files = external_call["g_value_get_boxed", Int](value)
+    if files == 0:
+        return
+    var list = external_call["gdk_file_list_get_files", Int](files)
+    var paths = List[String]()
+    var at = list
+    while at != 0:
+        var file = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
+        var raw = external_call["g_file_get_path", Int](file)
+        if raw != 0:
+            paths.append(c_str(raw))
+            external_call["g_free", NoneType](raw)
+        at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
+    external_call["g_slist_free", NoneType](list)
+    for p in paths:
+        print("PASTE: file " + p, flush=True)
+        host[].canvas_words(ci, PASTE_FILE, p, host_addr)
 
 
 def im_place[A: App](host_addr: Int, ci: Int):
@@ -7738,6 +7865,25 @@ def accept_filter(dialog: Int, accept: String, label: String):
             external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
     external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
     external_call["g_object_unref", NoneType](filter)
+
+
+def on_printed[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """(goal 82) The print dialog closed: "printed" (the job went to the printer, or to a file), "cancelled", or why it failed."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var ok = external_call["gtk_print_dialog_print_file_finish", c_int](dialog, result, Int(err.unsafe_ptr()))
+    var why = String("")
+    if err[0] != 0:
+        var m = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=err[0] + 8)[]  # (GError: domain, code, message)
+        var code = Int(Pointer[Int32, MutUntrackedOrigin](unsafe_from_address=err[0] + 4)[])
+        why = c_str(m) if m != 0 else String("failed")
+        if code == 2 or why.find("ancel") >= 0 or why.find("ismiss") >= 0:  # (GTK_DIALOG_ERROR_CANCELLED / DISMISSED)
+            why = "cancelled"
+        external_call["g_error_free", NoneType](err[0])
+    external_call["g_object_unref", NoneType](dialog)
+    var said = "printed" if ok != 0 else (why if why != "" else String("cancelled"))
+    print("PRINTED: " + said, flush=True)
+    host[].answer(host[].print_msg, said, host_addr)
 
 
 def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -8777,6 +8923,52 @@ def run_step[A: App](host_addr: Int, step: String):
                     var t = kv[1]
                     external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[k].im, sig.as_c_string_span(), t.as_c_string_span())
                     _ = t
+    elif verb == "clipboardimage":  # clipboardimage:/path.png: the system clipboard holds that picture (as a screenshot tool's copy would; goal 82)
+        var display = external_call["gdk_display_get_default", Int]()
+        var path = rest
+        var err = List[Int](length=1, fill=0)
+        var tex = external_call["gdk_texture_new_from_filename", Int](path.as_c_string_span(), Int(err.unsafe_ptr()))
+        if err[0] != 0:  # (read after the call: the buffer lives through it)
+            external_call["g_error_free", NoneType](err[0])
+        if tex == 0:
+            print("TEST: clipboardimage: can't read " + path, flush=True)
+            return
+        external_call["gdk_clipboard_set_texture", NoneType](external_call["gdk_display_get_clipboard", Int](display), tex)
+        external_call["g_object_unref", NoneType](tex)
+        for _ in range(10):
+            settle()
+    elif verb == "answer":  # answer:<text>: the last system ask answered as its dialog would (a path; "" for cancel: nothing; goal 82)
+        if rest != "":
+            host[].answer(host[].ask_msg, rest, host_addr)
+        for _ in range(5):
+            settle()
+    elif verb == "windows":  # windows: the process's toplevel windows' titles ("WINDOWS: Pnote | Print"; goal 82: a dialog is proven open)
+        var list = external_call["gtk_window_get_toplevels", Int]()
+        var n = Int(external_call["g_list_model_get_n_items", c_uint](list))
+        var titles = List[String]()
+        for k in range(n):
+            var w = external_call["g_list_model_get_item", Int](list, c_uint(k))
+            var t = external_call["gtk_window_get_title", Int](w)
+            if external_call["gtk_widget_get_visible", c_int](w) != 0:
+                titles.append(c_str(t) if t != 0 else String("(untitled)"))
+            external_call["g_object_unref", NoneType](w)
+        print("WINDOWS: " + " | ".join(titles), flush=True)
+    elif verb == "closedialogs":  # closedialogs: every visible toplevel but the app's window closed, as its close button would (goal 82)
+        var list = external_call["gtk_window_get_toplevels", Int]()
+        var n = Int(external_call["g_list_model_get_n_items", c_uint](list))
+        var shut = List[Int]()
+        for k in range(n):
+            var w = external_call["g_list_model_get_item", Int](list, c_uint(k))
+            if w != host[].window and external_call["gtk_widget_get_visible", c_int](w) != 0:
+                shut.append(w)
+            else:
+                external_call["g_object_unref", NoneType](w)
+        for w in shut:
+            external_call["gtk_window_close", NoneType](w)
+            external_call["g_object_unref", NoneType](w)
+        for _ in range(20):
+            settle()
+        print("CLOSED: " + String(len(shut)), flush=True)
     elif verb == "clipboard":  # clipboard:text: the system clipboard holds text (as another app's copy would)
         var display = external_call["gdk_display_get_default", Int]()
         var t = rest

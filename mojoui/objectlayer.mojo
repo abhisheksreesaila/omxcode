@@ -207,8 +207,9 @@ struct Obj(Copyable, Movable):
     var size: Float64  # font size
     var rev: Int  # the text's revision (unique per layer: an editor built from it is still good while it matches)
     var picture: List[Bitmap]  # PICTURE: its pixels (one, shared by every copy of the object)
-    var pw: Int
+    var pw: Int  # PICTURE: its pixel size (a document's picture: the stored file's natural size; x, y, w, h are the box it shows in)
     var ph: Int
+    var file: String  # (goal 82) PICTURE: the stored file it shows ("media/<sha256>.<ext>", a data: URL, or a vault path), "" for pixels only
     var stroke: Stroke  # INK, in page points (moves with the box)
     var from_id: Int  # CONNECTOR: the ends (-1: a free end at fx, fy)
     var to_id: Int
@@ -251,6 +252,7 @@ struct Obj(Copyable, Movable):
         self.picture = List[Bitmap]()
         self.pw = 0
         self.ph = 0
+        self.file = ""
         self.stroke = Stroke(2, color)
         self.from_id = -1
         self.to_id = -1
@@ -842,6 +844,35 @@ struct ObjectLayer(Movable):
         var id = self._new(o^)
         self._commit(CH_ADD)
         return id
+
+    def add_stored_picture(mut self, x: Float64, y: Float64, w: Float64, h: Float64, pixels: List[UInt32], pw: Int, ph: Int, file: String) -> Int:
+        """(goal 82) A picture kept in a file (a media store's name): shown in the box (x, y, w, h), its natural size pw × ph."""
+        var o = Obj(0, PICTURE, x, y, w, h, 0)
+        if len(pixels) == pw * ph and pw > 0:
+            o.picture.append(make_bitmap(pixels.copy(), pw, ph))
+        o.pw = pw
+        o.ph = ph
+        o.file = file
+        o.line_width = 0
+        var id = self._new(o^)
+        self._commit(CH_ADD)
+        return id
+
+    def show_picture(mut self, id: Int, pixels: List[UInt32], pw: Int, ph: Int):
+        """(goal 82) A picture's pixels, decoded after its document was read: drawn from now on. The document doesn't change (no
+        undo step; a layer that was saved stays saved)."""
+        var p = self.index(id)
+        if p < 0 or len(pixels) != pw * ph or pw <= 0:
+            return
+        var was_saved = not self.unsaved()
+        self.objs[p].picture = [make_bitmap(pixels.copy(), pw, ph)]
+        self.chg_ids.append(id)  # (named for the board's damage, not touched: nothing to save)
+        self.chg_vers.append(self.version + 1)
+        self.logged_n += 1
+        self.objs[p].rev = self._next_rev()
+        self._changed()
+        if was_saved:
+            self.saved_version = self.version
 
     def add_ink(mut self, stroke: Stroke) -> Int:
         """A finished pen stroke (page points). Its box is its points' bounds; the outline is sealed once."""
@@ -2366,6 +2397,23 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
         o.weight = 700 if j.text(j.get(style, "fontWeight")) == "bold" else Int(j.real(j.get(style, "fontWeight"), 400))  # ("normal", "bold", or a number)
         o.markdown = j.text(j.get(pn, "format")) == "markdown"
         made = True
+    elif kind == "file" and (own == "image" or own == "") and is_picture_file(j.text(j.get(n, "file"))):
+        # (goal 82) a picture: Personal Note keeps the stored file's natural size in the box and pn.geometry, shown at
+        # scaleX/scaleY about the box's centre (media.js newImage); another app's file node with a picture: as it is
+        var g = j.get(pn, "geometry")
+        var sx = j.real(j.get(g, "scaleX"), 1) if own == "image" else 1.0
+        var sy = j.real(j.get(g, "scaleY"), 1) if own == "image" else 1.0
+        var gx = j.real(j.get(g, "x"), x) if g >= 0 else x
+        var gy = j.real(j.get(g, "y"), y) if g >= 0 else y
+        var nw = j.real(j.get(g, "width"), w) if g >= 0 else w
+        var nh = j.real(j.get(g, "height"), h) if g >= 0 else h
+        o = Obj(0, PICTURE, gx + nw / 2 - nw * abs(sx) / 2, gy + nh / 2 - nh * abs(sy) / 2, nw * abs(sx), nh * abs(sy), 0)
+        o.pw = Int(nw + 0.5)
+        o.ph = Int(nh + 0.5)
+        o.file = j.text(j.get(n, "file"))
+        o.line_width = 0
+        o.rot = j.real(j.get(g, "rotation"), 0) * PI / 180 if g >= 0 else 0.0
+        made = True
     elif kind == "file" and j.text(j.get(pn, "type")) == "ink" and j.text(j.get(pn, "kind"), "stroke") == "stroke":
         # a pen stroke: Personal Note keeps its path (M/L/Q commands, relative to the box) in pn
         var g = j.get(pn, "geometry")
@@ -2410,6 +2458,32 @@ def canvas_node_obj(j: Json, n: Int, mut o: Obj) -> Bool:
     if made:
         o.key = j.text(j.get(n, "id"))
     return made
+
+
+def is_picture_file(file: String) -> Bool:
+    """A JSON Canvas file node's file that is a picture (json_canvas.py _image_extension): a data:image URL or a path ending in a
+    picture's extension."""
+    if file.startswith("data:"):
+        return file.lower().startswith("data:image/")
+    var name = file
+    for cut in ["?", "#"]:
+        var at = name.find(cut)
+        if at >= 0:
+            var cut_name = String(name[byte=0:at])
+            name = cut_name
+    var dot = name.rfind(".")
+    if dot < 0:
+        return False
+    var ext = String(name[byte=dot + 1:]).lower()
+    return ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "gif" or ext == "webp" or ext == "svg" or ext == "bmp" or ext == "avif"
+
+
+def picture_corner(ref o: Obj) -> Tuple[Float64, Float64, Float64]:
+    """A picture's unscaled box corner and its scale, as Personal Note writes them (the shown box scaled about its centre)."""
+    var s = o.w / Float64(o.pw) if o.pw > 0 else 1.0
+    var nw = Float64(o.pw) if o.pw > 0 else o.w
+    var nh = Float64(o.ph) if o.ph > 0 else o.h
+    return (o.x + o.w / 2 - nw / 2, o.y + o.h / 2 - nh / 2, s)
 
 
 def canvas_edge_obj(j: Json, e: Int) -> Tuple[String, String, Obj]:
@@ -2513,6 +2587,14 @@ def _made_node(ref o: Obj, key: String) -> String:
                      + ',"width":' + _jn(floor(o.w + 0.5)) + ',"height":' + _jn(floor(o.h + 0.5)) + ',"file":"","pn":{"type":"ink","geometry":'
                      + _geometry(o.x, o.y, o.w, o.h, o.rot) + ',"opacity":1,"visible":true,"strokeUniform":false,"blend":"source-over","extras":{},"kind":"stroke","tool":"' + ("pen" if (st.color >> 24) == 0xFF else "highlight") + '","width":'
                      + _jn(st.width) + ',"cap":"round","join":"round","color":"' + _hex(st.color) + '"' + ((',"alpha":' + _jn(Float64(Int(Float64(st.color >> 24) / 255 * 10000 + 0.5)) / 10000)) if (st.color >> 24) != 0xFF else String("")) + ',"path":' + path + "}}")
+    elif o.kind == PICTURE and o.file != "":  # (goal 82) a picture placed here (media.js newImage, json_canvas.py's image node)
+        var c = picture_corner(o)
+        var nw = Float64(o.pw)
+        var nh = Float64(o.ph)
+        return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(floor(c[0] + 0.5)) + ',"y":' + _jn(floor(c[1] + 0.5))
+                + ',"width":' + _jn(max(1.0, floor(nw + 0.5))) + ',"height":' + _jn(max(1.0, floor(nh + 0.5))) + ',"file":' + json_string(o.file)
+                + ',"pn":{"type":"image","geometry":{"x":' + _jn(c[0]) + ',"y":' + _jn(c[1]) + ',"width":' + _jn(nw) + ',"height":' + _jn(nh)
+                + ',"scaleX":' + _jn(c[2]) + ',"scaleY":' + _jn(c[2]) + ',"rotation":' + _jn(o.rot * 180 / PI) + ',"flipX":false,"flipY":false,"skewX":0,"skewY":0},"extras":{}}}')
     elif o.kind == RECT and o.line == 0:  # (a shape made here: text-ops.js newShape)
         var fill = _hex(o.color)
         return ('{"id":' + json_string(key) + ',"type":"file","x":' + _jn(floor(o.x + 0.5)) + ',"y":' + _jn(floor(o.y + 0.5))
@@ -2770,6 +2852,30 @@ def _node_patched(ref o: Obj, raw: String) -> String:
         var style = List[Patch]()
         var pnode = j.get(0, "pn")
         var g = j.get(pnode, "geometry")
+        if o.kind == PICTURE:  # (goal 82: its natural size stays; where it is and its scale change, as the web writes them)
+            var a = picture_corner(was)
+            var b = picture_corner(o)
+            if abs(a[0] - b[0]) > 1e-9:
+                top.append(Patch("x", _whole(floor(b[0] + 0.5))))
+                if g >= 0:
+                    geo.append(Patch("x", _jn(b[0])))
+            if abs(a[1] - b[1]) > 1e-9:
+                top.append(Patch("y", _whole(floor(b[1] + 0.5))))
+                if g >= 0:
+                    geo.append(Patch("y", _jn(b[1])))
+            if abs(a[2] - b[2]) > 1e-9 and g >= 0:
+                geo.append(Patch("scaleX", _jn(b[2])))
+                geo.append(Patch("scaleY", _jn(b[2])))
+            if abs(o.rot - was.rot) > 1e-9 and g >= 0:
+                geo.append(Patch("rotation", _jn(o.rot * 180 / PI)))
+            var out0 = patched(raw, top)
+            if len(geo) > 0:
+                var inner0 = member_text(out0, "pn")
+                if not inner0.startswith("{"):
+                    inner0 = "{}"
+                inner0 = patched_in(inner0, "geometry", geo)
+                out0 = patched(out0, [Patch("pn", inner0)])
+            return out0
         var dx = o.x - was.x
         var dy = o.y - was.y
         var dw = o.w - was.w
