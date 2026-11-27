@@ -396,19 +396,37 @@ struct PdfPainter(Painter, Movable):
         self._fill(color)
         var s = String("BT\n")
         var last_font = -1
+        # (CoreText's runs carry no clusters (every glyph 0): then glyph i stands for letter i when the counts agree, else the first
+        # glyph for all the words; HarfBuzz's byte clusters are used as they are)
+        var starts = List[Int]()
+        var off = 0
+        for c in text.codepoints():
+            starts.append(off)
+            off += c.utf8_byte_length()
+        var flat = len(r.glyphs) > 1
+        for gi in range(1, len(r.glyphs)):
+            if r.glyphs[gi].cluster != r.glyphs[0].cluster:
+                flat = False
         for gi in range(len(r.glyphs)):
             ref g = r.glyphs[gi]
             # the words this glyph stands for: from its cluster to the next cluster after it (a ligature's whole letters)
             var a = g.cluster
             var b = len(tb)
-            for gj in range(len(r.glyphs)):
-                var c = r.glyphs[gj].cluster
-                if c > a and c < b:
-                    b = c
+            if flat:
+                if len(r.glyphs) == len(starts):
+                    a = starts[gi]
+                    b = starts[gi + 1] if gi + 1 < len(starts) else len(tb)
+                else:
+                    a = 0 if gi == 0 else len(tb)
+            else:
+                for gj in range(len(r.glyphs)):
+                    var c = r.glyphs[gj].cluster
+                    if c > a and c < b:
+                        b = c
             var words = String(text[byte=a:b]) if a >= 0 and a < b and b <= len(tb) else String("")
             var first_of_cluster = True  # (a cluster drawn by several glyphs: its letters go with the first only, or a reader repeats them)
             for gk in range(gi):
-                if r.glyphs[gk].cluster == a:
+                if not flat and r.glyphs[gk].cluster == a:
                     first_of_cluster = False
             if not first_of_cluster:
                 words = ""

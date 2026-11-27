@@ -490,7 +490,7 @@ def m4():
              f"tapat:desk={title}", "wait:600", f"tapat:desk={center(card, '#share-png')}", "wait:800", "answer:{out}/picture.png", "wait:2500",
              "appbench:desk=exportpdf", "wait:500", "answer:{out}/export.pdf", "wait:2000", "appbench:desk=share", "wait:1500"])
     log, d = native("m4", ref / "pn.db", steps, {"MOJOUI_ASK_DRY": "1"})
-    m = re.search(r"^PNOTE PDF: (\S+) pages (\d+)", log, re.M)
+    m = re.search(r"^PNOTE PDF: (.+?) pages (\d+) runs \d+$", log, re.M)  # (D-8515: a path may hold spaces: the note's title)
     if not m or "ASK: print" not in log:
         probs.append(f"Linux: Print made no PDF or asked for no print dialog: {tail(log, 500)}")
     pdfs = [Path(m.group(1))] if m else []
@@ -519,7 +519,7 @@ def m4():
             a, b = G79.grey(got), G79.grey(ref / "sheet-1.png")
             if a.shape == b.shape:
                 sc = float(G79.ssim(a, b))
-                said.append(f"PDF page 1 vs the web's sheet SSIM {sc:.3f} (shadows aren't printed)")
+                said.append(f"PDF page 1 vs the web's sheet SSIM {sc:.3f}")
                 if sc < 0.90:
                     probs.append(f"the PDF's first page vs the web's print sheet SSIM {sc:.3f} < 0.90")
             else:
@@ -558,7 +558,7 @@ def m4_mac(ref, panel, card, title):
     if e:
         return "BLOCKED", e
     probs = []
-    m = re.search(r"^PNOTE PDF: \S+ pages (\d+) runs (\d+)", out, re.M)
+    m = re.search(r"^PNOTE PDF: .+? pages (\d+) runs (\d+)$", out, re.M)
     if not m or int(m.group(2)) == 0:
         probs.append("no PDF with words")
     wins = re.findall(r"^WINDOWS: (.*)$", out, re.M)
@@ -568,6 +568,22 @@ def m4_mac(ref, panel, card, title):
         probs.append("the print panel gave no answer")
     if "SHARE: shown" not in out:
         probs.append("the share picker wasn't shown")
+    mp = re.search(r"^PNOTE PDF: (.+?) pages \d+ runs \d+$", out, re.M)
+    got = OUT / "mac-print.pdf"
+    if mp and G79.mac_get(f"'{mp.group(1)}'", got):  # (the Mac's own PDF: its glyphs from CoreText's outlines)
+        text = " ".join(run(["pdftotext", str(got), "-"], 60).stdout.split())
+        for words in ("# Garden plan Beds by the south wall, herbs near the door.", "Tomatoes", "Water every other evening"):
+            if words not in text:
+                probs.append(f"the Mac's PDF text lacks {words!r} ({text[:160]!r})")
+        run(["pdftoppm", "-r", "192", "-png", "-f", "1", "-l", "1", str(got), str(OUT / "mac-sheet")], 120)
+        sh = next(iter(sorted(OUT.glob("mac-sheet-*1.png"))), None)
+        if sh and (ref / "sheet-1.png").exists():
+            a, b = G79.grey(sh), G79.grey(ref / "sheet-1.png")
+            sc = float(G79.ssim(a, b)) if a.shape == b.shape else -1
+            if sc < 0.90:
+                probs.append(f"the Mac's PDF page vs the web's sheet SSIM {sc:.3f} < 0.90")
+    else:
+        probs.append("the Mac's PDF couldn't be fetched")
     if probs:
         return "FAIL", "; ".join(probs) + ": " + tail(out, 400)
     return "PASS", "PDF made, " + " / ".join(wins) + ", share picker shown"
