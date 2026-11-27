@@ -3833,7 +3833,7 @@ struct AppKitHost[A: App](Movable):
         if a.kind == ASK_PRINT:
             var fw = String("/System/Library/Frameworks/PDFKit.framework/PDFKit")
             _ = cfunc("dlopen", Int(fw.as_c_string_span().unsafe_ptr()), Int32(2 | 8))  # (through dlsym: other modules declare dlopen with their own signature)
-            _ = len(fw)
+            _ = fw.byte_length()
             var url = msg(cls("NSURL"), "fileURLWithPath:", ns_string(a.path))
             var doc = msg(msg(cls("PDFDocument"), "alloc"), "initWithURL:", url)
             if doc == 0:
@@ -4427,7 +4427,7 @@ def pasted_picture() -> String:
         data = msg(rep, "representationUsingType:properties:", 4, msg(cls("NSDictionary"), "dictionary"))  # (NSBitmapImageFileTypePNG)
         if data == 0:
             return ""
-    var dir = from_ns(external_call["NSTemporaryDirectory", Int]())
+    var dir = from_ns(cfunc("NSTemporaryDirectory"))
     var path = (dir if dir.endswith("/") else dir + "/") + "mojoui-paste-" + String(Int(now_ns())) + ".png"
     if (msg(data, "writeToFile:atomically:", ns_string(path), 1) & 0xFF) == 0:
         return ""
@@ -6276,7 +6276,7 @@ def on_ask_watch[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     var app = msg(cls("NSApplication"), "sharedApplication")
     var w = msg(app, "modalWindow")
     var title = from_ns(msg(w, "title")) if w != 0 else String("")
-    var kind = from_ns(external_call["NSStringFromClass", Int](msg(w, "class"))) if w != 0 else String("none")
+    var kind = from_ns(cfunc("NSStringFromClass", msg(w, "class"))) if w != 0 else String("none")
     print("WINDOWS: modal " + kind + " '" + title + "'", flush=True)
     _ = msg(app, "abortModal")
 

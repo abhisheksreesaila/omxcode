@@ -105,7 +105,9 @@ def center(boxes, name, cw=1440.0, ch=900.0):
 def open_steps(panel, title):
     """From a fresh start (the notes panel closed): open the note titled `title` by its row, close the panel (the web's boxes)."""
     row = next(k for k in panel if k.startswith("row:") and k.endswith(title))
-    return [f"tapat:desk={center(panel, '#toggle-sidebar')}", "wait:600", f"tapat:desk={center(panel, row)}", "wait:900",
+    # (D-8512) a painted frame before the first tap: after the 17:39 restart the first frame came seconds late (cold shader cache)
+    # and taps on an unpainted window hit nothing; gpushot waits for the canvas's frames
+    return ["gpushot:desk={out}/first-frame.png", f"tapat:desk={center(panel, '#toggle-sidebar')}", "wait:600", f"tapat:desk={center(panel, row)}", "wait:900",
             f"tapat:desk={center(panel, '#toggle-sidebar')}", "wait:700"]
 
 

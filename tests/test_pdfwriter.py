@@ -11,7 +11,8 @@ q = subprocess.run(["qpdf", "--check", str(pdf)], capture_output=True, text=True
 if q.returncode != 0:
     bad.append("qpdf: " + (q.stdout + q.stderr)[-300:])
 info = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True).stdout
-if "Pages:          2" not in info or "645 x 810 pts" not in info:
+import re
+if not re.search(r"^Pages:\s+2$", info, re.M) or "645 x 810 pts" not in info:
     bad.append("pdfinfo: " + info.replace("\n", " | ")[:300])
 p1 = subprocess.run(["pdftotext", "-f", "1", "-l", "1", str(pdf), "-"], capture_output=True, text=True).stdout
 p2 = subprocess.run(["pdftotext", "-f", "2", "-l", "2", str(pdf), "-"], capture_output=True, text=True).stdout

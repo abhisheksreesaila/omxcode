@@ -406,6 +406,12 @@ struct PdfPainter(Painter, Movable):
                 if c > a and c < b:
                     b = c
             var words = String(text[byte=a:b]) if a >= 0 and a < b and b <= len(tb) else String("")
+            var first_of_cluster = True  # (a cluster drawn by several glyphs: its letters go with the first only, or a reader repeats them)
+            for gk in range(gi):
+                if r.glyphs[gk].cluster == a:
+                    first_of_cluster = False
+            if not first_of_cluster:
+                words = ""
             var fc = self._code(g.inst, g.gid, words)
             if fc[0] != last_font:
                 s += "/F" + String(fc[0]) + " " + _num(r.size) + " Tf\n"
@@ -421,12 +427,16 @@ struct PdfPainter(Painter, Movable):
         if f >= 0:
             var c = self.fonts[f].code_of.get(gid, -1)
             if c >= 0:
+                if self.fonts[f].words[c - 1] == "" and words != "":
+                    self.fonts[f].words[c - 1] = words
                 return (f, c)
             # (the same glyph may be in an older, full font of this instance)
         for k in range(len(self.fonts)):
             if self.fonts[k].inst == inst:
                 var c = self.fonts[k].code_of.get(gid, -1)
                 if c >= 0:
+                    if self.fonts[k].words[c - 1] == "" and words != "":  # (first met inside a cluster, now its letters)
+                        self.fonts[k].words[c - 1] = words
                     return (k, c)
         if f < 0 or len(self.fonts[f].gids) >= 255:
             var upem = e[].faces[e[].insts[inst].face].upem
