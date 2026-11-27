@@ -31,6 +31,8 @@ WEBPY = WEB / ".venv/bin/python"
 
 # ---- the bars, from the draft ----
 M7_SHOWN_MS = 300        # another app's write on pnote's screen (from 2 s: the feed's poll)
+MAC_DIR = "omxcode-g82b-app"  # (the M4 folder of this worker's app builds: ~/omxcode-g54 is every worker's, and a run that reused the
+# last build there ran another worker's app, 2026-11-26 19:09; this one gets its own pixi environment on its first run)
 M7_BOTHOPEN_MIN = 3      # minutes of goal 79's both-open run (with deletions on both sides and through the API)
 
 
@@ -217,7 +219,8 @@ def m3_mac_run(name, steps, env, data, fetch, build=False):
     d = OUT / "mac"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{name}.steps").write_text("\n".join(steps) + "\n")
-    e = dict(os.environ, MAC_SSH=os.environ.get("MAC_SSH", "bhoomijaprasad@100.76.9.101"), MAC_ENV=",".join(env), MAC_FETCH=" ".join(fetch), MAC_NOBUILD="0" if build else "1")
+    e = dict(os.environ, MAC_SSH=os.environ.get("MAC_SSH", "bhoomijaprasad@100.76.9.101"), MAC_ENV=",".join(env), MAC_FETCH=" ".join(fetch), MAC_NOBUILD="0" if build else "1",
+             MAC_SSH_DIR=MAC_DIR)
     r = subprocess.run([str(ROOT / "scripts/mac-ssh"), "pnote", str(d / f"{name}.steps"), *map(str, data)], cwd=ROOT, capture_output=True, text=True, timeout=3600, env=e)
     said = r.stdout + r.stderr
     last = [x for x in said.strip().splitlines() if x.startswith("build/mac-ssh/")]
@@ -466,16 +469,19 @@ def m7_mac_live():
     shutil.rmtree(seed, ignore_errors=True)
     web("seed", seed)
     shutil.copy(seed / "notes.db", d / "live.db")
+    rep, said = m3_mac_run("m7-build", ["pause:1000", "quit"], [f"PNOTE_DB={{data}}/b-{int(time.time())}.db"], [], [], build=True)  # (this source's app built in this worker's own folder first)
+    if rep is None:
+        return None, tail(said), "UNREACHABLE" in said or "timed out" in said
     (d / "live.steps").write_text("pause:40000\nquit\n")
     host = os.environ.get("MAC_SSH", "bhoomijaprasad@100.76.9.101")
-    e = dict(os.environ, MAC_SSH=host, MAC_ENV="PNOTE_DB={data}/live.db", MAC_NOBUILD="1", MAC_QUIET="0")
+    e = dict(os.environ, MAC_SSH=host, MAC_ENV="PNOTE_DB={data}/live.db", MAC_NOBUILD="1", MAC_QUIET="0", MAC_SSH_DIR=MAC_DIR)
     p = subprocess.Popen([str(ROOT / "scripts/mac-ssh"), "pnote", str(d / "live.steps"), str(d / "live.db")], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=e)
     time.sleep(24)
     key = os.path.expanduser(os.environ.get("MAC_SSH_KEY", "~/.ssh/edx_mac"))
     for k in range(4):
         sql = ("BEGIN IMMEDIATE; UPDATE notes SET content = json_insert(content, '$.nodes[#]', json_object('id','mac" + str(k) + "','type','text','text','mac agent " + str(k)
                + "','x',500,'y'," + str(200 + 60 * k) + ",'width',200,'height',50)), revision = revision + 1 WHERE title = 'Board'; UPDATE workspace_state SET sequence = sequence + 1 WHERE id = 1; COMMIT;")
-        subprocess.run(["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "sqlite3 ~/omxcode-g54/data/live.db " + json.dumps(sql).replace("$", "\\$")], capture_output=True, text=True, timeout=60)
+        subprocess.run(["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "sqlite3 ~/" + MAC_DIR + "/data/live.db " + json.dumps(sql).replace("$", "\\$")], capture_output=True, text=True, timeout=60)
         time.sleep(4)
     out, _ = p.communicate(timeout=600)
     if p.returncode != 0:

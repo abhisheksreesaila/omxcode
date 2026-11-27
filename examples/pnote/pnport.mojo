@@ -742,7 +742,8 @@ def one_file_set(path: String) raises -> FileSet:
                 var s2 = up.rfind("/")
                 if s2 <= 0:
                     break
-                up = String(up[byte=:s2])
+                var parent = String(up[byte=:s2])
+                up = parent^
     except:
         pass
     return out^
