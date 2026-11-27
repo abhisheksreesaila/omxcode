@@ -27,7 +27,7 @@ from mojoui.orb import Orb, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.pngread import decode_png
 from mojoui.spring import Spring
 from mojoui.theme import Palette, mix
-from mojoui.view import View, Canvas, NO_MSG
+from mojoui.view import View, Canvas, HStack, Spacer, CENTER, NO_MSG
 
 comptime MASCOT_REST = 0    # Hub state (== ORB_IDLE)
 comptime MASCOT_LISTEN = 1  # Attentive listening (== ORB_LISTEN)
@@ -687,9 +687,21 @@ def MascotView(canvas: Int, version: Int, side: Int = 172, on_gesture: Int = NO_
     return Canvas(canvas, version, on_gesture=on_gesture, hover=hover).width(side).height(side).tag("mascot").tooltip("Tap to say hi")
 
 
+comptime PERCH_SIDE = 184  # the perched mascot's canvas, points: full size, where its lighting, breath and aura read (52 loses them)
+
+
+def MascotPerch(canvas: Int, version: Int, on_gesture: Int = NO_MSG, side: Int = PERCH_SIDE) -> View:
+    """The mascot full-size on its perch (a side column under its lists: mojoui.stage's left), centred across the column, a
+    little room above and below. `on_gesture`: tap to poke, the pointer's hover leans it (NO_MSG while it leaves: presses go
+    through). Draw it with Presence.draw_perch; show it while Presence.perch_shown()."""
+    var view = MascotView(canvas, version, side=side, on_gesture=on_gesture, hover=on_gesture != NO_MSG)
+    return HStack(Spacer(), view^, Spacer(), spacing=0).align(CENTER).padding(12, 0).fill().tag("mascot-perch")
+
+
 comptime PRESENCE_K = 260.0  # the crossfade's spring (omxqua's --oq-spring-slow, k260 c20 here: a slight settle past full size)
 comptime PRESENCE_C = 20.0
 comptime PRESENCE_FROM_SCALE = 0.86  # the newcomer grows from this while the one leaving swells a little and fades
+comptime PERCH_GONE = 0.004  # the perch's spring below this (and heading to 0): it has left; the view drops it
 
 
 def _sample(px: List[UInt32], w: Int, h: Int, x: Float64, y: Float64) -> UInt32:
@@ -722,6 +734,10 @@ struct Presence(Movable):
     var stamp: Int
     var _old: List[UInt32]  # the crossfade's two pictures
     var _new: List[UInt32]
+    var perched: Bool  # the mascot sits full-size on its perch (arrange): the chat bar keeps the quiet orb
+    var perch: Spring  # 0 -> 1: the perch's arrival (it grows up from its feet and fades in; leaving, the reverse)
+    var perch_ns: Int
+    var _perch: List[UInt32]  # the perched mascot's picture while it arrives or leaves
 
     def __init__(out self):
         self.kind = PRESENCE_ORB
@@ -733,6 +749,74 @@ struct Presence(Movable):
         self.stamp = 0
         self._old = List[UInt32]()
         self._new = List[UInt32]()
+        self.perched = False
+        self.perch = Spring(0.0, PRESENCE_K, PRESENCE_C)
+        self.perch_ns = 0
+        self._perch = List[UInt32]()
+
+    def arrange(mut self, bar_mascot: Bool, perched: Bool):
+        """Where the presence shows (owner, 2026-11-26): `perched`, the mascot full-size on its perch (a wide window: its
+        lighting, breath and aura read at 184 pt, not at 52) while the chat bar keeps the quiet orb, so two mascots never
+        stare at once; else `bar_mascot`, the mascot in the chat bar's slot (a phone), or the orb. Both move on springs: the
+        chat bar crossfades (show) and the perch grows in or out (draw_perch). The mascot only once a pack is loaded."""
+        var perch = perched and self.mascot.ready
+        _ = self.show(PRESENCE_MASCOT if (bar_mascot and not perch) else PRESENCE_ORB)
+        if perch != self.perched:
+            self.perched = perch
+            self.perch.to(1.0 if perch else 0.0)
+            self.perch_ns = 0
+            self.stamp += 1
+
+    def perch_shown(self) -> Bool:
+        """The perch is in the view: perched, or still leaving (its spring not yet down: the view drops it after)."""
+        return self.perched or self.perch.value > PERCH_GONE or self.perch.moving()
+
+    def perch_version(self) -> Int:
+        """The perch canvas's version (it draws again every frame while the mascot breathes; this moves when it is re-placed)."""
+        return self.mascot.version() * 64 + self.stamp % 64
+
+    def look_bar(mut self, x: Float64, y: Float64, amount: Float64):
+        """The chat bar's gaze (the pointer's): the orb's, and the mascot's only while it sits in the bar (perched, it keeps
+        its own: the pointer resting on it leans it)."""
+        self.orb.look(x, y, amount)
+        if self.mascot.ready and not self.perched:
+            self.mascot.look(x, y, amount)
+
+    def draw_perch(mut self, mut s: Surface, p: Palette):
+        """The perched mascot: drawn as it is once it has arrived; while it arrives it grows from PRESENCE_FROM_SCALE about its
+        feet and fades in on the perch's spring (a slight settle past full size), leaving the reverse; gone, nothing."""
+        var now = now_ns()
+        if self.perch_ns > 0:
+            _ = self.perch.step((now - self.perch_ns) // 1000)
+        self.perch_ns = now
+        if s.still:
+            self.perch.snap(self.perch.target)
+        var a = min(max(self.perch.value, 0.0), 1.0)
+        if not self.mascot.ready or (a <= PERCH_GONE and self.perch.target <= 0.0 and not self.perch.moving()):
+            s.fill(0)
+            return
+        if a >= 0.999 and not self.perch.moving():
+            self.mascot.draw(s, p)
+            return
+        var w = s.width
+        var h = s.height
+        var n = w * h
+        if len(self._perch) != n:
+            self._perch = List[UInt32](length=n, fill=0)
+        var pic = Surface(Int(self._perch.unsafe_ptr()), w, h, s.scale)
+        self.mascot.draw(pic, p)
+        var k = PRESENCE_FROM_SCALE + (1.0 - PRESENCE_FROM_SCALE) * self.perch.value  # (the spring's settle shows as a size)
+        var cx = Float64(w) * 0.5
+        var cy = Float64(h) * self.mascot.anchor_y  # (it grows up from where it stands)
+        for y in range(h):
+            for x in range(w):
+                var q = _layer(_sample(self._perch, w, h, cx + (Float64(x) + 0.5 - cx) / k, cy + (Float64(y) + 0.5 - cy) / k), a)
+                var out: UInt32 = 0
+                if q[3] > 0.002:
+                    var al = q[3]
+                    out = UInt32(min(Int(q[0] / al + 0.5), 255)) | (UInt32(min(Int(q[1] / al + 0.5), 255)) << 8) | (UInt32(min(Int(q[2] / al + 0.5), 255)) << 16) | (UInt32(Int(min(al, 1.0) * 255.0 + 0.5)) << 24)
+                s.pixels().unsafe_offset(y * w + x)[] = out
+        s.again = True
 
     def show(mut self, kind: Int) -> Bool:
         """Switches to `kind` with the crossfade (the mascot only once a pack is loaded). True when `kind` now shows."""

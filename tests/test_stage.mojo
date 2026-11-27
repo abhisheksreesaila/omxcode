@@ -6,7 +6,10 @@ from mojoui.view import View, Text, Canvas, VStack, HStack, SCROLL, NO_MSG
 from mojoui.stage import Stage, StageClock, StageLabel, StageCard, StageRow, StageList, StageAvatar, StagePill, StageChat, StageNote, StageTool
 from mojoui.view import Node, Grid, TableGrid, VSTACK
 from mojoui.stage import stage_layout, stage_compact, STAGE_PHONE, STAGE_NARROW
-from themes.omxqua import omxqua_counter, counter_ground, counter_shade
+from mojoui.accents import ACCENT_VALUES, accent_colour, swatch_role
+from mojoui.theme import contrast_ratio
+from mojoui.look import css_color
+from themes.omxqua import omxqua_counter, counter_ground, counter_shade, counter_palette, counter_tv_look, readable_on, ring_css
 
 
 def tagged(v: View, name: String) -> List[Int]:
@@ -27,7 +30,7 @@ def tags(v: View) -> List[String]:
 
 def screen(width: Int) -> View:
     var compact = stage_compact(width)
-    var top = HStack(StageAvatar("All", 0, 1), StageAvatar("A", 2, 2), StagePill("settings", "Settings", 3, compact), spacing=8)
+    var top = HStack(StageAvatar("All", 0, 1), StageAvatar("A", 2, 2, active=True), StagePill("settings", "Settings", 3, compact), spacing=8)
     var left = VStack(StageClock("10:59", "Wednesday, November 18", "9° · clear", compact), StageLabel("pin", "Pinned"),
                       StageList([StageCard("map-pin", "Pinned", "A day in Lisbon", "3 stops", 3, on_unpin=9)], compact), StageNote("Nothing else today"), spacing=10)
     var right = VStack(StageLabel("zap", "Live"), StageList([StageRow("timer", "Pasta", "7:20", 4), StageRow("car", "Traffic", "Roads are clear", 3)]), spacing=10)
@@ -151,6 +154,78 @@ def test_counter_styles_every_tag() raises:
         assert_equal(bar.fill, omxqua_counter(dark).palette.card)
 
 
+def rule(css: String, selector: String) -> String:
+    """The declarations of every rule whose selector list ends with `selector`, one after another ("" when there is none)."""
+    var out = String("")
+    var at = css.find(selector + " {")
+    while at >= 0:
+        var end = css.find("}", at)
+        out += String(css[byte = at : end]) + "}"
+        at = css.find(selector + " {", end)
+    return out
+
+
+def test_active_avatar_and_accent() raises:
+    """The active person is ringed (D-8420: the role's -on, a ring in its shadows, the person's colour a step stronger); a
+    person's accent shows on a few structural surfaces (D-8419: a hint in the stage's ground, the TV's ground with it, their
+    chat bubbles, the active ring) and never on the tiles' kinds; the default accent leaves the roles as they were."""
+    assert_equal(StageAvatar("All", 0, 7).nodes[0].name, "stage-avatar")
+    assert_equal(StageAvatar("All", 0, 7, active=True).nodes[0].name, "stage-avatar-on")
+    assert_equal(StageAvatar("A", 2, 7, active=True).nodes[0].name, "stage-avatar-2-on")
+    for dark in [False, True]:
+        var p = counter_palette(dark)
+        var base = omxqua_counter(dark).look.copy()
+        assert_equal(base.surfaces[base.surface("stage-panel")].fill, counter_ground(dark))  # (the default: the token itself)
+        assert_equal(base.surfaces[base.surface("stage-msg-you")].fill, p.ink)
+        assert_equal(counter_tv_look(dark).ground, counter_ground(dark))
+        var t0 = omxqua_counter(dark)
+        var ring = ring_css(p.accent)  # (the ink: the Counter's own accent)
+        assert_true(rule(t0.gtk_css, "button.flat.mui-tag-stage-avatar-on").find(ring) >= 0, "GTK rings the active one in the ink")
+        assert_true(rule(t0.web_css, "button[data-tag=stage-avatar-2-on]").find(ring) >= 0, "the web rings the active one")
+        assert_equal(rule(t0.gtk_css, "button.flat.mui-tag-stage-avatar").find("outline"), -1)  # (the others: no ring)
+        var a = base.surfaces[base.surface("stage-avatar-2")].copy()
+        var a_on = base.surfaces[base.surface("stage-avatar-2-on")].copy()
+        assert_true(contrast_ratio(a_on.fill, p.card) > contrast_ratio(a.fill, p.card), "the active person's colour a step stronger")
+        assert_true(contrast_ratio(a_on.ink, a_on.fill) >= 4.5, "their initials still read")
+        var values = materialize[ACCENT_VALUES]()
+        for k in range(1, len(values)):
+            var acc = accent_colour(p, values[k])
+            var look = omxqua_counter(dark, acc).look.copy()
+            var ground = look.surfaces[look.surface("stage-panel")].fill
+            assert_true(ground != counter_ground(dark) and ground == counter_ground(dark, acc), "the stage's ground takes a hint of " + values[k])
+            assert_true(contrast_ratio(ground, counter_ground(dark)) < 1.15, "only a hint: " + values[k])
+            assert_equal(counter_tv_look(dark, acc).ground, ground)  # (the TV's veil fades the tiles into the same tone)
+            var you = look.surfaces[look.surface("stage-msg-you")].copy()
+            assert_true(you.fill != p.ink, "their bubbles wear " + values[k])
+            assert_true(contrast_ratio(you.fill, you.ink) >= 4.5, "their words read on " + values[k] + ": " + String(contrast_ratio(you.fill, you.ink)))
+            var t = omxqua_counter(dark, acc)
+            assert_true(rule(t.gtk_css, "button.flat.mui-tag-stage-avatar-3-on").find(ring_css(acc)) >= 0, "the active ring in " + values[k])
+            for i in range(6):  # (the tiles' kinds keep their own colours)
+                assert_equal(look.surfaces[look.surface("stage-kind-" + String(i + 1))].fill, p.series[i])
+            for v in values:  # (every swatch styled; the chosen one ringed in its own colour, its tick readable)
+                var sw = look.surfaces[look.surface(swatch_role(v, True))].copy()
+                assert_true(sw.width == 32 and sw.height == 32, swatch_role(v, True))
+                assert_true(rule(t.gtk_css, "button.image-button.mui-tag-" + swatch_role(v, True)).find(ring_css(sw.fill)) >= 0, "GTK rings " + v)
+                assert_true(rule(t.web_css, "button.subtle.icon-only[data-tag=" + swatch_role(v, True) + "]").find(ring_css(sw.fill)) >= 0, "the web rings " + v)
+                assert_equal(rule(t.gtk_css, "button.image-button.mui-tag-" + swatch_role(v, False)).find("outline"), -1)
+                assert_true(contrast_ratio(readable_on(sw.fill), sw.fill) >= 3.0, "a tick reads on " + v)
+                assert_true(look.surface(swatch_role(v, False)) >= 0)
+                assert_equal((look.surfaces[look.surface(swatch_role(v, False))].icon_ink >> 24), UInt32(0))  # (an unchosen swatch's icon unseen)
+
+
+def test_keyed_rows() raises:
+    """A side row keyed by its tile keeps its own widget among the others (a box tagged stage-keyed-<id>); one that just came off
+    the stage arrives (View.arrive) once."""
+    var plain = StageRow("timer", "Pasta", "7:20", 4)
+    assert_equal(plain.nodes[0].name, "stage-row")
+    var keyed = StageRow("timer", "Pasta", "7:20", 4, key="timer")
+    assert_equal(keyed.nodes[0].name, "stage-keyed-timer")
+    assert_false(keyed.nodes[0].arrives)
+    assert_equal(keyed.nodes[keyed.nodes[0].children[0]].name, "stage-row")
+    var coming = StageRow("cloud", "Weather", "9°", 2, key="weather", arrive=True)
+    assert_true(coming.nodes[0].arrives)
+
+
 def test_container_empty_views() raises:
     """An empty View among a container's children (D-7859, review of M7f): a stack skips it (counted, it took its next
     sibling's first node as its own); a Grid's or Table's cell and a Board's child keep their place as an empty box, so the
@@ -198,4 +273,6 @@ def main() raises:
     test_regions_phone()
     test_counter_styles_every_tag()
     test_container_empty_views()
-    print("test_stage: 8 tests passed")
+    test_active_avatar_and_accent()
+    test_keyed_rows()
+    print("test_stage: 10 tests passed")

@@ -19,8 +19,10 @@
 #   if c.ok and len(c.changed) > 0: morph.morph(); apply look.prefs   # mojoui.transition: the host blends old into new
 #   agent.answer(call.id, c.result())                       # what changed (or why not), in a sentence the model can pass on
 #   LlmAgent.add_deferred(PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)   # or personalize_tool() for an AG-UI client
-#   look_knobs(look.prefs, KNOBS, look.can_undo())          # the same four knobs and "Put it back" for touch (a Popover's body)
-#   var c = look.knob(event, KNOBS)                         # a knob's event (KNOBS + 0 … 4)
+#   look_knobs(look.prefs, KNOBS, look.can_undo(), look_title(look.profile))   # the same knobs and "Put it back" for touch (a
+#                                                           # Popover's body): whose look it is, the accent as colour swatches
+#   var c = look.knob(event.number, event.message - KNOBS)  # a knob's event (KNOBS + 0 … KNOB_COUNT - 1)
+#   var c = look.ask(call.arguments, utterance=heard)       # the agent's call, settings the person never mentioned left alone
 #   scheme_dark(look.prefs, system_dark, hour) · is_night(hour) · accent_colour(palette, look.prefs.accent) · stage_most(look.prefs, 6)
 
 from std.os import makedirs
@@ -30,16 +32,18 @@ from mojoui import libc
 from mojoui.json import Json, J_OBJECT, J_STRING, J_BOOL, json_string
 from mojoui.shared import environment
 from mojoui.theme import Palette
-from mojoui.view import View, VStack, HStack, Text, Segmented, Button, CAPTION, START, CENTER, SPACE_S, SPACE_XS, SUBTLE
+from mojoui.accents import accent_values, accent_index, accent_colour, swatch_role, SWATCH_SIDE, SWATCH_ROLE
+from mojoui.view import View, VStack, HStack, Text, Segmented, Button, CAPTION, HEADLINE, START, CENTER, SPACE_S, SPACE_XS, SUBTLE, ICON_ONLY
 
 comptime PERSONALIZE = "personalize"
 comptime UNDO_MAX = 12  # the changes "put it back" can undo, per person
 comptime KNOB_SCHEME = 0  # look_knobs' messages: base + these
-comptime KNOB_ACCENT = 1
+comptime KNOB_ACCENT = 1  # (a Segmented's index in event.number: look_knobs draws swatches now, KNOB_SWATCH; still read)
 comptime KNOB_PRESENCE = 2
 comptime KNOB_DENSITY = 3
 comptime KNOB_UNDO = 4
-comptime KNOB_COUNT = 5
+comptime KNOB_SWATCH = 5  # base + KNOB_SWATCH + k: the accent's swatch k (look_values("accent")[k]: Default, Violet, …, Gold)
+comptime KNOB_COUNT = 12  # every message look_knobs may send: base … base + KNOB_COUNT - 1 (an app numbers its own past them)
 comptime NIGHT_FROM = 19  # scheme auto: night from 19:00 …
 comptime NIGHT_UNTIL = 7  # … to 7:00
 comptime ROOMY_MOST = 4  # density roomy: at most this many tiles on a Stage (livetiles' preset(4): l l w w)
@@ -82,7 +86,7 @@ def look_values(key: String) -> List[String]:
     if key == "scheme":
         return ["auto", "light", "dark", "night"]
     if key == "accent":
-        return ["default", "violet", "blue", "teal", "orange", "red", "gold"]
+        return accent_values()  # (mojoui.accents: a theme names them too)
     if key == "presence":
         return ["orb", "mascot"]
     if key == "density":
@@ -145,6 +149,113 @@ def _synonym(key: String, value: String) -> String:
         if v == "dense" or v == "smaller" or v == "small" or v == "more" or v == "default" or v == "normal":
             return "compact"
     return v
+
+
+# ------------------------------------------------------------------------------------------------ what the person asked about
+# A model sometimes adds a setting nobody asked for (Qwen3.8-27B, 2026-11-25: "use the mascot and make it dark" came with
+# "density": "roomy", D-8417). A prompt can't make that deterministic, so the request is checked against the person's own
+# words: a setting whose concept they never mentioned is left as it is. Words, not substrings ("red" is not in "ordered"),
+# matched by their start so "darker", "colours" and "tiles" count. A request that names no concept at all ("surprise me",
+# "make it cozy") or asks for everything ("reset it", "back to the defaults") passes whole.
+
+
+def _words(text: String) -> List[String]:
+    """The words of `text`, lower case: runs of letters (a-z, A-Z and any non-ASCII byte, so "café" stays one word)."""
+    var out = List[String]()
+    var cur = String("")
+    for b in text.as_bytes():
+        var c = Int(b)
+        if c >= 65 and c <= 90:
+            cur += chr(c + 32)
+        elif (c >= 97 and c <= 122) or c >= 128:
+            cur += chr(c) if c < 128 else String("_")  # (a non-ASCII byte keeps the word whole; never matched)
+        elif cur != "":
+            out.append(cur)
+            cur = ""
+    if cur != "":
+        out.append(cur)
+    return out^
+
+
+def _starts(word: String, stems: List[String]) -> Bool:
+    for s in stems:
+        if word.startswith(s):
+            return True
+    return False
+
+
+def _is(word: String, words: List[String]) -> Bool:
+    for w in words:
+        if word == w:
+            return True
+    return False
+
+
+def _concept_stems(key: String) -> List[String]:
+    """Word starts that name a setting's concept ("dark" also counts "darker", "darken")."""
+    if key == "scheme":
+        return ["dark", "light", "night", "tonight", "bright", "dim", "auto", "system", "theme", "black", "white",
+                "evening", "contrast", "glare", "sun", "moon"]
+    if key == "accent":
+        return ["colo", "accent", "tint", "hue", "violet", "purpl", "indigo", "lavender", "lilac", "blue", "navy", "azure",
+                "teal", "turquoise", "aqua", "green", "cyan", "mint", "orange", "amber", "crimson", "scarlet", "pink", "rose",
+                "gold", "yellow", "ink"]
+    if key == "presence":
+        return ["mascot", "companion", "character", "creature", "owl", "fox", "pet", "orb", "ball", "circle", "sphere",
+                "presence", "avatar", "buddy", "critter", "spirit", "blob"]
+    if key == "density":
+        return ["tile", "card", "room", "compact", "dens", "spaci", "space", "big", "small", "larg", "few", "crowd", "clutter",
+                "busy", "clean", "layout", "size", "grid", "score", "simpl", "minimal", "tidy"]  # ("more" and "less" go with
+    return List[String]()                                                                   # anything: "more blue")
+
+
+def _concept_words(key: String) -> List[String]:
+    """Whole words that name a concept but would match too much as a start ("red" would count "redo", "mode" "model")."""
+    if key == "scheme":
+        return ["day", "days", "daytime", "dusk", "dawn", "mode", "modes"]
+    if key == "accent":
+        return ["red", "reds", "redder", "reddish"]
+    return List[String]()
+
+
+def _everything(word: String) -> Bool:
+    """A word that asks for the whole look ("reset it", "back to the defaults", "surprise me"): nothing is filtered."""
+    var whole: List[String] = ["everything", "reset", "default", "defaults", "normal", "original", "surprise", "random", "randomize",
+                               "randomise", "whatever", "anything", "personalize", "personalise", "makeover", "overhaul", "plain"]
+    return _is(word, whole)
+
+
+def _concept_name(key: String) -> String:
+    """A setting as a sentence names it ("the tile size")."""
+    if key == "scheme":
+        return "light or dark look"
+    if key == "accent":
+        return "accent colour"
+    if key == "presence":
+        return "orb or mascot"
+    if key == "density":
+        return "tile size"
+    return key
+
+
+def asked_settings(utterance: String) -> List[String]:
+    """The settings the person's words are about (look_keys() order); every key when they name none or ask for everything
+    (a broad request: the model's choice stands)."""
+    var words = _words(utterance)
+    var out = List[String]()
+    for w in words:
+        if _everything(w):
+            return look_keys()
+    for key in look_keys():
+        var stems = _concept_stems(key)
+        var whole = _concept_words(key)
+        for w in words:
+            if _starts(w, stems) or _is(w, whole):
+                out.append(key)
+                break
+    if len(out) == 0:
+        return look_keys()
+    return out^
 
 
 def _one_of(values: List[String]) -> String:
@@ -245,6 +356,7 @@ struct LookChange(Copyable, Movable):
     var ok: Bool
     var undo: Bool
     var changed: List[String]
+    var ignored: List[String]  # settings the request named that the person never mentioned (ask's utterance): left as they were
     var before: LookPrefs
     var after: LookPrefs
     var message: String
@@ -256,6 +368,7 @@ struct LookChange(Copyable, Movable):
         self.before = before.copy()
         self.after = after.copy()
         self.changed = List[String]()
+        self.ignored = List[String]()
         for key in look_keys():
             if before.get(key) != after.get(key):
                 self.changed.append(key)
@@ -265,15 +378,22 @@ struct LookChange(Copyable, Movable):
         return self.ok and len(self.changed) > 0
 
     def result(self) -> String:
-        """The tool's result (JSON): ok, what changed (from → to), the look now, and the sentence."""
+        """The tool's result (JSON): ok, what changed (from → to), the settings left alone because the person didn't ask
+        about them ("ignored", when any), the look now, and the sentence."""
         var ch = String("[")
         for i in range(len(self.changed)):
             var k = self.changed[i]
             ch += ("," if i > 0 else "") + '{"setting":' + json_string(k) + ',"from":' + json_string(self.before.get(k)) + ',"to":' + json_string(self.after.get(k)) + "}"
         ch += "]"
+        var left = String("")
+        if len(self.ignored) > 0:
+            left = ',"ignored":['
+            for i in range(len(self.ignored)):
+                left += ("," if i > 0 else "") + '{"setting":' + json_string(self.ignored[i]) + ',"why":"the person did not ask about it"}'
+            left += "]"
         if not self.ok:
-            return '{"ok":false,"refused":' + json_string(self.message) + ',"now":' + self.after.json() + "}"
-        return '{"ok":true,"changed":' + ch + ',"now":' + self.after.json() + ',"say":' + json_string(self.message) + "}"
+            return '{"ok":false,"refused":' + json_string(self.message) + left + ',"now":' + self.after.json() + "}"
+        return '{"ok":true,"changed":' + ch + left + ',"now":' + self.after.json() + ',"say":' + json_string(self.message) + "}"
 
 
 def _done_sentence(c: LookChange) -> String:
@@ -491,9 +611,12 @@ struct Personalize(Movable):
         c.message = _done_sentence(c)
         return c^
 
-    def ask(mut self, request: String) -> LookChange:
+    def ask(mut self, request: String, utterance: String = "") -> LookChange:
         """The agent's request (JSON): {"set": {setting: value, …}} or {"undo": true} (a flat {setting: value} is read as a
-        set). All or nothing: one value off the list refuses the whole request, with the reason."""
+        set). All or nothing: one value off the list refuses the whole request, with the reason.
+        `utterance`: what the person said this turn. When given, a setting they never mentioned is left as it is (in the
+        result's "ignored"), however the model filled it in: "use the mascot and make it dark" changes the presence and the
+        scheme, never the density (asked_settings: a request naming no setting, or everything, passes whole)."""
         var j: Json
         try:
             j = Json.parse(request)
@@ -508,8 +631,10 @@ struct Personalize(Movable):
         var obj = s if s >= 0 else 0
         if j.kind(obj) != J_OBJECT:
             return LookChange(False, "set needs the settings to change, like {\"scheme\": \"dark\"}.", self.prefs, self.prefs)
+        var asked = asked_settings(utterance) if utterance != "" else look_keys()
         var next = self.prefs.copy()
         var any = False
+        var ignored = List[String]()
         for i in range(j.size(obj)):
             var key = j.key(obj, i)
             if s < 0 and key == "undo":
@@ -521,16 +646,36 @@ struct Personalize(Movable):
             var why = look_check(key, v)
             if why != "":
                 return LookChange(False, why, self.prefs, self.prefs)
+            if not _is(key, asked):  # (a setting the person never mentioned: left as it is, whatever the model chose)
+                if v != self.prefs.get(key):
+                    ignored.append(key)
+                continue
             next.put(key, v)
             any = True
         if not any:
-            return LookChange(False, "Say what to change: the scheme, the accent, the presence or the density.", self.prefs, self.prefs)
-        return self._apply(next)
+            var none = LookChange(False, "Say what to change: the scheme, the accent, the presence or the density.", self.prefs, self.prefs)
+            if len(ignored) > 0:
+                var names = String("")
+                for i in range(len(ignored)):
+                    names += (" and the " if i > 0 else "the ") + _concept_name(ignored[i])
+                none.message = "Nothing changed: the person didn't ask about " + names + "."
+                none.ignored = ignored^
+            return none^
+        var c = self._apply(next)
+        c.ignored = ignored^
+        return c^
 
     def knob(mut self, value: Int, which: Int) -> LookChange:
-        """A look_knobs event: `which` = event.message - base (KNOB_*), `value` = event.number (the segment's index)."""
+        """A look_knobs event: `which` = event.message - base (KNOB_*), `value` = event.number (a segment's index; a swatch,
+        KNOB_SWATCH + k, says its accent by its message)."""
         if which == KNOB_UNDO:
             return self.undo()
+        if which >= KNOB_SWATCH and which < KNOB_COUNT:
+            var accents = look_values("accent")
+            var k = which - KNOB_SWATCH
+            if k >= len(accents):
+                return LookChange(False, "", self.prefs, self.prefs)
+            return self.set("accent", accents[k])
         var keys = look_keys()
         if which < 0 or which >= len(keys):
             return LookChange(False, "", self.prefs, self.prefs)
@@ -561,37 +706,52 @@ def scheme_dark(p: LookPrefs, system_dark: Bool, hour: Int) -> Bool:
     return system_dark
 
 
-def accent_index(accent: String) -> Int:
-    """The accent's palette series slot (0..5), -1 for the theme's own accent."""
-    var vs = look_values("accent")
-    for i in range(1, len(vs)):
-        if vs[i] == accent:
-            return i - 1
-    return -1
-
-
-def accent_colour(p: Palette, accent: String) -> UInt32:
-    """The accent as a colour of palette `p` (its series colour; the palette's own accent for "default")."""
-    var k = accent_index(accent)
-    if k < 0 or len(p.series) == 0:
-        return p.accent
-    return p.series[k % len(p.series)]
-
-
 def stage_most(p: LookPrefs, most: Int) -> Int:
     """How many tiles a Stage may show (mojoui.stagefeed.stage_feed's `most`): roomy keeps at most ROOMY_MOST, so each tile is
     bigger (livetiles' presets fill the same grid with fewer tiles)."""
     return min(most, ROOMY_MOST) if p.density == "roomy" else most
 
 
-def look_knobs(p: LookPrefs, base: Int, can_undo: Bool) -> View:
-    """The four settings as segmented controls (messages base + KNOB_SCHEME … KNOB_DENSITY, event.number = the value's index)
-    and "Put it back" (base + KNOB_UNDO), for a Settings popover: what the agent can change, by touch."""
+def look_title(profile: String, name: String = "") -> String:
+    """Whose look the knobs change, as their header says it: "Everyone's look" for "all", else "<name>'s look" (`name`: how the
+    app shows the person, "" for the profile's own name with a capital: "a" → "A's look")."""
+    if profile == "" or profile == "all":
+        return "Everyone's look"
+    var who = name
+    if who == "":
+        var b = profile.as_bytes()
+        who = (String(chr(Int(b[0]) - 32)) if b[0] >= 97 and b[0] <= 122 else String(profile[byte = 0 : 1])) + String(profile[byte = 1 :])
+    return who + "'s look"
+
+
+def accent_swatches(p: LookPrefs, base: Int) -> View:
+    """The accent as a row of round colour swatches, one per value (Default: the ink, then the palette's own colours), the chosen
+    one ringed and ticked. Each is a button named by its value ("Blue": its tooltip, its accessible name, what a test or an agent
+    taps), sending base + KNOB_SWATCH + its index."""
+    var items = List[View]()
+    var values = look_values("accent")
+    var labels = look_labels("accent")
+    var at = p.index("accent")
+    for k in range(len(values)):
+        var on = k == at
+        items.append(Button(labels[k], base + KNOB_SWATCH + k, ICON_ONLY, "check" if on else "circle").width(SWATCH_SIDE).height(SWATCH_SIDE)
+                     .tag(swatch_role(values[k], on)).tooltip(labels[k]))  # (a plain button given its role here: nothing to re-tag)
+    return HStack(items^, spacing=SPACE_S).align(CENTER).tag("look-swatches")
+
+
+def look_knobs(p: LookPrefs, base: Int, can_undo: Bool, title: String = "") -> View:
+    """The settings for a Settings popover, what the agent can change, by touch: whose look it is (`title`, look_title: "A's
+    look"; "" for none), light or dark, presence and tiles as segmented controls (messages base + KNOB_SCHEME, KNOB_PRESENCE,
+    KNOB_DENSITY, event.number = the value's index), the accent as colour swatches (base + KNOB_SWATCH + k: accent_swatches),
+    and "Put it back" (base + KNOB_UNDO). Narrow: the widest row is a four-word control or the seven swatches."""
     var rows = List[View]()
+    if title != "":
+        rows.append(Text(title, HEADLINE).tag("look-owner"))
     var names: List[String] = ["Light or dark", "Accent", "Presence", "Tiles"]
     var keys = look_keys()
     for k in range(len(keys)):
-        rows.append(VStack(Text(names[k], CAPTION), Segmented(look_labels(keys[k]), p.index(keys[k]), base + k), spacing=SPACE_XS).align(START))
+        var knob = accent_swatches(p, base) if keys[k] == "accent" else Segmented(look_labels(keys[k]), p.index(keys[k]), base + k)
+        rows.append(VStack(Text(names[k], CAPTION), knob^, spacing=SPACE_XS).align(START))
     if can_undo:
         rows.append(Button("Put it back", base + KNOB_UNDO, SUBTLE, "undo"))
     return VStack(rows^, spacing=SPACE_S).align(START).tag("look-knobs")

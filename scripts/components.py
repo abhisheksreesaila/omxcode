@@ -155,7 +155,7 @@ COMPOSITE_RUN = {
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
 COMPOSITES = [
-    ("Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, undo, per-person files, the personalize tool, Settings knobs)", "mojoui/personalize.mojo", ["Segmented", "Button", "View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)"], "look_knobs("),
+    ("Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, settings the person never named left alone, undo, per-person files, the personalize tool, Settings knobs headed by whose look, the accent as colour swatches)", "mojoui/personalize.mojo", ["Segmented", "Button", "View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)"], "look_knobs("),
     ("Ink stroke (pressure ink, round ends, the eraser's hit test)", "mojoui/ink.mojo", ["Canvas", "Canvas: pen pressure", "Scene: polygon fill"], "Stroke("),
     ("DataGrid", "mojoui/datagrid.mojo", ["Canvas", "Canvas: press, release, double", "Canvas: keys (focus on press)", "In-place editor", "TextField: Escape cancels", "Editor that echoes the grid's typing", "Board: drag, resize, snap"], "DataGrid("),
     ("Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)", "mojoui/freeboard.mojo", ["Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus)", "Board: drag, resize, snap", "Board: scrolls, reveals a child", "MenuBar"], "FreeCanvas("),
@@ -312,7 +312,7 @@ COMPOSITES = [
     ("Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)", "mojoui/signal.mojo", [], "smooth("),
     ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
     # the Stage (goal 77 M7)
-    ("Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)", "mojoui/stage.mojo", ["Text", "Button", "Icon", "TextField", "VStack", "HStack", "Scroll", "Canvas", "Themes on top (themes/, or yours)"], "StageChat("),  # (StageChat: mojoui.timeline has a Stage( of its own)
+    ("Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows that keep their widget and ease in when a tile leaves the stage, avatars with the active one ringed, pills)", "mojoui/stage.mojo", ["Text", "Button", "Icon", "TextField", "VStack", "HStack", "Scroll", "Canvas", "Arrive on a spring", "Themes on top (themes/, or yours)"], "StageChat("),  # (StageChat: mojoui.timeline has a Stage( of its own)
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
@@ -558,6 +558,10 @@ SERVICES = [
      {"Linux (GTK)": ("✅", "tests/test_orb; screenshots in docs/goals/72, light and dark"), "Web": ("✅", "the same canvases in the browser (docs/goals/72/tablet.png)"),
       "Android": ("🔨", "canvases run there; never drawn"), "Mac (AppKit)": ("🔨", "builds; never run"),
       "iPhone (UIKit)": ("🔨", "builds; never run"), "Agent (MCP)": ("—", "")}),
+    ("Mascot and its perch", "mojoui.mascot: Mascot (a pack of PNG sprite strips decoded in Mojo, hub-and-spoke states, spring squash, hop and gaze, a local / cloud floor aura); Presence: the orb or the mascot in the chat bar with a crossfade, or (arrange) the mascot full-size on its perch on a desktop while the chat bar keeps the orb, growing in and out on a spring (draw_perch, perch_shown); MascotView, MascotPerch (tap to poke, hover to lean)", "",
+     {"Linux (GTK)": ("✅", "tests/test_mascot; scripts/personalize_check.py on examples/stage: the perch under Pinned at 1280 x 820 (the orb kept in the chat bar), the mascot in the chat bar at 390 x 844, both on their springs (x11grab frames)"),
+      "Web": ("🔨", "the same canvases; the perch not run in the browser"), "Android": ("🔨", "canvases run there; never drawn"),
+      "Mac (AppKit)": ("🔨", "builds; never run"), "iPhone (UIKit)": ("🔨", "builds; never run"), "Agent (MCP)": ("—", "")}),
     ("Voice screens", "mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)", "",
      {"Linux (GTK)": ("✅", "examples/omx (72-check M4): the card on the shelf, phone width and desktop, light and dark; tests/test_agentui_adopt"), "Web": ("✅", "examples/omx in the browser (M5)"),
       "Android": ("🔨", "plain views; never run with this app"), "Mac (AppKit)": ("🔨", "builds; never run"),

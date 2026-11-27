@@ -15,7 +15,7 @@
 #   Parts (each a role its theme shapes, themes/omxqua.mojo omxqua_counter): StageClock(time, date, weather) ·
 #   StageLabel(icon, text) · StageCard(icon, head, title, sub, hue, on_unpin) (a pinned or Today card) · StageRow(icon, head,
 #   value, hue) (a Live or Today row) · StageNote(text) (an empty list's line) · StageList(items, compact) ·
-#   StageAvatar(initials, hue, on_tap) · StagePill(icon, label, on_tap, compact) ·
+#   StageAvatar(initials, hue, on_tap, active) · StagePill(icon, label, on_tap, compact) ·
 #   StageChat(orb, text, placeholder, …) (orb, a text box or her subtitles, StageTool(label, msg, icon) buttons, the mic).
 #
 #   Roles: stage (the whole), stage-top, stage-side (a shaded band: its fill is the shade), stage-left, stage-centre,
@@ -212,12 +212,18 @@ def StageCard(icon: String, head: String, title: String, sub: String = "", hue: 
     return VStack(items, spacing=2).align(START).fill().tag("stage-card")
 
 
-def StageRow(icon: String, head: String, value: String, hue: Int = 0) -> View:
+def StageRow(icon: String, head: String, value: String, hue: Int = 0, key: String = "", arrive: Bool = False) -> View:
     """A Live or Today row in a side column: one line that keeps ticking (a timer's 7:20, a score's 2–1): the kind's icon,
     what it is, its value at the end (roles stage-row, stage-row-head, stage-row-value: mono and tabular for a number;
-    stage-row-note for words, quiet, on one line, cut with an ellipsis)."""
-    return HStack(_kind(icon, hue), Text(head).tag("stage-row-head"), Spacer(),
-                  Text(value).tag("stage-row-value" if _numeric(value) else "stage-row-note"), spacing=10).align(CENTER).fill().tag("stage-row")
+    stage-row-note for words, quiet, on one line, cut with an ellipsis). `key` (its tile's id): the row keeps its own widget
+    when others join or leave the list (a row in a box tagged stage-keyed-<key>: the diff pairs rows by it); `arrive`: it
+    eases in once, fading and rising into place (View.arrive: mojoui.stagefeed's arrives says when a tile just left the stage)."""
+    var row = HStack(_kind(icon, hue), Text(head).tag("stage-row-head"), Spacer(),
+                     Text(value).tag("stage-row-value" if _numeric(value) else "stage-row-note"), spacing=10).align(CENTER).fill().tag("stage-row")
+    if key == "":
+        return row^
+    var keyed = VStack(row^, spacing=0).fill().tag("stage-keyed-" + key)  # (a role-wearing view is never tagged again: wrapped)
+    return keyed^.arrive() if arrive else keyed^
 
 
 def _numeric(value: String) -> Bool:
@@ -242,11 +248,12 @@ def StageList(items: List[View], compact: Bool = False) -> View:
     return VStack(items, spacing=10).align(START).fill().tag("stage-list")
 
 
-def StageAvatar(initials: String, hue: Int, on_tap: Int) -> View:
+def StageAvatar(initials: String, hue: Int, on_tap: Int, active: Bool = False) -> View:
     """A person in the top bar: their initials in a round button in their data colour (stage-avatar-1 … -6; 0: everyone,
-    stage-avatar)."""
+    stage-avatar). `active`: the person whose look and things the screen shows now (the theme rings it and fills it a step
+    stronger: the role's -on, stage-avatar-on / stage-avatar-N-on); one at a time."""
     var role = String("stage-avatar") if hue < 1 or hue > 6 else "stage-avatar-" + String(hue)
-    return Button(initials, on_tap, SUBTLE).width(38).height(38).tag(role)
+    return Button(initials, on_tap, SUBTLE).width(38).height(38).tag(role + ("-on" if active else ""))
 
 
 def StagePill(icon: String, label: String, on_tap: Int, compact: Bool = False) -> View:

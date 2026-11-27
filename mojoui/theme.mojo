@@ -4,6 +4,7 @@
 # yours) live outside the framework (`themes/` in this repo, D-260); an app that names none gets each
 # platform's own look (Theme.native()).
 
+from std.math import pow
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 
@@ -63,6 +64,19 @@ def luminance(c: UInt32) -> Float64:
     var g = Float64(Int((c >> 8) & 255))
     var b = Float64(Int((c >> 16) & 255))
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+
+
+def _linear(v: Int) -> Float64:
+    """An sRGB channel (0–255) as linear light (WCAG 2's formula)."""
+    var c = Float64(v) / 255.0
+    return c / 12.92 if c <= 0.03928 else pow((c + 0.055) / 1.055, 2.4)
+
+
+def contrast_ratio(a: UInt32, b: UInt32) -> Float64:
+    """WCAG 2's contrast ratio of two opaque colours, 1 to 21 (text needs 4.5, large text and marks 3)."""
+    var la = 0.2126 * _linear(Int(a & 255)) + 0.7152 * _linear(Int((a >> 8) & 255)) + 0.0722 * _linear(Int((a >> 16) & 255))
+    var lb = 0.2126 * _linear(Int(b & 255)) + 0.7152 * _linear(Int((b >> 8) & 255)) + 0.0722 * _linear(Int((b >> 16) & 255))
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
 comptime PLAIN_SERIES: List[UInt32] = [rgba(15, 108, 189), rgba(42, 160, 164), rgba(147, 115, 192), rgba(202, 80, 16), rgba(87, 129, 27),

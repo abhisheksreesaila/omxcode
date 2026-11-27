@@ -103,9 +103,31 @@ def test_occasions() raises:
     print("occasions put their charm on the tile they are about: ok")
 
 
+def test_fresh_rows() raises:
+    """D-8425: after a re-feed, the side rows whose tiles stood on the stage before (roomy: at most four stay) arrive, for a moment;
+    a row that was already on a side, or a feed with nothing before it, just shows."""
+    var ranked = day(["traffic", "todo", "cal", "weather", "timer", "photos", "bday", "flight", "home", "cam"])
+    var before = stage_feed(ranked, "traffic", List[String]())
+    assert_equal(joined(before.stage), "traffic,todo,cam,cal,photos")
+    var roomy = stage_feed(ranked, "traffic", List[String](), most=4)
+    roomy.since(before)
+    assert_equal(joined(roomy.stage), "traffic,todo,cam,cal")
+    assert_equal(joined(roomy.fresh), "photos")  # (off the stage, into Today)
+    assert_true(roomy.arrives("photos"))
+    assert_false(roomy.arrives("weather"))  # (in Today already)
+    var start = stage_feed(ranked, "traffic", List[String]())
+    start.since(StageFeed())  # (the first feed: nothing came off a stage)
+    assert_equal(len(start.fresh), 0)
+    var back = stage_feed(ranked, "traffic", List[String]())
+    back.since(roomy)  # (compact again: photos goes back on the stage, nothing new on the sides)
+    assert_equal(len(back.fresh), 0)
+    print("rows that come off the stage arrive: ok")
+
+
 def main() raises:
     test_plain_day()
     test_rain()
     test_pins_and_big()
     test_occasions()
+    test_fresh_rows()
     print("stagefeed: ok")
