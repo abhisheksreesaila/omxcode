@@ -1101,8 +1101,8 @@ struct Main(App):
         if not compact:
             top_items.append(where.copy())
         if self.settings_open:
-            var body = VStack(Text("Answers come from this machine (Qwen 27B) unless you ask for Claude.", CAPTION),
-                              Checkbox("Sample tiles (calendar, weather, photos, home)", self.samples_on, SAMPLES),
+            var body = VStack(Text("Local answers; Claude when you ask.", CAPTION),  # (short lines: the popover stays as narrow as the knobs, D-8422; the top bar's lane names the model)
+                              Checkbox("Sample tiles", self.samples_on, SAMPLES).tooltip("Calendar, weather, photos and home, until omx has its own"),
                               look_knobs(self.look.prefs, KNOBS, self.look.can_undo(), look_title(self.look.profile)), spacing=SPACE_S).align(START)
             top_items.append(Popover("omx-settings", "Settings", body^, on_close=SETTINGS_CLOSE))
         var top = HStack(top_items^, spacing=SPACE_S).align(CENTER)

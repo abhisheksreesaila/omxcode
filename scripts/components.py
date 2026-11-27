@@ -79,6 +79,7 @@ FEATURES = [
     ("Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus)", "mojoui.freeboard.FreeCanvas", r"is_free\(|free_board\(|board\.free", "omxplorer"),
     ("Canvas: hover and cursor", "Canvas(hover=True): HOVER; .cursor(name)", r"\bHOVER\b|data-hover|dataset\.hover", "omxplorer"),
     ("Canvas: click-through (shows only)", "Canvas(…).passthrough()", r"node\.size == 2|data-passthrough", "omxplorer"),
+    ("Canvas: see-through and pressable", "Canvas(…).see_through(): its alpha kept while it takes presses (the perched mascot)", r"\.see_through\(\)|in \(2, 3\)", "stage"),
     ("Overlay islands", "Overlay(base, *islands) + .pin(h, v)", r"\bOVERLAY\b", "workbook"),
     ("Themes on top (themes/, or yours)", "def theme(self) -> Theme", r"gtk_css|web_css|theme_key|paint_native|mod\.theme", "themes"),
     ("Sentence with tappable words", "Sentence([Word(…)]) · Button(style=TOKEN)", r"\bTOKEN\b|mui-token|button\.token", "omxplorer"),
@@ -312,7 +313,7 @@ COMPOSITES = [
     ("Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)", "mojoui/signal.mojo", [], "smooth("),
     ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
     # the Stage (goal 77 M7)
-    ("Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows that keep their widget and ease in when a tile leaves the stage, avatars with the active one ringed, pills)", "mojoui/stage.mojo", ["Text", "Button", "Icon", "TextField", "VStack", "HStack", "Scroll", "Canvas", "Arrive on a spring", "Themes on top (themes/, or yours)"], "StageChat("),  # (StageChat: mojoui.timeline has a Stage( of its own)
+    ("Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows that keep their widget and ease in when a tile leaves the stage, avatars with the active one ringed, pills)", "mojoui/stage.mojo", ["Text", "Button", "Icon", "TextField", "VStack", "HStack", "Scroll", "Canvas", "Themes on top (themes/, or yours)"], "StageChat("),  # (its rows' arrival is a nicety: a host without View.arrive shows them at once)  # (StageChat: mojoui.timeline has a Stage( of its own)
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

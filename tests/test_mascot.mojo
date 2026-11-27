@@ -194,7 +194,7 @@ def main() raises:
     assert_equal(v_pass.nodes[0].size, 2)  # passthrough when no gesture
     var v_tap = MascotView(9, 1, side=172, on_gesture=42, hover=True)
     assert_equal(v_tap.nodes[0].msg, 42)
-    assert_equal(v_tap.nodes[0].size, 0)   # interactive when gesture set
+    assert_equal(v_tap.nodes[0].size, 3)   # interactive when gesture set, and see-through (its alpha kept on every host, D-8426)
 
     # 8. The perch (D-8421): a wide window shows the mascot full-size on its perch while the chat bar keeps the orb (never two
     # mascots); it grows in and fades out on a spring; a phone puts it back in the chat bar

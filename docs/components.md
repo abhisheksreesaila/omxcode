@@ -87,6 +87,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus) | `mojoui.freeboard.FreeCanvas` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Canvas: hover and cursor | `Canvas(hover=True): HOVER; .cursor(name)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | 🔨 | 🔨 | ❌ |
+| Canvas: see-through and pressable | `Canvas(…).see_through(): its alpha kept while it takes presses (the perched mascot)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
@@ -161,6 +162,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | The Stage's TV | `mojoui.stagetv: the chat bar grows over the whole centre when she explains (StageTV: open / show / close / speaking / tick, the 12 s quiet; the box drawn on a see-through canvas on gitaway's soft spring, the tiles fading under a veil, the body arriving 160 ms in); a card on the left (any view: genui's Word, Iso, TripMap, Sight), StageThread (bubbles) on the right, StageChips with no card; Stage(…, tv=, content=); pointed_parts leaves hidden tiles out of the pointer, StageTV.target (the card shown or swapping in) and mojoui.agentui.stage_parts (this turn's card in the TV, an app card's own boxes, the tiles while they show) say what she may point at; RecentCards (the cards shown before, newest first, one tap back); Overlay bands (.pin(STRETCH, END))` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | The Stage's sides, pins and charms | `mojoui.stagefeed: stage_feed(ranked tiles with kinds, urgent, pins) says what stands on the stage (the urgent tile first, the centre ones, tiles that fill up to five) and what goes to Today, Live and Pinned (StageFeed.place: from what the grid really shows); occasions (school, game, Thanksgiving, rain, birthday, flight) put their charm on a tile (wear_occasion); mojoui.livetiles: drop zones outside the grid (drop_zone, DROPPED, hover_zone: a tile dragged onto Pinned) and a phone's two columns of 112 pt rows (set_columns, compact_height); mojoui.charms: draw_charm (bag, pennant, hat, umbrella, luggage tag, turkey, pin: drawn in code, coloured from the palette, swinging or flapping); mojoui.vector: an SVG subset on a canvas (draw_icon: mojoui's Lucide icons on a tile); mojoui.stage: StageRow (a number mono, words quiet), StageNote, StageCard(on_unpin)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | Orb and cloud rim | `mojoui.orb: Orb (listens / thinks / speaks, driven by a level, springs), OrbView(big), draw_rim / RimView (the cloud lane's frame); passthrough canvases` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
+| Mascot and its perch | `mojoui.mascot: Mascot (a pack of PNG sprite strips decoded in Mojo, hub-and-spoke states, spring squash, hop and gaze, a local / cloud floor aura); Presence: the orb or the mascot in the chat bar with a crossfade, or (arrange) the mascot full-size on its perch on a desktop while the chat bar keeps the orb, growing in and out on a spring (draw_perch, perch_shown); MascotView, MascotPerch (tap to poke, hover to lean)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | Voice screens | `mojoui.voiceui: VoiceHome, VoiceWork, VoiceDock (Mute / Type / Stop: the agent's tools), VoiceLane, VoiceChips; Screens.adopt(agent): cards an in-process agent already ran (render_ui)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | — |
 | To-do list | `mojoui.todo: TodoList(path) in a JSON file (add several, done / remove by number or words, ambiguity refused, refresh() when another writer changed it), TodoCard (a tick box per thing), todo_functions() the agent's four tools` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | News headlines | `mojoui.news: news_url, parse_headlines (Google News RSS: title, source, link, age; entities decoded, newest first), NewsCard (each headline a link), news_for_model` | ✅ | 🔨 | ❌ | 🔨 | ❌ | — |
@@ -251,6 +253,11 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 - Orb and cloud rim (Android): canvases run there; never drawn.
 - Orb and cloud rim (Mac (AppKit)): builds; never run.
 - Orb and cloud rim (iPhone (UIKit)): builds; never run.
+- Mascot and its perch (Linux (GTK)): tests/test_mascot; scripts/personalize_check.py on examples/stage: the perch under Pinned at 1280 x 820 (the orb kept in the chat bar), the mascot in the chat bar at 390 x 844, both on their springs (x11grab frames).
+- Mascot and its perch (Web): the same canvases; the perch not run in the browser.
+- Mascot and its perch (Android): canvases run there; never drawn.
+- Mascot and its perch (Mac (AppKit)): builds; never run.
+- Mascot and its perch (iPhone (UIKit)): builds; never run.
 - Voice screens (Linux (GTK)): examples/omx (72-check M4): the card on the shelf, phone width and desktop, light and dark; tests/test_agentui_adopt.
 - Voice screens (Web): examples/omx in the browser (M5).
 - Voice screens (Android): plain views; never run with this app.
@@ -313,7 +320,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
-| `Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, undo, per-person files, the personalize tool, Settings knobs)` | `mojoui/personalize.mojo` | Segmented, Button, View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition) | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omx, stage |
+| `Personalize by asking (a person's look: scheme, palette accent, presence, density; refusals, settings the person never named left alone, undo, per-person files, the personalize tool, Settings knobs headed by whose look, the accent as colour swatches)` | `mojoui/personalize.mojo` | Segmented, Button, View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition) | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omx, stage |
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | pnote, sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, agenttiles, maccheck, mxstudio, omx, omxplorer, stage, workbook |
 | `Free canvas (mojoui.freeboard: cards anywhere at any size, live 8-handle resize, snap guides, zoom, Tidy, Super/Alt keys)` | `mojoui/freeboard.mojo` | Board: free canvas (live resize from 8 handles, snap guides, zoom, click to focus), Board: drag, resize, snap, Board: scrolls, reveals a child, MenuBar | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | canvas, omxplorer |
@@ -456,7 +463,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)` | `mojoui/telemetrychart.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)` | `mojoui/signal.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows, avatars, pills)` | `mojoui/stage.mojo` | Text, Button, Icon, TextField, VStack, HStack, Scroll, Canvas, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omx, stage |
+| `Stage (one screen for a counter or a tablet: a top bar, the passive left, the raised stage and its chat bar in the centre, the live right; the sides shaded; a phone stacks it; clock, labels, cards, Live rows that keep their widget and ease in when a tile leaves the stage, avatars with the active one ringed, pills)` | `mojoui/stage.mojo` | Text, Button, Icon, TextField, VStack, HStack, Scroll, Canvas, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omx, stage |
 
 Run by a check of its own on that host (not through RUN_ON's examples):
 
@@ -479,12 +486,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 235 | 16 | 0 |
-| Web | 181 | 53 | 17 |
-| Android | 19 | 100 | 132 |
-| Mac (AppKit) | 9 | 213 | 29 |
-| iPhone (UIKit) | 0 | 176 | 75 |
-| Agent (MCP) | 67 | 79 | 105 |
+| Linux (GTK) | 236 | 16 | 0 |
+| Web | 182 | 53 | 17 |
+| Android | 19 | 100 | 133 |
+| Mac (AppKit) | 9 | 214 | 29 |
+| iPhone (UIKit) | 0 | 177 | 75 |
+| Agent (MCP) | 67 | 79 | 106 |
 
 ## Inside one app, not components yet (the debt)
 

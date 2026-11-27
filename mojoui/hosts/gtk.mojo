@@ -2006,7 +2006,8 @@ struct GtkHost[A: App](Movable):
                 connect_any(im, "preedit-changed", on_im_preedit[Self.A], self_addr)
                 c.im = im
                 print("IME: context=" + String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=external_call["g_type_name_from_instance", Int](im))), flush=True)
-            if node.size == 2:  # .passthrough(): it only shows; presses go to what's under it
+            if node.size == 2:  # .passthrough(): it only shows; presses go to what's under it (.see_through(), size 3: nothing to do
+                # here, every GTK canvas keeps its alpha; it takes presses as any canvas does)
                 external_call["gtk_widget_set_can_target", NoneType](w, c_int(0))
                 if snap != 0:
                     external_call["gtk_widget_set_can_target", NoneType](snap, c_int(0))

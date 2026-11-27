@@ -684,7 +684,7 @@ def MascotView(canvas: Int, version: Int, side: Int = 172, on_gesture: Int = NO_
     (and `hover=True` for subtle gaze lean toward the cursor); omit `on_gesture` for a passthrough display-only view."""
     if on_gesture == NO_MSG:
         return Canvas(canvas, version).passthrough().width(side).height(side).tag("mascot")
-    return Canvas(canvas, version, on_gesture=on_gesture, hover=hover).width(side).height(side).tag("mascot").tooltip("Tap to say hi")
+    return Canvas(canvas, version, on_gesture=on_gesture, hover=hover).see_through().width(side).height(side).tag("mascot").tooltip("Tap to say hi")
 
 
 comptime PERCH_SIDE = 184  # the perched mascot's canvas, points: full size, where its lighting, breath and aura read (52 loses them)

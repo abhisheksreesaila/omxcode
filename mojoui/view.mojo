@@ -180,7 +180,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
     var options: List[String]  # dropdown choices
     var hint: String  # field placeholder
     var msg2: Int  # field: message sent on Return
-    var size: Int  # scroll: visible height in points; image: height; field: message sent on Escape; canvas: 1 = takes keys
+    var size: Int  # scroll: visible height in points; image: height; field: message sent on Escape; canvas: 1 = takes keys, 2 = passthrough, 3 = see-through
     var pixels: List[UInt32]  # image: RGBA bytes, one UInt32 per pixel (R in the low byte)
     # Layout settings (0 = not set). Sizes include padding (border-box) on every host.
     var pad_v: Int  # padding top and bottom
@@ -453,6 +453,13 @@ struct View(Copyable, Movable):
         """On a Canvas: it only shows (lines over a page, a highlight): presses go to whatever is under it, and the parts
         it leaves unpainted show what's beneath (hosts keep its alpha)."""
         self.nodes[0].size = 2
+        return self^
+
+    def see_through(var self) -> View:
+        """On a Canvas that takes presses (on_gesture, hover): the parts it leaves unpainted show what's beneath, as a
+        passthrough canvas's do (a character on a side column you can poke). GTK keeps every canvas's alpha; the web sends this
+        one's pictures with their alpha (PNG) instead of flattening them (JPEG), D-8426."""
+        self.nodes[0].size = 3
         return self^
 
     def at(var self, x: Int, y: Int) -> View:

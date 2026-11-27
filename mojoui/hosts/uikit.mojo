@@ -415,6 +415,7 @@ struct UIKitHost[A: App](Movable):
             w = new("MojoCanvasView")
             _ = msg(w, "setContentMode:", 0)  # scale to fill: the pixels match its size
             _ = msg(w, "setUserInteractionEnabled:", 0 if node.size == 2 else 1)  # image views ignore touches by default; a .passthrough() canvas keeps ignoring them: they go to what is under it (D-7893)
+            # (.see_through(), size 3: touches on, and an image view keeps the picture's alpha anyway; not run)
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             for axis in range(2):  # its size comes from the layout, never from its picture
                 _ = msg(w, "setContentHuggingPriority:forAxis:", Float32(1), axis)
