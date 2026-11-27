@@ -339,7 +339,7 @@ struct AppKitHost[A: App](Movable):
     var activity: InputActivity
     var watch: FrameWatch
     var seen_on_screen: Bool  # (goal 81) the window has been on screen: from then on no frames while it's hidden or covered (not in test runs)
-    var clock_mode: String  # (goal 81) "" the screen's clock; "timer" the 60 Hz timer alone (MOJOUI_FRAME_CLOCK=timer, unshown windows); "dead" a screen's clock that never ticks (tests of the stand-in)
+    var clock_mode: String  # (goal 81) "" the screen's clock; "timer" the 60 Hz timer alone (MOJOUI_FRAME_CLOCK=timer, unshown windows); "dead" a screen's clock that never ticks (tests of the stand-in); "early" occlusion notices read as not shown yet (D-8905's test)
     var clock_log: Bool  # MOJOUI_FRAME_LOG=1
     var test_run: Bool  # MOJOUI_TEST: steps run, frames keep coming while the window can't be seen (the timer stands in)
     var hidden_watch: Bool  # (goal 81, b9250c55) a look at a hidden window is due (watch_hidden)
@@ -3328,6 +3328,8 @@ struct AppKitHost[A: App](Movable):
         if self.seen_on_screen and not self.test_run and not self.on_screen():  # (goal 81: it can't be seen: no frames, not the timer's)
             self.finish_gpu2d(0)
             self.stop_frames()
+            if not self.idle():  # (D-8905, the merge-79-81 review: something animates, so look again until it is seen; macOS's
+                self.watch_hidden()  # notice of its return can come before it counts as visible, and nothing else would start them)
             return
         self.check_frames()
         if self.link_ticks != self.link_seen:
@@ -3360,10 +3362,11 @@ struct AppKitHost[A: App](Movable):
             self.watch_hidden()
 
     def occlusion_changed(mut self):
-        """(goal 81) The window came on screen, or nothing of it shows any more."""
+        """(goal 81) The window came on screen, or nothing of it shows any more. MOJOUI_FRAME_CLOCK=early (a test): every notice
+        reads the window as not shown yet, as macOS's notice of a return sometimes does (D-8905)."""
         if self.clock_mode == "timer":
             return
-        if self.on_screen():
+        if self.on_screen() and self.clock_mode != "early":
             self.seen_on_screen = True
             if self.link != 0 and not self.link_is_screen:  # (the first frames' timer: the screen's clock now)
                 self.stop_frames()
@@ -3371,6 +3374,8 @@ struct AppKitHost[A: App](Movable):
         elif self.seen_on_screen and not self.test_run:
             self.finish_gpu2d(0)
             self.stop_frames()
+            if not self.idle():  # (D-8905: an animating window restored from the Dock would stay frozen when this notice came early)
+                self.watch_hidden()
 
     def ticked_by(mut self, clock: Int):
         """Which clock this tick is from (0: the one right after the event that started it). A tick right after an input draws

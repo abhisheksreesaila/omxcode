@@ -865,6 +865,7 @@ struct GtkHost[A: App](Movable):
     var key_draw_ms: Float64
     var clip_text: String  # (tests print it: the clipboard itself is asynchronous)
     var paste_node: Int  # the canvas a paste was pressed in, while the clipboard is read (the widgets' numbering)
+    var paste_style: Int  # and its Canvas id: found by it when a rebuild meanwhile replaced its widget (D-8906)
     var reveal_pending: Int  # a Board node waiting for its layout to scroll a child into view, or -1
     var window: Int
     var widgets: List[Int]  # the GTK widget drawn for each node of rt.shown
@@ -1096,6 +1097,7 @@ struct GtkHost[A: App](Movable):
         self.first_hand_age_ms = -1
         self.revealed = 0
         self.paste_node = -1
+        self.paste_style = -1
         self.reveal_pending = -1
         self.clip_version = 0
         self.embed_version = 0
@@ -3705,19 +3707,54 @@ struct GtkHost[A: App](Movable):
         self.apply(d, self_addr)
         self.ahead_after_input(self_addr)
 
-    def canvas_key(mut self, ci: Int, name: String, modifiers: Int, self_addr: Int):
+    def canvas_key(mut self, ci: Int, name: String, modifiers: Int, self_addr: Int, paste: Bool = False):
+        """A key to canvas ci; held while a rebuild waits. paste: Ctrl+V pressed while a full rebuild waited (its canvas
+        unknown then): the clipboard is read for it when the held key is sent (D-8906)."""
         if ci < 0 or ci >= len(self.canvases):
             return
         if writing():
             return
         if busy():
-            hold(held_input()[], Held(HELD_KEY, self.id_of(self.canvases[ci].node), name, modifiers))
+            hold(held_input()[], Held(HELD_KEY, self.id_of(self.canvases[ci].node), name, modifiers, paste))
             return
         var t0 = perf_counter_ns()
         var d = self.rt.key(self.canvases[ci].node, name, modifiers)
         self.trace_diff("event key " + name, t0, d)
         self.apply(d, self_addr)
         self.ahead_after_input(self_addr)
+
+    def read_paste(mut self, ci: Int, style: Int, self_addr: Int):
+        """(goal 79) A paste on canvas ci (its Canvas id `style`): the system clipboard's text read for it (PASTE), or (goal 82)
+        a picture on it (a screenshot, an image copied in another app) or files copied in the file manager, as PASTE_FILE in
+        place of the text, as a browser hands a page the clipboard's files first. paste_node follows rebuilds meanwhile."""
+        var display = external_call["gdk_display_get_default", Int]()
+        var clip = external_call["gdk_display_get_clipboard", Int](display)
+        var formats = external_call["gdk_clipboard_get_formats", Int](clip)
+        self.paste_node = self.canvases[ci].node
+        self.paste_style = style
+        var files_ok = self.rt.app.takes_paste_files(style)
+        if files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_file_list_get_type", Int]()) != 0:
+            external_call["gdk_clipboard_read_value_async", NoneType](clip, external_call["gdk_file_list_get_type", Int](), c_int(0), 0, on_paste_files[Self.A], self_addr)
+        elif files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_texture_get_type", Int]()) != 0:
+            external_call["gdk_clipboard_read_texture_async", NoneType](clip, 0, on_paste_texture[Self.A], self_addr)
+        else:
+            external_call["gdk_clipboard_read_text_async", NoneType](clip, 0, on_paste_read[Self.A], self_addr)
+
+    def paste_canvas(mut self) -> Int:
+        """The canvas a paste's clipboard read is for (then forgotten): the widget it was pressed in, wherever rebuilds put it,
+        or, when a rebuild replaced that widget, the canvas with the same Canvas id on the screen shown now (D-8906)."""
+        var ci = self.canvas_at(self.paste_node)
+        if ci < 0 and self.paste_style >= 0:
+            var old = busy() and len(self.built.nodes) > 0  # (while a rebuild waits the widgets are the old screen's)
+            for k in range(len(self.canvases)):
+                var n = self.canvases[k].node
+                if old and 0 <= n < len(self.built.nodes) and self.built.nodes[n].kind == CANVAS and self.built.nodes[n].style == self.paste_style:
+                    ci = k
+                elif not old and 0 <= n < len(self.rt.shown.nodes) and self.rt.shown.nodes[n].kind == CANVAS and self.rt.shown.nodes[n].style == self.paste_style:
+                    ci = k
+        self.paste_node = -1
+        self.paste_style = -1
+        return ci
 
     def canvas_words(mut self, ci: Int, kind: Int, text: String, self_addr: Int, x: Float64 = 0, y: Float64 = 0, w: Float64 = 0, h: Float64 = 0, cursor: Float64 = 0):
         """An input method's words (IME_COMMIT, IME_PREEDIT) or pasted ones (PASTE), to canvas ci."""
@@ -5353,7 +5390,11 @@ struct GtkHost[A: App](Movable):
                     self.canvases[ci].pressure = h.pressure
                     self.canvas_send(ci, h.kind, h.x, h.y, h.dx, h.dy, h.zoom, self_addr)
             elif h.what == HELD_KEY:
-                self.canvas_key(self.canvas_at(node), h.text, h.number, self_addr)
+                var kci = self.canvas_at(node)
+                var kstyle = self.rt.shown.nodes[node].style
+                self.canvas_key(kci, h.text, h.number, self_addr)
+                if h.second and 0 <= kci < len(self.canvases) and self.rt.app.takes_paste(kstyle):  # (Ctrl+V held in a full rebuild's wait: its paste now, D-8906)
+                    self.read_paste(kci, kstyle, self_addr)
             elif h.what == HELD_WORDS:
                 self.canvas_words(self.canvas_at(node), h.kind, h.text, self_addr, h.x, h.y, h.dx, h.dy, h.zoom)
             elif h.what == HELD_CANCEL:
@@ -6953,6 +6994,11 @@ def canvas_hover[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], ci: Int,
     """Canvas(hover=True): the pointer's place (HOVER; -1, -1 when it left), skipped while an update runs or a rebuild
     waits (the next motion carries the place on); the leaving is held then (canvas_send), never skipped."""
     var node = host[].shown_at(host[].canvases[ci].node)  # (while a rebuild waits: the old screen's numbering, goal 81)
+    if node < 0 and x < 0 and busy():  # (D-8906: a leave while a full rebuild waits, when no node is known: the screen still shown
+        var b = host[].canvases[ci].node  # says whether it hovers; canvas_send holds the leave, so a hover never sticks)
+        if 0 <= b < len(host[].built.nodes) and host[].built.nodes[b].kind == CANVAS and host[].built.nodes[b].text == "hover":
+            host[].canvas_send(ci, HOVER, x, y, 0, 0, 1, host_addr)
+        return
     if node < 0 or (busy() and x >= 0):  # (a motion while busy: the next one carries the place on; a leave is held, so a hover never sticks)
         return
     ref n = host[].rt.shown.nodes[node]
@@ -7066,22 +7112,16 @@ def on_key_pressed[A: App](keys: Int, keyval: c_uint, keycode: c_uint, state: c_
     var s = Int(state)  # (no busy() test: a key that comes while a rebuild waits is held by canvas_key, goal 81's M4; the host's own writes stopped above)
     var mods = (SHIFT if (s & 1) != 0 else 0) + (CTRL if (s & 4) != 0 else 0) + (ALT if (s & 8) != 0 else 0)
     var name = key_name(Int(keyval))
-    host[].canvas_key(ci, name, mods, host_addr)
-    var pn = host[].shown_at(host[].canvases[ci].node) if ci < len(host[].canvases) else -1  # (while a rebuild waits: the old screen's numbering)
-    if (mods & CTRL) != 0 and (name == "v" or name == "V") and pn >= 0 and host[].rt.app.takes_paste(host[].rt.shown.nodes[pn].style):  # (goal 79) a paste: the system clipboard's text, read for the canvas
-        var display = external_call["gdk_display_get_default", Int]()
-        var clip = external_call["gdk_display_get_clipboard", Int](display)
-        var formats = external_call["gdk_clipboard_get_formats", Int](clip)
-        host[].paste_node = host[].canvases[ci].node
-        # (goal 82) a picture on the clipboard (a screenshot, an image copied in another app) or files copied in the file manager
-        # come as PASTE_FILE in place of the text, as a browser hands a page the clipboard's files first
-        var files_ok = host[].rt.app.takes_paste_files(host[].rt.shown.nodes[pn].style)
-        if files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_file_list_get_type", Int]()) != 0:
-            external_call["gdk_clipboard_read_value_async", NoneType](clip, external_call["gdk_file_list_get_type", Int](), c_int(0), 0, on_paste_files[A], host_addr)
-        elif files_ok and external_call["gdk_content_formats_contain_gtype", c_int](formats, external_call["gdk_texture_get_type", Int]()) != 0:
-            external_call["gdk_clipboard_read_texture_async", NoneType](clip, 0, on_paste_texture[A], host_addr)
-        else:
-            external_call["gdk_clipboard_read_text_async", NoneType](clip, 0, on_paste_read[A], host_addr)
+    # (goal 79) Ctrl+V on a canvas that takes pastes: the system clipboard is read for it. Decided from the screen as it is
+    # before the key goes (D-8906): the key itself may start a full rebuild, and while one waits the canvas's node reads -1;
+    # then the key is held with the paste and the clipboard is read when it is sent (drain_held), in its place.
+    var paste = (mods & CTRL) != 0 and (name == "v" or name == "V")
+    var pn = host[].shown_at(host[].canvases[ci].node)  # (while a rebuild waits: the old screen's numbering)
+    var style = host[].rt.shown.nodes[pn].style if pn >= 0 else -1
+    var held_paste = paste and pn < 0 and busy()
+    host[].canvas_key(ci, name, mods, host_addr, held_paste)
+    if paste and pn >= 0 and ci < len(host[].canvases) and host[].rt.app.takes_paste(style):
+        host[].read_paste(ci, style, host_addr)
     if not busy():
         im_place[A](host_addr, ci)
     # handled (so Tab and the arrows don't move focus away), except shortcuts the window may own
@@ -7166,8 +7206,7 @@ def on_paste_read[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C"):
         return
     var text = c_str(t)
     external_call["g_free", NoneType](t)
-    var ci = host[].canvas_at(host[].paste_node)
-    host[].paste_node = -1
+    var ci = host[].paste_canvas()
     host[].canvas_words(ci, PASTE, text, host_addr)
 
 
@@ -7187,8 +7226,7 @@ def on_paste_texture[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C
     var tex = external_call["gdk_clipboard_read_texture_finish", Int](clipboard, result, Int(err.unsafe_ptr()))
     if err[0] != 0:
         external_call["g_error_free", NoneType](err[0])
-    var ci = host[].canvas_at(host[].paste_node)
-    host[].paste_node = -1
+    var ci = host[].paste_canvas()
     if tex == 0:
         return
     var path = paste_png_path()
@@ -7208,8 +7246,7 @@ def on_paste_files[A: App](clipboard: Int, result: Int, host_addr: Int) abi("C")
     var value = external_call["gdk_clipboard_read_value_finish", Int](clipboard, result, Int(err.unsafe_ptr()))
     if err[0] != 0:
         external_call["g_error_free", NoneType](err[0])
-    var ci = host[].canvas_at(host[].paste_node)
-    host[].paste_node = -1
+    var ci = host[].paste_canvas()
     if value == 0:
         return
     var files = external_call["g_value_get_boxed", Int](value)
@@ -8454,8 +8491,9 @@ def show_test_window(window: Int):
 
 
 def burst[A: App](host_addr: Int, line: String):
-    """The burst: step. A canvas's value: kX = the key X, iX = its input method commits X, wN = the wheel N points down, p = a press; ^Ctrl+F (no tag): the
-    window's shortcut; a field's value "!" = Return; a Board's card's "drop" = dragged and let go."""
+    """The burst: step. A canvas's value: kX = the key X, iX = its input method commits X, wN = the wheel N points down, p = a press, v = Ctrl+V,
+    l = the pointer leaves it; ^Ctrl+F (no tag): the window's shortcut; a field's value "!" = Return; a Board's card's "drop" = dragged and let go.
+    Each item that goes while a full rebuild waits prints "BURST: full <item>" (goal 82 integration's tests of what is held then, D-8906)."""
     var host = host_at[A](host_addr)
     var what = List[Tuple[Int, Int, String]]()  # (kind, widget, value), found before any of them goes
     for item in line.split("~"):
@@ -8477,13 +8515,15 @@ def burst[A: App](host_addr: Int, line: String):
             w = host[].outers[found]
         if kind == CANVAS:
             var ci = host[].canvas_at(found)
-            w = host[].canvases[ci].keys if kv[1].startswith("k") else (host[].canvases[ci].scroll if kv[1].startswith("w") else (host[].canvases[ci].im if kv[1].startswith("i") else host[].canvases[ci].drag))
+            w = host[].canvases[ci].keys if (kv[1].startswith("k") or kv[1] == "v") else (host[].canvases[ci].scroll if kv[1].startswith("w") else (host[].canvases[ci].im if kv[1].startswith("i") else (host[].canvases[ci].motion_ctl if kv[1] == "l" else host[].canvases[ci].drag)))
         _ = external_call["g_object_ref", Int](w)
         what.append((kind, w, kv[1]))
     for ref item in what:
         var kind = item[0]
         var w = item[1]
         var value = item[2]
+        if host[].full_waits:
+            print("BURST: full " + value, flush=True)
         if kind == -1:
             run_step[A](host_addr, "shortcut:" + value)
         elif kind == BUTTON:
@@ -8525,6 +8565,14 @@ def burst[A: App](host_addr: Int, line: String):
             var handled = List[c_int](length=1, fill=0)
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), c_uint(gdk_keyval(String(value[byte=1:]))), c_uint(0), c_uint(0), Int(handled.unsafe_ptr()))
             _ = len(handled)
+        elif kind == CANVAS and value == "v":  # (Ctrl+V: the key with its modifier, as GTK hands it; the paste's clipboard read follows)
+            var sig = String("key-pressed")
+            var handled = List[c_int](length=1, fill=0)
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span(), c_uint(gdk_keyval("v")), c_uint(0), c_uint(4), Int(handled.unsafe_ptr()))
+            _ = len(handled)
+        elif kind == CANVAS and value == "l":  # (the pointer leaves the canvas: its motion controller's own leave)
+            var sig = String("leave")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](w, sig.as_c_string_span())
         elif kind == CANVAS and value.startswith("i"):  # (the input method commits X: words held like keys while a rebuild waits; the merge of goals 79 and 81)
             var sig = String("commit")
             var text = String(value[byte=1:])

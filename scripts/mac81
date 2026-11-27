@@ -14,7 +14,8 @@ if ! ssh "${opts[@]}" "$user" true 2>/dev/null; then  # (Tailscale down: the hou
   opts+=(-o HostKeyAlias=100.76.9.101); user=${user%@*}@10.0.0.74
   ssh "${opts[@]}" "$user" true 2>/tmp/mac81.err || { echo "UNREACHABLE: $(head -c 200 /tmp/mac81.err)"; exit 75; }
 fi
+dir=${MAC81_DIR:-omxcode-g81}  # (goal 82 integration: a session's own folder on the Mac, e.g. MAC81_DIR=omxcode-g82i)
 mkdir -p build/g81
 tar -czf build/g81/mac-src.tar.gz --exclude=__pycache__ mojoui themes hosts vendor fonts tests apple examples/kitchen examples/expenses examples/gallery scripts/mac81-run scripts/mac81-clock
-ssh "${opts[@]}" "$user" 'mkdir -p ~/omxcode-g81' && scp -q "${opts[@]}" build/g81/mac-src.tar.gz "$user":omxcode-g81/ || { echo "UNREACHABLE: copy"; exit 75; }
-ssh "${opts[@]}" "$user" "cd ~/omxcode-g81 && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && caffeinate -is bash src/scripts/mac81-run $what"
+ssh "${opts[@]}" "$user" "mkdir -p ~/$dir" && scp -q "${opts[@]}" build/g81/mac-src.tar.gz "$user":$dir/ || { echo "UNREACHABLE: copy"; exit 75; }
+ssh "${opts[@]}" "$user" "export MAC81_DIR=$dir; cd ~/$dir && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && caffeinate -is bash src/scripts/mac81-run $what"

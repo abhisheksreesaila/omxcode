@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Goal 81 M7 on the Mac (run by mac81-run in ~/omxcode-g81/src): builds tests/gtkapps/clock and runs it with the screen's
+# Goal 81 M7 on the Mac (run by mac81-run in ~/$D/src): builds tests/gtkapps/clock and runs it with the screen's
 # clock, then with one that never ticks (the timer must take over). Prints FACT lines; LOCKED when the screen is locked.
 set -uo pipefail
 export PATH=$HOME/.pixi/bin:$PATH
+D=${MAC81_DIR:-omxcode-g81}  # (goal 82 integration: a session's own folder, e.g. omxcode-g82i)
 E=$HOME/omxcode-g54/pixi.toml
 cat > ../locked.mojo <<'M'
 from mojoui.hosts.objc import msg, cls, ns_string
@@ -26,12 +27,12 @@ def main():
     var v = msg(d, "objectForKey:", ns_string("CGSSessionScreenIsLocked"))
     print("LOCKSTATE", "locked" if v != 0 and msg(v, "intValue") != 0 else "open")
 M
-pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && mojo build -I . ../locked.mojo -o ../lockstate -Xlinker -lobjc -Xlinker -framework -Xlinker Foundation" > ../lock.log 2>&1
+pixi run --frozen --manifest-path "$E" bash -c "cd ~/$D/src && mojo build -I . ../locked.mojo -o ../lockstate -Xlinker -lobjc -Xlinker -framework -Xlinker Foundation" > ../lock.log 2>&1
 state=$(../lockstate 2>&1 | grep -o 'LOCKSTATE [a-z]*' | tail -1); echo "${state:-no lock state: $(tail -2 ../lock.log)}"
-pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && mojo build -I tests/gtkapps/clock -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../clockapp -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../clock-build.log 2>&1 || { grep error -A3 ../clock-build.log | head -20; exit 1; }
+pixi run --frozen --manifest-path "$E" bash -c "cd ~/$D/src && mojo build -I tests/gtkapps/clock -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../clockapp -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../clock-build.log 2>&1 || { grep error -A3 ../clock-build.log | head -20; exit 1; }
 [ "$state" = "LOCKSTATE locked" ] && [ "${G81_ANYWAY:-}" != 1 ] && { echo "LOCKED: the Mac's screen is locked"; exit 75; }
 one() { # one <clock mode> <out>: the app, ended after 40 s at most
-  MOJOUI_FRAME_CLOCK=$1 MOJOUI_FRAME_LOG=1 MOJOUI_STATE=$HOME/omxcode-g81/state ../clockapp > "$2" 2>&1 & local p=$!
+  MOJOUI_FRAME_CLOCK=$1 MOJOUI_FRAME_LOG=1 MOJOUI_STATE=$HOME/$D/state ../clockapp > "$2" 2>&1 & local p=$!
   for _ in $(seq 40); do kill -0 $p 2>/dev/null || break; sleep 1; done
   kill $p 2>/dev/null; wait $p 2>/dev/null
 }
@@ -43,4 +44,14 @@ idle=$(sed -n 's/^FACT idle_frames //p' ../clock1.log)
 grep -q 'FRAMES: started screen' ../clock1.log && [ -n "$idle" ] && echo "FACT idle_ticks $idle"
 rate=$(sed -n 's/^FACT ticks_per_s //p' ../clock2.log)
 grep -q "doesn't tick: timer" ../clock2.log && awk -v r="${rate:-0}" 'BEGIN{exit !(r>50 && r<66)}' && echo "FACT fallback_ok 1" || echo "FACT fallback_ok 0"
+# (goal 82 integration, D-8905) an animating window hidden and restored, its return's notice read early: frames come back
+pixi run --frozen --manifest-path "$E" bash -c "cd ~/$D/src && mojo build -I tests/gtkapps/hiddenclock -I . -I vendor hosts/mac_gpu_main.mojo -D MXFRAME_JOB_THREADS -o ../hiddenapp -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc" > ../hidden-build.log 2>&1 || { grep error -A3 ../hidden-build.log | head -20; }
+if [ -x ../hiddenapp ]; then
+  caffeinate -u -t 40 & c=$!
+  MOJOUI_FRAME_CLOCK=early MOJOUI_FRAME_LOG=1 MOJOUI_STATE=$HOME/$D/state ../hiddenapp > ../hidden.log 2>&1 & p=$!
+  for _ in $(seq 25); do kill -0 $p 2>/dev/null || break; sleep 1; done
+  kill $p 2>/dev/null; wait $p 2>/dev/null; kill $c 2>/dev/null
+  echo "--- hidden and restored (early notice)"; grep -E '^(FACT|HIDE|FRAMES|mac_hidden)' ../hidden.log | sed 's/^FACT \(ticks_per_s\|screen_hz\|idle_frames\)/fact \1/' | tail -12
+  grep -q 'mac_hidden_restore: ok' ../hidden.log || echo "FACT restored_frames 0"
+fi
 grep -q 'FACT ticks_per_s' ../clock1.log && echo "mac_clock: ok"

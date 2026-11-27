@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# The Mac's side of scripts/mac81 (run there, in ~/omxcode-g81).
+# The Mac's side of scripts/mac81 (run there, in ~/$D).
 set -uo pipefail
 export PATH=$HOME/.pixi/bin:$PATH
+D=${MAC81_DIR:-omxcode-g81}  # (goal 82 integration: a session's own folder, e.g. omxcode-g82i)
 E=$HOME/omxcode-g54/pixi.toml
-cd ~/omxcode-g81/src
+cd ~/$D/src
 F="-Xlinker -lobjc -Xlinker -framework -Xlinker Metal -Xlinker -framework -Xlinker Foundation -Xlinker -framework -Xlinker IOSurface"
-mojo() { pixi run --frozen --manifest-path "$E" bash -c "cd ~/omxcode-g81/src && $1" 2>&1; }
+mojo() { pixi run --frozen --manifest-path "$E" bash -c "cd ~/$D/src && $1" 2>&1; }
 metal() { # metal <test>: built and run; its output, or the errors
   mojo "mojo build -O3 -I . -I vendor tests/test_gpu2d_metal$1.mojo -o ../t$1 $F" > ../t$1.log || { grep -E 'error' -A3 ../t$1.log | head -20; return 1; }
   mojo "../t$1"

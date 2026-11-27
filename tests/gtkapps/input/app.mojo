@@ -45,6 +45,9 @@ struct Main(App):
             out.append((k + self.n // 2) % 3)
         return out^
 
+    def takes_paste(self, canvas: Int) -> Bool:
+        return getenv("G82_HOVER") == "1"  # (goal 82 integration: Ctrl+V brings the clipboard's text, also while a full rebuild waits, D-8906)
+
     def update(mut self, event: Event):
         var text = event.text
         if event.message == 22 and 0 <= event.number < 3:  # (which card it was, as the app sees its board now)
@@ -101,7 +104,7 @@ struct Main(App):
         parts.append(HStack(Toggle("On", self.on, 12).tag("toggle"), Dropdown(["One", "Two", "Three"], self.choice, 13).tag("drop"), Slider(self.level, 14).tag("slide")))
         parts.append(HStack(Segmented(["L", "M", "R"], self.part, 15).tag("seg"), Radio(["x", "y", "z"], self.dot, 16).tag("radio")))
         parts.append(LazyList(500, 1, on_tap=18, height=100, row_height=30).tag("list"))
-        parts.append(Canvas(1, self.n, on_gesture=19, keys=True, scroll_pans=True).width(200).height(80).tag("canvas"))
+        parts.append(Canvas(1, self.n, on_gesture=19, keys=True, scroll_pans=True, hover=getenv("G82_HOVER") == "1").width(200).height(80).tag("canvas"))  # (hover: goal 82's held leave; off for goal 81's M4, whose judge hears every event)
         var board = List[View]()
         for c in self.cards():
             board.append(Text("card " + String(c)).at(120 * c, 4).width(100).height(50).tag("card" + String(c)))
