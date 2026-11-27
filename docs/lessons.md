@@ -122,3 +122,4 @@ One line per rule that prevents a mistake that happened.
 
 - scripts/mac-unlocked (79-check M6) takes ~/.cache/omx-mac.lock itself and ignores OMX_MAC_LOCKED: never run it under an outer flock of the same lock.
 - Before a race, look for any 79-check M6 on the machine, not only this worktree's (another session's ran beside ours on 11-26).
+- Never call a variadic C function (fcntl, open, ioctl, printf…) through a plain `external_call` on the Mac: Apple arm64 passes variadic arguments on the stack, so the value silently goes missing (FD_CLOEXEC never set, goal 82 D-8702). Use a non-variadic route (a posix_spawn file action, `num_fixed_args=` where the call supports it) and prove it on the Mac.

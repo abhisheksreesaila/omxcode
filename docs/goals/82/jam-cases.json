@@ -1,0 +1,686 @@
+[
+ {
+  "name": "add react ghost",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"food\", \"text\": \"Past\\u00e9is de nata\", \"emoji\": \"\\ud83e\\udd67\", \"id\": \"n1\"}, {\"op\": \"add_branch\", \"parent_id\": \"n1\", \"text\": \"Bel\\u00e9m bakery\", \"emoji\": \"\"}, {\"op\": \"react\", \"node_id\": \"sights\", \"vote\": \"up\", \"reason\": \"Trams and views are the heart of it\"}, {\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"Day trips\", \"why\": \"Sintra is 40 minutes away\"}]}"
+ },
+ {
+  "name": "fenced",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "```json\n{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"sights\", \"text\": \"Tram 28\"}]}\n```"
+ },
+ {
+  "name": "prose around",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "Sure! Here you go: {\"edits\": [{\"op\": \"react\", \"node_id\": \"food\", \"vote\": \"down\", \"reason\": \"Too vague\"}]} Hope that helps."
+ },
+ {
+  "name": "remove refused",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"remove\", \"node_id\": \"food\"}]}"
+ },
+ {
+  "name": "rename refused",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"rename\", \"node_id\": \"food\", \"text\": \"Eat\"}]}"
+ },
+ {
+  "name": "unknown node",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"nope\", \"text\": \"X\"}]}"
+ },
+ {
+  "name": "reused id",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"X\", \"id\": \"food\"}]}"
+ },
+ {
+  "name": "too long dropped",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"a very long branch of many words\", \"id\": \"n1\"}, {\"op\": \"add_branch\", \"parent_id\": \"n1\", \"text\": \"child\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Budget\"}]}"
+ },
+ {
+  "name": "thirteen edits",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 0\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 1\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 2\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 3\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 4\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 5\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 6\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 7\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 8\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 9\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 10\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 11\"}, {\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"Idea 12\"}]}"
+ },
+ {
+  "name": "four ghosts",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"Ghost 0\", \"why\": \"because\"}, {\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"Ghost 1\", \"why\": \"because\"}, {\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"Ghost 2\", \"why\": \"because\"}, {\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"Ghost 3\", \"why\": \"because\"}]}"
+ },
+ {
+  "name": "bad emoji",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"food\", \"text\": \"Sardines\", \"emoji\": \"fish\"}]}"
+ },
+ {
+  "name": "bad vote",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"react\", \"node_id\": \"food\", \"vote\": \"maybe\", \"reason\": \"hm\"}]}"
+ },
+ {
+  "name": "not json",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "I think you should add more food."
+ },
+ {
+  "name": "no edits list",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"changes\": []}"
+ },
+ {
+  "name": "all trimmed",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"root\", \"text\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}]}"
+ },
+ {
+  "name": "ghost repeats a branch",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"ghost\", \"parent_id\": \"root\", \"text\": \"food\", \"why\": \"dup\"}, {\"op\": \"ghost\", \"parent_id\": \"food\", \"text\": \"Seafood\", \"why\": \"the coast\"}]}"
+ },
+ {
+  "name": "missing text",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"add_branch\", \"parent_id\": \"root\"}]}"
+ },
+ {
+  "name": "reason too long",
+  "map": {
+   "version": 1,
+   "title": "Trip to Lisbon",
+   "rootId": "root",
+   "defaultPresentation": "box",
+   "nodes": [
+    {
+     "id": "root",
+     "parentId": null,
+     "text": "Trip to Lisbon",
+     "x": 0,
+     "y": 0,
+     "color": "#ef684b",
+     "fontSize": 28,
+     "bold": true
+    },
+    {
+     "id": "food",
+     "parentId": "root",
+     "text": "Food",
+     "x": 220,
+     "y": -62,
+     "color": "#f2a33a"
+    },
+    {
+     "id": "sights",
+     "parentId": "root",
+     "text": "Sights",
+     "x": 220,
+     "y": 62,
+     "color": "#5bb37a"
+    }
+   ]
+  },
+  "reply": "{\"edits\": [{\"op\": \"react\", \"node_id\": \"food\", \"vote\": \"up\", \"reason\": \"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"}, {\"op\": \"react\", \"node_id\": \"sights\", \"vote\": \"up\", \"reason\": \"ok\"}]}"
+ }
+]

@@ -9,9 +9,11 @@
 # Linux: libpulse-simple (the PulseAudio API; PipeWire serves it through pipewire-pulse), opened with dlopen so neither
 # `mojo run` nor a build needs a link flag. Web host (goal 72 M5): the same calls, but the samples are the browser's
 # microphone, carried over the host's audio socket (mojoui.webaudio); a page that is open and tapped is the microphone.
-# Mac / iPhone: not built yet (start() marks the microphone failed with a reason: AVAudioEngine is the planned path); it
-# compiles there, so apps that use it still build.
-# A recorded voice for a microphone (tests, demos, a checker that has no person): $MOJOUI_AUDIO_SOURCE (or Microphone(source))
+# Mac (goal 82 M5): AVAudioEngine's input node, tapped; each buffer (the device's own rate, 44.1 or 48 kHz) is resampled
+# to 16 kHz into the same ring, on the engine's audio thread, with the same stamps and level. macOS asks the person once
+# for the microphone (System Settings → Privacy & Security → Microphone), for an app whose Info.plist says why
+# (NSMicrophoneUsageDescription). iPhone: not built yet (start() marks the microphone failed with a reason).
+# A recorded voice for a microphone (tests, demos, a checker that has no person; Linux and Mac): $MOJOUI_AUDIO_SOURCE (or Microphone(source))
 # of the form `file:<a.wav>[@<seconds>][,<b.wav>[@<seconds>]…]` plays 16 kHz 16-bit mono files into the capture ring at
 # their offsets from start(), in real time and mixed over silence, through the very same worker, stamps and level as the
 # sound server's source (no PulseAudio needed). The ring runs on after the last file: an unattended app hears silence.
@@ -225,6 +227,7 @@ struct Microphone(Movable):
     var reason: String  # why it failed, in words (empty while fine)
     var web: Bool  # the browser's microphone (the web host's hub): `words` are the hub's, and total() counts from base
     var base: Int  # the hub's sample count when this microphone started
+    var engine: Int  # macOS: the AVAudioEngine (0 when none)
 
     def __init__(out self, source: String = ""):
         self.source = source if source.byte_length() > 0 else getenv("MOJOUI_AUDIO_SOURCE", "")
@@ -233,6 +236,7 @@ struct Microphone(Movable):
         self.reason = ""
         self.web = False
         self.base = 0
+        self.engine = 0
 
     def start(mut self):
         """Starts capture on its own thread and returns at once. Safe to call once; samples arrive through read()."""
@@ -249,8 +253,8 @@ struct Microphone(Movable):
                 _A.store(_word(hub, W_STATE), 0)
             _A.store(_word(hub + 8 * HUB_CTL, H_MIC_WANT), 1)
             return
-        comptime if not CompilationTarget.is_linux():
-            self.reason = "no microphone on this host yet (Mac: AVAudioEngine, planned)"
+        comptime if not CompilationTarget.is_linux() and not CompilationTarget.is_macos():
+            self.reason = "no microphone on this host yet"
         else:
             var words = unsafe_alloc[Int64](W_WORDS)
             for k in range(W_WORDS):
@@ -261,6 +265,16 @@ struct Microphone(Movable):
             if self.source.byte_length() > 0:
                 _A.store(_word(Int(words), W_SOURCE), Int64(_cstr(self.source)))
             self.words = Int(words)
+            comptime if CompilationTarget.is_macos():
+                if not self.source.startswith("file:"):
+                    var why = _mac_start(self)
+                    if why != "":
+                        _A.store(_word(Int(words), W_STATE), -1)
+                        _release(Int(words))  # (the worker's share: there is no worker)
+                        self.reason = why
+                    else:
+                        _ = _A.fetch_add(_word(Int(words), W_REFS), -1)  # (no worker: the tap's words are the handle's to free)
+                    return
             var tid = List[Int](length=1, fill=0)
             var rc = libc.pthread_create[_entry](Int(words), Int(tid.unsafe_ptr()))
             if rc != 0:
@@ -351,6 +365,12 @@ struct Microphone(Movable):
                 _A.store(_word(self.words, W_STATE), 2)
         elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
+            comptime if CompilationTarget.is_macos():
+                if self.engine != 0:
+                    _mac_stop(self.engine)
+                    self.engine = 0
+                    if Int(_A.load(_word(self.words, W_STATE))) == 1:
+                        _A.store(_word(self.words, W_STATE), 2)
 
     def __deinit__(deinit self):
         if self.web:  # (the hub's words are the process's: nothing to free)
@@ -359,7 +379,99 @@ struct Microphone(Movable):
                 _A.store(_word(self.words, W_STATE), 2)
         elif self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
+            comptime if CompilationTarget.is_macos():
+                if self.engine != 0:
+                    _mac_stop(self.engine)  # (synchronous: the engine has stopped and the tap is gone when it returns)
             _release(self.words)
+
+
+def _mac_tap(block: Int, buffer: Int, when: Int) abi("C"):
+    """AVAudioEngine's tap (its audio thread): the buffer's first channel, resampled to 16 kHz, into the ring."""
+    comptime if CompilationTarget.is_macos():
+        from mojoui.hosts.objc import msg, block_data
+        var words = block_data(block)
+        if _A.load(_word(words, W_STOP)) != 0:
+            return
+        var sr = msg[Float64](msg(buffer, "format"), "sampleRate")
+        var n = Int(msg[UInt32](buffer, "frameLength"))
+        var channels = msg(buffer, "floatChannelData")
+        if n <= 0 or channels == 0 or sr <= 0:
+            return
+        var ch0 = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=channels)[]
+        var out_n = Int(Float64(n) * Float64(RATE) / sr + 0.5)
+        var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING))))
+        var total = Int(_A.load(_word(words, W_TOTAL)))
+        var sq = Float64(0)
+        for i in range(out_n):
+            var x = Float64(i) * sr / Float64(RATE)
+            var j = Int(x)
+            var f = Float32(x - Float64(j))
+            var a = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=ch0 + 4 * min(j, n - 1))[]
+            var b = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=ch0 + 4 * min(j + 1, n - 1))[]
+            var v = a + (b - a) * f
+            ring.unsafe_offset((total + i) % RING)[] = v
+            sq += Float64(v) * Float64(v)
+        _A.store(_word(words, W_LEVEL), Int64(sqrt(sq / Float64(max(out_n, 1))) * 1e6))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        _A.store(_word(words, W_TIME), Int64(now_ns()))
+        _A.store(_word(words, W_TOTAL), Int64(total + out_n))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
+        _A.store(_word(words, W_STATE), 1)
+
+
+def _mac_start(mut mic: Microphone) -> String:
+    """AVAudioEngine with a tap on its input node; "" when it runs, else why not."""
+    comptime if CompilationTarget.is_macos():
+        from mojoui.hosts.objc import cls, msg, data_block, pool_push
+        from mojoui.hosts.apple_canvas import cfunc
+        for name in ["AVFAudio", "AVFoundation"]:
+            var path = "/System/Library/Frameworks/" + name + ".framework/" + name
+            var c = path.as_c_string_span()
+            _ = cfunc("dlopen", Int(c.unsafe_ptr()), Int32(2 | 8))
+            _ = path.byte_length()
+        var pool = pool_push()
+        var status = msg(cls("AVCaptureDevice"), "authorizationStatusForMediaType:", _ns_media_audio())  # 0 not determined, 1 restricted, 2 denied, 3 authorized
+        if status == 1 or status == 2:
+            _ = cfunc("objc_autoreleasePoolPop", pool)
+            return "the microphone is turned off for this app (System Settings → Privacy & Security → Microphone)"
+        var engine = msg(msg(cls("AVAudioEngine"), "alloc"), "init")
+        var input = msg(engine, "inputNode")
+        var fmt = msg(input, "outputFormatForBus:", 0)
+        if input == 0 or fmt == 0 or msg[Float64](fmt, "sampleRate") <= 0:
+            _ = cfunc("objc_autoreleasePoolPop", pool)
+            return "no microphone on this Mac"
+        _ = msg(input, "installTapOnBus:bufferSize:format:block:", 0, UInt32(1600), fmt, data_block(_mac_tap, "v24@?0@8@16", mic.words))
+        _ = msg(engine, "prepare")
+        var err = List[Int](length=1, fill=0)
+        var ok = msg[Int8](engine, "startAndReturnError:", Int(err.unsafe_ptr()))
+        _ = cfunc("objc_autoreleasePoolPop", pool)
+        if ok == 0:
+            _ = msg(input, "removeTapOnBus:", 0)
+            return "the microphone didn't start (error " + (String(msg(err[0], "code")) if err[0] != 0 else "?") + "; is it allowed for this app?)"
+        mic.engine = engine
+        return ""
+    else:
+        return "no AVAudioEngine here"
+
+
+def _ns_media_audio() -> Int:
+    """AVMediaTypeAudio ("soun"), the constant's own NSString."""
+    comptime if CompilationTarget.is_macos():
+        from mojoui.hosts.apple_canvas import cfunc
+        var name = String("AVMediaTypeAudio")
+        var addr = cfunc("dlsym", -2, Int(name.as_c_string_span().unsafe_ptr()))
+        _ = name.byte_length()
+        return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)[] if addr != 0 else 0
+    else:
+        return 0
+
+
+def _mac_stop(engine: Int):
+    comptime if CompilationTarget.is_macos():
+        from mojoui.hosts.objc import msg
+        _ = msg(msg(engine, "inputNode"), "removeTapOnBus:", 0)
+        _ = msg(engine, "stop")
+        _ = msg(engine, "release")
 
 
 def load_wav(path: String) raises -> List[Float32]:

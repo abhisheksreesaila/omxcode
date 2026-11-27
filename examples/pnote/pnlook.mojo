@@ -162,6 +162,7 @@ def pn_actions() -> List[PnAction]:
     a.append(PnAction("quick-note", "Quick note", "zap", "inbox capture", True))
     a.append(PnAction("new-page", "New page", "file-pen", "create words write", True))
     a.append(PnAction("new-map", "New mind map", "git-fork", "create brainstorm", True))
+    a.append(PnAction("new-jam", "New jam", "sparkles", "brainstorm talk mind map claude", True))  # (goal 82 M6: the jam plugin's entry)
     a.append(PnAction("link-note", "Link to a note…", "link", "drop card reference", False))
     a.append(PnAction("focus", "Focus mode", "focus", "write quiet distraction full screen words only", True))  # (goal 82 M1)
     a.append(PnAction("print", "Print…", "printer", "paper sheets pdf printer", False))  # (goal 82 M4: the native app's own)

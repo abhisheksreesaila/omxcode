@@ -196,6 +196,10 @@ def posix_spawn_file_actions_adddup2(actions: Int, fd: Int, to: Int) -> Int:
     return Int(external_call["posix_spawn_file_actions_adddup2", c_int](_p(actions), c_int(fd), c_int(to)))
 
 
+def posix_spawn_file_actions_addclose(actions: Int, fd: Int) -> Int:
+    return Int(external_call["posix_spawn_file_actions_addclose", c_int](_p(actions), c_int(fd)))
+
+
 def posix_spawnattr_init(attr: Int) -> Int:
     return Int(external_call["posix_spawnattr_init", c_int](_p(attr)))
 

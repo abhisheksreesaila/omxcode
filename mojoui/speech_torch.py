@@ -127,7 +127,10 @@ class Model:
 
 class Stream:
     def __init__(self, model):
+        import os
         self.model = model
+        # (goal 82 M5) dictation at a caret wants its first words sooner than once a second: $MOJOUI_SPEECH_PARTIAL_MS
+        self.partial_ms = int(os.environ.get("MOJOUI_SPEECH_PARTIAL_MS") or PARTIAL_MS)
         self.buf = np.zeros(RATE * 60, dtype=np.float32)
         self.n = 0  # samples fed
         self.arrived = []  # (sample count after a feed, perf_counter_ns of that feed)
@@ -239,7 +242,7 @@ class Stream:
                     text = self.model.transcribe(buf[start:end].copy())
                     tentative = (text, last_voiced, time.perf_counter_ns())
                     self._emit("partial", text, self._arrival(last_voiced - 1), tentative[2])
-            elif not behind and (pos - partial_at) * 1000 // RATE >= PARTIAL_MS:
+            elif not behind and (pos - partial_at) * 1000 // RATE >= self.partial_ms:
                 partial_at = pos
                 text = self.model.transcribe(buf[start:pos].copy())
                 self._emit("partial", text)
