@@ -7,10 +7,11 @@ from std.testing import assert_equal, assert_true, assert_false
 from mojoui.canvas import Surface
 from mojoui.clock import now_ns
 from mojoui.mascot import (
-    Mascot, MascotClip, MascotTransition, MascotView, Presence,
+    Mascot, MascotClip, MascotTransition, MascotView, MascotPerch, Presence,
     MASCOT_REST, MASCOT_LISTEN, MASCOT_THINK, MASCOT_SPEAK, MASCOT_HYPE, MASCOT_NAP,
-    PRESENCE_ORB, PRESENCE_MASCOT, mascot_state_id, mascot_state_name,
+    PRESENCE_ORB, PRESENCE_MASCOT, PERCH_SIDE, mascot_state_id, mascot_state_name,
 )
+from mojoui.view import NO_MSG
 from mojoui.theme import Palette
 
 
@@ -193,6 +194,57 @@ def main() raises:
     assert_equal(v_pass.nodes[0].size, 2)  # passthrough when no gesture
     var v_tap = MascotView(9, 1, side=172, on_gesture=42, hover=True)
     assert_equal(v_tap.nodes[0].msg, 42)
-    assert_equal(v_tap.nodes[0].size, 0)   # interactive when gesture set
+    assert_equal(v_tap.nodes[0].size, 3)   # interactive when gesture set, and see-through (its alpha kept on every host, D-8426)
+
+    # 8. The perch (D-8421): a wide window shows the mascot full-size on its perch while the chat bar keeps the orb (never two
+    # mascots); it grows in and fades out on a spring; a phone puts it back in the chat bar
+    var seat = Presence()
+    seat.load_mascot("examples/stage/mascots/omx")
+    assert_false(seat.perch_shown())
+    seat.arrange(False, True)  # (wide: perched, the chat bar the orb)
+    assert_true(seat.perched)
+    assert_equal(seat.kind, PRESENCE_ORB)
+    assert_true(seat.perch_shown())
+    var pw = 184
+    var pbuf = List[UInt32](length=pw * pw, fill=0)
+    var ps = Surface(Int(pbuf.unsafe_ptr()), pw, pw, 1.0)
+    seat.draw_perch(ps, p)  # (its first frame: arriving from nothing)
+    var first = opaque_count(pbuf)
+    assert_true(first < 2000, "the perch starts from nothing (no snap in): " + String(first))
+    for _ in range(9):  # (some 70 ms on: part way in)
+        seat.perch.step(8000)
+    seat.perch_ns = 0
+    seat.draw_perch(ps, p)
+    var part = nonclear_count(pbuf)
+    assert_true(part > 0, "part way in, it shows")
+    seat.perch.snap(1.0)
+    seat.draw_perch(ps, p)
+    var full = opaque_count(pbuf)
+    assert_true(full > 6000, "the perched mascot, full-size: " + String(full))
+    seat.arrange(True, False)  # (a phone: the mascot moves into the chat bar, the perch leaves)
+    assert_false(seat.perched)
+    assert_equal(seat.kind, PRESENCE_MASCOT)
+    assert_true(seat.perch_shown(), "still leaving: the view keeps it until it has gone")
+    var calm = Surface(Int(pbuf.unsafe_ptr()), pw, pw, 1.0)
+    calm.still = True  # (less motion: it has gone at once)
+    seat.draw_perch(calm, p)
+    assert_false(seat.perch_shown())
+    assert_equal(nonclear_count(pbuf), 0)
+    seat.arrange(False, False)  # (the orb: no perch, the orb in the bar)
+    assert_equal(seat.kind, PRESENCE_ORB)
+    var bare = Presence()  # (no pack: never perched)
+    bare.arrange(False, True)
+    assert_false(bare.perched)
+    var perch_view = MascotPerch(9, 1, on_gesture=42)
+    assert_equal(perch_view.nodes[0].name, "mascot-perch")
+    var found = False
+    for n in perch_view.nodes:
+        if n.name == "mascot" and n.msg == 42 and n.w == PERCH_SIDE:
+            found = True
+    assert_true(found, "the perch's canvas: full-size and pokeable")
+    var leaving_view = MascotPerch(9, 1, on_gesture=NO_MSG)
+    for n in leaving_view.nodes:
+        if n.name == "mascot":
+            assert_equal(n.size, 2)  # (passthrough while it leaves)
 
     print("mascot: ok (load rest.png:", load_ms, "ms, draw 220x220:", draw_ms, "ms, rest opaque:", rest_px, "px)")

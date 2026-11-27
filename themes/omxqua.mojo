@@ -8,7 +8,8 @@
 
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
-from mojoui.theme import Palette, Theme, hx, mix, hex_of
+from mojoui.theme import Palette, Theme, hx, mix, hex_of, contrast_ratio
+from mojoui.accents import accent_values, accent_colour, swatch_role, SWATCH_ROLE, SWATCH_SIDE
 from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Segments, Motion, solid, band, words, chip, slot
 from mojoui.look import css_color, surface_rule, px, fpx, line_px
 from themes.skins import skin_css, SKIN_WEB
@@ -469,9 +470,10 @@ def omxqua(dark: Bool = False) -> Theme:
     id or length changes); both carry the class `omxqua`."""
     var pal = omxqua_palette(dark)
     var look = omxqua_look(pal)
+    look.surfaces += swatch_roles(pal)  # (mojoui.personalize's accent swatches, in any omxqua app)
     var id = String("omxqua-dark") if dark else String("omxqua")
     var classes = "skin omxqua" + (" omxqua-dark" if dark else "")
-    return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id), String(SKIN_WEB) + omxqua_web(pal, look, id),
+    return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id) + swatch_gtk(pal, id), String(SKIN_WEB) + omxqua_web(pal, look, id) + swatch_web(pal, id),
                  pal.ink2, pal.accent_ink, True, look^)
 
 
@@ -487,6 +489,13 @@ comptime COUNTER_TEXT = 15.0  # --oq-text (.oq-family-counter)
 comptime COUNTER_RADIUS_CARD = 22  # --oq-radius-card: tiles; side cards 18, the stage 30, the chat bar a pill
 comptime COUNTER_GROUND_LIGHT = "#f5f5f7"  # --oq-counter-ground: the stage (gitaway's ground)
 comptime COUNTER_GROUND_NIGHT = "#000000"
+# A person's accent (mojoui.personalize; the theme's own ink when they picked none, and then nothing below changes) shows on
+# a few structural surfaces, never on the tiles' kinds (stage-kind-1 … 6 keep their meaning): the stage's ground a hint of
+# it, their chat bubbles in it, the active person's ring in it (owner, 2026-11-26: "make my counter gold" must be seen).
+comptime COUNTER_TINT_LIGHT = 0.06  # the accent in the stage's ground by day (#f5f5f7 → #f0eee8 for gold)
+comptime COUNTER_TINT_NIGHT = 0.07  # at night (#000 → #100d00)
+comptime COUNTER_YOU_INK = 0.25  # their bubbles: the accent a quarter of the way to the ink (its words ≥ 5:1 on every accent)
+comptime AVATAR_ON_TINT = 0.30  # the active person's own colour, a step over the others' 18 %
 
 
 def counter_palette(dark: Bool = False) -> Palette:
@@ -508,9 +517,32 @@ def counter_palette(dark: Bool = False) -> Palette:
     return p^
 
 
-def counter_ground(dark: Bool) -> UInt32:
-    """--oq-counter-ground: the stage's own tone (the tiles' ground)."""
-    return hx(COUNTER_GROUND_NIGHT) if dark else hx(COUNTER_GROUND_LIGHT)
+def counter_ground(dark: Bool, accent: UInt32 = 0) -> UInt32:
+    """--oq-counter-ground: the stage's own tone (the tiles' ground). `accent`: a person's (0: none, the token itself) mixed
+    in a little (COUNTER_TINT_LIGHT / NIGHT): the panel, the tiles' canvas and the TV's well all take the same tone."""
+    var g = hx(COUNTER_GROUND_NIGHT) if dark else hx(COUNTER_GROUND_LIGHT)
+    if accent == 0:
+        return g
+    return mix(g, accent, COUNTER_TINT_NIGHT if dark else COUNTER_TINT_LIGHT)
+
+
+def avatar_ring(p: Palette) -> UInt32:
+    """The active avatar's ring colour: the accent (the ink unless a person picked one), pulled toward the ink just as far as it
+    takes to read at 3:1 against the room it sits on (WCAG's mark contrast: teal, orange and gold by day are 2.7–3.0 alone)."""
+    var c = p.accent
+    var t = 0.0
+    while contrast_ratio(c, p.page) < 3.0 and t < 1.0:
+        t += 0.05
+        c = mix(p.accent, p.ink, t)
+    return c
+
+
+def ring_css(colour: UInt32) -> String:
+    """A ring round a round control: 2 pt wide, 2 pt out from its edge, in `colour` (the active avatar: the accent; a chosen
+    swatch: its own colour). A CSS outline, which GTK and the web draw alike and which follows the corners; what is behind
+    (the room, the popover) shows in the gap. (Two spread box-shadows were tried: GTK stacks a list of shadows the other way
+    round from CSS, and the gap disappeared under the ring.)"""
+    return "outline: 2px solid " + css_color(colour) + "; outline-offset: 2px;"
 
 
 def counter_shade(dark: Bool) -> UInt32:
@@ -539,13 +571,15 @@ def counter_sh3(dark: Bool) -> List[Shadow]:
     return [Shadow(2, 4, 0, rgba(0, 0, 0, alpha(0.04)), False), Shadow(30, 60, -28, rgba(0, 0, 0, alpha(0.28)), False)]
 
 
-def counter_roles(p: Palette) -> List[Surface]:
+def counter_roles(p: Palette, accent: UInt32 = 0) -> List[Surface]:
     """mojoui.stage's roles in the Counter family: the shaded bands, the raised stage, the chat bar pill, the clock, the
-    side cards and Live rows, the top bar's avatars and pills (values: tokens.css .oq-family-counter, gitaway's .cv3)."""
+    side cards and Live rows, the top bar's avatars and pills (values: tokens.css .oq-family-counter, gitaway's .cv3).
+    `accent`: a person's accent (0: none): the stage's ground takes a hint of it, their chat bubbles wear it (counter_ground,
+    counter_tv_roles); the active avatar's ring is the palette's accent, the ink unless one was picked."""
     var dark = p.dark
     var out = List[Surface]()
     for r in ["stage", "stage-top", "stage-centre", "stage-orb", "stage-list", "stage-input", "stage-side-scroll", "stage-pins", "stage-today",
-              "stage-live"]:  # (containers: a side's scroller, M7e's sections)
+              "stage-live", "mascot-perch"]:  # (containers: a side's scroller, M7e's sections, the mascot's perch)
         out.append(box(r, 0, -1, -1, -1))
     out.append(words("stage-note", 12.5, 0, p.ink2))  # (an empty list's line: quiet, as a card's sub line)
     out.append(box("stage-drop", mix(p.card, p.ink, 0.10) if not dark else mix(p.card, p.ink, 0.16), 18, -1, -1))  # (Pinned while a tile is dragged over it)
@@ -566,7 +600,7 @@ def counter_roles(p: Palette) -> List[Surface]:
         out.append(s^)
     var side = Surface("stage-side", counter_shade(dark), 28, 0, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
     out.append(side^)
-    var panel = Surface("stage-panel", counter_ground(dark), 30, 30, -1, -1, -1, -1, -1, -1, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    var panel = Surface("stage-panel", counter_ground(dark, accent), 30, 30, -1, -1, -1, -1, -1, -1, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
     out.append(panel^)
     var bar = Surface("stage-bar", p.card, 32, 32, -1, -1, -1, -1, -1, -1, counter_sh2(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
     out.append(bar^)
@@ -612,26 +646,35 @@ def counter_roles(p: Palette) -> List[Surface]:
         var k = Surface("stage-kind-" + String(i + 1), p.series[i], 6, 6, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, icon_size=12, icon_stroke=2.4, icon_ink=p.accent_ink)
         out.append(k^)
     var everyone = Surface("stage-avatar", p.ink, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 13, p.card, 650, 0, 0, 0, 0, False)
+    var everyone_on = everyone.copy()  # (the active one: ringed in the accent, avatar_ring and ring_css in counter_gtk / counter_web)
+    everyone_on.role = "stage-avatar-on"
     out.append(everyone^)
+    out.append(everyone_on^)
     for i in range(6):  # (omxqua's avatar: an 18 % tint of the person's colour, initials in it pulled toward the ink, --oq-avatar-mix 55 %)
         var a = Surface("stage-avatar-" + String(i + 1), mix(p.card, p.series[i], 0.18), RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0,
                         counter_sh1(dark), 0, 0, 0, -1, "", 13, mix(p.ink, p.series[i], 0.55), 650, 0, 0, 0, 0, False)
+        var on = a.copy()  # (the active person: their colour a step stronger, ringed: ring_css)
+        on.role, on.fill = "stage-avatar-" + String(i + 1) + "-on", mix(p.card, p.series[i], AVATAR_ON_TINT)
         out.append(a^)
+        out.append(on^)
     var pill = Surface("stage-pill", p.card, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 14, 0, counter_sh1(dark), 0, 0, 0, -1, "", 14, p.ink, 550, 0, 0, 0, 0, False,
                        height=38, icon_size=16, icon_ink=p.ink)
     out.append(pill^)
     var round = Surface("stage-pill-compact", p.card, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, counter_sh1(dark), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
                         icon_size=18, icon_ink=p.ink)
     out.append(round^)
-    out += counter_tv_roles(p)
+    out += counter_tv_roles(p, accent)
+    out += swatch_roles(p)
     return out^
 
 
-def counter_tv_roles(p: Palette) -> List[Surface]:
+def counter_tv_roles(p: Palette, accent: UInt32 = 0) -> List[Surface]:
     """mojoui.stagetv's roles (goal 77 M7d, the prototype's .st-tv / .tv-* / .cb-msg): the TV's layers (the box is drawn on
     its canvas: counter_tv_look), its head (omx in small caps, the title, a round ×), the card's well on the stage's ground,
-    the conversation's bubbles (you: the ink, omx: the ground), the chips."""
+    the conversation's bubbles (you: the ink, or a person's accent pulled toward the ink; omx: the ground), the chips."""
     var dark = p.dark
+    var ground = counter_ground(dark, accent)
+    var you = p.ink if accent == 0 else mix(accent, p.ink, COUNTER_YOU_INK)
     var out = List[Surface]()
     for r in ["stage-side-wrap", "stage-tv-box", "stage-tv-band", "stage-tv-veil", "stage-tv", "stage-tv-head", "stage-tv-thread", "stage-tv-chips"]:
         out.append(box(r, 0, -1, -1, -1))
@@ -643,28 +686,94 @@ def counter_tv_roles(p: Palette) -> List[Surface]:
     var close = Surface("stage-tv-close", p.line, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False,
                         icon_size=18, icon_ink=p.ink)
     out.append(close^)
-    out.append(Surface("stage-tv-card", counter_ground(dark), 22, 22, -1, -1, -1, 14, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
+    out.append(Surface("stage-tv-card", ground, 22, 22, -1, -1, -1, 14, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
     out.append(box("stage-tv-card-compact", 0, -1, 0, 0))  # (a phone's TV: the card without a second frame round it)
-    out.append(Surface("stage-msg-you", p.ink, 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False))
-    out.append(Surface("stage-msg-omx", counter_ground(dark), 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False))
+    out.append(Surface("stage-msg-you", you, 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.card, 0, 0, 0, 0, 0, False))
+    out.append(Surface("stage-msg-omx", ground, 18, 18, -1, -1, -1, 9, 14, 9, [], 0, 0, 0, -1, "", 0, p.ink, 0, 0, 0, 0, 0, False))
     out.append(words("stage-msg-meta", 11, 600, 0))  # (its bubble's ink: .cb-msg small)
     out.append(words("stage-msg-text", 15, 0, 0))
-    var chip = Surface("stage-tv-chip", counter_ground(dark), RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 14, 0, [], 0, 0, 0, -1, "", 14, p.ink, 550, 0, 0, 0, 0, False,
+    var chip = Surface("stage-tv-chip", ground, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 14, 0, [], 0, 0, 0, -1, "", 14, p.ink, 550, 0, 0, 0, 0, False,
                        height=38, icon_size=16, icon_ink=p.ink)
     out.append(chip^)
     return out^
 
 
-def counter_tv_look(dark: Bool) -> TVLook:
+def counter_tv_look(dark: Bool, accent: UInt32 = 0) -> TVLook:
     """What mojoui.stagetv draws its box with in the Counter family: the chat bar's card colour, the stage's ground (the
-    tiles fade into it), the room (a phone's page), the open box's shadow (gitaway's sh3; night: sh2)."""
+    tiles fade into it; a person's accent tints it as it tints the panel: counter_ground), the room (a phone's page), the
+    open box's shadow (gitaway's sh3; night: sh2)."""
     var p = counter_palette(dark)
-    return TVLook(p.card, counter_ground(dark), p.page, counter_sh3(dark))
+    return TVLook(p.card, counter_ground(dark, accent), p.page, counter_sh3(dark))
 
 
-def counter_gtk(p: Palette, cls: String) -> String:
+# ---- the accent swatches (mojoui.personalize.accent_swatches): round buttons in the accent's own colour ----
+
+
+def swatch_colour(p: Palette, value: String) -> UInt32:
+    """A swatch's colour: the ink for "default" (the theme's own accent is ink on the Counter; neutral elsewhere), else the
+    palette's series colour the accent would be (mojoui.personalize.accent_colour)."""
+    return p.ink if value == "default" else accent_colour(p, value)
+
+
+def readable_on(fill: UInt32) -> UInt32:
+    """White or near-black, whichever reads better on `fill` (a swatch's tick: WCAG's contrast, the larger)."""
+    var white = hx("#ffffff")
+    var black = hx("#1d1d1f")
+    return white if contrast_ratio(fill, white) >= contrast_ratio(fill, black) else black
+
+
+def swatch_roles(p: Palette) -> List[Surface]:
+    """Each accent value's swatch role (look-swatch-<value>; -on: chosen): a SWATCH_SIDE round button in its colour, its
+    icon (the tick when chosen, an unseen circle when not: look_knobs' buttons need an icon to show only it) in the ink
+    that reads on it, the chosen one ringed in its own colour (ring_css, in swatch_gtk / swatch_web). The row and the
+    owner's line are plain containers."""
+    var out = List[Surface]()
+    out.append(box("look-swatches", 0, -1, -1, -1))
+    out.append(box("look-knobs", 0, -1, -1, -1))
+    var owner = words("look-owner", 17, 650, p.ink, -0.2)
+    out.append(owner^)
+    for v in accent_values():
+        var fill = swatch_colour(p, v)
+        for on in [False, True]:
+            var s = Surface(swatch_role(v, on), fill, RADIUS_FULL, RADIUS_FULL, -1, -1, -1, 0, 0, 0, List[Shadow](),
+                            0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, width=SWATCH_SIDE, height=SWATCH_SIDE, icon_size=16, icon_stroke=2.6,
+                            icon_ink=readable_on(fill) if on else tint(fill, 0.0))
+            out.append(s^)
+    return out^
+
+
+def swatch_gtk(p: Palette, cls: String) -> String:
+    """GTK: the swatches over omxqua's flat icon button (button.flat / .image-button set no fill, no shadow, the theme's
+    icon size), the tick's colour on the image (the role writer gives GTK a role's icon size only)."""
+    var w = "window." + cls + " "
+    var out = String("")
+    for s in swatch_roles(p):
+        if not s.role.startswith(SWATCH_ROLE):
+            continue
+        var sel = w + "button.mui-tag-" + s.role + ", " + w + "button.flat.mui-tag-" + s.role + ", " + w + "button.image-button.mui-tag-" + s.role
+        out += (sel + " { min-width: " + px(SWATCH_SIDE) + "; min-height: " + px(SWATCH_SIDE) + "; padding: 0; border-radius: 999px; background: " + css_color(s.fill)
+                + "; box-shadow: none;" + (" " + ring_css(s.fill) if s.role.endswith("-on") else String("")) + " }\n")
+        out += w + "button.mui-tag-" + s.role + " image { color: " + css_color(s.icon_ink) + "; -gtk-icon-size: " + px(s.icon_size) + "; }\n"
+    return out
+
+
+def swatch_web(p: Palette, cls: String) -> String:
+    """The web: the same over the theme's button.subtle.icon-only (its width, corners and tonal hover kept off a swatch's colour)."""
+    var b = "body." + cls + " "
+    var out = String("")
+    for s in swatch_roles(p):
+        if not s.role.startswith(SWATCH_ROLE):
+            continue
+        out += (b + "button[data-tag=" + s.role + "], " + b + "button.subtle.icon-only[data-tag=" + s.role + "] { width: " + px(SWATCH_SIDE) + "; min-width: " + px(SWATCH_SIDE)
+                + "; height: " + px(SWATCH_SIDE) + "; min-height: " + px(SWATCH_SIDE) + "; padding: 0; border-radius: 999px; background-color: " + css_color(s.fill)
+                + "; box-shadow: none;" + (" " + ring_css(s.fill) if s.role.endswith("-on") else String("")) + " }\n")
+        out += b + "button[data-tag=" + s.role + "] svg { width: " + px(s.icon_size) + "; height: " + px(s.icon_size) + "; color: " + css_color(s.icon_ink) + "; stroke-width: 2.6px; }\n"
+    return out
+
+
+def counter_gtk(p: Palette, cls: String, accent: UInt32 = 0) -> String:
     """GTK: where omxqua's own control rules (button, button.flat, button.image-button, entry) would win over a stage
-    role, the role again with a stronger selector."""
+    role, the role again with a stronger selector (the active avatar's ring among them: button.flat sets no shadow)."""
     var w = "window." + cls + " "
     var ink = hex_of(p.ink)
     var card = hex_of(p.card)
@@ -684,22 +793,20 @@ def counter_gtk(p: Palette, cls: String) -> String:
             + w + "button.mui-tag-stage-tv-chip, " + w + "button.flat.mui-tag-stage-tv-chip { min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + ground + "; box-shadow: none; }\n"
             + w + "button.mui-tag-stage-tv-chip label, " + w + "button.mui-tag-stage-tv-chip image { color: " + ink + "; }\n")
     out += w + "button.mui-tag-stage-pill-compact, " + w + "button.image-button.mui-tag-stage-pill-compact, " + w + "button.flat.mui-tag-stage-pill-compact { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: " + card + "; box-shadow: " + sh1 + "; }\n"
-    var roles = List[String]()
-    roles.append("stage-avatar")
-    for i in range(6):
-        roles.append("stage-avatar-" + String(i + 1))
-    for r in roles:
-        out += w + "button.mui-tag-" + r + ", " + w + "button.flat.mui-tag-" + r + " { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; }\n"
-    var fills = counter_roles(p)
+    var fills = counter_roles(p, accent)
     for s in fills:
         if s.role.startswith("stage-avatar"):
-            out += w + "button.flat.mui-tag-" + s.role + " { background: " + css_color(s.fill) + "; } " + w + "button.flat.mui-tag-" + s.role + " label { color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n"
+            var r = s.role
+            out += w + "button.mui-tag-" + r + ", " + w + "button.flat.mui-tag-" + r + " { min-width: 38px; min-height: 38px; padding: 0; border-radius: 999px; }\n"
+            out += w + "button.flat.mui-tag-" + r + " { background: " + css_color(s.fill) + ";" + (" " + ring_css(avatar_ring(p)) if r.endswith("-on") else String("")) + " } "
+            out += w + "button.flat.mui-tag-" + r + " label { color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n"
+    out += swatch_gtk(p, cls)
     return out
 
 
-def counter_web(p: Palette, cls: String) -> String:
+def counter_web(p: Palette, cls: String, accent: UInt32 = 0) -> String:
     """The web: the text box inside the chat bar's pill without a field's own box, the mic's icon in the card's colour,
-    the top bar's pills and avatars over the theme's subtle button."""
+    the top bar's pills and avatars over the theme's subtle button (the active one ringed), the accent swatches."""
     var b = "body." + cls + " "
     var ink = hex_of(p.ink)
     var card = hex_of(p.card)
@@ -722,10 +829,12 @@ def counter_web(p: Palette, cls: String) -> String:
     out += (b + "button[data-tag=stage-tv-close] { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 18px; background: " + line + "; color: " + ink + "; box-shadow: none; }\n"
             + b + "button[data-tag=stage-tv-close] svg { width: 18px; height: 18px; }\n"
             + b + "button[data-tag=stage-tv-chip] { height: 38px; min-height: 38px; padding: 0 14px; border-radius: 999px; background: " + ground + "; color: " + ink + "; box-shadow: none; }\n")
-    for s in counter_roles(p):
+    for s in counter_roles(p, accent):
         if s.role.startswith("stage-avatar"):
             out += (b + "button.subtle[data-tag=" + s.role + "], " + b + "button[data-tag=" + s.role + "] { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 999px; background: "
-                    + css_color(s.fill) + "; color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px; }\n")
+                    + css_color(s.fill) + "; color: " + css_color(s.ink) + "; font-weight: 650; font-size: 13px;"
+                    + (" " + ring_css(avatar_ring(p)) if s.role.endswith("-on") else String("")) + " }\n")
+    out += swatch_web(p, cls)
     return out
 
 
@@ -733,12 +842,13 @@ def omxqua_counter(dark: Bool = False, accent: UInt32 = 0) -> Theme:
     """omxqua's Counter family, light or night: omxqua's look (Geist, the press spring, its controls) over the Counter
     palette, its type a step up (15 pt body), and mojoui.stage's roles. Ids omxqua-counter / omxqua-counter-dark.
     `accent`: one of the palette's own series colours a person picked (mojoui.personalize.accent_colour; 0: the family's ink):
-    the chat bar's mic, the controls' accent; the key changes with it, so hosts restyle."""
+    the chat bar's mic, the controls' accent, the active avatar's ring, a hint of it in the stage's ground and their chat
+    bubbles (D-8419); 0 leaves every role as it was. The key changes with it, so hosts restyle."""
     var pal = counter_palette(dark).with_accent(accent)
     var look = omxqua_look(pal)
-    look.surfaces += counter_roles(pal)
+    look.surfaces += counter_roles(pal, accent)
     look.type.body = COUNTER_TEXT
     var id = String("omxqua-counter-dark") if dark else String("omxqua-counter")
     var classes = "skin omxqua omxqua-counter" + (" omxqua-counter-dark" if dark else "")
-    return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id) + counter_gtk(pal, id),
-                 String(SKIN_WEB) + omxqua_web(pal, look, id) + counter_web(pal, id), pal.ink2, pal.accent_ink, True, look^)
+    return Theme(id, classes, pal.copy(), skin_css(pal, id) + omxqua_gtk(pal, look, id) + counter_gtk(pal, id, accent),
+                 String(SKIN_WEB) + omxqua_web(pal, look, id) + counter_web(pal, id, accent), pal.ink2, pal.accent_ink, True, look^)

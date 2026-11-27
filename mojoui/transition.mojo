@@ -8,8 +8,10 @@
 #   def transition(mut self) -> Int: return self.morph.take()     # App.transition: asked after every update()
 #
 # The motion (the owner's approved TV motion, scaled to a whole screen): the old picture fades from 1 to 0 over MORPH_FADE_MS
-# on the standard ease; the new screen, at full opacity under it, settles from MORPH_FROM_SCALE to 1 over MORPH_SETTLE_MS on the
-# soft spring (--oq-spring, k170 c26). The new screen is there from the first frame, so no frame shows an empty window.
+# on a crisp ease (it passes the middle quickly: halfway at the standard ease's moment, 28 % less time between 30 and 70 %, so
+# light into dark shows less of the flat grey in between, D-8424); the new screen, at full opacity under it, settles from
+# MORPH_FROM_SCALE to 1 over MORPH_SETTLE_MS on the soft spring (--oq-spring, k170 c26). The new screen is there from the first
+# frame, so no frame shows an empty window.
 #
 # Hosts: GTK snapshots the window's last frame (GtkWidgetPaintable's current image: its render node, no copy), lays it over the
 # content in an overlay and fades it on the frame clock, the content's settle a CSS transform transition (MORPH_SETTLE_GTK, the
@@ -19,7 +21,9 @@
 comptime MORPH_FADE_MS = 420  # the old picture's fade
 comptime MORPH_SETTLE_MS = 710  # the new screen's settle (--oq-spring-dur)
 comptime MORPH_FROM_SCALE = 0.985
-comptime MORPH_FADE_EASE = "cubic-bezier(0.4, 0, 0.2, 1)"  # the standard ease: a true blend at the middle
+comptime MORPH_FADE_X1 = 0.55  # the fade's curve, cubic-bezier(x1, 0, x2, 1): through the middle quickly (the standard ease's
+comptime MORPH_FADE_X2 = 0.1  # 0.4 / 0.2 spent 72 ms of 420 between 30 % and 70 % blended; this 52, halfway at 155 ms not 147)
+comptime MORPH_FADE_EASE = "cubic-bezier(0.55, 0, 0.1, 1)"  # (the same numbers for CSS and Core Animation)
 comptime MORPH_SETTLE_GTK = "cubic-bezier(0.3, 0.53, 0.05, 1)"  # --oq-spring fitted (within 2.4 % at every sample)
 comptime MORPH_SETTLE_WEB = "linear(0, 0.023, 0.079, 0.154, 0.237, 0.322, 0.405, 0.482, 0.553, 0.617, 0.674, 0.723, 0.766, 0.803, 0.835, 0.862, 0.885, 0.905, 0.921, 0.935, 0.946, 0.955, 0.963, 0.97, 0.975, 0.98, 0.983, 0.986, 0.989, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 0.999, 0.999, 1)"  # --oq-spring
 
@@ -43,7 +47,8 @@ struct Morph(Copyable, Movable):
 
 
 def fade_ease(t: Float64) -> Float64:
-    """MORPH_FADE_EASE at t (0..1): cubic-bezier(0.4, 0, 0.2, 1), solved for x by bisection (hosts that fade by hand)."""
+    """MORPH_FADE_EASE at t (0..1): cubic-bezier(MORPH_FADE_X1, 0, MORPH_FADE_X2, 1), solved for x by bisection (hosts that
+    fade by hand)."""
     if t <= 0.0:
         return 0.0
     if t >= 1.0:
@@ -53,7 +58,7 @@ def fade_ease(t: Float64) -> Float64:
     var s = t
     for _ in range(24):
         s = (lo + hi) * 0.5
-        var x = 3.0 * (1.0 - s) * (1.0 - s) * s * 0.4 + 3.0 * (1.0 - s) * s * s * 0.2 + s * s * s
+        var x = 3.0 * (1.0 - s) * (1.0 - s) * s * MORPH_FADE_X1 + 3.0 * (1.0 - s) * s * s * MORPH_FADE_X2 + s * s * s
         if x < t:
             lo = s
         else:

@@ -369,13 +369,13 @@ def common_modes_constant() -> Int:
 
 def layer_fade(layer: Int, ms: Int):
     """A view transition on Apple hosts (App.transition, mojoui.transition): a fade CATransition on `layer`, added before the
-    change is made, so Core Animation crossfades the layer's old contents into the new over `ms` on the standard ease
-    (cubic-bezier 0.4, 0, 0.2, 1). Built, not run (no Mac here when it was written)."""
+    change is made, so Core Animation crossfades the layer's old contents into the new over `ms` on mojoui.transition's fade
+    curve (cubic-bezier 0.55, 0, 0.1, 1). Built, not run (no Mac here when it was written)."""
     if layer == 0 or ms <= 0:
         return
     var t = msg(cls("CATransition"), "animation")
     _ = msg(t, "setType:", ns_string("fade"))  # kCATransitionFade
     _ = msg(t, "setDuration:", Float64(ms) / 1000.0)
-    var ease = msg(cls("CAMediaTimingFunction"), "functionWithControlPoints::::", Float32(0.4), Float32(0.0), Float32(0.2), Float32(1.0))
+    var ease = msg(cls("CAMediaTimingFunction"), "functionWithControlPoints::::", Float32(0.55), Float32(0.0), Float32(0.1), Float32(1.0))
     _ = msg(t, "setTimingFunction:", ease)
     _ = msg(layer, "addAnimation:forKey:", t, ns_string("mojoui-morph"))

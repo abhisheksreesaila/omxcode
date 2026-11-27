@@ -17,10 +17,15 @@
 #   feed.place(ranked, tiles.layout().ids)                       # the sides again from what the grid really shows (a size
 #                                                                # the person chose can push a tile off: it goes to its side)
 #   wear_occasion(all, "rain", "weather")                        # the umbrella on the weather tile (occasion_charm())
-#   StageRow(icon, head, value, tint_hue(tile.tint))             # a side row in its tile's colour
+#   StageRow(icon, head, value, tint_hue(tile.tint), key=id, arrive=feed.arrives(id))   # a side row in its tile's colour; one
+#                                                                # that just left the stage for this side eases in
+#   feed.since(old)                                              # after a re-feed: which side rows just came off the stage
 
 from mojoui.livetiles import Tile
 from mojoui.charms import charm_names
+from mojoui.clock import now_ns
+
+comptime ARRIVE_MS = 900  # a side row that came off the stage arrives within this of the re-feed (View.arrive takes ~400 ms)
 
 comptime FEED_CENTRE = "centre"
 comptime FEED_PASSIVE = "passive"
@@ -42,12 +47,33 @@ struct StageFeed(Copyable, Movable):
     var today: List[String]  # the left column's quiet list (passive tiles not on the stage)
     var live: List[String]  # the right column (live tiles, and any other that isn't on the stage)
     var pinned: List[String]  # Pinned, in the order they were pinned
+    var fresh: List[String]  # side rows whose tiles were on the stage before the last re-feed (since): they ease in
+    var fresh_ns: Int  # when (now_ns) they came off
 
     def __init__(out self):
         self.stage = List[String]()
         self.today = List[String]()
         self.live = List[String]()
         self.pinned = List[String]()
+        self.fresh = List[String]()
+        self.fresh_ns = 0
+
+    def since(mut self, old: StageFeed):
+        """After a re-feed (`old`: the feed shown before it): the Today and Live rows whose tiles stood on the stage then (roomy
+        sends two tiles to the sides as the stage shrinks them away) are fresh for ARRIVE_MS: StageRow(…, arrive=arrives(id))
+        lets each ease in instead of appearing at once. A row new for any other reason, or at the start, just shows."""
+        self.fresh.clear()
+        for id in self.today:
+            if _has(old.stage, id):
+                self.fresh.append(id)
+        for id in self.live:
+            if _has(old.stage, id):
+                self.fresh.append(id)
+        self.fresh_ns = now_ns()
+
+    def arrives(self, id: String) -> Bool:
+        """Side row `id` came off the stage a moment ago (since): it arrives on the host's spring (View.arrive, once)."""
+        return len(self.fresh) > 0 and _has(self.fresh, id) and now_ns() - self.fresh_ns < ARRIVE_MS * 1_000_000
 
     def place(mut self, ranked: List[FeedTile], shown: List[String]):
         """The stage and the sides again from the ids the grid really shows (LiveTiles.layout().ids): the rest go to Today

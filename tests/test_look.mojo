@@ -10,10 +10,12 @@ from mojoui.json import Json
 from mojoui.personalize import (
     Personalize, LookPrefs, LookChange, look_values, look_labels, look_check, look_dir, is_profile_name, scheme_dark,
     accent_colour, accent_index, stage_most, is_night, look_knobs, personalize_tool, PERSONALIZE, PERSONALIZE_PARAMS, UNDO_MAX,
-    KNOB_SCHEME, KNOB_ACCENT, KNOB_PRESENCE, KNOB_DENSITY, KNOB_UNDO,
+    KNOB_SCHEME, KNOB_ACCENT, KNOB_PRESENCE, KNOB_DENSITY, KNOB_UNDO, KNOB_SWATCH, KNOB_COUNT, asked_settings, look_title,
 )
+from mojoui.accents import ACCENT_VALUES, swatch_role, SWATCH_ROLE
 from mojoui.theme import Palette
-from mojoui.view import SEGMENTED, BUTTON
+from mojoui.transition import fade_ease, MORPH_FADE_MS
+from mojoui.view import SEGMENTED, BUTTON, TEXT, ICON_ONLY
 from themes.omxqua import counter_palette
 
 
@@ -209,13 +211,13 @@ def test_knobs() raises:
             segs += 1
         if n.kind == BUTTON and n.msg == 300 + KNOB_UNDO:
             undo = True
-    assert_equal(segs, 4)
+    assert_equal(segs, 3)  # (light or dark, presence, tiles: the accent is swatches, test_swatches)
     assert_false(undo)  # (nothing to put back yet: no button)
     assert_true(look.knob(2, KNOB_SCHEME).moved())
     assert_equal(look.prefs.scheme, "dark")
     assert_true(look.knob(1, KNOB_PRESENCE).moved())
     assert_true(look.knob(1, KNOB_DENSITY).moved())
-    assert_true(look.knob(3, KNOB_ACCENT).moved())
+    assert_true(look.knob(3, KNOB_ACCENT).moved())  # (a Segmented's index still works for the accent)
     assert_equal(look.prefs.accent, "teal")
     assert_false(look.knob(9, KNOB_ACCENT).ok)
     var after = look_knobs(look.prefs, 300, look.can_undo())
@@ -226,6 +228,137 @@ def test_knobs() raises:
     assert_true(found)
     assert_true(look.knob(0, KNOB_UNDO).moved())
     assert_equal(look.prefs.accent, "default")
+
+
+def test_swatches() raises:
+    """The accent as round swatches (a button each, named by its value: tooltip, accessible name and what tap:Blue finds), the
+    chosen one ringed and ticked (its role's -on, the check icon), each sending its own message; the header says whose look."""
+    var look = Personalize("t", dir="")
+    _ = look.set("accent", "blue")
+    var v = look_knobs(look.prefs, 300, look.can_undo(), look_title(look.profile))
+    var labels = look_labels("accent")
+    var found = 0
+    for k in range(len(labels)):
+        for n in v.nodes:
+            if n.kind == BUTTON and n.text == labels[k]:
+                found += 1
+                assert_equal(n.msg, 300 + KNOB_SWATCH + k)
+                assert_equal(n.style, ICON_ONLY)
+                assert_equal(n.tip, labels[k])
+                var on = labels[k] == "Blue"
+                assert_equal(n.name, swatch_role(look_values("accent")[k], on))
+                assert_equal(n.hint, "check" if on else "circle")
+    assert_equal(found, 7)
+    assert_true(300 + KNOB_SWATCH + 6 < 300 + KNOB_COUNT, "every swatch inside the knobs' range")
+    var owner = False
+    for n in v.nodes:
+        if n.kind == TEXT and n.text == "Everyone's look" and n.name == "look-owner":
+            owner = True
+    assert_true(owner, "the header names whose look it is")
+    assert_equal(look_title("all"), "Everyone's look")
+    assert_equal(look_title("a"), "A's look")
+    assert_equal(look_title("m", "Maya"), "Maya's look")
+    assert_true(look.knob(0, KNOB_SWATCH + 6).moved())  # (the Gold swatch)
+    assert_equal(look.prefs.accent, "gold")
+    assert_true(look.knob(0, KNOB_SWATCH).moved())  # (Default)
+    assert_equal(look.prefs.accent, "default")
+    assert_false(look.knob(0, KNOB_COUNT).ok)  # (past the range: nothing)
+    assert_equal(len(materialize[ACCENT_VALUES]()), len(look_values("accent")))
+
+
+def test_unasked_settings_are_left() raises:
+    """D-8418: the person's words decide what may change. "use the mascot and make it dark" with the model's unasked roomy:
+    the presence (and in its second call the scheme) change, the density stays, and the result says why."""
+    var look = Personalize("t", dir="")
+    var said = String("use the mascot and make it dark")
+    look.begin_group()
+    var c = look.ask('{"set":{"presence":"mascot","density":"roomy"}}', utterance=said)
+    assert_true(c.ok)
+    assert_equal(look.prefs.presence, "mascot")
+    assert_equal(look.prefs.density, "compact")
+    assert_equal(len(c.ignored), 1)
+    assert_equal(c.ignored[0], "density")
+    var r = Json.parse(c.result())
+    assert_equal(r.text(r.get(r.at(r.get(0, "ignored"), 0), "setting")), "density")
+    assert_equal(r.size(r.get(0, "changed")), 1)
+    assert_true(look.ask('{"set":{"scheme":"dark"}}', utterance=said).ok)
+    look.end_group()
+    assert_equal(look.prefs.scheme, "dark")
+    assert_equal(len(look.undos), 1)  # (still one "put it back" for the turn)
+    # a request whose every setting is unasked changes nothing, and says so
+    var only = look.ask('{"set":{"density":"roomy"}}', utterance="make it dark")
+    assert_false(only.ok)
+    assert_true(only.message.find("tile size") >= 0)
+    assert_equal(look.prefs.density, "compact")
+    # an unasked setting the model left as it is isn't reported
+    var same = look.ask('{"set":{"accent":"default","scheme":"light"}}', utterance="make it light")
+    assert_true(same.ok)
+    assert_equal(len(same.ignored), 0)
+    # broad requests pass whole: no concept named, or the whole look asked for
+    for broad in ["make it feel cozy", "surprise me", "reset everything", "back to the defaults please", "personalize my look"]:
+        var b = Personalize("t", dir="")
+        var bc = b.ask('{"set":{"scheme":"dark","accent":"orange","density":"roomy"}}', utterance=broad)
+        assert_true(bc.ok, broad)
+        assert_equal(b.prefs.density, "roomy", broad)
+        assert_equal(b.prefs.accent, "orange", broad)
+        assert_equal(len(bc.ignored), 0, broad)
+    # no utterance: as before (a knob, an app's own call)
+    var plain = Personalize("t", dir="")
+    assert_true(plain.ask('{"set":{"presence":"mascot","density":"roomy"}}').ok)
+    assert_equal(plain.prefs.density, "roomy")
+
+
+def test_asked_settings_words() raises:
+    """Whole words by their start: "darker", "colours" and "tiles" count; "red" isn't in "ordered", "mode" isn't "model"."""
+    var a = asked_settings("I ordered pizza, make it darker")
+    assert_equal(len(a), 1)
+    assert_equal(a[0], "scheme")
+    var b = asked_settings("make the colours gold")
+    assert_equal(len(b), 1)
+    assert_equal(b[0], "accent")
+    var c = asked_settings("bigger tiles please")
+    assert_equal(len(c), 1)
+    assert_equal(c[0], "density")
+    var d = asked_settings("Use the MASCOT instead of the orb, and red!")
+    assert_equal(len(d), 2)
+    assert_equal(d[0], "accent")
+    assert_equal(d[1], "presence")
+    var e = asked_settings("try another model")
+    assert_equal(len(e), 4)  # (no concept: everything may change)
+    assert_equal(len(asked_settings("dark mode at night")), 1)
+    var quoted = asked_settings("use the “mascot”—and make it dark")  # (a phone keyboard's curly quotes and dash part words)
+    assert_equal(len(quoted), 2)
+    assert_equal(quoted[0], "scheme")
+    assert_equal(quoted[1], "presence")
+    var rest = asked_settings("Whatever, make it dark and don't change anything else")  # (a named concept: only it, however it goes on)
+    assert_equal(len(rest), 1)
+    assert_equal(rest[0], "scheme")
+    var orb = asked_settings("use the normal orb")
+    assert_equal(len(orb), 1)
+    assert_equal(orb[0], "presence")
+    assert_equal(len(asked_settings("see you on sunday")), 4)  # ("sun" is a whole word now, "sunday" names nothing)
+
+
+def test_fade_curve() raises:
+    """mojoui.transition's fade (D-8424): from 0 to 1, never back, through the middle quickly (light into dark shows less grey):
+    under 60 ms of its 420 between 30 % and 70 % (the standard ease spent 72), halfway near the standard ease's 147 ms."""
+    assert_equal(fade_ease(0.0), 0.0)
+    assert_equal(fade_ease(1.0), 1.0)
+    var prev = 0.0
+    var mid = 0
+    var half = -1
+    for i in range(1, 1000):
+        var y = fade_ease(Float64(i) / 1000.0)
+        assert_true(y >= prev - 1e-9, "the fade never goes back")
+        prev = y
+        if y >= 0.3 and y <= 0.7:
+            mid += 1
+        if half < 0 and y >= 0.5:
+            half = i
+    var mid_ms = Float64(mid) / 1000.0 * Float64(MORPH_FADE_MS)
+    assert_true(mid_ms < 60.0, "time in the middle: " + String(mid_ms))
+    var half_ms = Float64(half) / 1000.0 * Float64(MORPH_FADE_MS)
+    assert_true(half_ms > 130.0 and half_ms < 175.0, "halfway at " + String(half_ms))
 
 
 def test_night_by_asking() raises:
@@ -320,4 +453,8 @@ def main() raises:
     test_failed_save_leaves_no_tmp()
     test_group_is_one_undo()
     test_tool()
-    print("test_look: 16 tests passed")
+    test_swatches()
+    test_unasked_settings_are_left()
+    test_asked_settings_words()
+    test_fade_curve()
+    print("test_look: 20 tests passed")

@@ -28,7 +28,10 @@
 #                                                         change a few whitelisted settings per person (the top bar's All, A, S, M),
 #                                                         kept in ~/.local/share/mojoui/look/omx (MOJOUI_LOOK); a scheme or accent
 #                                                         morphs the window (mojoui.transition), the orb and the mascot crossfade
-#                                                         (mojoui.mascot), the tiles reflow on their water spring (mojoui.livetiles)
+#                                                         (mojoui.mascot), the tiles reflow on their water spring (mojoui.livetiles);
+#                                                         a setting the person never mentioned is left alone (D-8418); the mascot
+#                                                         sits full-size under Pinned on a desktop, the chat bar keeping the orb
+#                                                         (D-8421); an accent tints the ring, the ground, their bubbles (D-8419)
 #   the features       mojoui.assistant.Assistant         to-do (a file; the voice and the tick boxes edit it), news (cards of links),
 #                                                         think-it-through jobs (the model's second sequence), the cloud lane (`claude
 #                                                         -p`, only when asked for)
@@ -56,7 +59,7 @@
 
 from std.os.path import exists
 from mojoui.app import App, Event
-from mojoui.view import View, Node, Overlay, VStack, HStack, Text, Canvas, Spacer, CAPTION, CENTER, START, SPACE_S, SPACE_M, PRESS
+from mojoui.view import View, Node, Overlay, VStack, HStack, Text, Canvas, Spacer, CAPTION, CENTER, START, SPACE_S, SPACE_M, PRESS, TAP, HOVER, NO_MSG
 from mojoui.overlays import Popover, Checkbox
 from mojoui.agui import Agent, EV_TEXT, EV_RUN_FINISHED, EV_RUN_ERROR
 from mojoui.assistant import Assistant, ASSISTANT_SYSTEM
@@ -78,8 +81,8 @@ from mojoui.looker import Looker
 from mojoui.orb import Orb, OrbView, RimView, draw_rim, ORB_IDLE, ORB_LISTEN, ORB_THINK, ORB_SPEAK
 from mojoui.shared import environment
 from mojoui.theme import Theme, Palette, ThemeCache
-from mojoui.mascot import Presence, PRESENCE_ORB, PRESENCE_MASCOT, MASCOT_REST, mascot_pack_dir
-from mojoui.personalize import (Personalize, LookChange, look_knobs, scheme_dark, is_night, accent_colour, stage_most, KNOB_COUNT,
+from mojoui.mascot import Presence, MascotPerch, PRESENCE_ORB, PRESENCE_MASCOT, PERCH_SIDE, MASCOT_REST, mascot_pack_dir
+from mojoui.personalize import (Personalize, LookChange, look_knobs, look_title, scheme_dark, is_night, accent_colour, stage_most, KNOB_COUNT,
                                 PERSONALIZE, PERSONALIZE_ABOUT, PERSONALIZE_PARAMS)
 from mojoui.transition import Morph
 from mojoui.utf8 import head, boundary
@@ -109,11 +112,12 @@ comptime TV_CLOSE = 12
 comptime SETTINGS = 13
 comptime SETTINGS_CLOSE = 14
 comptime SAMPLES = 15
+comptime MASCOT_GESTURE = 16  # the perched mascot: a tap pokes it, the pointer resting on it leans it
 comptime PERSON = 40  # PERSON + 0 … 3: the avatars
 comptime RECENT = 60  # RECENT + k: a card shown before, into the TV again
 comptime UNPIN = 70  # UNPIN + k: pinned tile k back on the stage
-comptime KNOBS = 90  # KNOBS + 0 … 4: the look's knobs in Settings (mojoui.personalize.look_knobs)
-comptime CHIP = 100  # the suggestions: CHIP + k
+comptime CHIP = 100  # the suggestions: CHIP + k (three)
+comptime KNOBS = 120  # KNOBS + 0 … KNOB_COUNT - 1 (12): the look's knobs and swatches in Settings (mojoui.personalize.look_knobs)
 comptime TODO = 1000  # the to-do card's tick boxes: TODO + the thing's index (mojoui.assistant owns 200 numbers)
 comptime ORB_CANVAS = 1
 comptime RIM_CANVAS = 2
@@ -121,6 +125,7 @@ comptime POINTER_CANVAS = 3  # the ring she points with (mojoui.pointer), over t
 comptime TILES_CANVAS = 4
 comptime TV_CANVAS = 5  # the TV's box (over the centre column)
 comptime TV_VEIL = 6  # the TV body's veil
+comptime MASCOT_CANVAS = 7  # the mascot on its perch (a desktop, the person's presence "mascot")
 comptime CARDS = 20_000  # the cards' controls (mojoui.agentui.Screens) and their canvases
 comptime CARD_CANVASES = 2000
 comptime CREATOR_MSG = 900  # the image server's replies (mojoui.creator)
@@ -325,6 +330,7 @@ struct Main(App):
         var cols = 2 if stage_compact(width) else 4
         if cols != self.tiles.cols:
             self.tiles.set_columns(cols)
+        self.place_presence()  # (a phone puts the mascot in the chat bar; a desktop on its perch)
 
     def appearance(mut self, dark: Bool):
         self.system_dark = dark
@@ -332,6 +338,12 @@ struct Main(App):
 
     def theme_key(self) -> String:
         return ("dark/" if self.dark else "light/") + self.look.prefs.accent
+
+    def accent(self) -> UInt32:
+        """The person's accent as a colour of this scheme's palette (0: the theme's own: nothing tinted)."""
+        if self.look.prefs.accent == "default":
+            return 0
+        return accent_colour(counter_palette(self.dark), self.look.prefs.accent)
 
     def restyle(mut self):
         """The look's scheme (auto: as the system is; night, opt-in: dark from 19:00 to 7:00 by this machine's clock) and accent
@@ -343,8 +355,7 @@ struct Main(App):
         self.dark = True if pin == "1" else (False if pin == "0" else scheme_dark(self.look.prefs, self.system_dark, hour))
         var key = self.theme_key()
         if not self.themes.has(key):
-            var p = counter_palette(self.dark)
-            self.themes.put(key, omxqua_counter(self.dark, accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else UInt32(0)))
+            self.themes.put(key, omxqua_counter(self.dark, self.accent()))
         self.tiles.version += 1  # (the same tiles in the night's palette: their tints are names)
         self.tv.version += 1
 
@@ -359,10 +370,18 @@ struct Main(App):
         if self.theme_key() != was:  # (only a new scheme or accent morphs the window; the presence crossfades and the tiles reflow
             self.morph.morph()        # by themselves, D-8413)
         if c.before.presence != c.after.presence:
-            _ = self.presence.show(PRESENCE_MASCOT if c.after.presence == "mascot" else PRESENCE_ORB)
+            self.place_presence()
         if c.before.density != c.after.density:
             self.stage_sig = ""
             self.place_stage()
+
+    def place_presence(mut self):
+        """Where the presence shows (D-8421): the person's mascot full-size on its perch under Pinned on a desktop, the chat bar
+        keeping the quiet orb (never two mascots at once); in the chat bar on a phone. The pack's resting strip was decoded at
+        start, so the spring never waits on it."""
+        var want = self.look.prefs.presence == "mascot"
+        var perched = want and not stage_compact(self.width)
+        self.presence.arrange(want and not perched, perched)
 
     def transition(mut self) -> Int:
         return self.morph.take()
@@ -431,6 +450,15 @@ struct Main(App):
                 self.personalized(LookChange(True, "", before, self.look.prefs))
         elif m >= KNOBS and m < KNOBS + KNOB_COUNT:
             self.personalized(self.look.knob(e.number, m - KNOBS))
+        elif m == MASCOT_GESTURE:  # (the perched mascot: a tap pokes it, the pointer resting on it leans it)
+            if e.number == TAP:
+                self.presence.poke()
+            elif e.number == HOVER:
+                if e.x < 0 or e.y < 0:
+                    self.presence.mascot.look(0.0, 0.0, 0.0)
+                else:
+                    var half = Float64(PERCH_SIDE) * 0.5
+                    self.presence.mascot.look((e.x - half) / half, (e.y - half) / half, 0.75)
         elif m >= RECENT and m < RECENT + RECENT_MAX:
             var k = m - RECENT
             if k < len(self.recent.keys):
@@ -769,8 +797,9 @@ struct Main(App):
                 if self.looker.handles(c.name):
                     self.looker.call(c.id, c.arguments)
                     continue
-                if c.name == PERSONALIZE:  # (the person's look: checked, applied with a morph, the result says what changed)
-                    var ch = self.look.ask(c.arguments)
+                if c.name == PERSONALIZE:  # (the person's look: checked, applied with a morph, the result says what changed;
+                    var said = self.heard        # a setting their words never named is left alone, D-8418)
+                    var ch = self.look.ask(c.arguments, utterance=said)
                     self.personalized(ch)
                     self.llm.value().answer(c.id, ch.result())
                     continue
@@ -877,10 +906,12 @@ struct Main(App):
         if len(ranked) == 0:
             return
         var big = len(all) > 0 and all[0].big
+        var old = self.feed.copy()
         self.feed = stage_feed(ranked, ranked[0].id, self.pins, most=stage_most(self.look.prefs, 3 if big else 6))  # (roomy: fewer, bigger tiles)
         self.all = all^
         self.tiles.set_tiles(stage_tiles(self.all, self.feed))
         self.feed.place(ranked, self.tiles.layout().ids)
+        self.feed.since(old)  # (rows whose tiles just left the stage ease in: D-8425)
         var shown = String("")
         for id in self.tiles.layout().ids:
             shown += ("," if shown != "" else "") + id
@@ -1052,7 +1083,7 @@ struct Main(App):
         """A tile as a one-line side row: its icon, its head, its first face's big line (the job's clock ticking)."""
         var t = tile_by_id(self.all, id)
         var value = t.faces[0].big if len(t.faces) > 0 else String("")
-        return StageRow(tile_icon(t.icon), t.head, value, tint_hue(t.tint))
+        return StageRow(tile_icon(t.icon), t.head, value, tint_hue(t.tint), key=id, arrive=self.feed.arrives(id))
 
     def view(self) -> View:
         var compact = stage_compact(self.width)
@@ -1061,18 +1092,18 @@ struct Main(App):
         var settings = HStack(StagePill("settings", "Settings", SETTINGS, compact), spacing=0).tag("omx-settings")  # (the popover's
         # anchor wraps the pill: a role-wearing view is never tagged again, docs/lessons.md)
         var top_items = List[View]()
-        top_items.append(StageAvatar("All", 0, PERSON))
-        top_items.append(StageAvatar("A", 2, PERSON + 1))
-        top_items.append(StageAvatar("S", 3, PERSON + 2))
-        top_items.append(StageAvatar("M", 5, PERSON + 3))
+        top_items.append(StageAvatar("All", 0, PERSON, self.person == 0))  # (the active one ringed: whose look and things these are)
+        top_items.append(StageAvatar("A", 2, PERSON + 1, self.person == 1))
+        top_items.append(StageAvatar("S", 3, PERSON + 2, self.person == 2))
+        top_items.append(StageAvatar("M", 5, PERSON + 3, self.person == 3))
         top_items.append(settings^)
         top_items.append(Spacer())
         if not compact:
             top_items.append(where.copy())
         if self.settings_open:
-            var body = VStack(Text("Answers come from this machine (Qwen 27B) unless you ask for Claude.", CAPTION),
-                              Checkbox("Sample tiles (calendar, weather, photos, home)", self.samples_on, SAMPLES),
-                              look_knobs(self.look.prefs, KNOBS, self.look.can_undo()), spacing=SPACE_S).align(START)
+            var body = VStack(Text("Local answers; Claude when you ask.", CAPTION),  # (short lines: the popover stays as narrow as the knobs, D-8422; the top bar's lane names the model)
+                              Checkbox("Sample tiles", self.samples_on, SAMPLES).tooltip("Calendar, weather, photos and home, until omx has its own"),
+                              look_knobs(self.look.prefs, KNOBS, self.look.can_undo(), look_title(self.look.profile)), spacing=SPACE_S).align(START)
             top_items.append(Popover("omx-settings", "Settings", body^, on_close=SETTINGS_CLOSE))
         var top = HStack(top_items^, spacing=SPACE_S).align(CENTER)
         # left: what she is doing (a phone), the clock and its weather line, Today, Pinned
@@ -1097,6 +1128,8 @@ struct Main(App):
             pins.append(StageNote("Drag a tile here to keep it at your side"))
         left_items.append(VStack(VStack(StageLabel("pin", "Pinned"), StageList(pins), spacing=SPACE_S).align(START).fill().tag(
             "stage-drop" if self.tiles.hover_zone == "pinned" else "stage-pins"), spacing=0).fill().tag("stage.pins"))
+        if self.presence.perch_shown() and not compact:  # (the mascot full-size under Pinned; it stays while it leaves)
+            left_items.append(MascotPerch(MASCOT_CANVAS, self.presence.perch_version(), on_gesture=MASCOT_GESTURE if self.presence.perched else NO_MSG))
         var left = VStack(left_items^, spacing=SPACE_M).align(START)
         # right: Live (rows that keep ticking: the job's clock)
         var live = List[View]()
@@ -1127,9 +1160,12 @@ struct Main(App):
         var p = counter_palette(self.dark)  # (the palette only: the whole theme, its CSS included, is not rebuilt every frame, D-7876)
         if canvas == ORB_CANVAS:
             var gaze = self.pointer.look("orb-small")
-            self.presence.look(gaze[0], gaze[1], gaze[2])
+            self.presence.look_bar(gaze[0], gaze[1], gaze[2])  # (the chat bar's gaze; a perched mascot keeps its own)
             var tint = accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else p.series[1]
             self.presence.draw(surface, p.with_accent(tint))  # (the Counter's accent is ink: the orb in the family's blue, or the accent picked)
+        elif canvas == MASCOT_CANVAS:
+            var tint = accent_colour(p, self.look.prefs.accent) if self.look.prefs.accent != "default" else p.series[1]
+            self.presence.draw_perch(surface, p.with_accent(tint))  # (full-size on its perch; arriving or leaving on its spring)
         elif canvas == POINTER_CANVAS:
             self.pointer.draw(surface, p.with_accent(p.series[2]))  # (the ring in the family's teal: pointing reads apart from the ink)
         elif canvas == RIM_CANVAS:
@@ -1137,9 +1173,10 @@ struct Main(App):
             rim.warn = p.series[3]  # (the cloud's frame in the family's orange: the Counter's warn is a darker ink for words)
             draw_rim(surface, rim, self.assist.cloud.framed)
         elif canvas == TILES_CANVAS:
-            self.tiles.draw(surface, TileLook.on(p, counter_ground(self.dark)), self.screens.font)  # (on the stage's own ground; the cards' font)
+            self.tiles.draw(surface, TileLook.on(p, counter_ground(self.dark, self.accent())), self.screens.font)  # (on the stage's own ground, a
+            # person's accent in it; the cards' font)
         elif self.tv.draws(canvas):
-            self.tv.draw(canvas, surface, counter_tv_look(self.dark))
+            self.tv.draw(canvas, surface, counter_tv_look(self.dark, self.accent()))
         elif self.creator.owns_canvas(canvas):
             self.creator.draw(canvas, surface, p)
         elif self.looker.owns_canvas(canvas):

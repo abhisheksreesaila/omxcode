@@ -1023,7 +1023,8 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == CANVAS:
             # A MojoCanvas (an NSImageView whose scrollWheel: is Mojo) showing the app's pixels;
             # pan, pinch and click recognisers call back into it.
-            w = msg(msg(cls("MojoPassCanvas" if node.size == 2 else "MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))  # (.passthrough(): presses go under it)
+            w = msg(msg(cls("MojoPassCanvas" if node.size == 2 else "MojoCanvas"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(320), Float64(240))  # (.passthrough(): presses go under it;
+            # .see_through(), size 3: a MojoCanvas, which as an NSImageView keeps the picture's alpha anyway; not run)
             _ = msg(w, "setImageScaling:", 1)  # NSImageScaleAxesIndependently: the pixels fill the view
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             for orientation in range(2):  # its size comes from the layout, never from its picture

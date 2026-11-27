@@ -36,6 +36,14 @@ plist() {  # plist <template> <out>
   sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/HelloMojo/$NAME/g" "$1" > "$2"
 }
 
+mascots_into() {  # mascots_into <dir>: ship mascot packs beside an app that uses mojoui.mascot, as fonts/ are (D-8427)
+  if [ -d "examples/$EX/mascots" ] || grep -rq 'mojoui\.mascot' "examples/$EX/" 2>/dev/null; then
+    mkdir -p "$1/mascots"
+    if [ -d examples/stage/mascots ]; then cp -R examples/stage/mascots/* "$1/mascots/"; fi
+    if [ -d "examples/$EX/mascots" ] && [ "$EX" != stage ]; then cp -R "examples/$EX/mascots"/* "$1/mascots/"; fi
+  fi
+}
+
 companions() {  # companions <dir>: examples/$EX/companions' programs built beside the app (mojoui.companion starts them, goal 55)
   [ -f "examples/$EX/companions" ] || return 0
   grep -v '^#' "examples/$EX/companions" | while read -r name src kind; do
@@ -62,6 +70,7 @@ build_linux() {
     -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}" "${flare[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
   [ -d fonts ] && cp -R fonts/* "$out/fonts/"  # (mojoui.fonttext's faces with their OFL licences, as the Mac's: a copy outside the checkout drew no words without them, review 6)
+  mascots_into "$out"
   companions "$out" || return 1
   # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,
   # built into $out/webview by the same esbuild step. Where WebKitGTK 6.0 isn't installed, scripts/webkitgtk.sh fetches
@@ -256,6 +265,7 @@ build_mac() {
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
   [ -d fonts ] && cp -R fonts/* "$app/Contents/Resources/fonts/"  # (mojoui.fonttext's faces, OFL, with their licences: goal 79)
+  mascots_into "$app/Contents/Resources"
   # Its JavaScript (docs/js.md, goal 34b M2): each WebComponent runs in a WKWebView loading the web's own bundles, built
   # into Resources/webview by the same esbuild step (nothing for an app without web/widgets/)
   pixi run python scripts/web_assets.py --webview "$app/Contents/Resources/webview" "$EX"
@@ -275,6 +285,7 @@ build_ios() {
     -platform_version ios 17.0 26.0 -o "$app/$NAME" "$out"/*.o apple/sdk/ios/*.tbd
   plist apple/ios/Info.plist "$app/Info.plist"
   mkdir -p "$app/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/fonts/"  # the app's own fonts (D-155), registered at start
+  mascots_into "$app"
   printf 'APPL????' > "$app/PkgInfo"
   sign "$app"
   (cd "$out" && zip -qry "$NAME.ipa" Payload)

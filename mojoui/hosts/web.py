@@ -938,7 +938,7 @@ CANVAS_JS = r"""
       if (seq < st.drawnSeq) return 'ok';  // (an older answer overtaken by a newer one)
       st.drawnSeq = seq; st.pic = pic;
       if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
-      if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);
+      if (div.dataset.clear === '1') g.clearRect(0, 0, cv.width, cv.height);
       g.drawImage(img, 0, 0);
       if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic, bmp: img, w: img.width, h: img.height });
                              if (shownPics.size > 40) shownPics.delete(shownPics.keys().next().value); }
@@ -960,7 +960,7 @@ CANVAS_JS = r"""
           member.shown = mine;
           const m = meta(); st.pic = head['x-mojoui-pic'] || ''; st.drawn = m ? m.dataset.version : st.drawn; st.skin = skinNow();
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
-          if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);
+          if (div.dataset.clear === '1') g.clearRect(0, 0, cv.width, cv.height);
           g.drawImage(img, 0, 0);
           if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic: st.pic, bmp: img, w: img.width, h: img.height }); }
           st.count++; st.times.push(performance.now()); if (st.times.length > 1200) st.times.splice(0, 600);
@@ -1027,7 +1027,7 @@ CANVAS_JS = r"""
           if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic: st.pic, bmp: img, w: img.width, h: img.height });
                                  if (shownPics.size > 40) shownPics.delete(shownPics.keys().next().value); }
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
-          if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);  // (its alpha: the last frame mustn't show through)
+          if (div.dataset.clear === '1') g.clearRect(0, 0, cv.width, cv.height);  // (its alpha: the last frame mustn't show through)
           g.drawImage(img, 0, 0);
           st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
           if (st.times.length > 1200) st.times.splice(0, 600);  // (frame times, for tests; bounded)
@@ -2078,6 +2078,7 @@ def render_node(s, i, sid):
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
                    data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None, data_hover="1" if n["text"] == "hover" else None,
+                   data_clear="1" if n["size"] in (2, 3) else None,  # (.passthrough() or .see_through(): its alpha kept, each picture on a cleared canvas)
                    data_scroll="pan" if n["spacing"] == 1 else None,
                    style=";".join(([own] if own else []) + (["pointer-events:none"] if n["size"] == 2 else [])) or None)
     if kind == DIVIDER:
@@ -3680,8 +3681,8 @@ def make_app(module_dir):
                     sent.popitem(last=False)
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1)
-        clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] == 2 if 0 <= n < len(sess.nodes) else False
-        if clear:  # (.passthrough(): what it leaves unpainted shows the page beneath: PNG with its alpha, even animating)
+        clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] in (2, 3) if 0 <= n < len(sess.nodes) else False
+        if clear:  # (.passthrough() or .see_through(): what it leaves unpainted shows the page beneath: PNG with its alpha, even animating)
             tick = 0
         else:
             picture = picture.convert("RGB")
