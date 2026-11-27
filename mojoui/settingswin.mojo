@@ -242,6 +242,9 @@ struct SettingsForm(Movable):
                 var pst = TextStyle(UI, 500, False, 13)
                 for i in range(len(r.options)):
                     var pw = measure(pst, r.options[i]) + 26
+                    if px > fx and px + pw > fx + fw:  # (no room left on this line: the pills wrap inside the pane)
+                        px = fx
+                        cy += 40
                     var on = i == r.chosen
                     if on:
                         p.rect(px, cy + 2, pw, 32, sk.ink, 16)

@@ -3950,12 +3950,13 @@ struct WebShell(Movable):
             self.talk.cancel()
             self.say("Voice needs its speech model (about 640 MB, once; it runs on this computer and keeps only the words)", "Download", TOAST_VOICE)
             return
-        var py = read_setting("pnote", "voice_python", libc.exe_dir() + "/../../../.pixi/envs/voice")
-        var why = use_python_env(py)
-        if why != "":
-            self.talk.cancel()
-            self.say("Voice isn't set up: " + why)
-            return
+        comptime if CompilationTarget.is_linux():  # (the speech model's Python; the Mac uses Apple's recogniser)
+            var py = read_setting("pnote", "voice_python", libc.exe_dir() + "/../../../.pixi/envs/voice")
+            var why = use_python_env(py)
+            if why != "":
+                self.talk.cancel()
+                self.say("Voice isn't set up: " + why)
+                return
         if self.notes[i].kind == "mindmap" and not self.jam_on() and self.map.editing < 0:
             self.talk.cancel()
             self.say("Pick an idea to write in first")
