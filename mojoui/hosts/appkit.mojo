@@ -1496,8 +1496,11 @@ struct AppKitHost[A: App](Movable):
                 prefer(w, "widthAnchor", Float64(320))
             if node.value == 1:
                 self.pinned.append(i)
-        else:  # (a Draggable, a DropTarget and a WebFrame show their one child: drag and drop isn't built here yet)
-            w = new("NSStackView")
+        else:  # (a Draggable and a WebFrame show their one child; a DropTarget with on_file takes files from Finder, D-8908)
+            var takes_files = node.kind == DROP and node.msg2 != 0
+            w = new("MojoDrop") if takes_files else new("NSStackView")
+            if takes_files:
+                drop_setup(w, self_addr)
             var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP
             _ = msg(w, "setOrientation:", 1 if vertical else 0)
             # align → NSStackView alignment (NSLayoutAttribute); STRETCH = per-child constraints below
@@ -3782,6 +3785,20 @@ struct AppKitHost[A: App](Movable):
         self.asks_pending.append(a.copy())
         _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("systemAsk:"), ns_number(self_addr), Float64(0))
 
+    def files_dropped(mut self, view: Int, paths: List[String], self_addr: Int) -> Bool:
+        """(D-8908) Files from Finder let go over a DropTarget with on_file (the MojoDrop view `view`): its on_file once per file,
+        event.text = the path, as GTK's on_drop_files. The message is read once, first: the first file's screen may renumber."""
+        var m = 0
+        for k in range(min(len(self.widgets), len(self.rt.shown.nodes))):
+            if self.widgets[k] == view and self.rt.shown.nodes[k].kind == DROP:
+                m = self.rt.shown.nodes[k].msg2
+        if m == 0:
+            return False
+        for p in paths:
+            print("DROP: file " + p, flush=True)
+            self.ask_answer(m, p, self_addr)
+        return len(paths) > 0
+
     def ask_answer(mut self, message: Int, text: String, self_addr: Int):
         if message == 0:
             return
@@ -4392,6 +4409,50 @@ def on_canvas_flags[A: App](view: Int, cmd: Int, event: Int) abi("C"):
 
 # ---------- (D-7979) the input methods: bridge/mac_ime.m calls these with scalars only ----------
 
+# ---------- (D-8908) files dragged in from Finder: a DropTarget with on_file is a MojoDrop (an NSStackView taking file URLs) ----------
+
+def drop_setup(view: Int, host_addr: Int):
+    """A MojoDrop knows its host (an associated object) and takes file URLs (public.file-url) dragged over it."""
+    _ = external_call["objc_setAssociatedObject", Int](view, sel("mojoDropHost"), ns_number(host_addr), 1)  # (OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    _ = msg(view, "registerForDraggedTypes:", ns_array(["public.file-url"]))
+
+
+def board_files(pb: Int) -> List[String]:
+    """The file URLs on a pasteboard, as paths (Finder's copy, or a drag's)."""
+    var out = List[String]()
+    var types = msg(pb, "types") if pb != 0 else 0
+    if types == 0 or (msg(types, "containsObject:", ns_string("public.file-url")) & 0xFF) == 0:
+        return out^
+    var urls = msg(pb, "readObjectsForClasses:options:", msg(cls("NSArray"), "arrayWithObject:", cls("NSURL")), 0)
+    if urls == 0:
+        return out^
+    for k in range(msg(urls, "count")):
+        var u = msg(urls, "objectAtIndex:", k)
+        if (msg(u, "isFileURL") & 0xFF) != 0:
+            out.append(from_ns(msg(u, "path")))
+    return out^
+
+
+def on_drag_entered(view: Int, cmd: Int, info: Int) abi("C") -> Int:
+    """draggingEntered: / draggingUpdated:: a copy when files are dragged (NSDragOperationCopy), else nothing."""
+    return 1 if len(board_files(msg(info, "draggingPasteboard"))) > 0 else 0
+
+
+def on_drag_perform[A: App](view: Int, cmd: Int, info: Int) abi("C") -> Int8:
+    """performDragOperation:: the files to the DropTarget's on_file (AppKitHost.files_dropped)."""
+    var v = external_call["objc_getAssociatedObject", Int](view, sel("mojoDropHost"))
+    if v == 0:
+        return 0
+    var addr = msg(v, "longValue")
+    var paths = board_files(msg(info, "draggingPasteboard"))
+    return 1 if host_at[A](addr)[].files_dropped(view, paths, addr) else 0
+
+
+def fake_drag_board(view: Int, cmd: Int) abi("C") -> Int:
+    """(tests) MojoFakeDrag's draggingPasteboard: the private board the dropfile: step wrote."""
+    return msg(cls("NSPasteboard"), "pasteboardWithName:", ns_string("mojoui.drop"))
+
+
 def paste_board() -> Int:
     """The pasteboard a paste reads: the general one; in test mode a private one (mojoui.test), so a test's clipboard:
     step never replaces what the person copied."""
@@ -4402,20 +4463,7 @@ def paste_board() -> Int:
 
 def pasted_files() -> List[String]:
     """(goal 82) Files copied in Finder (file URLs on the pasteboard), as paths."""
-    var out = List[String]()
-    var pb = paste_board()
-    var types = msg(pb, "types")
-    if types == 0 or (msg(types, "containsObject:", ns_string("public.file-url")) & 0xFF) == 0:
-        return out^
-    var classes = msg(cls("NSArray"), "arrayWithObject:", cls("NSURL"))
-    var urls = msg(pb, "readObjectsForClasses:options:", classes, 0)
-    if urls == 0:
-        return out^
-    for k in range(msg(urls, "count")):
-        var u = msg(urls, "objectAtIndex:", k)
-        if (msg(u, "isFileURL") & 0xFF) != 0:
-            out.append(from_ns(msg(u, "path")))
-    return out^
+    return board_files(paste_board())
 
 
 def pasted_picture() -> String:
@@ -5979,6 +6027,28 @@ def run_step[A: App](host_addr: Int, step: String):
             _ = msg(board, "setData:forType:", data, ns_string("public.png"))
         else:
             host[].report.note("TEST: clipboardimage can't read " + rest)
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dragged from Finder onto the DropTarget tagged Tag, through its MojoDrop's own
+        # draggingEntered: and performDragOperation: (a stand-in dragging info whose pasteboard holds the file URLs; D-8908, GTK's word)
+        var kv = split_at(rest, "=")
+        var i = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == DROP and host[].rt.shown.nodes[k].name == kv[0]:
+                i = k
+        var view = host[].widgets[i] if 0 <= i < len(host[].widgets) else 0
+        var types = msg(view, "registeredDraggedTypes") if view != 0 else 0
+        if types == 0 or (msg(types, "containsObject:", ns_string("public.file-url")) & 0xFF) == 0:
+            print("TEST: no file drop target", kv[0], flush=True)
+            return
+        var urls = msg(cls("NSMutableArray"), "array")
+        for p in kv[1].split(","):
+            _ = msg(urls, "addObject:", msg(cls("NSURL"), "fileURLWithPath:", ns_string(String(p))))
+        var board = msg(cls("NSPasteboard"), "pasteboardWithName:", ns_string("mojoui.drop"))
+        _ = msg(board, "clearContents")
+        _ = msg(board, "writeObjects:", urls)
+        var fake = new("MojoFakeDrag")
+        var op = msg(view, "draggingEntered:", fake)
+        var done = msg(view, "performDragOperation:", fake) & 0xFF
+        print("DROPSTEP: " + kv[0] + " operation " + String(op) + " performed " + String(done), flush=True)
     elif verb == "answer":  # answer:<text>: the last system ask answered as its panel would (goal 82)
         if rest != "":
             host[].ask_answer(host[].ask_msg, rest, host_addr)
@@ -6747,6 +6817,14 @@ def run[A: App]() -> c_int:
     if ime_install[A](canvas):  # (D-7979: bridge/mac_ime.m linked in)
         put_shared(SLOT_MAC_IME, 1)
     register_class(canvas)
+    var drop = new_class("MojoDrop", "NSStackView")  # (D-8908: a DropTarget with on_file, files from Finder)
+    add_method(drop, "draggingEntered:", on_drag_entered, "Q@:@")
+    add_method(drop, "draggingUpdated:", on_drag_entered, "Q@:@")
+    add_method(drop, "performDragOperation:", on_drag_perform[A], "c@:@")
+    register_class(drop)
+    var fake = new_class("MojoFakeDrag", "NSObject")  # (tests: the dropfile: step's dragging info)
+    add_method(fake, "draggingPasteboard", fake_drag_board, "@@:")
+    register_class(fake)
     var pass_canvas = new_class("MojoPassCanvas", "MojoCanvas")  # .passthrough(): it only shows; presses go to what's under it (GTK's can-target off)
     add_method(pass_canvas, "hitTest:", hit_nothing, "@@:{CGPoint=dd}")
     register_class(pass_canvas)

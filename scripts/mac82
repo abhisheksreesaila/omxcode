@@ -15,12 +15,13 @@ if ! ssh "${opts[@]}" "$user" true 2>/dev/null; then  # (Tailscale down: the hou
   opts+=(-o HostKeyAlias=100.76.9.101); user=${user%@*}@10.0.0.74
   ssh "${opts[@]}" "$user" true 2>/tmp/mac82.err || { echo "UNREACHABLE: $(head -c 200 /tmp/mac82.err)"; exit 75; }
 fi
+d=${MAC82_DIR:-omxcode-g82b}  # (goal 82 integration: a session's own folder, MAC82_DIR=omxcode-g82i-t)
 mkdir -p build/g82
 tar -czf build/g82/mac-src.tar.gz --exclude=__pycache__ mojoui vendor fonts themes examples/pnote tests/fixtures/archive "$@"
-ssh "${opts[@]}" "$user" 'mkdir -p ~/omxcode-g82b' && scp -q "${opts[@]}" build/g82/mac-src.tar.gz "$user":omxcode-g82b/ || { echo "UNREACHABLE: copy"; exit 75; }
-cmd="cd ~/omxcode-g82b && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && cd src && export PATH=\$HOME/.pixi/bin:\$PATH"
+ssh "${opts[@]}" "$user" "mkdir -p ~/$d" && scp -q "${opts[@]}" build/g82/mac-src.tar.gz "$user":$d/ || { echo "UNREACHABLE: copy"; exit 75; }
+cmd="cd ~/$d && rm -rf src && mkdir src && tar -xzf mac-src.tar.gz -C src && cd src && export PATH=\$HOME/.pixi/bin:\$PATH"
 for t in "$@"; do
   n=$(basename "$t" .mojo)
-  cmd+=" ; { echo '== $t'; caffeinate -is pixi run --frozen --manifest-path \$HOME/omxcode-g54/pixi.toml bash -c 'cd ~/omxcode-g82b/src && mojo build -I . -I vendor -I examples/pnote $t -o ../bin_$n -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc > ../build_$n.log 2>&1 && ../bin_$n || { grep -A3 error ../build_$n.log | head -20; echo BUILD-FAILED; }' 2>&1; }"
+  cmd+=" ; { echo '== $t'; caffeinate -is pixi run --frozen --manifest-path \$HOME/omxcode-g54/pixi.toml bash -c 'cd ~/$d/src && mojo build -I . -I vendor -I examples/pnote $t -o ../bin_$n -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc > ../build_$n.log 2>&1 && ../bin_$n || { grep -A3 error ../build_$n.log | head -20; echo BUILD-FAILED; }' 2>&1; }"
 done
 ssh "${opts[@]}" "$user" "$cmd" | grep -v -E "warning:|~~~|^ *\^ *$|note:|Imported from|Included from|unsafe_ptr|^ +ptr$|telemetry|^ +var |^ +_ = |^ +if |^ +return |^ +for "

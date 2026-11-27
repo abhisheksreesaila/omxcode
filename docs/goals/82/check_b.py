@@ -31,7 +31,7 @@ WEBPY = WEB / ".venv/bin/python"
 
 # ---- the bars, from the draft ----
 M7_SHOWN_MS = 300        # another app's write on pnote's screen (from 2 s: the feed's poll)
-MAC_DIR = "omxcode-g82b-app"  # (the M4 folder of this worker's app builds: ~/omxcode-g54 is every worker's, and a run that reused the
+MAC_DIR = os.environ.get("G82_MAC_DIR", "omxcode-g82b-app")  # (the integration runs with its own: D-8909)  # (the M4 folder of this worker's app builds: ~/omxcode-g54 is every worker's, and a run that reused the
 # last build there ran another worker's app, 2026-11-26 19:09; this one gets its own pixi environment on its first run)
 M7_BOTHOPEN_MIN = 3      # minutes of goal 79's both-open run (with deletions on both sides and through the API)
 

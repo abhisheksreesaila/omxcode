@@ -7,7 +7,8 @@ of its own (their helpers share names with different signatures), and this file 
   docs/goals/82/check_a.py  M1 focus mode, M2 pictures, M4 print and export, TYPING (worker A)
   docs/goals/82/check_b.py  M3 import and export, M7 live updates and deletion merge (worker B)
   docs/goals/82/check_c.py  M5 voice, M6 AI (worker C)
-  docs/goals/82/check_i.py  INTEG: the integration's own checks (one drop target, the merged media store, the review fixes)
+  docs/goals/82/check_i.py  INTEG: the integration's own checks (one drop target, the merged media store, the review fixes);
+                            TYPING_MAC(_BEFORE): Mac typing before and after the CoreText cluster fix
 Each module keeps its own locking (the quiet lock shared per command or per run, the build lock per Mojo build, the Mac lock).
 """
 import importlib.util
@@ -26,7 +27,7 @@ def load(name):
 
 
 OWNER = {"M1": "check_a", "M2": "check_a", "M4": "check_a", "TYPING": "check_a", "M3": "check_b", "M7": "check_b",
-         "M5": "check_c", "M6": "check_c", "INTEG": "check_i"}
+         "M5": "check_c", "M6": "check_c", "INTEG": "check_i", "TYPING_MAC": "check_i", "TYPING_MAC_BEFORE": "check_i"}
 
 
 def table(mod):
