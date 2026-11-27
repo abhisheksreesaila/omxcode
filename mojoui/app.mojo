@@ -670,7 +670,14 @@ struct Runtime[A: App](Movable):
         return self.dispatch(Event(message, "", 0))
 
     def refresh(mut self) -> Diff:
-        """The screen again after state changed outside update() (e.g. in draw())."""
+        """The screen again after state changed outside update() (e.g. in draw(), a bench step): the system dialogs and pages
+        it asked for meanwhile go out too (D-8915: a share asked from a bench step waited for the next update, and with no
+        timer left in pnote, never came)."""
+        for a in self.app.asks():
+            self.asks_out.append(a.copy())
+        for url in self.app.opens():
+            if is_web_url(url):
+                self.opens_out.append(url)
         return self._refresh("refresh")
 
     def _refresh(mut self, cause: String) -> Diff:

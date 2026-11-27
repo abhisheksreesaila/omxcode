@@ -240,6 +240,13 @@ def signal(sig: Int, handler: SignalHandler) -> Int:
     return external_call["signal", Int](c_int(sig), handler)
 
 
+def ignore_signal(sig: Int) -> Int:
+    """signal(sig, SIG_IGN) through the one declaration above (SIG_IGN is the handler address 1 on Linux and macOS): a second
+    external_call["signal"] with an Int handler doesn't compile beside it (goal 82 integration, test_saveattack)."""
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=1)
+    return signal(sig, Pointer(to=raw).unsafe_bitcast[SignalHandler]()[])
+
+
 # threads ------------------------------------------------------------------------------------------------------------
 
 comptime ThreadArg = Pointer[UInt8, MutUntrackedOrigin]

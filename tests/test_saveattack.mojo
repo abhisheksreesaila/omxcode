@@ -212,7 +212,7 @@ def full_disk() raises:
     s.create("page", "Full")
     var id = s.current
     s.flush()
-    _ = external_call["signal", Int](c_int(25), Int(1))  # (SIGXFSZ ignored: writes fail with EFBIG)
+    _ = libc.ignore_signal(25)  # (SIGXFSZ ignored: writes fail with EFBIG; libc's one signal declaration, goal 82 integration)
     var lim = List[UInt64](length=2, fill=0)
     _ = external_call["getrlimit", c_int](c_int(1), Int(lim.unsafe_ptr()))
     var was = lim[0]

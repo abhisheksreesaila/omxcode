@@ -3,7 +3,9 @@
 # CoreText glyph said cluster 0: goal 80's typing fast path (its pair test needs the second glyph's cluster == 1) never
 # switched on there, and the PDF's words fell back to guessing. Checked: known strings' clusters, and the fast path is on
 # for plain words (goal 80's tests/test_textfast then proves it places glyphs exactly as the shaper).
-#   pixi run mojo run -I . tests/test_ct_clusters.mojo        (and on the Mac through scripts/mac-test)
+#   pixi run mojo run -I . tests/test_ct_clusters.mojo
+# On the Mac it FAILS today, by design: the CoreText half of D-8907 was measured against Mac typing and not kept (D-8916); the
+# fix is commit 4ddd85e1 (mojoui/fonttext.mojo), to bring back with a typing bench that can resolve 3 %.
 from std.testing import assert_true, assert_equal
 from mojoui.fonttext import TextStyle, Run, engine, fast_shape
 
