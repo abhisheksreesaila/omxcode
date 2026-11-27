@@ -1,0 +1,6 @@
+M1: PASS  6300 pairs; 0 wrong; 0 widgets used twice; 0 mutants missed of 10396; 10396 mutants; GTK 900 screens; GTK 0 wrong; GTK 678 were partial updates
+M2: PASS  600 rows: 0 old widgets lost; 2000 rows: 0 old widgets lost; 10000 rows: 0 old widgets lost; 499 unchanged 0.0785 ms; per row at 10,000 / 500: 1.025; 3000 lists, 0 with fewer pairs than the exact table
+M3: PASS  0 stale rows of 280 read; 280 rows read; 0 scroll positions moved; 5 runs
+M4: PASS  300 bursts; 0 lost of 1215; 1215 sent; 0 twice; 0 out of order; 0 of the host's own writes sent
+M5: PASS  said during the hang: 1; and after: 1; names its message: 1; 100 ms ones said: 0; 0.1739 µs a mark; private words in the log: 0; log ≤ 200 lines; off: 0 said
+M8: PASS  worst mean 0.881 levels; 16 cases; unscaled differs in 0; copied 0 pixels; hashed 0; uploads 0; Metal worst mean 0.881; Metal uploads 0

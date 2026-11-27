@@ -25,6 +25,7 @@ from std.memory.alloc import alloc, Layout
 from std.collections import Dict
 from std.os import getenv
 from mojoui.shared import get_shared, put_shared
+from mojoui import libc
 from mojoui.canvas import Surface
 
 comptime SLOT_FONTS = 230  # mojoui.shared slot: the process's FontEngine
@@ -1739,14 +1740,10 @@ def _registry() -> List[List[String]]:
 
 
 def _exe_dir() -> String:
-    var buf = List[UInt8](length=4096, fill=0)
-    var p = String("/proc/self/exe")
-    var n = Int(external_call["readlink", Int](p.as_c_string_span().ptr(), buf.unsafe_ptr(), 4095))
-    if n <= 0:
-        return "."
-    var s = String(from_utf8_lossy=Span(buf)[:n])
-    var cut = s.rfind("/")
-    return String(s[byte=:cut]) if cut > 0 else "."
+    """The program's folder: mojoui.libc.exe_dir (/proc/self/exe on Linux, _NSGetExecutablePath on the Mac). Before the goal 82
+    integration this read /proc/self/exe only, so an installed Mac app (pnote.app/Contents/MacOS) found no fonts unless it
+    was started from a folder holding fonts/, then crashed on a face that wasn't there (D-8917)."""
+    return libc.exe_dir()
 
 
 def _exists(path: String) -> Bool:
