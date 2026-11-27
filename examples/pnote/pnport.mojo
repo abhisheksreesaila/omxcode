@@ -45,6 +45,18 @@ struct PortResult(Copyable, Movable):
         self.skipped = List[String]()
 
 
+def first_chars(text: String, n: Int) -> String:
+    """The first n characters (code points, as Python's text[:n] counts them; never a cut inside one)."""
+    var out = String("")
+    var k = 0
+    for c in text.codepoint_slices():
+        if k >= n:
+            break
+        out += String(c)
+        k += 1
+    return out^
+
+
 def now_utc() -> String:
     return iso_utc(_wall_ns() // 1_000_000_000)
 
@@ -226,6 +238,15 @@ def map_words(text: String) -> String:
         return out^
     except:
         return ""
+
+
+def _has_nodes(text: String) -> Bool:
+    """A JSON Canvas: an object with a "nodes" array (else another app's format, or Personal Note's old Fabric JSON)."""
+    try:
+        var c = Json.parse(text)
+        return c.kind(c.get(0, "nodes")) == J_ARRAY
+    except:
+        return False
 
 
 def _num(j: Json, node: Int) -> Float64:
@@ -440,8 +461,7 @@ def import_snapshot(mut db: Database, media_dir: String, j: Json, notebooks: Int
         for k in range(j.size(notebooks)):
             var nb = j.at(notebooks, k)
             var name = String(j.text(j.get(nb, "name"), "Imported notebook").strip())
-            if name.byte_length() > 80:
-                name = String(name[byte=:80])
+            name = first_chars(name, 80)
             var color = j.text(j.get(nb, "color"))
             var cat = j.text(j.get(nb, "category"), "projects")
             books[j.text(j.get(nb, "resourceId"))] = _new_notebook(db, name if name != "" else String("Imported notebook"), color if _hex_color(color) else String("#B86B4B"), cat if cat != "" else String("projects"), j.text(j.get(nb, "icon")))
@@ -460,7 +480,7 @@ def import_snapshot(mut db: Database, media_dir: String, j: Json, notebooks: Int
             elif kind == "mindmap":
                 fmt = "mindmap"
                 body = map_words(content)
-            elif j.text(j.get(n, "contentFormat")) == "fabric" or j.kind(Json.parse(content).get(0, "nodes")) != J_ARRAY:
+            elif j.text(j.get(n, "contentFormat")) == "fabric" or not _has_nodes(content):
                 fmt = "fabric"  # (a version-1 backup's canvas: stored as it came; Personal Note converts it when it next starts)
                 body = ""
             else:
@@ -470,8 +490,7 @@ def import_snapshot(mut db: Database, media_dir: String, j: Json, notebooks: Int
             var title = j.text(j.get(n, "title"), "Untitled note")
             if title == "":
                 title = "Untitled note"
-            if title.byte_length() > 180:
-                title = String(title[byte=:180])
+            title = first_chars(title, 180)
             var icon = j.text(j.get(n, "icon"))
             var tint = j.number(j.get(n, "iconTint"), 0)
             var old = j.text(j.get(n, "resourceId"))
@@ -528,14 +547,7 @@ def vault_name(value: String, fallback: String) -> String:
         else:
             out += s
             dash = False
-    var t = String(out.strip(" .-"))
-    var n = 0
-    var cut = String("")
-    for c in t.codepoint_slices():
-        if n >= 100:
-            break
-        cut += String(c)
-        n += 1
+    var cut = first_chars(String(out.strip(" .-")), 100)
     return cut if cut != "" else fallback
 
 
@@ -675,14 +687,7 @@ def import_vault(mut db: Database, media_dir: String, files: FileSet) raises -> 
         var key = folder if folder != "" else String(DEFAULT_NOTEBOOK)
         if key not in books:
             books.append(key)
-            var name = folder.replace("/", " / ") if folder != "" else String(DEFAULT_NOTEBOOK)
-            var cut = String("")
-            var k = 0
-            for c in name.codepoint_slices():
-                if k >= 80:
-                    break
-                cut += String(c)
-                k += 1
+            var cut = first_chars(folder.replace("/", " / ") if folder != "" else String(DEFAULT_NOTEBOOK), 80)
             nb_json += ("," if nb_json != "" else "") + '{"resourceId":' + json_string(key) + ',"name":' + json_string(cut) + "}"
         var title = stem if stem != "" else String("Untitled note")
         notes_json += ("," if notes_json != "" else "") + '{"notebookResourceId":' + json_string(key) + ',"noteType":"canvas","title":' + json_string(title) + ',"content":' + canvas + ',"pageState":{"columns":1,"rows":1}}'

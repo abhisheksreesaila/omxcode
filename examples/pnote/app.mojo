@@ -1012,7 +1012,7 @@ struct Main(App):
                 if self.web[0].clip_version > 0:
                     return VStack(bar^, HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill(), spacing=0).grow().fill()
                 return VStack(bar^, desk^, spacing=0).grow().fill()
-            var dropped = DropTarget(desk^, 0, IMPORT_DROP).grow().fill()  # (goal 82 M3: files from outside: imported)
+            var dropped = DropTarget(desk^, 0, IMPORT_DROP).grow().fill().tag("drop")  # (goal 82 M3: files from outside: imported; tagged for the dropfile: test step)
             if self.web[0].clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
                 return HStack(dropped^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
             return dropped^
