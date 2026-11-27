@@ -1,0 +1,8 @@
+M0: PASS  9 screens at 1.6× (2304×1440), 187 distinct names (476 boxes), 19 text widths, pn.db seeded
+M1: PASS  Linux: 19 lines, worst 0.00 device px, no .notdef, crisp 1.00; Mac worst 0.03 px, crisp 1.00
+M2: PASS  boxes ≤ 2.0px, fills ≤ 4 levels, SSIM page-sidebar 0.976, page 0.985, page-sidebar-night 0.975, page-sidebar-crayon 0.977; build/g79/<screen>-compare.png
+M4: PASS  28 steps, worst SSIM 0.965 (step 9), saved notes equal through the web API
+M5: PASS  Linux: GtkIMContext preedit underlined at the caret, commits and paste saved exactly; Mac: NSTextInputClient on the real view
+PACKAGE: PASS  the installer touches nothing it didn't write (43 mutants noticed; a random person's files in 60 HOMEs untouched); the package draws its words from a scratch folder, installed, updated, removed; without its fonts in the system's
+M3: PASS  boxes ≤ 2.0px, fills ≤ 4 levels, SSIM canvas 0.993, mindmap 0.991, search 0.989, island-card 0.986, settings 0.985; build/g79/<screen>-compare.png
+KEYS: PASS  Linux: real keys and a pointer in kit, workbook, sketch, the player, omxplorer, pnote; Mac: the system's key events in kit and pnote; a key drawn at once while the clock runs (D-8099)

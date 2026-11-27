@@ -627,7 +627,9 @@ def native_shot(screen, ref, outdir, skin=None):
     meta = json.loads((ref / "meta.json").read_text()) if (ref / "meta.json").exists() else {}
     if meta.get("shots", {}).get(screen):
         env["PNOTE_NOW"] = meta["shots"][screen]
-    r = run(["scripts/testscreen", str(APP)], 600, env=env)
+    (OUT / "no-models").mkdir(parents=True, exist_ok=True)  # (goal 82 integration, D-8918: the web's reference has no voice
+    env["HF_HUB_CACHE"] = str(OUT / "no-models")  # installed, so pnote runs with no speech model either: its Voice row says
+    r = run(["scripts/testscreen", str(APP)], 600, env=env)  # "Not installed" as the web's does, not "Ready" from this machine's cache
     log = r.stdout + r.stderr
     (outdir / f"{screen}.log").write_text(log)
     if not png.exists():
