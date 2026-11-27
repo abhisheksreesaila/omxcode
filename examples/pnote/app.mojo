@@ -38,7 +38,10 @@ from mojoui.view import PASTE_FILE
 from mojoui.systemask import SystemAsk
 from mojoui.dragdrop import DropTarget
 from pnstore import default_notes_file
-from mojoui.files import read_setting
+from mojoui.files import read_setting, file_argument
+from mojoui.shared import arguments
+from std.os.path import isdir
+from mojoui.dragdrop import DropTarget
 from mojoui.fonttext_check import fontcheck
 from mojoui.glyphwarm import WARM_TICK_MS
 from mojoui.menus import MenuBar, Menu, Item, Separator
@@ -58,7 +61,10 @@ comptime PALETTE_CANCEL = 8
 comptime DELETE_NOTE = 9
 comptime WARM_TICK = 11  # (D-8002: glyphs readied while nothing happens)
 comptime FEED_TICK = 12  # the notes file looked at for what another app did
-comptime FEED_TICK_MS = 2000
+comptime FEED_TICK_MS = 2000  # (only when the notes file can't be watched, or another app's change waits for words typed here)
+comptime FEED_RETRY_MS = 100  # (goal 82 M7) a file event that came during a save of ours or a gesture: looked at again this soon
+comptime IMPORT_DROP = 14  # (goal 82 M3) a file or folder dropped on the window: imported (a backup, a vault, a .canvas)
+comptime JOBS_WAKE = 13  # (goal 82 M7) App.jobs_message: the notes file was written (mojoui.filewatch), or a job ended
 comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
 
 comptime PAGE = 0
@@ -300,6 +306,16 @@ struct Main(App):
             elif self.web[0].problem == "":
                 self.web[0].create("canvas")  # (no note yet: one to start on, as the web makes)
             print("PNOTE WEB: " + String(len(self.web[0].notes)) + " notes from " + pn_db, flush=True)
+            var given = environment("PNOTE_OPEN", "")  # (goal 82 M3: opened with a backup, a vault or a .canvas file)
+            if given == "":
+                given = file_argument([".json", ".zip", ".canvas", ".md"])
+            if given == "":
+                var words = arguments()
+                for k in range(1, len(words)):
+                    if isdir(words[k]) and not words[k].startswith("-"):
+                        given = words[k]
+            if given != "":
+                _ = self.web[0].import_path(given)
             return
         var dir = environment("PNOTE_DIR", "")
         if dir == "":
@@ -562,9 +578,14 @@ struct Main(App):
             return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() or self.web[0].saving() else 500, SAVE_TICK)]
         if len(self.web) > 0 and self.web[0].readying():
             return [Every(WARM_TICK_MS, WARM_TICK)]
-        if len(self.web) > 0:
+        if len(self.web) > 0 and self.web[0].feed_due:
+            return [Every(FEED_RETRY_MS, FEED_TICK)]
+        if len(self.web) > 0 and (not self.web[0].watch.ready() or self.web[0].behind):  # (D-8601: file events, not a poll, when they can be had)
             return [Every(FEED_TICK_MS, FEED_TICK)]
         return List[Every]()
+
+    def jobs_message(self) -> Int:
+        return JOBS_WAKE if len(self.web) > 0 else 0
 
     def draws_after_closing(self) -> Bool:
         return len(self.web) > 0
@@ -825,11 +846,22 @@ struct Main(App):
                     self.version += 1
                 return
             if m == FEED_TICK:  # (another app on the same notes file)
-                if self.web[0].refresh():
+                if self.web[0].file_event() or self.web[0].refresh():
+                    self.version += 1
+                return
+            if m == IMPORT_DROP:
+                if self.web[0].import_path(event.text):
+                    self.version += 1
+                self.version += 1
+                return
+            if m == JOBS_WAKE:  # (the notes file was written: mojoui.filewatch woke the host)
+                if self.web[0].file_event():
                     self.version += 1
                 return
             if m == WARM_TICK:
                 self.web[0].ready_step()
+                if self.web[0].file_event():
+                    self.version += 1
                 return
             self.web[0].warm.touch()
             if m >= MENU0 and m < MENU0 + 32:
@@ -1000,9 +1032,10 @@ struct Main(App):
                 if self.web[0].clip_version > 0:
                     return VStack(bar^, HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill(), spacing=0).grow().fill()
                 return VStack(bar^, desk^, spacing=0).grow().fill()
+            var dropped = DropTarget(desk^, 0, IMPORT_DROP).grow().fill().tag("drop")  # (goal 82 M3: files from outside: imported; tagged for the dropfile: test step)
             if self.web[0].clip_version > 0:  # (something was copied: the hosts put it on the system clipboard)
-                return HStack(desk^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
-            return desk^
+                return HStack(dropped^, Clipboard(self.web[0].clip, self.web[0].clip_version), spacing=0).grow().fill()
+            return dropped^
         var side = List[View]()
         side.append(SidebarHead("Notes", String(len(self.rows))))
         side.append(TextField(self.query, "Search notes", on_change=SEARCH).fill().tag("search"))

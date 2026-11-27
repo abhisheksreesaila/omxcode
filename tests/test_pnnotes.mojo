@@ -10,6 +10,7 @@ from mojoui.files import private_dir
 from mojoui.scene import Scene
 from mojoui.sqlite import Database
 from mojoui.docstore import clock_us
+from mojoui.json import Json
 from webshell import WebShell, fts_words
 from pnstore import default_notes_file
 
@@ -714,9 +715,17 @@ def menus_and_exports() raises:
         if "- Leaf é" in t:
             found += 10
     assert_equal(found, 11)
-    s.export_backup()
+    s.export_database()  # (goal 79's Backup, a SQLite copy: kept as export_database, D-8611)
     var path = String(s.toast[byte=s.toast.find("build/"):s.toast.byte_length()])
     assert_equal(Database(path).count("SELECT COUNT(*) FROM notes"), count("SELECT COUNT(*) FROM notes"))
+    s.export_backup()  # (goal 82 M3: the card's Backup is Personal Note's own JSON backup, every note in it)
+    var jpath = String(s.toast[byte=s.toast.find("build/"):s.toast.byte_length()])
+    var jtext: String
+    with open(jpath, "r") as h:
+        jtext = h.read()
+    var j = Json.parse(jtext)
+    assert_equal(j.text(j.get(0, "format")), "personal-note-workspace")
+    assert_equal(j.size(j.get(0, "notes")), count("SELECT COUNT(*) FROM notes"))
     s.close()
 
 

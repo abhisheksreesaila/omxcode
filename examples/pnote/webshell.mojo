@@ -48,6 +48,7 @@ from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
 from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
+from mojoui.docstore import as_it_is
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
@@ -80,6 +81,12 @@ comptime MSG_DROPPED = 14  # a file dropped on the window from the file manager
 comptime MSG_PRINTED = 15  # the print dialog closed
 comptime MSG_SAVED_AS = 16  # the save dialog chose where the PDF or PNG goes
 comptime MSG_SHARED = 17  # the share sheet was shown
+from mojoui.filewatch import FileWatch
+from mojoui.merge3 import merge_keyed
+from mojoui.clock import now_ns
+from mojoui.archive import FileSet, read_zip, zip_bytes, read_folder
+from pnport import backup_json, import_backup, vault_files, import_vault, media_dir_of, PortResult, one_file_set
+from std.os.path import isdir
 
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
@@ -539,6 +546,9 @@ struct WebShell(Movable):
     var dropped_us: Int  # when a row's drag last ended (the tap that may follow it opens nothing)
     var book_card: Int  # the notebook whose card is open (-1: none)
     var known_seq: Int  # the notes file's change feed, as last seen (-1: not yet)
+    var watch: FileWatch  # (goal 82 M7) the notes file and its WAL, watched by the system's file events
+    var feed_due: Bool  # a write was seen that refresh() hasn't looked at yet (a save of ours or a gesture was under way)
+    var feed_at_ns: Int  # when that write was seen
     var clip: String  # what was copied last, and how many times something was
     var clip_version: Int
     var words_clips: Int
@@ -664,6 +674,9 @@ struct WebShell(Movable):
         self.picture_queue = List[String]()
         self.doubled_us = -1_000_000
         self.known_seq = -1
+        self.watch = FileWatch([db_path, db_path + "-wal", db_path + "-journal"], wake=True)
+        self.feed_due = False
+        self.feed_at_ns = 0
         self.owed = 0
         self.dropped_us = -1_000_000
         self.book_card = -1
@@ -697,6 +710,9 @@ struct WebShell(Movable):
             self.outbox.load()
             self.dbs[0].map_reads()  # (a 12 MB canvas row copied from mapped pages, not read 4 KB at a time)
             self.load()
+            self.known_seq = self.dbs[0].count("SELECT sequence FROM workspace_state WHERE id = 1")  # (the first change seen is a change)
+            if getenv("PNOTE_WATCH") != "0":
+                self.watch.start()
             self.recall_folds()
             self.forget_pictures()
             self.reconcile()
@@ -1869,6 +1885,26 @@ struct WebShell(Movable):
         except e:
             return False
 
+    def feed_waits(self) -> Bool:
+        """refresh() would look later: a save of ours is on its way (its outcome first), or a pointer gesture is under way."""
+        return len(self.dbs) == 0 or self.saving() or self.hand_down()
+
+    def file_event(mut self) -> Bool:
+        """(goal 82 M7) The notes file was written (mojoui.filewatch: another app, an agent, or a save of ours): what it says is
+        read now (refresh), or as soon as a save of ours or a gesture is over (App.every asks again in 100 ms). True when the
+        screen changes."""
+        if self.watch.changed():
+            if not self.feed_due:
+                self.feed_at_ns = self.watch.last_ns()
+            self.feed_due = True
+        if not self.feed_due or self.feed_waits():
+            return False
+        self.feed_due = False
+        var shown = self.refresh()
+        if shown:
+            print("PNOTE WATCH: read again " + String((now_ns() - self.feed_at_ns) // 1000) + " us after the write was seen", flush=True)
+        return shown
+
     def written_on(self) -> Bool:
         """Words typed into what is being written, or a composition, that no save has yet; a new idea (it isn't in the file until
         it is done)."""
@@ -2241,7 +2277,8 @@ struct WebShell(Movable):
         if self.saver.due(clock_us()):  # (one still being written doesn't hold the next up: a locked file could for a minute)
             self.save_later()
         self.spill_waiting()
-        return self.save_state != before
+        var shown = self.feed_due and self.file_event()
+        return self.save_state != before or shown
 
     def spill_waiting(mut self):
         """Saves that have waited their turn a while (the file is locked): on disk too, so a crash loses none of them."""
@@ -2385,6 +2422,17 @@ struct WebShell(Movable):
                     self.written.insert(0, w^)
                     self.start_save()
                     if not wait:
+                        return locked
+                    continue
+            if r.status == CONFLICT and self.note_index(w.id) >= 0:  # (goal 82 M7: another writer's edits elsewhere in it: both kept, their deletions too)
+                var m = self.merge_save(self.note_index(w.id), w.content, w.base)
+                if m.status == SAVED:
+                    self.merged_note(self.note_index(w.id), m, w.content, w.base, w.upto)
+                    for k in range(len(self.written)):  # (the next of it builds on what this window had: it meets the row and merges too)
+                        if self.written[k].id == w.id:
+                            self.written[k].base = DocBase(w.base.revision, w.content, 0, w.base.plain)
+                    if not wait:
+                        self.start_save()
                         return locked
                     continue
             if r.status != SAVED:  # (what is held is the newest there is of it)
@@ -2637,8 +2685,69 @@ struct WebShell(Movable):
             self.rebased(i, rev)
             base.revision = rev
             r = self.settled(save_row(self.dbs[0], self.row_save(i, base.revision, content, body)), id, content)
+        if r.status == CONFLICT:  # (goal 82 M7: another writer's edits elsewhere in it: both kept, their deletions too)
+            var m = self.merge_save(i, content, base)
+            if m.status == SAVED:
+                self.merged_note(i, m, content, base)
+                return True
         self.saved_note(i, r, content, body, base)
         return r.status == SAVED
+
+    def merge_save(mut self, i: Int, content: String, base: DocBase) -> SaveResult:
+        """(goal 82 M7, D-8603) A save that met another writer's: when their edits and these touch different objects or ideas,
+        both are put together (mojoui.merge3: what they deleted and these left alone stays deleted; what they added or changed
+        is taken) and saved on top of the row as it is now. Not SAVED: they overlap (or it isn't a canvas or a map, or the base
+        isn't known), and the caller holds the edits as a conflict, as before."""
+        var kind = String(self.notes[i].kind)
+        var id = self.notes[i].id
+        if (kind != "canvas" and kind != "mindmap") or base.text == "" or len(self.dbs) == 0:
+            return SaveResult(CONFLICT, -1, "", "not merged")
+        try:
+            var q = self.dbs[0].prepare("SELECT revision, content FROM notes WHERE id = ? AND secure = 0")
+            q.bind(1, id)
+            if not q.step():
+                return SaveResult(CONFLICT, -1, "", "not merged: the row is gone")
+            var rev = q.int(0)
+            var theirs = q.text(1)
+            var arrays: List[String] = ["nodes", "edges"] if kind == "canvas" else ["nodes"]
+            var m = merge_keyed(base.text, content, theirs, arrays, "id", undecorated if kind == "canvas" else as_it_is)
+            if not m.ok:
+                print("PNOTE SAVE: not merged note " + String(id) + ": " + m.why, flush=True)
+                return SaveResult(CONFLICT, -1, "", "not merged: " + m.why)
+            var body: String
+            if kind == "canvas":
+                body = reading_text(import_json_canvas(m.text))
+            else:
+                var bm = BuzanMap()
+                _ = read_map(m.text, bm)
+                body = map_text(bm)
+            var r = save_row(self.dbs[0], self.row_save(i, rev, m.text, body))
+            if r.status == SAVED:
+                print("PNOTE SAVE: merged note " + String(id) + " with another app's changes at revision " + String(rev) + ": theirs " + String(m.theirs) + " (deleted " + String(m.deleted) + " stay deleted), mine " + String(m.mine) + " -> revision " + String(r.revision), flush=True)
+            return r^
+        except e:
+            return SaveResult(CONFLICT, -1, "", "not merged: " + String(e))
+
+    def merged_note(mut self, i: Int, r: SaveResult, mine: String, base: DocBase, upto: Int = 0):
+        """A merged save landed: nothing of it is held. The open note's screen has these edits but not the other writer's: its
+        next save builds on what it had at the revision it had, so it meets the row and merges again; it is read again (the
+        other writer's edits shown, the caret where it was) as soon as nothing here is unsaved (refresh)."""
+        var id = self.notes[i].id
+        if self.queued_at(id) >= 0:
+            self.outbox.landed(id, upto)
+        else:
+            self.outbox.drop(id)
+        self.unheld(id)
+        if id == self.current and self.doc.may_edit():
+            self.doc.base = DocBase(base.revision, mine, 0, base.plain)
+            self.doc.revision = base.revision
+            self.save_state = ""
+            self.save_detail = ""
+            self.behind = True
+            self.feed_due = True
+        else:
+            self.notes[i].revision = r.revision
+            self.notes[i].updated = r.value
 
     def rebased(mut self, i: Int, revision: Int):
         """Note i's edits build on the row as it is at `revision` (the same words)."""
@@ -2785,8 +2894,34 @@ struct WebShell(Movable):
         except e:
             self.say("Couldn’t export: " + String(e))
 
+    def export_name(self, name: String, ext: String) -> String:
+        """A new file in the exports folder: name.ext, else "name (2).ext" … (as a browser names a second download)."""
+        var base = self.export_folder() + "/" + name
+        var path = base + "." + ext
+        var again = 1
+        while file_exists(path):
+            again += 1
+            path = base + " (" + String(again) + ")." + ext
+        return path
+
     def export_backup(mut self):
-        """The whole notes file, as one database of its own (SQLite's VACUUM INTO: consistent, nothing lost). Told where."""
+        """(goal 82 M3) The whole workspace as Personal Note's own backup (personal-note-backup.json: lossless, its pictures
+        inside, the web app imports it), in the exports folder. Told where."""
+        self.flush()
+        try:
+            makedirs(self.export_folder(), exist_ok=True)
+            var text = backup_json(self.dbs[0], media_dir_of(self.db_path))
+            var path = self.export_name("personal-note-backup", "json")
+            with open(path, "w") as f:
+                f.write(text)
+            self.say("Backed up to " + path)
+            print("PNOTE EXPORT: " + path, flush=True)
+        except e:
+            self.say("Couldn’t back up: " + String(e))
+
+    def export_database(mut self):
+        """(goal 79's Backup, kept: D-8611) The whole notes file as one database of its own (SQLite's VACUUM INTO: consistent,
+        nothing lost, the web's own format on disk). Told where."""
         self.flush()
         try:
             makedirs(self.export_folder(), exist_ok=True)
@@ -2803,6 +2938,65 @@ struct WebShell(Movable):
             print("PNOTE EXPORT: " + path, flush=True)
         except e:
             self.say("Couldn’t back up: " + String(e))
+
+    def export_vault(mut self):
+        """(goal 82 M3) The workspace as an Obsidian vault (personal-note-obsidian-vault.zip: a folder a notebook, canvases as
+        .canvas with their pictures under attachments/, pages and maps as Markdown), in the exports folder. Told where."""
+        self.flush()
+        try:
+            makedirs(self.export_folder(), exist_ok=True)
+            var files = vault_files(self.dbs[0], media_dir_of(self.db_path))
+            if len(files.skipped) > 0:
+                var t = String("These notes could not be exported:\n")
+                for x in files.skipped:
+                    t += "- " + x + "\n"
+                files.add_text("NOT-EXPORTED.txt", t)
+            var zip = zip_bytes(files)
+            var path = self.export_name("personal-note-obsidian-vault", "zip")
+            with open(path, "w") as f:
+                f.write_bytes(Span(zip))
+            self.say("Obsidian vault written to " + path)
+            print("PNOTE EXPORT: " + path + " " + String(len(files)) + " files", flush=True)
+        except e:
+            self.say("Couldn’t export: " + String(e))
+
+    def import_path(mut self, path: String) -> Bool:
+        """(goal 82 M3) A backup (.json), an Obsidian vault (a .zip or a folder) or one .canvas / .md file, added as new notes
+        in new notebooks; nothing that exists changes. Told what came in. True when notes were added."""
+        if len(self.dbs) == 0:
+            return False
+        self.commit_delete()  # (a note deleted a moment ago, its Undo still showing, would come back with the list read again)
+        self.flush()
+        var low = path.lower()
+        try:
+            var r: PortResult
+            var media = media_dir_of(self.db_path)
+            if isdir(path):
+                r = import_vault(self.dbs[0], media, read_folder(path))
+            elif low.endswith(".zip"):
+                var bytes: List[UInt8]
+                with open(path, "r") as f:
+                    bytes = f.read_bytes()
+                r = import_vault(self.dbs[0], media, read_zip(bytes))
+            elif low.endswith(".canvas") or low.endswith(".md"):
+                r = import_vault(self.dbs[0], media, one_file_set(path))
+            elif low.endswith(".json"):
+                var text: String
+                with open(path, "r") as f:
+                    text = f.read()
+                r = import_backup(self.dbs[0], media, text)
+            else:
+                self.say("Personal Note imports a backup (.json), an Obsidian vault (.zip or a folder) or a .canvas file")
+                return False
+            self.load()
+            self.panel_counts()
+            self.say("Imported " + String(r.notes) + (" note" if r.notes == 1 else " notes") + " into " + String(r.notebooks) + (" notebook" if r.notebooks == 1 else " notebooks") + ("" if len(r.skipped) == 0 else " (" + String(len(r.skipped)) + " files skipped)"))
+            print("PNOTE IMPORT: " + path + " " + String(r.notes) + " notes " + String(r.notebooks) + " notebooks " + String(len(r.skipped)) + " skipped", flush=True)
+            return r.notes > 0
+        except e:
+            self.say("Import failed: " + String(e) + ". Nothing was changed.")
+            print("PNOTE IMPORT: failed " + path + ": " + String(e), flush=True)
+            return False
 
     def choose_icon(mut self, box: String):
         """The icon picker, opened at a button."""
@@ -4279,6 +4473,8 @@ struct WebShell(Movable):
                 self.export_markdown()
             elif ch == "#share-backup":
                 self.export_backup()
+            elif ch == "#share-vault":
+                self.export_vault()
             elif ch == "#share-icon":
                 self.choose_icon("#island")
             elif ch == "#share-focus":
