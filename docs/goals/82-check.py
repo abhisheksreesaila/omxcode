@@ -6,7 +6,8 @@ Worker B (2026-11-26) wrote M3 (import and export) and M7 (live updates and the 
 by the same pattern (m<n>_* functions, ALL below), merged later. Written before the runs from the draft's words; never edited
 to make a milestone pass (add, don't weaken; checker bugs are logged in docs/decisions.md with why the fix isn't a weakening).
 
-Machine rules: every Mojo build and GUI run takes ~/.cache/omx-quiet.lock shared (a judged race holds it alone), builds and
+Machine rules: every Mojo build takes ~/.cache/omx-build.lock exclusively (one build on the machine at a time) and the whole run
+holds ~/.cache/omx-quiet.lock shared (a judged race holds it alone); builds and
 the app use 6 cores at most, windows only on a headless Xvfb (scripts/headless.py through docs/goals/79/xdrive.py), the Mac
 through scripts/mac82 (which takes ~/.cache/omx-mac.lock itself). Scratch files only, under build/g82; the web app
 (~/Projects/personalnotev2) is run read-only: its own Python, -B -I, on scratch databases (docs/goals/82/webport.py).
@@ -24,6 +25,7 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pixi.toml").exi
 OUT = ROOT / "build" / "g82"
 CORES = os.environ.get("G82_CORES", "0-5")
 LOCK = os.path.expanduser("~/.cache/omx-quiet.lock")
+BUILD_LOCK = os.path.expanduser("~/.cache/omx-build.lock")  # (main session, 2026-11-26 after the 17:39 stop: one Mojo build at a time on the machine, exclusive)
 WEB = Path(os.path.expanduser("~/Projects/personalnotev2"))
 WEBPY = WEB / ".venv/bin/python"
 
@@ -32,10 +34,10 @@ M7_SHOWN_MS = 300        # another app's write on pnote's screen (from 2 s: the 
 M7_BOTHOPEN_MIN = 3      # minutes of goal 79's both-open run (with deletions on both sides and through the API)
 
 
-def run(cmd, timeout, env=None, lock=True, cwd=None):
+def run(cmd, timeout, env=None, lock=True, cwd=None, build=False):
     e = dict(os.environ)
     e.update(env or {})
-    pre = (["flock", "-s", LOCK] if lock and not os.environ.get("G82_LOCKED") else []) + ["taskset", "-c", CORES, "nice", "-n", "5"]
+    pre = (["flock", "-s", LOCK] if lock and not os.environ.get("G82_LOCKED") else []) + (["flock", BUILD_LOCK] if build else []) + ["taskset", "-c", CORES, "nice", "-n", "5"]
     try:
         return subprocess.run(pre + cmd, cwd=cwd or ROOT, capture_output=True, text=True, timeout=timeout, env=e)
     except subprocess.TimeoutExpired as x:
@@ -73,12 +75,12 @@ def mojo_test(path, built=False, timeout=2400):
     name = Path(path).stem.removeprefix("test_")
     if built:
         exe = OUT / f"bin_{name}"
-        r = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", "-I", "examples/pnote", path, "-o", str(exe)], timeout)
+        r = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", "-I", "examples/pnote", path, "-o", str(exe)], timeout, build=True)
         if r.returncode != 0:
             return {}, f"{path} build: {tail(r.stdout + r.stderr)}"
         r = run([str(exe)], timeout, lock=False)
     else:
-        r = run(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", path], timeout)
+        r = run(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", path], timeout, build=True)  # (mojo run compiles: a build)
     said = r.stdout + r.stderr
     if r.returncode != 0 or f"{name}: ok" not in said:
         return facts(said), f"{path} rc {r.returncode}: {tail(said)}"
@@ -107,7 +109,7 @@ def pnote_built():
     exe = ROOT / "build/pnote/linux/pnote"
     newest = max(p.stat().st_mtime for d in ["mojoui", "examples/pnote"] for p in (ROOT / d).rglob("*.mojo"))
     if not exe.exists() or exe.stat().st_mtime < newest:
-        r = run(["bash", "scripts/build.sh", "pnote", "linux"], 3600)
+        r = run(["bash", "scripts/build.sh", "pnote", "linux"], 3600, build=True)
         if r.returncode != 0:
             return f"pnote build: {tail(r.stdout + r.stderr)}"
     return None

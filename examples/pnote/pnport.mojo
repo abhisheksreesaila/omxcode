@@ -17,7 +17,9 @@ from std.math import floor, ceil
 from mojoui.sqlite import Database
 from mojoui.json import Json, json_string, J_OBJECT, J_ARRAY, J_STRING, J_NUMBER
 from mojoui.jsonedit import members, elements, find_member
-from mojoui.archive import FileSet
+from mojoui.archive import FileSet, safe_relative
+from mojoui.files import file_exists
+from mojoui.mediafiles import MAX_MEDIA_BYTES
 from mojoui.mediafiles import put_media, read_media, data_url, decode_data_url, ext_of_suffix
 from mojoui.objectlayer import import_json_canvas, reading_text
 from mojoui.hash import sha256, hex
@@ -700,3 +702,47 @@ def import_vault(mut db: Database, media_dir: String, files: FileSet) raises -> 
     for s in files.skipped:
         res.skipped.append(s)
     return res^
+
+
+def one_file_set(path: String) raises -> FileSet:
+    """One .canvas or .md file, opened by itself, as a vault of one: a .canvas's pictures, named by vault paths as Obsidian
+    names them, looked for from the file's folder up through its parents (the vault's root is one of them; 8 levels at most),
+    so a canvas opened from inside a vault keeps its pictures. Only safe relative names, only picture types, 20 MB at most."""
+    var out = FileSet()
+    var slash = path.rfind("/")
+    var name = String(path[byte = slash + 1 :])
+    var dir = String(path[byte=:slash]) if slash > 0 else String(".")
+    var bytes: List[UInt8]
+    with open(path, "r") as f:
+        bytes = f.read_bytes()
+    out.add(name, bytes.copy())
+    if not name.lower().endswith(".canvas"):
+        return out^
+    var text = String(from_utf8_lossy=Span(bytes))
+    try:
+        var j = Json.parse(text)
+        var nodes = j.get(0, "nodes")
+        for k in range(j.size(nodes)):
+            var n = j.at(nodes, k)
+            if j.text(j.get(n, "type")) != "file":
+                continue
+            var ref_name = String(j.text(j.get(n, "file")).split("#")[0])
+            var rel = safe_relative(ref_name)
+            if rel == "" or ext_of_suffix(String(rel[byte = rel.rfind(".") + 1 :])) == "" or out.find(rel) >= 0:
+                continue
+            var up = dir
+            for _ in range(8):
+                if file_exists(up + "/" + rel):
+                    var data: List[UInt8]
+                    with open(up + "/" + rel, "r") as f:
+                        data = f.read_bytes()
+                    if len(data) <= MAX_MEDIA_BYTES:
+                        out.add(rel, data^)
+                    break
+                var s2 = up.rfind("/")
+                if s2 <= 0:
+                    break
+                up = String(up[byte=:s2])
+    except:
+        pass
+    return out^

@@ -69,7 +69,7 @@ from mojoui.filewatch import FileWatch
 from mojoui.merge3 import merge_keyed
 from mojoui.clock import now_ns
 from mojoui.archive import FileSet, read_zip, zip_bytes, read_folder
-from pnport import backup_json, import_backup, vault_files, import_vault, media_dir_of, PortResult
+from pnport import backup_json, import_backup, vault_files, import_vault, media_dir_of, PortResult, one_file_set
 from std.os.path import isdir
 
 comptime S_PAGE = 0
@@ -2824,10 +2824,7 @@ struct WebShell(Movable):
                     bytes = f.read_bytes()
                 r = import_vault(self.dbs[0], media, read_zip(bytes))
             elif low.endswith(".canvas") or low.endswith(".md"):
-                var one = FileSet()
-                with open(path, "r") as f:
-                    one.add(String(path[byte = path.rfind("/") + 1 :]), f.read_bytes())
-                r = import_vault(self.dbs[0], media, one)
+                r = import_vault(self.dbs[0], media, one_file_set(path))
             elif low.endswith(".json"):
                 var text: String
                 with open(path, "r") as f:
