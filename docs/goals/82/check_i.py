@@ -39,6 +39,7 @@ RACE = next((d for d in [Path(os.path.expanduser("~/.abode/home/worktrees/mojo-u
 TYPE_ROWS = ["wait:800", "window:1440x900", "wait:1500", "appbench:desk=zoom100", "framebench:desk=typing,80"]  # (worker A's TYPING rows)
 PAGE_ROWS = ["wait:800", "window:1440x900", "wait:1500", "framebench:desk=typing,80"]
 WORSE = 1.03
+ROUNDS = int(os.environ.get("G82_TYPING_ROUNDS", "3"))  # (runs a side, alternated; the median judged. 7 after the first 3 couldn't resolve 3 %: D-8913)
 KEYS = ("lat_p95", "lat_max", "lat_code_p95", "lat_code_max", "gap_p95", "gap_max")  # (the Mac's FRAMEBENCH on Metal: frame times read 0, D-8911)
 
 
@@ -108,21 +109,22 @@ def judge_drop(said, where):
 
 
 def linux_drop():
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import headless
-    if not headless.ensure():
-        return [(False, "Linux drop: no headless display")]
+    """pnote on the hidden 1.6× test screen (scripts/testscreen, as worker A's runs: Xvfb painted no frame after a drop, so the
+    queued picture was never placed there), a fresh notes file: a picture dropped, then a .canvas file, through GTK's own drop
+    signal (the dropfile: step); a picture taken after each, so a painted frame is part of the proof."""
+    if subprocess.run(["scripts/gpu-free"], cwd=ROOT, capture_output=True).returncode:
+        return [(False, "Linux drop: gpu-free said no (another project's GPU job): run again")]
     d = OUT / "integ-drop"
     shutil.rmtree(d, ignore_errors=True)
     pic, canvas = drop_files(d / "files")
-    for k in ("cfg", "data", "home"):
+    for k in ("cfg", "data"):
         (d / k).mkdir(parents=True)
-    e = dict(os.environ, PNOTE_DB=str(d / "notes.db"), OMX_CONFIG=str(d / "cfg"), OMX_DATA=str(d / "data"), HOME=str(d / "home"), CUDA_VISIBLE_DEVICES="", MOJOUI_GPU2D="0",
-             LIBGL_ALWAYS_SOFTWARE="1", MOJOUI_TEST=f"pause:2500;dropfile:drop={pic};wait:2500;dropfile:drop={canvas};wait:2500;quit")
-    r = subprocess.run(["flock", "-s", QUIET, "taskset", "-c", CORES, "nice", "-n", "5", str(ROOT / "build/pnote/linux/pnote")], env=e, capture_output=True, text=True, timeout=300,
-                       preexec_fn=headless.with_parent)
+    steps = ["wait:800", f"gpushot:desk={d}/first.png", f"dropfile:drop={pic}", "wait:2500", f"gpushot:desk={d}/after-picture.png",
+             f"dropfile:drop={canvas}", "wait:2500", f"gpushot:desk={d}/after-import.png", "quit"]
+    e = dict(os.environ, PNOTE_DB=str(d / "notes.db"), OMX_CONFIG=str(d / "cfg"), OMX_DATA=str(d / "data"), PNOTE_SKIN="paper", MOJOUI_TEST=";".join(steps))
+    r = run(["scripts/testscreen", str(ROOT / "build/pnote/linux/pnote")], 600, env=e)
     (d / "said.txt").write_text(r.stdout + r.stderr)
-    return judge_drop(r.stdout + r.stderr, "Linux (GTK's drop signal)")
+    return judge_drop(r.stdout + r.stderr, "Linux (GTK's drop signal, the hidden test screen)")
 
 
 def mac_pnote(tag, steps, env, data, nobuild=False, folder=None):
@@ -238,9 +240,9 @@ def typing_mac():
     store = OUT / "typing-mac.json"
     data = json.loads(store.read_text()) if store.exists() else {"before": [], "after": []}
     built = {"before": bool(data["before"]), "after": bool(data["after"])}
-    for _ in range(3):
+    for _ in range(ROUNDS):
         for side, folder in (("before", MAC_BEFORE_DIR), ("after", MAC_DIR)):
-            if len(data[side]) >= 3:
+            if len(data[side]) >= ROUNDS:
                 continue
             if side == "before" and not built["before"]:
                 return "BLOCKED", "no before build: run TYPING_MAC_BEFORE from the tree before the CoreText fix first"
@@ -254,14 +256,15 @@ def typing_mac():
     for name in data["before"][0]:
         med = {}
         for side in ("before", "after"):
-            med[side] = {k: sorted(r[name].get(k, 0.0) for r in data[side][:3])[1] for k in KEYS}
+            vals = data[side][:ROUNDS]
+            med[side] = {k: sorted(r[name].get(k, 0.0) for r in vals)[len(vals) // 2] for k in KEYS}
         b, a = med["before"], med["after"]
         table.append(f"{name}: key to paint p95/max {b['lat_p95']:.1f}/{b['lat_max']:.1f} → {a['lat_p95']:.1f}/{a['lat_max']:.1f}; key to frame begun {b['lat_code_p95']:.1f}/{b['lat_code_max']:.1f} → {a['lat_code_p95']:.1f}/{a['lat_code_max']:.1f}; "
                      f"frame gaps p95/max {b['gap_p95']:.1f}/{b['gap_max']:.1f} → {a['gap_p95']:.1f}/{a['gap_max']:.1f}")
         for k in KEYS:
             if b[k] > 0 and a[k] > b[k] * WORSE:
                 worse.append(f"{name} {k} {b[k]:.2f} → {a[k]:.2f} (+{(a[k] / b[k] - 1) * 100:.1f} %)")
-    (OUT / "typing-mac.md").write_text("# Goal 82 integration: Mac typing, before vs after the CoreText cluster fix (middle of 3 alternated runs, ms)\n\n"
+    (OUT / "typing-mac.md").write_text(f"# Goal 82 integration: Mac typing, before vs after the CoreText cluster fix (median of {ROUNDS} alternated runs a side, ms)\n\n"
                                        + "\n".join("- " + t for t in table) + "\n\nWorse by more than 3 %: " + ("; ".join(worse) or "none") + "\n")
     return ("FAIL" if worse else "PASS"), ("; ".join(table) + "; worse than 3 %: " + ("; ".join(worse) or "none"))[:1500]
 

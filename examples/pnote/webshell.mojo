@@ -3471,8 +3471,10 @@ struct WebShell(Movable):
         """(D-8903) A file or folder dropped on the window, the one drop target: a picture file goes on the open canvas (with the
         others of its gesture); a backup, a vault zip or folder, a .canvas or .md file is imported. True when it changed something."""
         if not isdir(path) and is_picture_file(path):
+            print("PNOTE DROP: picture " + path, flush=True)
             self.queue_picture(path)
             return True
+        print("PNOTE DROP: import " + path, flush=True)
         return self.import_path(path)
 
     def queue_picture(mut self, path: String):
@@ -3484,9 +3486,15 @@ struct WebShell(Movable):
         bytes, placed centred on the view's middle (or the drop point, page px), 520 at most, the next 28 down and right; selected,
         one save. Refused with the web's words when the note isn't a canvas."""
         var i = self.note_index(self.current)
-        if i < 0 or self.notes[i].kind != "canvas" or self.notes[i].secure or not self.editable():
+        if i >= 0 and self.notes[i].kind == "canvas" and not self.notes[i].secure and not self.editable():  # (D-8912: still being read: the
+            for p in paths:  # pictures wait for the next frame, never dropped without a word)
+                self.picture_queue.append(p)
+            print("PNOTE PICTURE: waits for the canvas to open (" + String(len(paths)) + ")", flush=True)
+            return
+        if i < 0 or self.notes[i].kind != "canvas" or self.notes[i].secure:
             if i >= 0 and self.notes[i].kind != "canvas":
                 self.say("Pictures go on a canvas note")
+            print("PNOTE PICTURE: refused " + String(len(paths)) + ": " + ("no note open" if i < 0 else ("a locked note" if self.notes[i].secure else "not a canvas")), flush=True)
             return
         if self.focus.on:
             self.leave_focus()

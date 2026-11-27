@@ -34,8 +34,21 @@ def table(mod):
     return getattr(mod, "CHECKS", None) or getattr(mod, "ALL", None) or getattr(mod, "MILESTONES")
 
 
+if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "--alone":
+    sys.argv = [sys.argv[0], sys.argv[2]]  # (one milestone in this process: see below)
+elif __name__ == "__main__":
+    # (D-8914) each milestone in a process of its own: a checker that sets up the headless X display (scripts/headless.ensure:
+    # DISPLAY, GDK_BACKEND=x11, GSK_RENDERER=cairo, once per process) changed the environment of the next one, and worker A's
+    # milestones then ran on Xvfb at 1× instead of the hidden 1.6× screen (every picture compare -1.000 in the first run)
+    import subprocess
+    bad = False
+    for k in sys.argv[1:] or ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "INTEG"]:
+        r = subprocess.run([sys.executable, __file__, "--alone", k])
+        bad = bad or r.returncode != 0
+    sys.exit(1 if bad else 0)
+
 if __name__ == "__main__":
-    want = sys.argv[1:] or ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "INTEG"]
+    want = sys.argv[1:]
     mods, bad = {}, False
     for k in want:
         part = None
