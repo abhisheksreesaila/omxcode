@@ -2075,3 +2075,9 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 34) — D-8101
 - lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).
+
+## goal 82 A (2026-11-26): focus mode, pictures, print and export
+- Branch goal-82-a from ad48b5f3 in its own worktree; the draft saved as docs/goals/82-draft.md. The worktree had no .pixi: linked to mojo-ui-omxcode's (same pixi.lock and toml; the other workers' worktrees link it too).
+- M1: the web's focus-mode.js read (96 top, 24 side, word count, capture/enter/leave). Generic parts: mojoui/focusmode.mojo (shortcut, view, count, hint fade), PageSheet.focus (680 column, no toolbar/marks/icon/ink), notesshell's focus strip and hint. pnote: FocusWas record put back on leaving; only the words take the pointer; Esc/Ctrl+. leave; another note opened leaves first.
+- First M1 run: states equal before/after on Linux AND the Mac (Cmd+. through the key step), counts 12 and 69 words as the web's, a map refused with the web's toast. But the GPU shots of focus were blank: the frame had no fill op, so gpu2d handed GTK a see-through GL texture (D-8502). Fixed with a fill layer.
+- A judged race of another session (79 M6, `build/merge/race-locked.sh`) held ~/.cache/omx-quiet.lock exclusively from 17:08; no builds or GUI runs meanwhile. Wrote M2/M4's framework parts in the wait: mojoui.jpeg (libjpeg's PSNR exactly), mediastore, zlibc, systemask (+ GTK and AppKit), PASTE_FILE (GTK: texture/file list; Mac: NSPasteboard png/tiff/file URLs), pictures in ObjectLayer (the web's image node both ways), pdfwriter (Type 3 glyph outlines), glyph_outline in fonttext (FreeType outline read from the slot; CoreText CGPathApply).

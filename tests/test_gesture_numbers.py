@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 KINDS = ["PAN", "ZOOM", "TAP", "PRESS", "RELEASE", "DOUBLE", "KEY", "SECONDARY", "WHEEL", "SET_TO", "HOVER", "BOARD_LIVE", "BOARD_ZOOM",
-         "BOARD_VIEW", "BOARD_PICK", "IME_COMMIT", "IME_PREEDIT", "PASTE"]
+         "BOARD_VIEW", "BOARD_PICK", "IME_COMMIT", "IME_PREEDIT", "PASTE", "PASTE_FILE"]
 SHIPPED = {"PAN": 1, "ZOOM": 2, "TAP": 3, "PRESS": 4, "RELEASE": 5, "DOUBLE": 6, "KEY": 7, "SECONDARY": 8, "WHEEL": 9, "SET_TO": 10,
            "BOARD_LIVE": 11, "BOARD_ZOOM": 12, "BOARD_VIEW": 13, "HOVER": 14, "BOARD_PICK": 15}  # (main, as released)
 

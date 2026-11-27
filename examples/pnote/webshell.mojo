@@ -3,7 +3,7 @@
 # file only composes them: which note is open, whether the notes panel shows, where the islands sit, what a tap hits.
 
 from std.collections import Dict
-from std.math import floor, ceil
+from std.math import floor, ceil, sqrt
 from std.os import getenv, stat
 from mojoui.scene import Painter, Scene, KeptPaint
 from mojoui.sqlite import Database
@@ -64,6 +64,22 @@ from std.os import listdir
 from mojoui.framebudget import FrameBudget
 from mojoui.pagedesk import board_rect, BOARD_REACH
 from mojoui.buzanmap import map_text, node_extra
+from mojoui.focusmode import focus_shortcut, focus_view, count_words, word_label, hint_alpha, FOCUS_HINT_MS
+from mojoui.notesshell import draw_focus_strip, draw_focus_hint
+from mojoui.objectlayer import Obj, PICTURE
+from mojoui.systemask import SystemAsks
+from mojoui.mediastore import MediaStore, prepare_picture, place_picture
+from mojoui.picture import Picture
+from mojoui.pdfwriter import PdfPainter, PT_PER_PX
+from mojoui.scene import SurfacePainter
+from mojoui.canvas import Surface
+from mojoui.mediastore import encode_png_small
+
+comptime MSG_PICKED = 13  # (goal 82) the system's file picker chose a picture (app.mojo routes it: numbers past every range there)
+comptime MSG_DROPPED = 14  # a file dropped on the window from the file manager
+comptime MSG_PRINTED = 15  # the print dialog closed
+comptime MSG_SAVED_AS = 16  # the save dialog chose where the PDF or PNG goes
+comptime MSG_SHARED = 17  # the share sheet was shown
 
 comptime S_PAGE = 0
 comptime S_CANVAS = 1
@@ -392,6 +408,46 @@ struct Written(Copyable, Movable):
     var base: DocBase  # the row it builds on
 
 
+struct FocusWas(Copyable, Movable):
+    """(goal 82 M1) What focus mode changed, read before it changed it, and put back exactly when it ends (main.js's capture())."""
+    var on: Bool
+    var page: Bool  # a page note (else a canvas)
+    var draw: Bool  # the page was in Draw
+    var scroll: Float64  # the page's scroll
+    var tool: String  # the canvas's tool, view, selection
+    var view: DeskView
+    var selection: List[Int]
+    var writing: Int  # the object being written when focus began (-1: none; -2: a new text not made yet)
+    var caret: Pos  # its caret and anchor
+    var anchor: Pos
+    var sidebar: Bool
+    var props: Bool
+    var text_id: Int  # the text focus shows (-1: a new one)
+    var started: Bool  # focus began the writing (leaving ends it)
+    var began_us: Int  # when it began (the hint fades from there)
+    var typed: Bool  # a key or words came since the last paint (only then the caret is kept in sight: a wheel's scroll stays)
+    var shift: Float64  # how far the words were scrolled to keep the caret in sight (screen px; main.js focusScroll)
+
+    def __init__(out self):
+        self.on = False
+        self.page = False
+        self.draw = False
+        self.scroll = 0
+        self.tool = "select"
+        self.view = DeskView(0, 0, 1)
+        self.selection = List[Int]()
+        self.writing = -1
+        self.caret = Pos(0, 0)
+        self.anchor = Pos(0, 0)
+        self.sidebar = False
+        self.props = False
+        self.text_id = -1
+        self.started = False
+        self.began_us = 0
+        self.shift = 0
+        self.typed = False
+
+
 struct WebShell(Movable):
     var db_path: String
     var notes: List[NoteRec]
@@ -490,6 +546,13 @@ struct WebShell(Movable):
     var words_at: Tuple[Float64, Float64, Float64, Float64]  # the caret of the canvas words being written, on screen
     var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
+    var focus: FocusWas  # (goal 82 M1) focus mode: on, and what it put aside
+    var sys: SystemAsks  # (goal 82) the system's dialogs asked for (App.asks)
+    var decoding: List[Picture]  # (goal 82 M2) a canvas's stored pictures being decoded on their threads, by object id below
+    var decoding_ids: List[Int]
+    var pictures_doc: Int  # the layer (its doc serial) whose pictures were last asked for (-1: none)
+    var picture_queue: List[String]  # (goal 82 M2) files dropped, pasted or picked this turn: placed together at the next frame (28 apart)
+    var save_as: String  # (goal 82 M4) what the save dialog asked for writes: "png" | "pdf" ("": nothing)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
@@ -592,6 +655,13 @@ struct WebShell(Movable):
         self.kept_pages = Dict[Int, Int]()
         self.cold_opens = False
         self.bench_note = -1
+        self.focus = FocusWas()
+        self.sys = SystemAsks()
+        self.decoding = List[Picture]()
+        self.decoding_ids = List[Int]()
+        self.pictures_doc = -1
+        self.save_as = ""
+        self.picture_queue = List[String]()
         self.doubled_us = -1_000_000
         self.known_seq = -1
         self.owed = 0
@@ -766,6 +836,8 @@ struct WebShell(Movable):
             i = self.note_index(id)
             if i < 0:
                 return
+        if self.focus.on:  # (another note: focus ends here, everything put back first)
+            self.leave_focus()
         self.props_open = False
         var t_open = clock_us()
         var trace = getenv("MOJOUI_LOAD_TRACE") == "1"
@@ -1017,8 +1089,15 @@ struct WebShell(Movable):
         self.budget.end()
 
     def _paint[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
+        if len(self.picture_queue) > 0:  # (goal 82: one gesture's pictures, placed together)
+            var q = self.picture_queue^
+            self.picture_queue = List[String]()
+            self.add_pictures(q)
         self.boxes.clear()
         self.boxes.add("#app", 0, 0, w, h)
+        if self.focus.on and self.note_index(self.current) >= 0:
+            self._paint_focused(p, w, h, k)
+            return
         var cover = List[Float64]()  # (the opaque page or map host drawn over the desk, inside its rounded corners)
         var ci = self.note_index(self.current)
         if ci >= 0 and self.notes[ci].kind != "canvas" and not self.notes[ci].secure and not self.doc.is_failed():
@@ -1052,6 +1131,9 @@ struct WebShell(Movable):
                 if more:
                     p.set_again()
             self.settle_open()  # (a deferred open that has landed: read, or failed)
+            self.ask_pictures()  # (goal 82: its stored pictures, decoded on threads, drawn as they land)
+            if self.land_pictures():
+                p.set_again()
             self.look.reach = 0 if self.board.loading() else BOARD_REACH
             if self.look.keep_path != "":  # (D-7956) the kept view: shown while the view's nodes load, kept again when settled
                 self.look.keep_hold = self.board.holding(r[0], r[1], r[2], r[3])
@@ -1133,6 +1215,50 @@ struct WebShell(Movable):
                 draw_pill_button(p, self.boxes, "#save-copy", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Save a copy", self.sk)
             else:
                 draw_pill_button(p, self.boxes, "#save-retry", left + (w - left) / 2, h - 18 - 28 - 40 + 34, "Retry", self.sk)
+        self.paint_overlays(p, w, h, k)
+
+    def _paint_focused[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
+        """(goal 82 M1) Focus mode: the window is the paper; on a canvas, the one text (the others and the page furniture only not
+        drawn: nothing in the note moves), on a page, its words in a column."""
+        p.begin_layer("focus-paper")  # (the paper as the frame's fill: the renderer knows the frame is opaque, as it is with the desk)
+        p.fill(self.sk.paper)
+        p.begin_layer("shell")
+        p.layer_transform(0, 0, k)
+        self.win_w = w
+        self.win_h = h
+        self.win_k = k
+        self.boxes.add("#workspace", 0, 0, w, h)
+        if not self.focus.page:
+            var r = self.view_rect()
+            if self.board.loading():
+                var more = self.board.step(r[0], r[1], r[2], r[3], self.budget.slice_us(LOAD_SLICE_MIN_US, LOAD_SLICE_US))
+                if more:
+                    p.set_again()
+            self.settle_open()
+            self.layout_focus()  # (the window's size may have changed; the words being written may have grown)
+            if self.tools.editing == -1:
+                var q = self.board.layer.index(self.focus.text_id)
+                if q >= 0:
+                    p.begin_layer("board-focus")
+                    p.layer_transform(self.view.x * k, self.view.y * k, self.view.scale * k)
+                    self.look.paint_obj(p, self.board.layer, q)
+            self.tools.paint_overlay(p, self.look, self.board.layer, self.view, k)
+            if self.tools.editing != -1:
+                self.words_at = self.tools.words_caret(self.board.layer, self.view)
+                # (the line being typed stays in the window, with room below it: the view moves, never the words; main.js keepCaretInView)
+                var bottom = h - max(120.0, h * 0.22)
+                var c = self.words_at
+                var dy = (bottom - (c[1] + c[3])) if c[1] + c[3] > bottom else ((72 - c[1]) if c[1] < 72 else 0.0)
+                if dy != 0 and self.focus.typed:
+                    self.focus.shift += dy
+                    self.layout_focus()
+                    self.words_at = self.tools.words_caret(self.board.layer, self.view)
+                    p.set_again()
+                self.focus.typed = False
+                var b = self.tools.words_box(self.board.layer)
+                var tl = self.view.to_screen(b[0], b[1])
+                self.boxes.add("focus.words", tl[0], tl[1], b[2] * self.view.scale, b[3] * Float64(max(len(self.tools.words.lines), 1)) * self.view.scale)
+        self.paint_focus(p, w, h, k)
         self.paint_overlays(p, w, h, k)
 
     def paint_overlays[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
@@ -1512,6 +1638,15 @@ struct WebShell(Movable):
             self.settings_open = True
         elif id.startswith("skin-"):
             self.set_skin(String(id[byte=5:]))
+        elif id == "focus":
+            self.searching = False
+            self.toggle_focus()
+        elif id == "print":
+            self.print_note()
+        elif id == "export-pdf":
+            self.export_pdf()
+        elif id == "share":
+            self.share_note()
         else:
             self.say("Not in the native app yet")
 
@@ -2786,6 +2921,8 @@ struct WebShell(Movable):
     def text_in(mut self, kind: String, text: String) -> Bool:
         """An input method's commit or a paste: into the open page, the canvas words or the idea being written, the search."""
         self.taps.interrupt()
+        if self.focus.on:
+            self.focus.typed = True
         if self.emoji.open:
             self.emoji.insert(text)
             return True
@@ -2842,6 +2979,16 @@ struct WebShell(Movable):
             return self.writing_or_pen()
         if name.startswith(KEY_UP) or tap_key(name):  # (a modifier by itself)
             return False
+        if focus_shortcut(name, mods) and not self.card.editing:  # (goal 82 M1: Ctrl+. / Cmd+., even with the caret in the words)
+            self.toggle_focus()
+            return True
+        if self.focus.on:
+            self.focus.typed = True
+            if name == "Escape" and self.page.preedit == "" and self.tools.words.preedit == "":
+                self.leave_focus()
+                return True
+            if (mods & 2) != 0 and (name == "k" or name == "K"):  # (search opens on the full window)
+                self.leave_focus()
         if self.emoji.open:
             return self.emoji.key(name, mods)
         if self.new_menu:
@@ -2897,6 +3044,9 @@ struct WebShell(Movable):
                 if (self.map.undo() if back else self.map.redo()):
                     self.save_map()
                 return True
+        if self.on_canvas() and self.tools.editing == -1 and mods == 0 and (name == "i" or name == "I"):  # (goal 82: Image (I), as the web's dock says)
+            self.sys.pick_file(MSG_PICKED, "Add a picture", ".png,.jpg,.jpeg,.webp,.gif")
+            return True
         if self.on_canvas() and self.editable():
             var r = self.tools.key(name, mods, self.board.edit(), self.view, self.win_w, self.win_h, self.cols, self.rows)
             if r and (mods & 2) != 0 and (name == "z" or name == "Z" or name == "y"):  # (an undo or redo by key, as by the island)
@@ -2960,6 +3110,416 @@ struct WebShell(Movable):
         else:
             return False
         return True
+
+    # ------------------------------------------------ pictures (goal 82 M2, the web's F-033/F-023): media/<sha256>.<ext> beside the notes file
+
+    def media(self) -> MediaStore:
+        """The notes file's media folder (the web's services.py: <the database's folder>/media)."""
+        var cut = self.db_path.rfind("/")
+        return MediaStore((String(self.db_path[byte=0:cut]) if cut > 0 else String(".")) + "/media")
+
+    def ask_pictures(mut self):
+        """The open canvas's stored pictures without pixels, each decoded on a thread of its own (drawn as they land)."""
+        ref layer = self.board.layer
+        if self.board.loading() or layer.doc == self.pictures_doc:
+            return
+        self.pictures_doc = layer.doc
+        self.decoding.clear()
+        self.decoding_ids.clear()
+        var store = self.media()
+        for ref o in layer.objs:
+            if o.kind != PICTURE or len(o.picture) > 0 or o.file == "":
+                continue
+            var path = store.file(o.file)
+            if path == "":
+                continue
+            try:
+                self.decoding.append(Picture.opening(path))
+                self.decoding_ids.append(o.id)
+            except:
+                print("PNOTE PICTURE: missing " + o.file, flush=True)
+
+    def land_pictures(mut self) -> Bool:
+        """Pictures decoded since the last frame put on the board; True while some are still on their way."""
+        var k = 0
+        while k < len(self.decoding):
+            if self.decoding[k].poll():
+                if self.decoding[k].ready() and self.pictures_doc == self.board.layer.doc:
+                    self.board.layer.show_picture(self.decoding_ids[k], self.decoding[k].pixels, self.decoding[k].width, self.decoding[k].height)
+                _ = self.decoding.pop(k)
+                _ = self.decoding_ids.pop(k)
+                continue
+            k += 1
+        return len(self.decoding) > 0
+
+    def queue_picture(mut self, path: String):
+        """A file dropped, pasted or picked: placed with the others of its gesture at the next frame (one drop of three: 28 apart)."""
+        self.picture_queue.append(path)
+
+    def add_pictures(mut self, paths: List[String], at_x: Float64 = -1, at_y: Float64 = -1):
+        """Pictures from files (dropped, pasted, picked) on the open canvas: each prepared by the web's rules and stored once by its
+        bytes, placed centred on the view's middle (or the drop point, page px), 520 at most, the next 28 down and right; selected,
+        one save. Refused with the web's words when the note isn't a canvas."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "canvas" or self.notes[i].secure or not self.editable():
+            if i >= 0 and self.notes[i].kind != "canvas":
+                self.say("Pictures go on a canvas note")
+            return
+        if self.focus.on:
+            self.leave_focus()
+        ref layer = self.board.edit()
+        if self.tools.editing != -1:  # (a text merely open isn't typing: the pictures go in and the text closes, as the web's)
+            self.tools.finish(layer)
+            self.save_canvas()
+        var left = 296.0 if self.sidebar else 0.0
+        var c = self.view.to_page(left + (self.win_w - left) / 2, self.win_h / 2) if at_x < 0 else (at_x, at_y)
+        var store = self.media()
+        var made = List[Int]()
+        for k in range(len(paths)):
+            try:
+                var pr = prepare_picture(paths[k])
+                var name = store.put(pr.bytes, pr.ext)
+                var pic = Picture(store.file(name))
+                var pl = place_picture(pr.width, pr.height, c[0], c[1], len(made))
+                var sw = pl.width * pl.scale
+                var sh = pl.height * pl.scale
+                var id = layer.add_stored_picture(pl.x + pl.width / 2 - sw / 2, pl.y + pl.height / 2 - sh / 2, sw, sh, pic.pixels, pr.width, pr.height, name)
+                made.append(id)
+                print("PNOTE PICTURE: " + name + " " + String(pr.width) + "x" + String(pr.height) + " " + String(len(pr.bytes)) + " bytes at " + String(pl.x) + "," + String(pl.y) + " scale " + String(pl.scale), flush=True)
+            except e:
+                self.save_state = ""
+                self.say(String(e))
+                print("PNOTE PICTURE: refused " + paths[k] + ": " + String(e), flush=True)
+        if len(made) == 0:
+            return
+        self.tools.set_tool("select", layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
+        layer.selected = made.copy()
+        self.tools.changed = True
+        self.save_canvas()
+
+    def system_answer(mut self, m: Int, text: String):
+        """(goal 82) A system dialog's answer: the print dialog closed, a save dialog chose a place, the share sheet showed."""
+        if m == MSG_PRINTED:
+            print("PNOTE PRINT: " + text, flush=True)
+            if text != "printed" and text != "cancelled":
+                self.say("Couldn’t print: " + text)
+        elif m == MSG_SHARED:
+            print("PNOTE SHARE: " + text, flush=True)
+        elif m == MSG_SAVED_AS:
+            var kind = self.save_as
+            self.save_as = ""
+            var ok = self.note_png(text) if kind == "png" else (self.note_pdf(text) if kind == "pdf" else False)
+            print("PNOTE SAVE AS: " + kind + " " + text + (" written" if ok else " FAILED"), flush=True)
+            if ok:
+                self.say("Saved " + String(text.split("/")[-1]))
+
+    # ------------------------------------------------ print and export (goal 82 M4, the web's F-033 print sheets and Picture)
+
+    def printable(mut self) -> Bool:
+        """A canvas note, read, its words being written finished (they're on the sheets), its board whole; else said why."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "canvas" or self.notes[i].secure or not self.editable():
+            self.say("Print and Picture are for canvas notes")
+            return False
+        if self.board.loading():
+            _ = self.board.wait(2000)
+        if self.tools.editing != -1:
+            self.tools.finish(self.board.edit())
+            self.save_canvas()
+        return True
+
+    def note_title(self) -> String:
+        var i = self.note_index(self.current)
+        var t = String(self.notes[i].title.strip()) if i >= 0 else String("")
+        return t if t != "" else String("Untitled note")
+
+    def file_title(self) -> String:
+        """The note's title as a file name (the web's: \\/:*?"<>| become -)."""
+        var out = String("")
+        for c in self.note_title().codepoints():
+            var ch = String(c)
+            out += "-" if ch == "/" or ch == "\\" or ch == ":" or ch == "*" or ch == "?" or ch == '"' or ch == "<" or ch == ">" or ch == "|" else ch
+        return out^
+
+    def paint_cells[P: Painter](mut self, mut p: P, x0: Float64, y0: Float64, w: Float64, h: Float64):
+        """The board's objects meeting the page rect (page px) on white paper, no page furniture (the web's renderRegion of a sheet)."""
+        p.begin_layer("print")
+        p.layer_transform(-x0, -y0, 1)
+        p.push_clip(x0, y0, w, h)
+        ref layer = self.board.layer
+        for q in layer.query(x0, y0, x0 + w, y0 + h):
+            self.look.paint_obj(p, self.board.layer, q)
+        p.pop_clip()
+
+    def note_pdf(mut self, path: String) -> Bool:
+        """The note's print sheets (one page per cell of its grid, row by row, PAGE_W × PAGE_H px at 0.75 pt each) as a vector PDF."""
+        if not self.printable():
+            return False
+        var pdf = PdfPainter()
+        for row in range(self.rows):
+            for col in range(self.cols):
+                pdf.page(PAGE_W * PT_PER_PX, PAGE_H * PT_PER_PX)
+                pdf.begin_layer("paper")
+                pdf.rect(0, 0, PAGE_W, PAGE_H, 0xFFFFFFFF, 0)
+                self.paint_cells(pdf, Float64(col) * PAGE_W, Float64(row) * PAGE_H, PAGE_W, PAGE_H)
+        try:
+            pdf.save(path)
+        except e:
+            self.say("Couldn’t write " + path + ": " + String(e))
+            return False
+        print("PNOTE PDF: " + path + " pages " + String(self.cols * self.rows) + " runs " + String(len(pdf.words)), flush=True)
+        return True
+
+    def note_png(mut self, path: String) -> Bool:
+        """The whole note as one PNG at twice its page px (less for a grid over 16 megapixels), white paper (the web's renderNotePicture)."""
+        if not self.printable():
+            return False
+        var gw = Float64(self.cols) * PAGE_W
+        var gh = Float64(self.rows) * PAGE_H
+        var sc = min(2.0, sqrt(16_000_000.0 / (gw * gh)))
+        var pw = Int(floor(gw * sc + 0.5))
+        var ph = Int(floor(gh * sc + 0.5))
+        var px = List[UInt32](length=pw * ph, fill=0xFFFFFFFF)
+        var sp = SurfacePainter(Surface(Int(px.unsafe_ptr()), pw, ph, sc))
+        sp.begin_layer("print")
+        sp.layer_transform(0, 0, sc)
+        ref layer = self.board.layer
+        for q in layer.query(0, 0, gw, gh):
+            self.look.paint_obj(sp, self.board.layer, q)
+        _ = sp.width()
+        var png = encode_png_small(px, pw, ph)
+        _ = len(px)
+        try:
+            with open(path, "w") as f:
+                f.write_bytes(Span(png))
+        except e:
+            self.say("Couldn’t write " + path + ": " + String(e))
+            return False
+        print("PNOTE PNG: " + path + " " + String(pw) + "x" + String(ph), flush=True)
+        return True
+
+    def spool_path(self, ext: String) -> String:
+        """Where a PDF to print or share is made: the private folder beside the notes' views, named after the note."""
+        var d = config_dir("pnote") + "/print"
+        try:
+            makedirs(d, exist_ok=True)
+        except:
+            pass
+        return d + "/" + self.file_title() + "." + ext
+
+    def print_note(mut self):
+        """Print: the note's sheets as a vector PDF, handed to the system's print dialog (its printers, its own Save as PDF)."""
+        var path = self.spool_path("pdf")
+        if self.note_pdf(path):
+            self.sys.print_pdf(MSG_PRINTED, path, self.note_title())
+
+    def picture_note(mut self):
+        """Picture: where to save the note's PNG, asked of the system's save dialog (MSG_SAVED_AS writes it)."""
+        if not self.printable():
+            return
+        self.save_as = "png"
+        self.sys.save_file(MSG_SAVED_AS, "Save the note as a picture", self.file_title() + ".png")
+
+    def export_pdf(mut self):
+        if not self.printable():
+            return
+        self.save_as = "pdf"
+        self.sys.save_file(MSG_SAVED_AS, "Save the note as a PDF", self.file_title() + ".pdf")
+
+    def share_note(mut self):
+        """Share: the note's PDF handed to the system's share sheet (the Mac's; Linux shows it in the file manager)."""
+        var path = self.spool_path("pdf")
+        if self.note_pdf(path):
+            self.sys.share(MSG_SHARED, path, "Share " + self.note_title())
+
+    # ------------------------------------------------ focus mode (goal 82 M1, the web's F-073): only the words; the same key puts back what was there
+
+    def can_focus(mut self) -> Bool:
+        """A page or canvas note, read, not locked, nothing open over it (main.js canFocus)."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].secure or self.doc.is_failed() or not self.editable() or self.searching or self.settings_open or self.emoji.open:
+            return False
+        return self.notes[i].kind == "canvas" or self.notes[i].kind == "page"
+
+    def toggle_focus(mut self):
+        """The shortcut, the card's Focus and the omnibar's action (main.js toggleFocus)."""
+        if self.focus.on:
+            self.leave_focus()
+            return
+        if not self.enter_focus():
+            var i = self.note_index(self.current)
+            if i >= 0 and self.notes[i].kind != "canvas" and self.notes[i].kind != "page":
+                self.say("Focus mode is for notes you write on the page")
+                print("PNOTE TOAST: Focus mode is for notes you write on the page", flush=True)
+
+    def focus_text(self, layer: ObjectLayer) -> Int:
+        """The text focus shows (main.js focusCandidate): the one being written, else the one text selected, else the topmost (Markdown
+        first, then top, then left); -1: none (a new one is begun)."""
+        if self.tools.editing >= 0:
+            var q = layer.index(self.tools.editing)
+            if q >= 0 and layer.objs[q].kind == TEXT:
+                return self.tools.editing
+        if len(layer.selected) == 1:
+            var q = layer.index(layer.selected[0])
+            if q >= 0 and layer.objs[q].kind == TEXT:
+                return layer.selected[0]
+        var top = -1
+        for k in range(len(layer.objs)):
+            ref o = layer.objs[k]
+            if o.kind != TEXT:
+                continue
+            if top < 0:
+                top = k
+                continue
+            ref t = layer.objs[top]
+            if (o.markdown and not t.markdown) or (o.markdown == t.markdown and (o.y < t.y or (o.y == t.y and o.x < t.x))):
+                top = k
+        return layer.objs[top].id if top >= 0 else -1
+
+    def focus_box(self) -> Tuple[Float64, Float64, Float64]:
+        """The focused text's left, top and width (page px): a new text's writing box when there is none (main.js focusBox)."""
+        ref layer = self.board.layer
+        var q = layer.index(self.focus.text_id) if self.focus.text_id >= 0 else -1
+        if q >= 0:
+            return (layer.objs[q].x, layer.objs[q].y, layer.objs[q].w)
+        if self.tools.editing == -2:
+            return (self.tools.edit_x, self.tools.edit_y, self.tools.edit_w)
+        return (80.0, 80.0, PAGE_W - 56 - 80)
+
+    def layout_focus(mut self):
+        """The canvas view that puts the focused text in the middle, 96 px down (main.js layoutFocus)."""
+        var b = self.focus_box()
+        var v = focus_view(self.win_w, b[0], b[1], b[2], 1.0)
+        self.view = DeskView(v.x, v.y + self.focus.shift, v.scale)
+        self.view_set = True
+
+    def enter_focus(mut self) -> Bool:
+        if self.focus.on or not self.can_focus():
+            return False
+        var i = self.note_index(self.current)
+        var was = FocusWas()
+        was.on = True
+        was.page = self.notes[i].kind == "page"
+        was.sidebar = self.sidebar
+        was.props = self.props_open
+        was.began_us = clock_us()
+        self.sidebar = False  # (the panel's room is the window's now; put back as it was, the view with it)
+        self.props_open = False
+        self.card_open = False
+        self.flyout = False
+        self.ink_options = False
+        self.new_menu = False
+        if was.page:
+            was.draw = self.page.draw_mode
+            was.scroll = self.page.scroll
+            self.page.draw_mode = False  # (drawing is off and the drawings aren't shown)
+            self.page.focus = True
+            self.page.focus_fill = self.sk.paper
+            self.page.follow = True
+        else:
+            ref layer = self.board.edit()
+            was.tool = self.tools.tool
+            was.view = self.view
+            was.selection = layer.selected.copy()
+            was.writing = self.tools.editing
+            was.caret = self.tools.words.ed.caret
+            was.anchor = self.tools.words.ed.anchor
+            was.text_id = self.focus_text(layer)
+            var writing_it = self.tools.editing != -1 and (self.tools.editing == was.text_id or self.tools.editing == -2)
+            if writing_it:
+                self.tools.tool = "text"  # (the words being written stay open: only the tool's name changes)
+            else:
+                self.tools.set_tool("text", layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
+                self.save_canvas()
+                if was.text_id >= 0:
+                    self.tools.begin_words(layer, was.text_id)
+                else:
+                    self.tools.begin_text(80, 80)
+            was.started = not writing_it
+            layer.clear_selection()
+        self.focus = was^
+        if not self.focus.page:
+            self.layout_focus()
+        print("PNOTE FOCUS: on " + ("page" if self.focus.page else "canvas text " + String(self.focus.text_id)), flush=True)
+        return True
+
+    def focus_press(mut self, x: Float64, y: Float64) -> Bool:
+        """A press in focus mode: only the words take it (a page's caret; a canvas text's caret or selection); the pen is off."""
+        if self.boxes.hit_any(x, y, ["focus.leave", "#toast"]) != "":
+            return False  # (a tap: leave, or the toast)
+        if self.focus.page:
+            return self.page.press(x, y, False)
+        if self.boxes.hit_any(x, y, ["focus.words"]) == "" or not self.editable():
+            return False
+        var r = self.near_rect(x, y)
+        return self.tools.press(x, y, self.board.near(r[0], r[1], r[2], r[3]), self.view)
+
+    def leave_focus(mut self):
+        if not self.focus.on:
+            return
+        var was = self.focus.copy()
+        self.focus.on = False
+        if was.page:
+            self.page.focus = False
+            self.page.draw_mode = was.draw
+            self.page.scroll = was.scroll
+            self.page.follow = False
+        else:
+            ref layer = self.board.edit()
+            if was.started and self.tools.editing != -1:  # (the words are kept; an untouched text changes nothing)
+                self.tools.finish(layer)
+                self.save_canvas()
+            if was.tool != "text" or was.writing == -1:
+                if self.tools.editing != -1 and was.writing == -1:
+                    self.tools.finish(layer)
+                    self.save_canvas()
+                self.tools.tool = was.tool
+            layer.selected.clear()
+            for id in was.selection:
+                if layer.index(id) >= 0:
+                    layer.selected.append(id)
+            if was.writing >= 0 and self.tools.editing == -1 and layer.index(was.writing) >= 0:  # (the writing closed during focus: open again where the caret was)
+                self.tools.begin_words(layer, was.writing)
+            if was.writing != -1 and self.tools.editing != -1:
+                var n = len(self.tools.words.ed.paras)
+                var a = Pos(min(was.anchor.para, n - 1), 0)
+                a.byte = min(was.anchor.byte, self.tools.words.ed.paras[a.para].byte_length())
+                var c = Pos(min(was.caret.para, n - 1), 0)
+                c.byte = min(was.caret.byte, self.tools.words.ed.paras[c.para].byte_length())
+                self.tools.words.ed.move_to(a, False)
+                if a.para != c.para or a.byte != c.byte:
+                    self.tools.words.ed.move_to(c, True)
+            self.view = was.view
+        self.sidebar = was.sidebar
+        self.props_open = was.props
+        print("PNOTE FOCUS: off", flush=True)
+
+    def focus_words(mut self) -> Int:
+        """The words focus counts: the page's, or the focused text's (what is being written included)."""
+        if self.focus.page:
+            return count_words(self.page.markdown())
+        if self.tools.editing != -1:
+            return count_words(self.tools.words.text())
+        var q = self.board.layer.index(self.focus.text_id)
+        return count_words(self.board.layer.objs[q].text) if q >= 0 else 0
+
+    def paint_focus[P: Painter](mut self, mut p: P, w: Float64, h: Float64, k: Float64):
+        """Focus mode's window: the paper and the words; the island's focus face while the pointer is at the top; the hint."""
+        var i = self.note_index(self.current)
+        if self.focus.page:
+            self.page.draw(p, self.boxes, 0, 0, w, h, k, "", 0, 0)
+        p.begin_layer("focus-chrome")
+        p.layer_transform(0, 0, k)
+        var shown = self.py >= 0 and self.py < 64 and self.px >= 0
+        if shown and i >= 0:
+            var words = word_label(self.focus_words())
+            var title = self.notes[i].title.copy()
+            draw_focus_strip(p, self.boxes, w / 2, title, words, k, self.sk)
+        var ms = (clock_us() - self.focus.began_us) // 1000
+        var a = hint_alpha(ms)
+        if a > 0:
+            draw_focus_hint(p, self.boxes, w / 2, h, "Esc or " + String(keycap("").strip()) + " . to leave", a, self.sk)
+            p.set_again()
 
     def copied(mut self, words: String):
         """Words copied here: for the system's clipboard (the app shows mojoui.overlays.Clipboard(clip, clip_version))."""
@@ -3047,6 +3607,25 @@ struct WebShell(Movable):
         board the person uses (pagedesk.BoardTools): pan with the hand, pen, a text box written in the middle of the
         window, an object (or 40 selected) to drag, thirty moves to undo and redo, and a fresh open of the note.
         bench:loading answers (1, nodes left) while an open is still coming in, else (0, 0)."""
+        if name == "bench:state":  # (goal 82 M1) what focus mode must put back, as one line (checks compare before and after)
+            var sel = String("")
+            for id in self.board.layer.selected:
+                sel += String(id) + ","
+            var on_page = self.note_index(self.current) >= 0 and self.notes[self.note_index(self.current)].kind == "page"
+            var cs = self.page.ed.caret if on_page else self.tools.words.ed.caret
+            if not on_page and self.tools.editing == -1:  # (no text open on the canvas: its editor's caret is a leftover, nothing a person has)
+                cs = Pos(-1, -1)
+            print("PNOTE STATE: note=" + String(self.current) + " focus=" + String(self.focus.on) + " tool=" + self.tools.tool + " view=" + String(self.view.x) + "," + String(self.view.y) + "," + String(self.view.scale)
+                  + " sel=" + sel + " editing=" + String(self.tools.editing) + " caret=" + String(cs.para) + ":" + String(cs.byte) + " sidebar=" + String(self.sidebar)
+                  + " scroll=" + String(self.page.scroll) + " draw=" + String(self.page.draw_mode) + " words=" + String(self.focus_words() if self.focus.on else -1), flush=True)
+            return (-1.0, -1.0)
+        if name == "bench:share" or name == "bench:exportpdf" or name == "bench:print":  # (goal 82 M4: the omnibar's actions, by name)
+            self.act("share" if name == "bench:share" else ("export-pdf" if name == "bench:exportpdf" else "print"))
+            return (-1.0, -1.0)
+        if name == "bench:hovertop" or name == "bench:hoveraway":  # (goal 82 M1) the pointer at the window's top (the focus face) or away
+            self.px = 720.0 if name == "bench:hovertop" else 700.0
+            self.py = 30.0 if name == "bench:hovertop" else 500.0
+            return (-1.0, -1.0)
         if name == "bench:loading":
             if self.board.loading():
                 return (1.0, Float64(self.board.left()))
@@ -3155,6 +3734,10 @@ struct WebShell(Movable):
     def wheel(mut self, x: Float64, y: Float64, dx: Float64, dy: Float64) -> Bool:
         """A wheel or touchpad scroll: on a canvas the view moves (the web's wheel pan)."""
         self.taps.interrupt()
+        if self.focus.on and not self.focus.page:  # (focus: the words move up and down, never sideways)
+            self.focus.shift -= dy
+            self.layout_focus()
+            return True
         if self.sidebar and not self.searching and not self.settings_open and self.boxes.hit_any(x, y, ["#sidebar"]) != "":
             return self.panel.wheel(dy)
         if self.on_map():
@@ -3173,6 +3756,8 @@ struct WebShell(Movable):
 
     def zoom(mut self, x: Float64, y: Float64, factor: Float64) -> Bool:
         """A pinch or Ctrl+wheel: on a canvas the view zooms about the pointer."""
+        if self.focus.on:
+            return False
         if self.on_map():
             var b = self.map_box()
             var v = self.map.view(b[2], b[3])
@@ -3192,6 +3777,8 @@ struct WebShell(Movable):
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
         self.pressed_us = clock_us()
+        if self.focus.on:
+            return self.focus_press(x, y)
         if self.emoji.open or self.new_menu:
             return False
         if not self.searching and not self.card_open and not self.settings_open and self.icon_under(x, y) != "":
@@ -3281,6 +3868,12 @@ struct WebShell(Movable):
 
     def double(mut self, x: Float64, y: Float64) -> Bool:
         """A double click: on a page's words, the word; a click more soon after, the line."""
+        if self.focus.on and not self.focus.page:  # (only the words take the pointer)
+            if self.boxes.hit_any(x, y, ["focus.words"]) == "":
+                return False
+            var r = self.tools.edit_at(x, y, self.board.edit(), self.view, self.win_w, self.win_h)
+            self.save_canvas()
+            return r
         if self.on_canvas() and self.boxes.hit_any(x, y, ["[Canvas tools]", "#history-island", "#zoom-control", "#selection-bar", "#island", "#toggle-sidebar", "#search-button", "#sidebar"]) == "":
             if not self.editable():
                 return False
@@ -3390,8 +3983,12 @@ struct WebShell(Movable):
         var hit = self.boxes.hit_any(x, y, ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]", "#undo", "#redo",
                                             "#zoom-in", "#zoom-out", "#zoom-fit", "#zoom-value", "#dock-more", "#ink-options-trigger", "#voice-button",
                                             "#selection-bar", "[Canvas tools]", "#history-island", "#zoom-control"])
-        var more = self.boxes.hit_any(x, y, ["[Hand]", "[Highlighter]", "[Connect]", "ink-color:", "ink-width:", "#dock-flyout", "#ink-options-popover"])
+        var more = self.boxes.hit_any(x, y, ["[Hand]", "[Highlighter]", "[Connect]", "[Add image]", "ink-color:", "ink-width:", "#dock-flyout", "#ink-options-popover"])
         if more != "":
+            if more == "[Add image]":  # (goal 82: the system's file picker; the pictures come back as MSG_PICKED)
+                self.flyout = False
+                self.sys.pick_file(MSG_PICKED, "Add a picture", ".png,.jpg,.jpeg,.webp,.gif")
+                return True
             if more == "[Hand]" or more == "[Highlighter]" or more == "[Connect]":
                 self.tools.set_tool("hand" if more == "[Hand]" else ("highlight" if more == "[Highlighter]" else "connect"), self.board.layer, self.view, self.win_w, self.win_h, self.cols, self.rows)
                 self.flyout = False
@@ -3533,6 +4130,11 @@ struct WebShell(Movable):
 
     def hover(mut self, x: Float64, y: Float64) -> Bool:
         """The pointer moved; True when a hover state changes (only then the screen redraws)."""
+        if self.focus.on:  # (the focus face shows while the pointer is in the top 64 px)
+            var was_top = self.py >= 0 and self.py < 64
+            self.px = x
+            self.py = y
+            return was_top != (y >= 0 and y < 64)
         var before = self.boxes.hit_any(self.px, self.py, ["#toggle-sidebar", "#search-button", ".sec-head", "#zoom-control"])
         var row = self.panel.hovered() if self.sidebar else -1
         self.px = x
@@ -3545,6 +4147,21 @@ struct WebShell(Movable):
         """A tap at (x, y) layout px; True when it changed something."""
         self.budget.input()
         self.title_focus = False
+        if self.focus.on:
+            if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
+                if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
+                    self.run_toast()
+                return True
+            if self.boxes.hit_any(x, y, ["focus.leave"]) != "":
+                self.leave_focus()
+                return True
+            if self.focus.page:
+                return self.page.tap(x, y)
+            if self.boxes.hit_any(x, y, ["focus.words"]) == "":
+                return False  # (a press elsewhere starts no text, closes nothing, moves no caret)
+            var r = self.tools.tap(x, y, self.board.edit(), self.view, self.win_w, self.win_h, 0)
+            self.save_canvas()
+            return r
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#save-copy", "#rail-new-note", ".nav-row:"])
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
@@ -3663,6 +4280,12 @@ struct WebShell(Movable):
                 self.export_backup()
             elif ch == "#share-icon":
                 self.choose_icon("#island")
+            elif ch == "#share-focus":
+                self.toggle_focus()
+            elif ch == "#share-print":
+                self.print_note()
+            elif ch == "#share-png":
+                self.picture_note()
             elif ch.startswith("#share-"):
                 self.say("Not in the native app yet")
             return True

@@ -13,6 +13,8 @@ from std.memory.alloc import alloc, Layout
 from mojoui.browser import open_url as browser_open_url
 from mojoui.graphemes import typed_text
 from mojoui.view import FIELD_SECRET, IME_COMMIT, IME_PREEDIT, PASTE, HOVER
+from mojoui.view import PASTE_FILE
+from mojoui.systemask import SystemAsk, ASK_PICK, ASK_SAVE, ASK_PRINT, ASK_SHARE, ASK_FULLSCREEN
 from mojoui.shared import put_shared, get_shared
 
 comptime SLOT_MAC_IME = 238  # (D-7979) mojoui.shared slot: 1 when the canvas class is an NSTextInputClient (bridge/mac_ime.m)
@@ -309,6 +311,8 @@ def key_name_of(event: Int) -> String:
 struct AppKitHost[A: App](Movable):
     var rt: Runtime[Self.A]
     var window: Int
+    var asks_pending: List[SystemAsk]  # (goal 82) system dialogs waiting for the next run-loop turn (systemAsk:)
+    var ask_msg: Int  # the last ask's answer message (the test step answer: answers it)
     var target: Int  # MojoTarget object that receives every event
     var widgets: List[Int]
     var shells: List[Int]  # per node: the box a control is drawn in when it isn't the control (a field's rounded frame); 0: none
@@ -422,6 +426,8 @@ struct AppKitHost[A: App](Movable):
         self.rt = Runtime(Self.A())
         self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines on stdout)
         self.window = 0
+        self.asks_pending = List[SystemAsk]()
+        self.ask_msg = 0
         self.target = 0
         self.widgets = List[Int]()
         self.shells = List[Int]()
@@ -3134,6 +3140,21 @@ struct AppKitHost[A: App](Movable):
         self.apply(d, self_addr)
         self.prompt_tick()
         if (mods & 2) != 0 and (name == "v" or name == "V") and node < len(self.rt.shown.nodes) and self.rt.app.takes_paste(self.rt.shown.nodes[node].style):  # (D-7979) a paste: the pasteboard's text for the canvas, as GTK's
+            # (goal 82) files copied in Finder, or a picture (a screenshot, an image copied in another app): PASTE_FILE in place of the text
+            var files_ok = self.rt.app.takes_paste_files(self.rt.shown.nodes[node].style)
+            var files = pasted_files() if files_ok else List[String]()
+            if len(files) > 0:
+                for f in files:
+                    print("PASTE: file " + f, flush=True)
+                    var df = self.rt.text_event(node, PASTE_FILE, f)
+                    self.apply(df, self_addr)
+                return
+            var png = pasted_picture() if files_ok else String("")
+            if png != "":
+                print("PASTE: picture " + png, flush=True)
+                var dp = self.rt.text_event(node, PASTE_FILE, png)
+                self.apply(dp, self_addr)
+                return
             var text = from_ns(msg(paste_board(), "stringForType:", ns_string("public.utf8-plain-text")))
             if text != "":
                 var d2 = self.rt.text_event(node, PASTE, text)
@@ -3744,6 +3765,100 @@ struct AppKitHost[A: App](Movable):
         self.canvases[k].gpu_frames += 1
         return True
 
+    def ask(mut self, a: SystemAsk, self_addr: Int):
+        """(goal 82) A system ask (mojoui.systemask) with the Mac's own: NSOpenPanel, NSSavePanel, PDFKit's print operation (the
+        print panel, its PDF button), NSSharingServicePicker, the window's full screen. Run on the next run-loop turn (a modal
+        panel must not run inside update's patching). Prints `ASK: <kind> <title>`; MOJOUI_ASK_DRY=1 opens nothing."""
+        print("ASK: " + a.kind_name() + " " + a.title + (" " + a.path if a.path != "" else ""), flush=True)
+        if a.msg != 0:
+            self.ask_msg = a.msg
+        if env("MOJOUI_ASK_DRY") == "1" and a.kind != ASK_FULLSCREEN:
+            return
+        self.asks_pending.append(a.copy())
+        _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("systemAsk:"), ns_number(self_addr), Float64(0))
+
+    def ask_answer(mut self, message: Int, text: String, self_addr: Int):
+        if message == 0:
+            return
+        var d = self.rt.dispatch(Event(message, text, 0))
+        self.apply(d, self_addr)
+
+    def run_ask(mut self, self_addr: Int):
+        """The first pending ask, now (systemAsk:). A test (MOJOUI_ASK_CLOSE_MS) has the panel looked at and closed after that long
+        (askWatch:: the modal window's title printed, then abortModal), as no test step runs while a panel is modal."""
+        if len(self.asks_pending) == 0:
+            return
+        var a = self.asks_pending.pop(0)
+        var close_ms = env("MOJOUI_ASK_CLOSE_MS")
+        if close_ms != "" and a.kind != ASK_FULLSCREEN and a.kind != ASK_SHARE:
+            var modes = msg(cls("NSArray"), "arrayWithObject:", common_modes_constant())
+            try:
+                _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("askWatch:"), ns_number(self_addr), Float64(Int(close_ms)) / 1000.0, modes)
+            except:
+                pass
+        if a.kind == ASK_FULLSCREEN:
+            var full = (msg(self.window, "styleMask") & (1 << 14)) != 0  # (NSWindowStyleMaskFullScreen)
+            if full != (a.accept == "1"):
+                _ = msg(self.window, "toggleFullScreen:", 0)
+            return
+        if a.kind == ASK_PICK:
+            var panel = msg(cls("NSOpenPanel"), "openPanel")
+            _ = msg(panel, "setMessage:", ns_string(a.title))
+            _ = msg(panel, "setCanChooseFiles:", 1)
+            _ = msg(panel, "setCanChooseDirectories:", 0)
+            _ = msg(panel, "setAllowsMultipleSelection:", 1)
+            if a.accept != "":
+                var exts = List[String]()
+                for e in a.accept.split(","):
+                    var x = String(String(e).strip().lstrip("."))
+                    if x != "":
+                        exts.append(x)
+                _ = msg(panel, "setAllowedFileTypes:", ns_array(exts))
+            if msg(panel, "runModal") == 1:  # (NSModalResponseOK)
+                var urls = msg(panel, "URLs")
+                var paths = List[String]()
+                for k in range(msg(urls, "count")):
+                    paths.append(from_ns(msg(msg(urls, "objectAtIndex:", k), "path")))
+                for p in paths:
+                    self.ask_answer(a.msg, p, self_addr)
+            return
+        if a.kind == ASK_SAVE:
+            var panel = msg(cls("NSSavePanel"), "savePanel")
+            _ = msg(panel, "setMessage:", ns_string(a.title))
+            if a.path != "":
+                _ = msg(panel, "setNameFieldStringValue:", ns_string(a.path))
+            if msg(panel, "runModal") == 1:
+                self.ask_answer(a.msg, from_ns(msg(msg(panel, "URL"), "path")), self_addr)
+            return
+        if a.kind == ASK_PRINT:
+            var fw = String("/System/Library/Frameworks/PDFKit.framework/PDFKit")
+            _ = cfunc("dlopen", Int(fw.as_c_string_span().unsafe_ptr()), Int32(2 | 8))  # (through dlsym: other modules declare dlopen with their own signature)
+            _ = len(fw)
+            var url = msg(cls("NSURL"), "fileURLWithPath:", ns_string(a.path))
+            var doc = msg(msg(cls("PDFDocument"), "alloc"), "initWithURL:", url)
+            if doc == 0:
+                self.ask_answer(a.msg, "the PDF couldn't be read", self_addr)
+                return
+            var info = msg(cls("NSPrintInfo"), "sharedPrintInfo")
+            var op = msg(doc, "printOperationForPrintInfo:scalingMode:autoRotate:", info, 2, 1)  # (kPDFPrintPageScaleDownToFit, turned to fit)
+            _ = msg(op, "setJobTitle:", ns_string(a.title))
+            _ = msg(op, "setShowsPrintPanel:", 1)
+            var ok = msg(op, "runOperation") & 0xFF
+            _ = msg(doc, "release")
+            print("PRINTED: " + ("printed" if ok != 0 else "cancelled"), flush=True)
+            self.ask_answer(a.msg, "printed" if ok != 0 else "cancelled", self_addr)
+            return
+        if a.kind == ASK_SHARE:
+            var url = msg(cls("NSURL"), "fileURLWithPath:", ns_string(a.path))
+            var items = msg(cls("NSArray"), "arrayWithObject:", url)
+            var picker = msg(msg(cls("NSSharingServicePicker"), "alloc"), "initWithItems:", items)
+            var view = msg(self.window, "contentView")
+            var b = msg[CGRect](view, "bounds")
+            # (a CGRect argument on arm64 goes in d0–d3, as four doubles do: no struct crosses the call)
+            _ = msg(picker, "showRelativeToRect:ofView:preferredEdge:", b.x + b.width / 2 - 1, b.y + b.height - 60, Float64(2), Float64(2), view, 1)
+            print("SHARE: shown", flush=True)
+            self.ask_answer(a.msg, "shown", self_addr)
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A control changed: build the event, run update(), patch the controls."""
         ref n = self.rt.shown.nodes[node]
@@ -3857,6 +3972,8 @@ struct AppKitHost[A: App](Movable):
         answered with an error (through the inbox, on the next run-loop turn, as a page's reply is)."""
         for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
             _ = browser_open_url(url)
+        for a in self.rt.take_asks():  # (goal 82: the system's dialogs the app asked for)
+            self.ask(a, self_addr)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return
@@ -4276,6 +4393,45 @@ def paste_board() -> Int:
     if env("MOJOUI_TEST") != "":
         return msg(cls("NSPasteboard"), "pasteboardWithName:", ns_string("mojoui.test"))
     return msg(cls("NSPasteboard"), "generalPasteboard")
+
+
+def pasted_files() -> List[String]:
+    """(goal 82) Files copied in Finder (file URLs on the pasteboard), as paths."""
+    var out = List[String]()
+    var pb = paste_board()
+    var types = msg(pb, "types")
+    if types == 0 or (msg(types, "containsObject:", ns_string("public.file-url")) & 0xFF) == 0:
+        return out^
+    var classes = msg(cls("NSArray"), "arrayWithObject:", cls("NSURL"))
+    var urls = msg(pb, "readObjectsForClasses:options:", classes, 0)
+    if urls == 0:
+        return out^
+    for k in range(msg(urls, "count")):
+        var u = msg(urls, "objectAtIndex:", k)
+        if (msg(u, "isFileURL") & 0xFF) != 0:
+            out.append(from_ns(msg(u, "path")))
+    return out^
+
+
+def pasted_picture() -> String:
+    """(goal 82) A picture on the pasteboard (PNG, else TIFF made PNG) written to a file of its own: its path ("": none)."""
+    var pb = paste_board()
+    var data = msg(pb, "dataForType:", ns_string("public.png"))
+    if data == 0:
+        var tiff = msg(pb, "dataForType:", ns_string("public.tiff"))
+        if tiff == 0:
+            return ""
+        var rep = msg(cls("NSBitmapImageRep"), "imageRepWithData:", tiff)
+        if rep == 0:
+            return ""
+        data = msg(rep, "representationUsingType:properties:", 4, msg(cls("NSDictionary"), "dictionary"))  # (NSBitmapImageFileTypePNG)
+        if data == 0:
+            return ""
+    var dir = from_ns(external_call["NSTemporaryDirectory", Int]())
+    var path = (dir if dir.endswith("/") else dir + "/") + "mojoui-paste-" + String(Int(now_ns())) + ".png"
+    if (msg(data, "writeToFile:atomically:", ns_string(path), 1) & 0xFF) == 0:
+        return ""
+    return path
 
 
 def shim_sym(name: String) -> Int:
@@ -5797,6 +5953,17 @@ def run_step[A: App](host_addr: Int, step: String):
         else:
             for ch in kv[1].codepoint_slices():
                 real_key_step[A](host_addr, kv[0], String(ch))
+    elif verb == "clipboardimage":  # clipboardimage:/path.png: the paste board holds that picture (as a screenshot's copy would; goal 82)
+        var board = paste_board()
+        var data = msg(cls("NSData"), "dataWithContentsOfFile:", ns_string(rest))
+        _ = msg(board, "clearContents")
+        if data != 0:
+            _ = msg(board, "setData:forType:", data, ns_string("public.png"))
+        else:
+            host[].report.note("TEST: clipboardimage can't read " + rest)
+    elif verb == "answer":  # answer:<text>: the last system ask answered as its panel would (goal 82)
+        if rest != "":
+            host[].ask_answer(host[].ask_msg, rest, host_addr)
     elif verb == "clipboard":  # clipboard:text: the paste board holds text (as another app's copy would; in test mode the private one)
         var board = paste_board()
         _ = msg(board, "clearContents")
@@ -6102,6 +6269,22 @@ def on_popover_closed[A: App](target: Int, cmd: Int, notification: Int) abi("C")
                 host[].send(node, True, "", 0, host_addr)
     except:
         return
+
+
+def on_ask_watch[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    """(goal 82, tests) The modal panel a system ask opened, seen (its window's title and class) and closed (abortModal)."""
+    var app = msg(cls("NSApplication"), "sharedApplication")
+    var w = msg(app, "modalWindow")
+    var title = from_ns(msg(w, "title")) if w != 0 else String("")
+    var kind = from_ns(external_call["NSStringFromClass", Int](msg(w, "class"))) if w != 0 else String("none")
+    print("WINDOWS: modal " + kind + " '" + title + "'", flush=True)
+    _ = msg(app, "abortModal")
+
+
+def on_system_ask[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    """(goal 82) A system ask's turn: its panel, modal, outside update's patching."""
+    var host = host_at[A](msg(number, "longValue"))
+    host[].run_ask(msg(number, "longValue"))
 
 
 def on_show_sheet[A: App](target: Int, cmd: Int, number: Int) abi("C"):
@@ -6508,6 +6691,8 @@ def run[A: App]() -> c_int:
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
     add_method(c, "popoverDidClose:", on_popover_closed[A], "v@:@")
     add_method(c, "showSheet:", on_show_sheet[A], "v@:@")
+    add_method(c, "systemAsk:", on_system_ask[A], "v@:@")
+    add_method(c, "askWatch:", on_ask_watch[A], "v@:@")
     add_method(c, "toastTimeout:", on_toast_timeout[A], "v@:@")
     add_method(c, "boardPan:", on_board_pan[A], "v@:@")
     add_protocol(c, "NSPopoverDelegate")

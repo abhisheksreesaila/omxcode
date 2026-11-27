@@ -114,6 +114,12 @@ FEATURES = [
     ("Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)", "DesktopSignIn(server) · .url · code() · token_request(msg, code)", r"(?!)", "saas"),
     ("Open in the system browser (an effect: App.opens, mojoui.browser)", "Browser.open(url) · def opens(mut self) -> List[String]", r"(?!)", "saas"),
     ("View transitions (the old screen fades over the new while it settles: GTK snapshot overlay, web startViewTransition, CATransition)", "mojoui.transition.Morph · def transition(mut self) -> Int", r"take_transition|mojoui-morph", "stage"),
+    ("System dialogs asked from update (mojoui.systemask: file picker, save dialog, print a PDF, share, full screen)", "SystemAsks.pick_file · save_file · print_pdf · share · full_screen · def asks(mut self)", r"(?!)", "pnote"),
+    ("Pictures and files pasted (PASTE_FILE: a clipboard picture as a PNG, files copied in the file manager)", "def takes_paste_files(self, canvas) → PASTE_FILE events", r"(?!)", "pnote"),
+    ("Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG)", "MediaStore(dir).put(bytes, ext) · prepare_picture(path) · place_picture(w, h, x, y, i)", r"(?!)", "pnote"),
+    ("JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform)", "encode_jpeg(pixels, w, h, quality)", r"(?!)", "pnote"),
+    ("Vector PDF (mojoui.pdfwriter: a Painter; shapes as paths, words from their glyph outlines with ToUnicode, pictures)", "PdfPainter().page(w_pt, h_pt) · any Painter calls · save(path)", r"(?!)", "pnote"),
+    ("Focus mode rules (mojoui.focusmode; PageSheet.focus: words only, a 680 px column)", "focus_shortcut(name, mods) · focus_view(…) · count_words(text)", r"(?!)", "pnote"),
 ]
 
 # Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
@@ -133,7 +139,14 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
            "Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
-           "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"}}
+           "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           # goal 82 A (docs/goals/82-check.py M1, M2, M4; states as those runs left them, NOTES say what each drove)
+           "System dialogs asked from update (mojoui.systemask: file picker, save dialog, print a PDF, share, full screen)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"},
+           "Pictures and files pasted (PASTE_FILE: a clipboard picture as a PNG, files copied in the file manager)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"},
+           "Media store (mojoui.mediastore: pictures by SHA-256 in media/, the web app's rules: as they came, or 1400 px JPEG/PNG)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"},
+           "JPEG encoder (mojoui.jpeg, plain Mojo: the same bytes on every platform)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"},
+           "Vector PDF (mojoui.pdfwriter: a Painter; shapes as paths, words from their glyph outlines with ToUnicode, pictures)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"},
+           "Focus mode rules (mojoui.focusmode; PageSheet.focus: words only, a 680 px column)": {"Linux (GTK)": "🔨", "Mac (AppKit)": "🔨"}}
 
 # Composites a check runs on a host where no example in RUN_ON[host] reaches them (RUN_ON's Mac list is empty: the Mac
 # checks run single apps over scripts/mac-ssh): (module, host) → the check that runs it there. Set by hand and narrow:

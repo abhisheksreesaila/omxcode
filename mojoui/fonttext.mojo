@@ -128,6 +128,114 @@ def _peek(addr: Int) -> Int:
     return Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)[]
 
 
+def _quad_to(mut out: List[Float64], x0: Float64, y0: Float64, cx: Float64, cy: Float64, x: Float64, y: Float64):
+    """A quadratic Bézier from (x0, y0) as the cubic PDF draws (control points 2/3 of the way to the quadratic's)."""
+    out += [2.0, x0 + 2.0 / 3.0 * (cx - x0), y0 + 2.0 / 3.0 * (cy - y0), x + 2.0 / 3.0 * (cx - x), y + 2.0 / 3.0 * (cy - y), x, y]
+
+
+def _decompose(xs: List[Float64], ys: List[Float64], ks: List[Int], mut out: List[Float64]):
+    """One TrueType/CFF contour (points with kinds 0 on, 1 conic, 2 cubic control) as move/line/cubic/close commands (FreeType's
+    FT_Outline_Decompose: two conic controls in a row imply the on-curve point between them)."""
+    var n = len(xs)
+    if n == 0:
+        return
+    var sx = xs[0]
+    var sy = ys[0]
+    var i = 0
+    var last = n - 1
+    if ks[0] == 1:  # (starts off the curve: start at the last point if it's on, else between the two)
+        if ks[last] == 0:
+            sx = xs[last]
+            sy = ys[last]
+            last -= 1
+        else:
+            sx = (xs[0] + xs[last]) / 2
+            sy = (ys[0] + ys[last]) / 2
+        i = -1
+    out += [0.0, sx, sy]
+    var cx0 = sx
+    var cy0 = sy
+    while i < last:
+        i += 1
+        if ks[i] == 0:
+            out += [1.0, xs[i], ys[i]]
+            cx0 = xs[i]
+            cy0 = ys[i]
+            continue
+        if ks[i] == 1:
+            var ctx = xs[i]
+            var cty = ys[i]
+            var closed = True
+            while i < last:
+                i += 1
+                if ks[i] == 0:
+                    _quad_to(out, cx0, cy0, ctx, cty, xs[i], ys[i])
+                    cx0 = xs[i]
+                    cy0 = ys[i]
+                    closed = False
+                    break
+                var mx = (ctx + xs[i]) / 2
+                var my = (cty + ys[i]) / 2
+                _quad_to(out, cx0, cy0, ctx, cty, mx, my)
+                cx0 = mx
+                cy0 = my
+                ctx = xs[i]
+                cty = ys[i]
+            if closed:
+                _quad_to(out, cx0, cy0, ctx, cty, sx, sy)
+                cx0 = sx
+                cy0 = sy
+                break
+            continue
+        # cubic: two controls then an on-curve point (or the start)
+        if i + 1 > last + 1:
+            break
+        var x1 = xs[i]
+        var y1 = ys[i]
+        var x2 = xs[i + 1] if i + 1 <= last else sx
+        var y2 = ys[i + 1] if i + 1 <= last else sy
+        i += 2
+        if i <= last:
+            out += [2.0, x1, y1, x2, y2, xs[i], ys[i]]
+            cx0 = xs[i]
+            cy0 = ys[i]
+        else:
+            out += [2.0, x1, y1, x2, y2, sx, sy]
+            cx0 = sx
+            cy0 = sy
+            break
+    out.append(3.0)
+
+
+def _on_path_element(info: Int, element: Int) abi("C"):
+    """CGPathApply's function: one element (type, points) appended to the List[Float64] at `info` as glyph_outline's commands."""
+    var outp = Pointer[List[Float64], MutUntrackedOrigin](unsafe_from_address=info)
+    var kind = _peek_i32(element)
+    var pts = _peek(element + 8)
+    if kind == 0:
+        outp[] += [0.0, _peek_f64(pts), _peek_f64(pts + 8)]
+    elif kind == 1:
+        outp[] += [1.0, _peek_f64(pts), _peek_f64(pts + 8)]
+    elif kind == 2:  # (a quadratic: from the last point)
+        var n = len(outp[])
+        var x0 = outp[][n - 2] if n >= 2 else 0.0
+        var y0 = outp[][n - 1] if n >= 2 else 0.0
+        _quad_to(outp[], x0, y0, _peek_f64(pts), _peek_f64(pts + 8), _peek_f64(pts + 16), _peek_f64(pts + 24))
+    elif kind == 3:
+        outp[] += [2.0, _peek_f64(pts), _peek_f64(pts + 8), _peek_f64(pts + 16), _peek_f64(pts + 24), _peek_f64(pts + 32), _peek_f64(pts + 40)]
+    elif kind == 4:
+        outp[].append(3.0)
+
+
+def _path_element_address() -> Int:
+    var f = _on_path_element
+    return Pointer(to=f).unsafe_bitcast[Int]()[]
+
+
+def _peek_f64(addr: Int) -> Float64:
+    return Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=addr)[]
+
+
 def _c_text(addr: Int) -> String:
     if addr == 0:
         return String("")
@@ -1014,6 +1122,52 @@ struct FontEngine(Movable):
         return len(self.images) - 1
 
 
+    def glyph_outline(mut self, inst: Int, gid: Int) -> List[Float64]:
+        """(goal 82, vector PDF) A glyph's outline at the instance's variations, in font units (y up), as commands: 0 x y (move),
+        1 x y (line), 2 x1 y1 x2 y2 x y (cubic), 3 (close). Empty for a glyph with no outline (a space, a colour bitmap)."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_outline(inst, gid)
+        var out = List[Float64]()
+        ref ins = self.insts[inst]
+        var fi = ins.face
+        if self.faces[fi].fixed or self.faces[fi].color:
+            return out^
+        var ft = self.faces[fi].ft
+        self._use(inst)
+        var upem = self.faces[fi].upem
+        _ = _fn[def(Int, Int, Int, c_uint, c_uint) thin abi("C") -> c_int](self.FT_Set_Char_Size)(ft, 0, upem * 64, c_uint(72), c_uint(72))
+        self.faces[fi].size_set = -1  # (the next image() sets its own size again)
+        _fn[def(Int, Int, Int) thin abi("C") -> NoneType](self.FT_Set_Transform)(ft, 0, 0)
+        var rc = Int(_fn[def(Int, c_uint, Int32) thin abi("C") -> c_int](self.FT_Load_Glyph)(ft, c_uint(gid), Int32(2 | 8)))  # NO_HINTING | NO_BITMAP
+        if rc != 0:
+            return out^
+        var slot = _peek(ft + 152)
+        var ol = slot + 200  # FT_Outline: n_contours, n_points (16 bits each), points, tags, contours
+        var nc = _peek_u16(ol)
+        var np = _peek_u16(ol + 2)
+        var pts = _peek(ol + 8)
+        var tags = _peek(ol + 16)
+        var cons = _peek(ol + 24)
+        if nc == 0 or np == 0 or pts == 0:
+            return out^
+        var sc = 1.0 / 64.0
+        var first = 0
+        for c in range(nc):
+            var last = _peek_u16(cons + 2 * c)
+            if last < first or last >= np:
+                break
+            var xs = List[Float64]()
+            var ys = List[Float64]()
+            var ks = List[Int]()  # 0 on, 1 conic, 2 cubic
+            for q in range(first, last + 1):
+                xs.append(Float64(_peek(pts + 16 * q)) * sc)
+                ys.append(Float64(_peek(pts + 16 * q + 8)) * sc)
+                var t = _peek_u8(tags + q)
+                ks.append(0 if (t & 1) != 0 else (2 if (t & 2) != 0 else 1))
+            _decompose(xs, ys, ks, out)
+            first = last + 1
+        return out^
+
     # ------------------------------------------------ the Mac: CoreText (goal 79 M1)
 
     def _m(self, i: Int) -> Int:
@@ -1255,6 +1409,30 @@ struct FontEngine(Movable):
                     idx = -1
         self.fallback[key] = idx
         return idx
+
+    def _mac_outline(mut self, inst: Int, gid: Int) -> List[Float64]:
+        """glyph_outline on the Mac: CoreText's path of the glyph at the instance's variations (at its em size: font units)."""
+        var out = List[Float64]()
+        var fi = self.insts[inst].face
+        if self.faces[fi].color:
+            return out^
+        var font = self.ct_font(inst, Float64(self.faces[fi].upem))
+        var mk = _dlsym(-2, "CTFontCreatePathForGlyph")
+        var apply = _dlsym(-2, "CGPathApply")
+        if font == 0 or mk == 0 or apply == 0:
+            return out^
+        var path = _fn[def(Int, UInt16, Int) thin abi("C") -> Int](mk)(font, UInt16(gid), 0)
+        if path == 0:
+            return out^
+        var box = alloc(Layout[List[Float64]].single())
+        var cell = box^.unsafe_leak()
+        cell.unsafe_write(List[Float64]())
+        _fn[def(Int, Int, Int) thin abi("C") -> NoneType](apply)(path, Int(cell), _path_element_address())
+        out = cell[].copy()
+        cell.unsafe_deinit_pointee()
+        cell.unsafe_free()
+        _fn[def(Int) thin abi("C") -> NoneType](_dlsym(-2, "CGPathRelease"))(path)
+        return out^
 
     def _mac_advance_units(mut self, inst: Int, gid: Int) -> Int:
         var key = inst * 1048576 + gid

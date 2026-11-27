@@ -1380,3 +1380,50 @@ def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w:
         text_at(p, ds, lines[n], cx + 24, cy + 24 + 22 + 10 + 20 * Float64(n), 20, sk.ui_muted)
     if action != "":
         draw_pill_button(p, bx, name, cx + 24 + 60, cy + ch - 24 - 32, action, sk)
+
+
+# ------------------------------------------------ focus mode (goal 82 M1): the island's focus face and the leaving hint
+
+def draw_focus_strip[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, title: String, count: String, k: Float64, sk: Skin):
+    """The island's focus face (the web's .isl-focus), centred on cx at the top: the note's title, its word count, and a
+    "Leave focus Esc" button. Boxes: "focus.strip", "focus.count:<count>", "focus.leave"."""
+    var tst = TextStyle(UI, 500, False, 12.5)
+    var cst = TextStyle(UI, 400, False, 12.5)
+    var shown = title if title != "" else String("Untitled note")
+    var tw = min(measure(tst, shown), 240.0)
+    var cw = measure(cst, count)
+    var lw = measure(cst, "Leave focus")
+    var kst = TextStyle(UI, 500, False, 11)
+    var kw = measure(kst, "Esc") + 10
+    var bw = 10 + 14 + 6 + lw + 6 + kw + 10
+    var w = 18 + tw + 14 + cw + 14 + bw + 8
+    var x = Float64(Int((cx - w / 2) * 2 + 0.5)) / 2
+    var y = 16.0
+    draw_lifted(p, x, y, w, 44, 22, sk.shadow2, sk.panel)
+    bx.add("focus.strip", x, y, w, 44)
+    var top = y + (44 - line_metrics(tst).normal_height()) / 2
+    p.push_clip(x + 18, y, tw, 44)
+    text_normal(p, tst, shown, x + 18, top, sk.ink)
+    p.pop_clip()
+    text_normal(p, cst, count, x + 18 + tw + 14, top, sk.ui_muted)
+    bx.add("focus.count:" + count, x + 18 + tw + 14, top, cw, line_metrics(cst).normal_height())
+    var bx0 = x + 18 + tw + 14 + cw + 14
+    var by = y + (44 - 30) / 2
+    p.rect(bx0, by, bw, 30, sk.line, 15)
+    p.rect(bx0 + 1, by + 1, bw - 2, 28, sk.panel, 14)
+    draw_icon(p, "x", bx0 + 10, by + 8, 14, k, sk.ui_muted)
+    text_normal(p, cst, "Leave focus", bx0 + 10 + 14 + 6, by + (30 - line_metrics(cst).normal_height()) / 2, sk.ui_muted)
+    var kx = bx0 + 10 + 14 + 6 + lw + 6
+    text_normal(p, kst, "Esc", kx + 5, by + 6 + (18 - line_metrics(kst).normal_height()) / 2, sk.ui_muted)
+    bx.add("focus.leave", bx0, by, bw, 30)
+
+
+def draw_focus_hint[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, bottom: Float64, words: String, alpha: Float64, sk: Skin):
+    """The words that say how to leave focus mode (the web's .focus-hint: 12.5 px muted, its bottom 28 px up), fading by `alpha`."""
+    if alpha <= 0:
+        return
+    var st = TextStyle(UI, 500, False, 12.5)
+    var w = measure(st, words)
+    var h = line_metrics(st).normal_height()
+    text_normal(p, st, words, cx - w / 2, bottom - 28 - h, with_alpha(sk.ui_muted, alpha * Float64((sk.ui_muted >> 24) & 0xFF) / 255.0))
+    bx.add("focus.hint", cx - w / 2, bottom - 28 - h, w, h)

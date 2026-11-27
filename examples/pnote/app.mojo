@@ -33,7 +33,10 @@ from mojoui.ink import Stroke
 from mojoui.maths import cos, sin
 from mojoui.gpu2d_backend import backend_name, turn_off_gpu2d
 from themes.liquid import liquid
-from webshell import WebShell
+from webshell import WebShell, MSG_PICKED, MSG_DROPPED, MSG_PRINTED, MSG_SAVED_AS, MSG_SHARED
+from mojoui.view import PASTE_FILE
+from mojoui.systemask import SystemAsk
+from mojoui.dragdrop import DropTarget
 from pnstore import default_notes_file
 from mojoui.files import read_setting
 from mojoui.fonttext_check import fontcheck
@@ -365,6 +368,14 @@ struct Main(App):
 
     def takes_paste(self, canvas: Int) -> Bool:
         return len(self.web) > 0
+
+    def takes_paste_files(self, canvas: Int) -> Bool:
+        return len(self.web) > 0
+
+    def asks(mut self) -> List[SystemAsk]:
+        if len(self.web) > 0:
+            return self.web[0].sys.take()
+        return List[SystemAsk]()
 
     def hears_key_ups(self) -> Bool:
         return len(self.web) > 0
@@ -833,6 +844,14 @@ struct Main(App):
                 if self.web[0].key(event.text, Int(event.dx)):
                     self.version += 1
                 return
+            if (m == GESTURE and event.number == PASTE_FILE) or m == MSG_PICKED or m == MSG_DROPPED:  # (goal 82: a picture pasted, picked or dropped)
+                self.web[0].queue_picture(event.text)
+                self.version += 1
+                return
+            if m == MSG_PRINTED or m == MSG_SAVED_AS or m == MSG_SHARED:
+                self.web[0].system_answer(m, event.text)
+                self.version += 1
+                return
             if m == GESTURE and (event.number == IME_COMMIT or event.number == PASTE):
                 if self.web[0].text_in("paste" if event.number == PASTE else "ime", event.text):
                     self.version += 1
@@ -968,7 +987,8 @@ struct Main(App):
 
     def view(self) -> View:
         if len(self.web) > 0:
-            var desk = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu().grow().fill().tag("desk")  # (hover: the web look draws hover states)
+            var canvas = Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True, hover=True).gpu().grow().fill().tag("desk")  # (hover: the web look draws hover states)
+            var desk = DropTarget(canvas^, 0, on_file=MSG_DROPPED).grow().fill().tag("desk-drop")  # (goal 82: pictures dropped from the file manager)
             comptime if CompilationTarget.is_macos():  # (the system menu bar: Personal Note's own menus, desktop_menu.py; Edit is the system's)
                 var bar = MenuBar([
                     Menu("File", [Item("New note", MENU0 + 0, shortcut="Ctrl+N"), Item("Quick note", MENU0 + 1), Separator(),
