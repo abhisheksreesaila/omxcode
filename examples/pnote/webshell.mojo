@@ -3211,7 +3211,8 @@ struct WebShell(Movable):
             var ok = self.note_png(text) if kind == "png" else (self.note_pdf(text) if kind == "pdf" else False)
             print("PNOTE SAVE AS: " + kind + " " + text + (" written" if ok else " FAILED"), flush=True)
             if ok:
-                self.say("Saved " + String(text.split("/")[-1]))
+                var parts = text.split("/")
+                self.say("Saved " + String(parts[len(parts) - 1]))
 
     # ------------------------------------------------ print and export (goal 82 M4, the web's F-033 print sheets and Picture)
 

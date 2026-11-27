@@ -5289,12 +5289,12 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
             if a.kind == ASK_PICK:
                 accept_filter(dialog, a.accept, "Files it opens")
-                external_call["gtk_file_dialog_open", NoneType](dialog, self.window, 0, on_file_picked[A], self_addr)
+                external_call["gtk_file_dialog_open", NoneType](dialog, self.window, 0, on_file_picked[Self.A], self_addr)
             else:
                 var suggested = a.path
                 if suggested != "":
                     external_call["gtk_file_dialog_set_initial_name", NoneType](dialog, suggested.as_c_string_span())
-                external_call["gtk_file_dialog_save", NoneType](dialog, self.window, 0, on_file_saved[A], self_addr)
+                external_call["gtk_file_dialog_save", NoneType](dialog, self.window, 0, on_file_saved[Self.A], self_addr)
             return
         if a.kind == ASK_PRINT:
             self.print_msg = a.msg
@@ -5303,7 +5303,7 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_print_dialog_set_title", NoneType](pd, title.as_c_string_span())
             var path = a.path
             var file = external_call["g_file_new_for_path", Int](path.as_c_string_span())
-            external_call["gtk_print_dialog_print_file", NoneType](pd, self.window, 0, file, 0, on_printed[A], self_addr)
+            external_call["gtk_print_dialog_print_file", NoneType](pd, self.window, 0, file, 0, on_printed[Self.A], self_addr)
             external_call["g_object_unref", NoneType](file)
             return
         if a.kind == ASK_SHARE:

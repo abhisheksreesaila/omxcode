@@ -2469,7 +2469,8 @@ def is_picture_file(file: String) -> Bool:
     for cut in ["?", "#"]:
         var at = name.find(cut)
         if at >= 0:
-            name = String(name[byte=0:at])
+            var cut_name = String(name[byte=0:at])
+            name = cut_name
     var dot = name.rfind(".")
     if dot < 0:
         return False

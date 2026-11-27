@@ -25,6 +25,7 @@ comptime IMAGE_MAX_SIDE = 1400
 comptime IMAGE_MAX_BYTES_KEPT = 300 * 1024  # (the web's IMAGE_MAX_DATA_URL: bigger files are written again)
 comptime MAX_MEGAPIXELS = 100
 comptime MAX_MEDIA_BYTES = 20 * 1024 * 1024
+comptime PLACE_SIDE_PX = 520  # (an Int beside it: Int() of a comptime float does not compile)
 comptime PLACE_SIDE = 520.0  # a new picture is at most this big on its long side (page px)
 comptime PLACE_OFFSET = 28.0  # each further picture of one drop is placed this far down and right
 comptime JPEG_QUALITY = 85
@@ -355,7 +356,7 @@ struct Placed(Copyable, Movable):
 def place_picture(w: Int, h: Int, x: Float64, y: Float64, index: Int = 0) -> Placed:
     """Centred on (x, y) (page px), at most PLACE_SIDE on its long side, never enlarged; the index-th of one drop PLACE_OFFSET
     further down and right. The corner is the unscaled box's (scaled about its centre), as the web writes it."""
-    var shown = fit_image(w, h, Int(PLACE_SIDE))
+    var shown = fit_image(w, h, PLACE_SIDE_PX)
     var scale = Float64(shown[0]) / Float64(w) if w > 0 else 1.0
     var off = Float64(index) * PLACE_OFFSET
     return Placed(x + off - Float64(w) / 2, y + off - Float64(h) / 2, Float64(w), Float64(h), scale)

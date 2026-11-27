@@ -38,7 +38,8 @@ def _num(v: Float64) -> String:
         while f.byte_length() < 3:
             f = "0" + f
         while f.endswith("0"):
-            f = String(f[byte=0:f.byte_length() - 1])
+            var shorter = String(f[byte=0:f.byte_length() - 1])
+            f = shorter
         out += "." + f
     return out^
 
@@ -492,18 +493,18 @@ struct PdfPainter(Painter, Movable):
         var font_start = 3 + 2 * npages
         var next = font_start
         var proc_obj = List[List[Int]]()
-        for ref t in self.fonts:
+        for t_i in range(len(self.fonts)):
             font_obj.append(next)
             next += 2  # font, ToUnicode
             var ps = List[Int]()
-            for _ in range(len(t.gids)):
+            for _ in range(len(self.fonts[t_i].gids)):
                 ps.append(next)
                 next += 1
             proc_obj.append(ps^)
         var img_obj = List[Int]()
-        for ref im in self.images:
+        for i_i in range(len(self.images)):
             img_obj.append(next)
-            next += 2 if len(im.alpha) > 0 else 1
+            next += 2 if len(self.images[i_i].alpha) > 0 else 1
         var gs_obj = next
         var total = gs_obj + len(self.alphas) - 1
         for _ in range(total - 2):

@@ -53,8 +53,16 @@ def tail(s, n=500):
 
 
 def quiet(cmd):
-    """A Mojo build or GUI run: under the shared quiet lock, on at most six cores."""
+    """A test or GUI run: under the shared quiet lock, on at most six cores."""
     return ["flock", "-s", QUIET, "taskset", "-c", CORES] + cmd
+
+
+BUILD_LOCK = os.path.expanduser("~/.cache/omx-build.lock")
+
+
+def building(cmd):
+    """(main session, 2026-11-26 17:45) A Mojo build: one at a time across the machine (an exclusive lock), at most six cores."""
+    return ["flock", BUILD_LOCK, "taskset", "-c", CORES] + cmd
 
 
 _built = {}
@@ -63,7 +71,7 @@ _built = {}
 def build_linux():
     if "linux" in _built:
         return _built["linux"]
-    r = run(quiet(["bash", "scripts/build.sh", "pnote", "linux"]), 3600)
+    r = run(building(["bash", "scripts/build.sh", "pnote", "linux"]), 3600)
     _built["linux"] = "" if r.returncode == 0 and APP.exists() else f"build failed: {tail(r.stdout + r.stderr, 800)}"
     return _built["linux"]
 
@@ -303,11 +311,11 @@ def m2():
     if err:
         return "FAIL", err
     probs, said = [], []
-    r = run(quiet(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", "tests/test_mediastore.mojo", str(OUT / "unit-media")]), 1800)
+    r = run(building(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", "tests/test_mediastore.mojo", str(OUT / "unit-media")]), 1800)
     if r.returncode != 0 or "test_mediastore: all passed" not in r.stdout:
         probs.append(f"tests/test_mediastore: {tail(r.stdout + r.stderr, 400)}")
     (OUT / "unit").mkdir(parents=True, exist_ok=True)
-    r = run(quiet(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_jpeg.mojo", str(OUT / "unit")]), 900)
+    r = run(building(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_jpeg.mojo", str(OUT / "unit")]), 900)
     r2 = run(["pixi", "run", "python", "tests/test_jpeg.py", str(OUT / "unit")], 300)
     if r.returncode or r2.returncode:
         probs.append(f"tests/test_jpeg: {tail(r.stdout + r.stderr + r2.stdout, 400)}")
@@ -443,7 +451,7 @@ def m4():
     probs, said = [], []
     unit = OUT / "unit-pdf"
     unit.mkdir(parents=True, exist_ok=True)
-    r = run(quiet(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", "tests/test_pdfwriter.mojo", str(unit)]), 1800)
+    r = run(building(["pixi", "run", "mojo", "run", "-I", ".", "-I", "vendor", "tests/test_pdfwriter.mojo", str(unit)]), 1800)
     r2 = run(["pixi", "run", "python", "tests/test_pdfwriter.py", str(unit)], 300)
     if r.returncode or r2.returncode:
         probs.append(f"tests/test_pdfwriter: {tail(r.stdout + r.stderr + r2.stdout, 500)}")
@@ -561,7 +569,7 @@ def base_app():
         if r.returncode:
             return None, f"git worktree add: {tail(r.stdout + r.stderr)}"
         os.symlink(os.readlink(ROOT / ".pixi") if (ROOT / ".pixi").is_symlink() else str(ROOT / ".pixi"), wt / ".pixi")
-    r = run(quiet(["bash", "scripts/build.sh", "pnote", "linux"]), 3600, cwd=wt)
+    r = run(building(["bash", "scripts/build.sh", "pnote", "linux"]), 3600, cwd=wt)
     return (app, "") if app.exists() else (None, f"base build: {tail(r.stdout + r.stderr, 500)}")
 
 
