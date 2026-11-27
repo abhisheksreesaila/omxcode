@@ -48,6 +48,17 @@ from mojoui.fonttext import engine
 from mojoui.glyphwarm import GlyphWarm
 from mojoui.scenewarm import SceneWarm
 from mojoui.objectlayer import reading_text
+from mojoui.dictation import PressToTalk, DictationText, Dictation, use_python_env, TALK_START, TALK_STOP, PARAKEET
+from mojoui.notesshell import draw_mic_button, draw_listening_ring, draw_toast2, draw_jam_island
+from mojoui.settingswin import SettingsForm, FormRow, ROW_CHOICE, ROW_FIELD, ROW_SECRET, ROW_NOTE, ROW_BUTTONS, ROW_STATUS
+from mojoui.aisettings import AiSettings, BrainCall, save_settings, has_key, forget_key, find_claude, key_store, ASK_RUNNING, ASK_DONE, ASK_FAILED
+from mojoui.jam import JAM_SYSTEM, parse_jam, apply_jam, jam_prompt, jam_ghosts, is_jam, answer_ghost, start_jam, JamEdits
+from mojoui.agentedit import merge_text, changed_span
+from mojoui.files import config_dir
+from mojoui.dictation import model_on_disk
+from mojoui.hfcache import hf_hub_cache
+from std.sys import CompilationTarget
+from mojoui import libc
 from mojoui.canvasload import OpenBoard, SqlText, skim
 from mojoui.files import config_dir
 from mojoui.viewsnap import snap_dir_ready, expect_snapshots, snap_forget, fnv
@@ -276,6 +287,11 @@ def _outline(m: BuzanMap, parent: Int, depth: Int, mut out: String):
 comptime TOAST_UNDELETE = 1
 comptime DRAFTED = 1  # (content_hash: the file holds words still being written, which no picture of the board shows yet: no kept view is of it)
 comptime TOAST_UNCLEAR = 2
+comptime TOAST_VOICE = 82  # (goal 82 M5) yes to the speech model's download
+comptime TOAST_AGENT = 83  # (goal 82 M6) an agent's edit: Undo (and Show, the second action)
+comptime AI_TEST_SYSTEM = 'You are a connection check. Answer with JSON only: {"ok": true}'
+comptime SETTINGS_PAGES = ["Appearance", "Writing", "AI", "Plugins", "Voice", "Search by meaning", "X bookmarks", "Locked notes", "Advanced"]
+comptime JAM_NOTHING = "Nothing to jam on yet: hold the mic and talk."
 
 
 def has_all(text: String, tokens: List[String]) -> Bool:
@@ -490,9 +506,47 @@ struct WebShell(Movable):
     var words_at: Tuple[Float64, Float64, Float64, Float64]  # the caret of the canvas words being written, on screen
     var doubled_us: Int  # when the last double click came (one more soon after selects the line)
     var bench_note: Int  # (the race's cold opens) the canvas they open, from another note's (D-7951)
+    var talk: PressToTalk  # (goal 82 M5) the mic: hold to talk, tap to keep listening
+    var dictated: DictationText  # the words at the caret while dictating
+    var ears: Dictation  # the microphone and the speech model (loaded on the first press)
+    var voice_t0: Int  # when this dictation started (µs), for the log's first words
+    var settings_page: Int  # (goal 82 M6) the settings window's page (SETTINGS_PAGES)
+    var ai_form: SettingsForm  # Settings → AI
+    var voice_form: SettingsForm  # Settings → Voice
+    var ai_draft: AiSettings  # the AI page's choices while edited
+    var pending_key: String  # a key typed into the AI page, until Save (never anywhere else)
+    var ai_calls: List[BrainCall]  # a brain call in flight (0 or 1): the AI page's Test, or a jam turn
+    var ai_call_for: String  # "test" | "jam"
+    var jam_said: List[String]  # a jam's finished sentences not sent yet
+    var jam_partial: String  # the sentence still being heard
+    var jam_fault: String  # why the last turn failed (until the next)
+    var jam_doc: String  # the map as the turn in flight saw it
+    var jam_user: String  # that turn's words for the brain (a retry adds the refusal)
+    var jam_retried: Bool
+    var agent_edit: Int  # the agent edit on offer (agent_edits.id; 0: none)
+    var toast_action2: String  # a second toast action (Show)
 
     def __init__(out self, db_path: String, skin: String):
         self.db_path = db_path
+        self.talk = PressToTalk()
+        self.dictated = DictationText()
+        self.ears = Dictation(environment("PNOTE_VOICE_SOURCE", ""), read_setting("pnote", "voice_engine", PARAKEET), read_setting("pnote", "models_dir", ""))
+        self.voice_t0 = 0
+        self.settings_page = 0
+        self.ai_form = SettingsForm()
+        self.voice_form = SettingsForm()
+        self.ai_draft = AiSettings.load(config_dir("pnote"))
+        self.pending_key = ""
+        self.ai_calls = List[BrainCall]()
+        self.ai_call_for = ""
+        self.jam_said = List[String]()
+        self.jam_partial = ""
+        self.jam_fault = ""
+        self.jam_doc = ""
+        self.jam_user = ""
+        self.jam_retried = False
+        self.agent_edit = 0
+        self.toast_action2 = ""
         self.notes = List[NoteRec]()
         self.panel = NotesPanel(pn_panel())
         self.panel.skin_name = skin
@@ -1093,7 +1147,14 @@ struct WebShell(Movable):
                 draw_tool_dock(p, self.boxes, w - 72, (h - 410) / 2, ["Add image", "Import JSON", "Export JSON", "Export PNG", "", "Undo", "Redo", "", "Clean up layout", "Fit map"],
                                ["image-plus", "folder-open", "braces", "image-down", "", "undo-2", "redo-2", "", "wand-sparkles", "scan"], k, self.sk, "#mindmap-rail-actions")
                 draw_zoom_island(p, self.boxes, left + 4 + mw - 16 - 132, 66 + mh - 16 - 42, Int(fv[0] * 100 + 0.5), k, self.sk)
-                draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
+                if self.jam_on():  # (goal 82 M6: a jam map: the mic joins the map's rail, the jam's island at the bottom)
+                    draw_mic_button(p, self.boxes, "#map-voice", w - 72 + 6, (h - 410) / 2 + 410 + 14, 44, k, self.sk, self.ears.busy(), self.ears.level(), self.ears.listening())
+                    var gl = List[String]()
+                    for g in jam_ghosts(self.page_src):
+                        gl.append(g.text + " — " + g.why)
+                    draw_jam_island(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18, self.jam_line(), self.jam_phase(), gl, k, self.sk)
+                else:
+                    draw_hint(p, self.boxes, left + 4 + mw / 2, 66 + mh - 18 - 28, "Drag an anchor to draw. Hold an idea to switch Box or Branch.", self.sk)
             if n.kind == "canvas" and not n.secure and not self.doc.is_failed():
                 self.boxes.add("#paper", left, 0, w - left, h)
                 self.boxes.add("#leafer-host", left, 0, w - left, h)
@@ -1103,6 +1164,9 @@ struct WebShell(Movable):
                 if active == "#dock-more":  # (a tool from the flyout shows in its place)
                     items[8].icon = canvas_more_items()[0 if self.tools.tool == "hand" else (1 if self.tools.tool == "highlight" else 2)].icon
                 draw_dock(p, self.boxes, w - 72, 72 + (h - 144 - dock_height(items)) / 2, items, active, k, self.sk, "#dock-canvas")
+                if self.ears.busy():
+                    var vb = self.boxes.rect("#voice-button")
+                    draw_listening_ring(p, vb[0], vb[1], vb[2], self.ears.level(), self.ears.listening(), self.sk)
                 if len(self.board.layer.selected) > 0 and self.tools.editing == -1:
                     _ = draw_selection_bar(p, self.boxes, left + (w - left) / 2, 64, ["Back", "Forward", "Lock", "Link to words", "Delete"], k, self.sk)
                 var dock_y = 72 + (h - 144 - dock_height(items)) / 2
@@ -1126,6 +1190,8 @@ struct WebShell(Movable):
                 draw_page_zoom(p, self.boxes, w - 16, h - 16 - 48, Int(self.view.scale * 100 + 0.5), k, self.sk, quiet and not over)
             if n.kind == "page" and not n.secure and not self.doc.is_failed():
                 self.page.draw(p, self.boxes, left + 4, 66, w - 12, h - 12, k, n.emoji, self.sk.tint(n.tint), self.sk.radius)
+                if not self.page.draw_mode and self.doc.may_edit():  # (goal 82: the page's own mic, where a canvas has its dock's)
+                    draw_mic_button(p, self.boxes, "#page-voice", w - 16 - 48, h - 16 - 48, 48, k, self.sk, self.ears.busy(), self.ears.level(), self.ears.listening())
         if self.save_state != "":  # (the web puts a failed save in its island: "Couldn’t save", the reason, Retry)
             draw_hint(p, self.boxes, left + (w - left) / 2, h - 18 - 28 - 40, self.save_state + " · " + self.save_detail, self.sk, True)
             var held_at = self.outbox.find(self.current)
@@ -1194,18 +1260,22 @@ struct WebShell(Movable):
         if self.new_menu:
             draw_popup_menu(p, self.boxes, 27, 177, 168, ["Canvas note", "Page", "Mind map"], ["file-text", "file-pen", "git-fork"], k, self.sk, self.px, self.py)
         if self.toast != "":
-            _ = draw_toast(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.sk)
+            if self.toast_action2 != "":
+                _ = draw_toast2(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.toast_action2, self.sk)
+            else:
+                _ = draw_toast(p, self.boxes, w / 2, h - 96, self.toast, self.toast_action, self.sk)
         if self.searching:
             self.omni.draw(p, self.boxes, w, h, k, self.sk)
         if self.settings_open:
             var sw = SettingsWindow()
+            sw.page = self.settings_page
             var g1 = List[SettingsPage]()
             g1.append(SettingsPage("Appearance", "sun", "How Personal Note looks. A skin applies at once.", ("Paper" if self.panel.skin_name == "paper" else ("Night" if self.panel.skin_name == "night" else "Crayon"))))
             g1.append(SettingsPage("Writing", "pen-line", "Fonts and sizes for what you write.", "Mono · 24"))
             var g2 = List[SettingsPage]()
-            g2.append(SettingsPage("AI", "sparkles", "Not in the native app yet.", "Claude Code"))
+            g2.append(SettingsPage("AI", "sparkles", "Which model every AI feature uses: Jam on mind maps and the agents.", self.ai_draft.label()))
             g2.append(SettingsPage("Plugins", "layout-grid", "Not in the native app yet.", "3 on"))
-            g2.append(SettingsPage("Voice", "mic", "Not in the native app yet.", "Not installed"))
+            g2.append(SettingsPage("Voice", "mic", "Hold to talk. It runs here and keeps only the words.", "Not installed" if self.ears.needs_download() else "Ready"))
             g2.append(SettingsPage("Search by meaning", "globe", "Not in the native app yet.", "Not installed"))
             g2.append(SettingsPage("X bookmarks", "bookmark", "Not in the native app yet.", "Not connected"))
             var g3 = List[SettingsPage]()
@@ -1215,8 +1285,13 @@ struct WebShell(Movable):
             sw.groups.append(g2^)
             sw.groups.append(g3^)
             var body = sw.draw(p, self.boxes, w, h, k, self.sk)
-            var cards = pn_skin_cards()
-            skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name, cards[0], cards[1])
+            if self.settings_page == 0:
+                var cards = pn_skin_cards()
+                skin_cards(p, self.boxes, body[0], body[1], body[2], k, self.sk, self.panel.skin_name, cards[0], cards[1])
+            elif self.settings_page == 2:
+                _ = self.ai_form.draw(p, self.boxes, body[0], body[1], body[2], k, self.sk)
+            elif self.settings_page == 4:
+                _ = self.voice_form.draw(p, self.boxes, body[0], body[1], body[2], k, self.sk)
 
     def readying(self) -> Bool:
         """Something is left to ready while nothing happens (the glyphs drawn last time, the screens likely next)."""
@@ -1510,6 +1585,8 @@ struct WebShell(Movable):
             self.create("mindmap")
         elif id == "settings":
             self.settings_open = True
+        elif id == "new-jam":
+            self.new_jam()
         elif id.startswith("skin-"):
             self.set_skin(String(id[byte=5:]))
         else:
@@ -1729,6 +1806,7 @@ struct WebShell(Movable):
                     self.view = view
                 if self.doc.may_edit():
                     self.write_at(place)
+                self.agent_look(cur)
             print("PNOTE FEED: read again at " + String(seq), flush=True)
             return True
         except e:
@@ -2049,11 +2127,13 @@ struct WebShell(Movable):
         if does != TOAST_UNDELETE:
             self.commit_delete()
         self.toast = words
+        self.toast_action2 = ""
         self.toast_action = action
         self.toast_does = does
         self.toast_until = clock_us() + 8_000_000
 
     def hide_toast(mut self):
+        self.toast_action2 = ""
         self.toast = ""
         self.toast_action = ""
         self.toast_does = 0
@@ -2065,6 +2145,13 @@ struct WebShell(Movable):
             self.undo_delete()
             return
         self.hide_toast()
+        if does == TOAST_VOICE:
+            self.ears.download_ok = True
+            self.voice_start()
+            return
+        if does == TOAST_AGENT:
+            self.agent_undo()
+            return
         if does == TOAST_UNCLEAR:
             var i = self.note_index(self.current)
             if i >= 0 and self.notes[i].kind == "page":
@@ -2776,6 +2863,8 @@ struct WebShell(Movable):
         """Words are being written somewhere; else a letter is a key (a canvas's tools, a map's shortcuts)."""
         if self.emoji.open or self.searching or (self.panel.naming >= 0 and self.sidebar) or (self.card_open and self.card.editing):
             return True
+        if self.settings_open and (self.ai_form.editing != "" or self.voice_form.editing != ""):
+            return True
         var i = self.note_index(self.current)
         if i < 0 or self.card_open or self.settings_open:
             return False
@@ -2803,6 +2892,8 @@ struct WebShell(Movable):
                 self.card.all_selected = False
             self.card.title += one_line(text)
             return True
+        if self.settings_open and (self.ai_form.editing != "" or self.voice_form.editing != ""):
+            return self.ai_form.type(text) if self.ai_form.editing != "" else self.voice_form.type(text)
         if i < 0 or self.notes[i].secure or self.card_open or self.settings_open or not self.editable():
             return False
         if self.notes[i].kind == "page":
@@ -2936,6 +3027,29 @@ struct WebShell(Movable):
                 self.card_open = False
                 self.title_focus = True  # (Enter gives the focus back to the island's button: the web shows its ring)
             return r != 0
+        if self.settings_open and (self.ai_form.editing != "" or self.voice_form.editing != ""):  # (typing in a settings field)
+            ref f = self.ai_form if self.ai_form.editing != "" else self.voice_form
+            if name == "BackSpace":
+                return f.backspace()
+            if name == "Escape":
+                f.cancel()
+                return True
+            if name == "Return" or name == "KP_Enter" or name == "Enter" or name == "Tab":
+                var was = f.done()
+                self.settings_act("field-done:" + was)
+                return True
+            if (mods & 4) == 0:  # (a key that is a character: GTK's names for the punctuation an address or a key needs)
+                var names: List[String] = ["space", "minus", "underscore", "period", "colon", "slash", "equal", "plus", "at", "asciitilde"]
+                var chars: List[String] = [" ", "-", "_", ".", ":", "/", "=", "+", "@", "~"]
+                for q in range(len(names)):
+                    if name == names[q]:
+                        return f.type(chars[q])
+                var n = 0
+                for _ in name.codepoints():
+                    n += 1
+                if n == 1:
+                    return f.type(name)
+            return False
         if (self.card_open or self.settings_open) and name == "Escape":
             self.card_open = False
             self.settings_open = False
@@ -3192,6 +3306,8 @@ struct WebShell(Movable):
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
             return False
         self.pressed_us = clock_us()
+        if not self.searching and not self.card_open and not self.settings_open and self.boxes.hit_any(x, y, ["#voice-button", "#page-voice", "#map-voice"]) != "":
+            return self.voice_press()
         if self.emoji.open or self.new_menu:
             return False
         if not self.searching and not self.card_open and not self.settings_open and self.icon_under(x, y) != "":
@@ -3334,6 +3450,8 @@ struct WebShell(Movable):
         return self.page.drag(x, y)
 
     def release(mut self, x: Float64, y: Float64) -> Bool:
+        if self.talk.pressed_at >= 0 or self.talk.stop_on_release:
+            return self.voice_release()
         if self.panel.drag_id >= 0:
             var was = self.panel.dragging
             var d = self.panel.release(x, y)
@@ -3437,8 +3555,7 @@ struct WebShell(Movable):
         if hit == "#zoom-value":
             self.view = self.tools.zoom_at(self.view, 1.0 / self.view.scale, self.win_w / 2, self.win_h / 2, self.win_w, self.win_h, self.cols, self.rows)
             return True
-        if hit == "#voice-button":
-            self.say("Not in the native app yet")
+        if hit == "#voice-button":  # (press and release did it)
             return True
         var names: List[String] = ["[Select]", "[Text]", "[Pen]", "[Stroke eraser]", "[Shape]", "[Sticky note]"]
         var tools: List[String] = ["select", "text", "pen", "eraser", "shape", "sticky"]
@@ -3545,9 +3662,27 @@ struct WebShell(Movable):
         """A tap at (x, y) layout px; True when it changed something."""
         self.budget.input()
         self.title_focus = False
+        if self.talk.pressed_at >= 0 or self.talk.stop_on_release:  # (the mic's click: its press began it, the release may not have come)
+            _ = self.voice_release()
+            return True
+        if self.jam_on() and not self.searching and not self.card_open and not self.settings_open:
+            var jh = self.boxes.hit_any(x, y, ["#jam-go", "jam.yes:", "jam.no:", "jam"])
+            if jh == "#jam-go":
+                self.jam_turn()
+                return True
+            if jh.startswith("jam.yes:") or jh.startswith("jam.no:"):
+                try:
+                    self.jam_answer(Int(String(jh[byte = jh.find(":") + 1 :])), jh.startswith("jam.yes:"))
+                except:
+                    pass
+                return True
+            if jh == "jam":
+                return True
         var hit = self.boxes.hit_any(x, y, ["#toggle-sidebar", "#search-button", "row:", "[Crayon skin]", "[Paper skin]", "[Night skin]", ".sec-head", "#share-button", "#open-retry", "#save-retry", "#save-copy", "#rail-new-note", ".nav-row:"])
         if self.toast != "" and self.boxes.hit_any(x, y, ["#toast"]) != "":
-            if self.boxes.hit_any(x, y, ["#toast-action"]) != "":
+            if self.toast_action2 != "" and self.boxes.hit_any(x, y, ["toast.action2"]) != "":
+                self.agent_show()
+            elif self.boxes.hit_any(x, y, ["#toast-action"]) != "":
                 self.run_toast()
             return True
         if self.emoji.open:
@@ -3632,6 +3767,21 @@ struct WebShell(Movable):
                 self.props.menu_open = False
             return True
         if self.settings_open:
+            var item = self.boxes.hit_any(x, y, ["settings.item:"])
+            if item != "":
+                self.settings_go(String(item[byte = 14:]))
+                return True
+            if self.settings_page == 2 or self.settings_page == 4:
+                ref form = self.ai_form if self.settings_page == 2 else self.voice_form
+                var was = form.editing
+                var hit = form.tap(self.boxes, x, y)
+                if hit == "" and was != "":
+                    _ = form.done()
+                    self.settings_act("field-done:" + was)
+                    return True
+                if hit != "":
+                    self.settings_act(hit)
+                    return True
             var sh = self.boxes.hit_any(x, y, [".sw-skin", "#close-properties"])
             if sh == "#close-properties":
                 self.settings_open = False
@@ -3771,6 +3921,474 @@ struct WebShell(Movable):
             self.set_skin("night")
             return True
         return False
+
+
+    # ---- voice (goal 82 M5): hold the mic to talk, the words at the caret (mojoui.dictation) ----
+
+    def voice_busy(self) -> Bool:
+        return self.ears.busy()
+
+    def voice_press(mut self) -> Bool:
+        if self.talk.press(Int(now_ms()), self.ears.listening()) == TALK_START:
+            self.voice_start()
+        return True
+
+    def voice_release(mut self) -> Bool:
+        if self.talk.release(Int(now_ms())) == TALK_STOP:
+            self.ears.stop()
+            print("PNOTE VOICE: stop", flush=True)
+        return True
+
+    def voice_start(mut self):
+        """Listening begins at the caret: the page's, the canvas text being written (a new one under what is there when
+        none is), the idea being written."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].secure or not self.editable():
+            self.talk.cancel()
+            return
+        if self.ears.needs_download() and not self.ears.download_ok:
+            self.talk.cancel()
+            self.say("Voice needs its speech model (about 640 MB, once; it runs on this computer and keeps only the words)", "Download", TOAST_VOICE)
+            return
+        var py = read_setting("pnote", "voice_python", libc.exe_dir() + "/../../../.pixi/envs/voice")
+        var why = use_python_env(py)
+        if why != "":
+            self.talk.cancel()
+            self.say("Voice isn't set up: " + why)
+            return
+        if self.notes[i].kind == "mindmap" and not self.jam_on() and self.map.editing < 0:
+            self.talk.cancel()
+            self.say("Pick an idea to write in first")
+            return
+        if self.notes[i].kind == "canvas" and self.tools.editing == -1:
+            ref layer = self.board.edit()
+            var x = 80.0
+            var y = 80.0
+            for ref o in layer.objs:  # (under what is there, as the web's voiceInsertPoint)
+                y = max(y, o.y + o.h + 24)
+            self.tools.begin_text(x, y)
+        var place = self.writing_place()
+        var before = String(place.text[byte = 0 : min(place.caret, place.text.byte_length())]) if place.caret > 0 else String("")
+        if not self.ears.start():
+            self.talk.cancel()
+            var said = self.ears.why
+            self.say(said)
+            print("PNOTE VOICE: can't listen: " + self.ears.why, flush=True)
+            return
+        self.dictated.start(before)
+        self.voice_t0 = clock_us()
+        print("PNOTE VOICE: listening kind=" + self.notes[i].kind, flush=True)
+
+    def voice_tick(mut self) -> Bool:
+        """From the app's timer while dictating: the words that are ready, into the note."""
+        var changed = False
+        for e in self.ears.tick():
+            if self.jam_on():  # (a jam listens: the words go to it, not into an idea; jam-plugin.js voiceSink)
+                self.jam_heard(e.text, e.kind == 1)
+                changed = True
+                continue
+            var put = self.dictated.hear(e)
+            if put.commit != "":
+                _ = self.preedit("", 0, 0, 0, 0)
+                _ = self.text_in("voice", put.commit)
+                print("PNOTE VOICE: committed ms=" + String((clock_us() - abs(self.voice_t0)) // 1000) + " text=" + put.commit, flush=True)
+                changed = True
+            elif put.preedit != "" or e.kind == 0:
+                if self.voice_t0 > 0 and put.preedit != "":
+                    print("PNOTE VOICE: words ms=" + String((clock_us() - self.voice_t0) // 1000), flush=True)
+                    self.voice_t0 = -self.voice_t0  # (the first words only)
+                _ = self.preedit(put.preedit, 0, 0, 0, 0)
+                changed = True
+        if not self.ears.busy() and self.dictated.active:
+            _ = self.dictated.finish()
+            _ = self.preedit("", 0, 0, 0, 0)
+            print("PNOTE VOICE: done said=" + self.dictated.said, flush=True)
+            if self.ears.why != "":
+                var said = self.ears.why
+                self.say(said)
+            changed = True
+        return changed
+
+
+    # ---- settings pages (goal 82 M6): AI and Voice, drawn by mojoui.settingswin's form ----
+
+    def settings_go(mut self, item: String):
+        """A page of the settings window's list, by its item's name (its label and status)."""
+        var pages = materialize[SETTINGS_PAGES]()
+        for k in range(len(pages)):
+            if item.startswith(String(pages[k])):
+                if item.startswith("Search by meaning") and k == 2:
+                    continue
+                self.settings_page = k
+        if self.settings_page == 2:
+            self.ai_draft = AiSettings.load(config_dir("pnote"))
+            self.build_ai_form("")
+        elif self.settings_page == 4:
+            self.build_voice_form("")
+
+    def ai_provider_index(self) -> Int:
+        if self.ai_draft.provider == "claude-code":
+            return 0
+        if self.ai_draft.provider == "azure":
+            return 1
+        return 3 if self.ai_draft.is_local() or (self.ai_draft.base_url == "" and self.ai_form.row("provider") >= 0 and self.ai_form.rows[self.ai_form.row("provider")].chosen == 3) else 2
+
+    def build_ai_form(mut self, status: String, error: Bool = False):
+        """Settings → AI as the web draws it (ai-settings.js): the provider, its fields, the key (once saved, only that it
+        is), Save / Test / Remove key, a status line."""
+        var f = SettingsForm()
+        var d = self.ai_draft.copy()
+        var which = self.ai_provider_index()
+        f.rows.append(FormRow(ROW_CHOICE, "provider", "Use", "", "", ["Claude Code", "Azure OpenAI", "OpenAI-compatible", "Local model"], which))
+        if which == 0:
+            var models: List[String] = ["sonnet", "haiku", "opus"]
+            var at = 0
+            for q in range(3):
+                if models[q] == d.claude_model:
+                    at = q
+            f.rows.append(FormRow(ROW_CHOICE, "claude-model", "Model", "", "", ["Sonnet (balanced)", "Haiku (fastest)", "Opus (deepest)"], at))
+            f.rows.append(FormRow(ROW_NOTE, "claude-note", "", "Claude Code is installed here. It uses your own sign-in; nothing else is needed." if find_claude() != ""
+                                  else "Claude Code was not found on this computer. Install it and sign in, or pick another service."))
+        elif which == 1:
+            f.rows.append(FormRow(ROW_FIELD, "endpoint", "Endpoint", d.endpoint, "https://name.openai.azure.com"))
+            f.rows.append(FormRow(ROW_FIELD, "deployment", "Deployment", d.deployment, "deployment name"))
+            f.rows.append(FormRow(ROW_FIELD, "api-version", "API version", d.api_version, ""))
+        else:
+            var url = d.base_url if d.base_url != "" or which == 2 else String("http://127.0.0.1:8000/v1")
+            f.rows.append(FormRow(ROW_FIELD, "base-url", "Base URL", url, "https://api.openai.com/v1" if which == 2 else "http://127.0.0.1:8000/v1"))
+            f.rows.append(FormRow(ROW_FIELD, "model", "Model", d.model, "model name"))
+            if which == 3:
+                f.rows.append(FormRow(ROW_NOTE, "local-note", "", "A model served on this computer (max serve, omxconsole, llama.cpp): no key, nothing leaves it."))
+        var saved = has_key()
+        if which != 0:  # (a local server may take a key too: the web shows the key for any OpenAI-compatible address)
+            f.rows.append(FormRow(ROW_SECRET, "key", "API key", ("Saved in " + key_store().where()) if saved else String(""), "paste the key"))
+        var buttons: List[String] = ["Save", "Test"]
+        if saved and which != 0:
+            buttons.append("Remove key")
+        f.rows.append(FormRow(ROW_BUTTONS, "actions", "", "", "", buttons))
+        f.rows.append(FormRow(ROW_STATUS, "status", "", status))
+        f.say("status", status, error)
+        self.ai_form = f^
+
+    def ai_from_form(mut self):
+        """The page's fields into the draft."""
+        ref f = self.ai_form
+        var which = f.rows[f.row("provider")].chosen
+        self.ai_draft.provider = "claude-code" if which == 0 else ("azure" if which == 1 else "openai")
+        if f.row("claude-model") >= 0:
+            var models: List[String] = ["sonnet", "haiku", "opus"]
+            self.ai_draft.claude_model = models[f.rows[f.row("claude-model")].chosen]
+        if f.row("endpoint") >= 0:
+            self.ai_draft.endpoint = f.value("endpoint")
+            self.ai_draft.deployment = f.value("deployment")
+            self.ai_draft.api_version = f.value("api-version")
+        if f.row("base-url") >= 0:
+            self.ai_draft.base_url = f.value("base-url")
+            self.ai_draft.model = f.value("model")
+        var typed = f.take_secret()
+        if typed != "":
+            self.pending_key = typed
+
+    def build_voice_form(mut self, status: String):
+        var f = SettingsForm()
+        comptime if CompilationTarget.is_macos():
+            f.rows.append(FormRow(ROW_NOTE, "engine", "", "Apple's on-device speech recognition: nothing to download, nothing leaves this Mac."))
+        else:
+            var where = self.ears.models_dir if self.ears.models_dir != "" else hf_hub_cache()
+            f.rows.append(FormRow(ROW_NOTE, "engine", "", "Parakeet TDT 0.6B on this computer's GPU, in the app itself. The words stay here; no audio is kept."))
+            f.rows.append(FormRow(ROW_STATUS, "model", "", "Ready: the model is on this computer." if not self.ears.needs_download() else "Not installed: the model (about 640 MB) downloads once, when you say yes."))
+            f.rows.append(FormRow(ROW_FIELD, "models-dir", "Models folder", self.ears.models_dir, where))
+            var buttons: List[String] = ["Save folder"]
+            if self.ears.needs_download():
+                buttons.append("Download model")
+            f.rows.append(FormRow(ROW_BUTTONS, "voice-actions", "", "", "", buttons))
+        f.rows.append(FormRow(ROW_STATUS, "status", "", status))
+        self.voice_form = f^
+
+    def settings_act(mut self, hit: String):
+        """What a tap or a key in the AI / Voice page meant."""
+        if self.settings_page == 4:
+            if hit == "button:voice-actions:0" or hit == "field-done:models-dir":
+                var d = String(self.voice_form.value("models-dir").strip())
+                write_setting("pnote", "models_dir", d)
+                self.ears.models_dir = d
+                self.build_voice_form("Saved: models go to " + (d if d != "" else hf_hub_cache()) + ".")
+            elif hit == "button:voice-actions:1":
+                self.ears.download_ok = True
+                self.build_voice_form("Yes, noted: the model downloads the next time you hold the mic.")
+            return
+        if hit.startswith("choice:provider:"):
+            self.ai_from_form()
+            var which = self.ai_form.rows[self.ai_form.row("provider")].chosen
+            self.ai_draft.provider = "claude-code" if which == 0 else ("azure" if which == 1 else "openai")
+            if which == 3 and not self.ai_draft.is_local():
+                self.ai_draft.base_url = "http://127.0.0.1:8000/v1"
+            elif which == 2 and self.ai_draft.is_local():
+                self.ai_draft.base_url = ""
+            self.build_ai_form("")
+            return
+        if hit.startswith("field-done:") or hit.startswith("choice:") or hit == "":
+            self.ai_from_form()
+            return
+        if hit == "button:actions:0":  # Save
+            self.ai_from_form()
+            try:
+                var dropped = save_settings(self.ai_draft, config_dir("pnote"), self.pending_key)
+                self.pending_key = ""
+                self.build_ai_form("Saved. Key removed because the address changed: paste the key for the new one." if dropped else "Saved.")
+                print("PNOTE AI: saved provider=" + self.ai_draft.provider + " key=" + ("saved" if has_key() else "none"), flush=True)
+            except e:
+                self.pending_key = ""
+                self.build_ai_form(String(e), True)
+                print("PNOTE AI: refused " + String(e), flush=True)
+        elif hit == "button:actions:1":  # Test
+            self.ai_from_form()
+            if len(self.ai_calls) > 0:
+                return
+            self.ai_calls.append(BrainCall.start(self.ai_draft, AI_TEST_SYSTEM, "ping"))
+            self.ai_call_for = "test"
+            self.ai_form.say("status", "Testing…")
+            _ = self.ai_tick()
+        elif hit == "button:actions:2":  # Remove key
+            try:
+                forget_key()
+                self.build_ai_form("Key removed.")
+            except e:
+                self.build_ai_form("The key could not be removed: " + String(e), True)
+
+    def ai_busy(self) -> Bool:
+        return len(self.ai_calls) > 0
+
+    def ai_tick(mut self) -> Bool:
+        """From the app's timer while a brain call is out: its answer, when it has come."""
+        if len(self.ai_calls) == 0:
+            return False
+        var st = self.ai_calls[0].poll()
+        if st == ASK_RUNNING:
+            return False
+        var answer = self.ai_calls[0].answer
+        var why = self.ai_calls[0].error
+        var secs = self.ai_calls[0].seconds()
+        _ = self.ai_calls.pop()
+        if self.ai_call_for == "test":
+            var words = String("Answered in ") + String(Int(secs * 10 + 0.5) // 10) + "." + String(Int(secs * 10 + 0.5) % 10) + " s" if st == ASK_DONE else why
+            if self.settings_page == 2:
+                self.ai_form.say("status", words, st != ASK_DONE)
+            print("PNOTE AI: test " + words, flush=True)
+            return True
+        if st != ASK_DONE:
+            self.jam_fault = why
+            print("PNOTE JAM: failed " + why, flush=True)
+            return True
+        self.jam_land(answer)
+        return True
+
+    # ---- Jam (goal 82 M6): talk an idea through and the brain grows the mind map (jam-plugin.js, jam-session.js) ----
+
+    def jam_on(self) -> Bool:
+        var i = self.note_index(self.current)
+        return i >= 0 and self.notes[i].kind == "mindmap" and not self.notes[i].secure and self.doc.may_edit() and is_jam(self.page_src)
+
+    def jam_line(self) -> String:
+        var out = String("")
+        for t in self.jam_said:
+            out += (" " if out != "" else "") + t
+        if self.jam_partial != "":
+            out += (" " if out != "" else "") + self.jam_partial
+        return out^
+
+    def jam_phase(self) -> String:
+        if len(self.ai_calls) > 0 and self.ai_call_for == "jam":
+            return "Thinking…"
+        if self.jam_fault != "":
+            return self.jam_fault
+        if self.ears.listening():
+            return "Listening…"
+        return "Hold the mic and talk, then press Jam (or end with “jam”)."
+
+    def jam_heard(mut self, text: String, final: Bool):
+        """The mic's words (jam-session.js heard): a partial shows; a finished sentence waits for the turn; "yes" takes the
+        newest suggestion; a sentence ending in "jam" sends the turn."""
+        var words = String(text.strip())
+        if not final:
+            self.jam_partial = words
+            return
+        self.jam_partial = ""
+        if words == "":
+            return
+        var low = words.lower()
+        while low.endswith(".") or low.endswith("!"):
+            low = String(low[byte = 0 : low.byte_length() - 1])
+        var ghosts = jam_ghosts(self.page_src)
+        if (low == "yes" or low == "yeah" or low == "yep" or low == "yes please") and len(ghosts) > 0:
+            self.jam_answer(len(ghosts) - 1, True)
+            return
+        var ending = False
+        var rest = words
+        var t = low
+        while t.endswith("?") or t.endswith(","):
+            t = String(t[byte = 0 : t.byte_length() - 1])
+        if t == "jam" or t.endswith(" jam"):
+            ending = True
+            var cut = words.lower().rfind("jam")
+            rest = String(String(words[byte = 0:cut]).strip())
+        if rest != "":
+            self.jam_said.append(rest)
+        if ending:
+            self.jam_turn()
+
+    def jam_turn(mut self):
+        """One brain call: the map and the words said since the last turn (the Jam button)."""
+        if len(self.ai_calls) > 0:
+            return
+        var said = self.jam_line()
+        if said == "":
+            self.jam_fault = JAM_NOTHING
+            return
+        self.jam_fault = ""
+        try:
+            var title = self.title_of(self.current)
+            self.jam_doc = map_json_from(self.map, self.page_src, title, self.map_root)
+            var waiting = List[String]()
+            for g in jam_ghosts(self.jam_doc):
+                waiting.append(g.text)
+            self.jam_user = jam_prompt(self.jam_doc, said, waiting)
+        except e:
+            self.jam_fault = String(e)
+            return
+        self.jam_retried = False
+        self.ai_calls.append(BrainCall.start(AiSettings.load(config_dir("pnote")), JAM_SYSTEM, self.jam_user))
+        self.ai_call_for = "jam"
+        print("PNOTE JAM: asked words=" + said, flush=True)
+        _ = self.ai_tick()
+
+    def jam_land(mut self, answer: String):
+        """The brain's answer: validated whole, applied as one change, saved; a refusal asks once more with why (propose)."""
+        var edits: JamEdits
+        try:
+            edits = parse_jam(answer, self.jam_doc)
+        except e:
+            if not self.jam_retried:
+                self.jam_retried = True
+                self.jam_user += "\n\nYour last answer was rejected: " + String(e) + " Answer again, fixing that. JSON only."
+                self.ai_calls.append(BrainCall.start(AiSettings.load(config_dir("pnote")), JAM_SYSTEM, self.jam_user))
+                self.ai_call_for = "jam"
+                return
+            self.jam_fault = String(e)
+            print("PNOTE JAM: refused " + String(e), flush=True)
+            return
+        try:
+            var doc = apply_jam(self.jam_doc, edits, String(clock_us()))
+            self.reload_map(doc)
+            self.jam_said.clear()
+            print("PNOTE JAM: edits=" + edits.wire(), flush=True)
+        except e:
+            self.jam_fault = String(e)
+
+    def reload_map(mut self, var doc: String) raises:
+        """The open map as `doc` says (one jam turn, a ghost answered), saved as one change."""
+        var m = BuzanMap()
+        var root = read_map(doc, m)
+        self.map = m^
+        self.map_root = root
+        self.page_src = doc^
+        self.save_map()
+
+    def jam_answer(mut self, at: Int, yes: Bool):
+        var ghosts = jam_ghosts(self.page_src)
+        if at < 0 or at >= len(ghosts):
+            return
+        try:
+            var title = self.title_of(self.current)
+            var doc = map_json_from(self.map, self.page_src, title, self.map_root)
+            self.reload_map(answer_ghost(doc, ghosts[at].id, yes, String(clock_us())))
+            print("PNOTE JAM: ghost " + ("yes " if yes else "no ") + ghosts[at].text, flush=True)
+        except e:
+            self.jam_fault = String(e)
+
+    def new_jam(mut self):
+        """A new mind map in jam mode, its centre idea "New jam" (jam-plugin.js newJam)."""
+        self.create("mindmap", "New jam")
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "mindmap":
+            return
+        try:
+            var doc = map_json_from(self.map, self.page_src, "New jam", self.map_root)
+            self.reload_map(start_jam(doc, "New jam"))
+        except e:
+            self.say("The jam couldn't start: " + String(e))
+
+    # ---- an agent's edit (goal 82 M6, F-096): "Claude edited this note" with Show and Undo ----
+
+    def agent_look(mut self, id: Int):
+        """The open note was read again because another program wrote it: if an agent made that revision (the web's CLI
+        or MCP server records each write in agent_edits), offer Show and Undo."""
+        var i = self.note_index(id)
+        if i < 0 or len(self.dbs) == 0:
+            return
+        try:
+            var q = self.dbs[0].prepare("SELECT id, agent FROM agent_edits WHERE note_id = " + String(id) + " AND after_revision = " + String(self.notes[i].revision) + " AND state = 'applied' ORDER BY id DESC LIMIT 1")
+            if q.step():
+                self.agent_edit = q.int(0)
+                var who = q.text(1)
+                if who.endswith(" Code"):
+                    who = String(who[byte = 0 : who.byte_length() - 5])
+                self.say((who if who != "" else String("An agent")) + " edited this note", "Undo", TOAST_AGENT)
+                self.toast_action2 = "Show"
+                print("PNOTE AGENT: offered edit " + String(self.agent_edit) + " by " + q.text(1), flush=True)
+        except:
+            pass
+
+    def agent_texts(mut self) raises -> Tuple[String, String]:
+        """The agent edit's before and after words (a page's Markdown)."""
+        var q = self.dbs[0].prepare("SELECT before_content, after_content FROM agent_edits WHERE id = " + String(self.agent_edit))
+        if not q.step():
+            raise Error("That edit is no longer kept")
+        return (page_markdown(q.text(0)), page_markdown(q.text(1)))
+
+    def agent_show(mut self):
+        """Where the agent wrote: its lines selected on the page."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.notes[i].kind != "page" or self.agent_edit == 0:
+            return
+        try:
+            var t = self.agent_texts()
+            var span = changed_span(t[0], t[1])
+            var now = self.page.ed.text()
+            var at = place_after(t[1], now, span[0])
+            var to = place_after(t[1], now, span[1])
+            self.page.ed.move_to(self.page.ed.place(at), False)
+            self.page.ed.move_to(self.page.ed.place(to), True)
+            self.page.follow = True
+            print("PNOTE AGENT: show " + String(at) + ".." + String(to), flush=True)
+        except e:
+            self.say(String(e))
+
+    def agent_undo(mut self):
+        """The agent's write taken back over what is there now (a three-way merge: the person's later words stay); when the
+        person changed the very words it wrote, nothing changes and they are told why (services.turn_agent_edit)."""
+        var i = self.note_index(self.current)
+        if i < 0 or self.agent_edit == 0:
+            return
+        if self.notes[i].kind != "page":
+            self.say("Undo of an agent's edit works on pages here; canvases aren't in the native app yet")
+            return
+        try:
+            var t = self.agent_texts()
+            var back = merge_text(t[1], self.page.ed.text(), t[0])
+            if not back:
+                var who = String("the agent")
+                self.say("You changed " + who + "’s words after it wrote them, so Undo would overwrite your edit. Nothing was changed.")
+                print("PNOTE AGENT: undo refused", flush=True)
+                return
+            self.page.set_markdown(back.value())
+            self.save_page()
+            self.flush()
+            _ = self.dbs[0].run("UPDATE agent_edits SET state = 'undone' WHERE id = ?", [String(self.agent_edit)])
+            print("PNOTE AGENT: undone edit " + String(self.agent_edit), flush=True)
+            self.agent_edit = 0
+        except e:
+            self.say(String(e))
 
 
 def _in(x: Float64, y: Float64, bx: Float64, by: Float64, size: Float64) -> Bool:

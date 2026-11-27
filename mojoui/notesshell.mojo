@@ -80,6 +80,16 @@ struct Boxes(Movable):
         self.r.append(w)
         self.r.append(h)
 
+    def rect(self, generic: String) -> Tuple[Float64, Float64, Float64, Float64]:
+        """The box last recorded under this name this frame ((0, 0, 0, 0): none)."""
+        var name = self.name_of(generic)
+        var i = len(self.names) - 1
+        while i >= 0:
+            if self.names[i] == name:
+                return (self.r[i * 4], self.r[i * 4 + 1], self.r[i * 4 + 2], self.r[i * 4 + 3])
+            i -= 1
+        return (0.0, 0.0, 0.0, 0.0)
+
     def hit(self, x: Float64, y: Float64, prefix: String = "") -> String:
         """The topmost box under a point (with this prefix): its name, or ""."""
         var pf = self.name_of(prefix)
@@ -1380,3 +1390,97 @@ def draw_problem[P: Painter](mut p: P, mut bx: Boxes, x: Float64, y: Float64, w:
         text_at(p, ds, lines[n], cx + 24, cy + 24 + 22 + 10 + 20 * Float64(n), 20, sk.ui_muted)
     if action != "":
         draw_pill_button(p, bx, name, cx + 24 + 60, cy + ch - 24 - 32, action, sk)
+
+
+def draw_mic_button[P: Painter](mut p: P, mut bx: Boxes, name: String, x: Float64, y: Float64, size: Float64, k: Float64, sk: Skin,
+                                busy: Bool, level: Float64, listening: Bool):
+    """The round accent mic (Personal Note's voice button) standing on its own (a page has no dock); listening, the
+    level ring around it."""
+    draw_lifted(p, x, y, size, size, size / 2, sk.shadow2, sk.accent)
+    draw_icon(p, "mic", x + (size - 22) / 2, y + (size - 22) / 2, 22, k, sk.accent_ink)
+    bx.add(name, x, y, size, size)
+    bx.add("[Start voice dictation]", x, y, size, size)
+    if busy:
+        draw_listening_ring(p, x, y, size, level, listening, sk)
+
+
+def draw_listening_ring[P: Painter](mut p: P, x: Float64, y: Float64, size: Float64, level: Float64, listening: Bool, sk: Skin):
+    """A ring around a round mic button while it listens, wider as the voice is louder (RMS 0..~0.2); fainter while the
+    last words are still being finished."""
+    var grow = 3.0 + min(level * 60.0, 9.0)
+    var a = 0.45 if listening else 0.2
+    var r = size / 2 + grow
+    p.circle(x + size / 2, y + size / 2, r, with_alpha(sk.accent, a * 0.5))
+    p.circle(x + size / 2, y + size / 2, size / 2 + 1.5, with_alpha(sk.accent, a))
+
+
+def draw_toast2[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, bottom: Float64, words: String, action: String, action2: String, sk: Skin) -> Float64:
+    """draw_toast with a second action before the first (the web's island notice: "Claude edited this note  Show  Undo").
+    Its boxes: "toast", "toast.action2", "toast.action"."""
+    var st = TextStyle(UI, 400, False, 13)
+    var bst = TextStyle(UI, 600, False, 12)
+    var ww = measure(st, words)
+    var bw2 = measure(bst, action2) + 20
+    var bw = measure(bst, action) + 20
+    var w = 16 + ww + 14 + bw2 + 8 + bw + 10
+    var h = 44.0
+    var x = cx - w / 2
+    var y = bottom - h
+    draw_lifted(p, x, y, w, h, 8, sk.shadow2, rgba(41, 42, 37))
+    bx.add("toast", x, y, w, h)
+    text_at(p, st, words, x + 16, y, h, rgba(255, 255, 255))
+    var ax = x + 16 + ww + 14
+    p.rect(ax, y + 9, bw2, 26, rgba(255, 255, 255, 41), 6)
+    text_at(p, bst, action2, ax + 10, y + 9, 26, rgba(255, 255, 255))
+    bx.add("toast.action2", ax, y + 9, bw2, 26)
+    ax += bw2 + 8
+    p.rect(ax, y + 9, bw, 26, rgba(255, 255, 255, 41), 6)
+    text_at(p, bst, action, ax + 10, y + 9, 26, rgba(255, 255, 255))
+    bx.add("toast.action", ax, y + 9, bw, 26)
+    return w
+
+
+def draw_jam_island[P: Painter](mut p: P, mut bx: Boxes, cx: Float64, bottom: Float64, line: String, phase: String, ghosts: List[String], k: Float64, sk: Skin):
+    """A jam's island (the web's jam face): what was heard (or the phase's words), the Jam button, and the suggestions
+    waiting, each with yes and no. Boxes: "jam", "#jam-go", "jam.yes:<i>", "jam.no:<i>"."""
+    var st = TextStyle(UI, 400, False, 14)
+    var bst = TextStyle(UI, 600, False, 13)
+    var shown = line if line != "" else phase
+    var cut = String("")
+    var n = 0
+    for c in shown.codepoints():
+        n += 1
+    var skip = max(0, n - 64)  # (the newest words: the line's end)
+    var i = 0
+    for c in shown.codepoints():
+        if i >= skip:
+            cut += String(c)
+        i += 1
+    if skip > 0:
+        cut = "…" + cut
+    var tw = max(measure(st, cut), 160.0)
+    var gw = 0.0
+    for g in ghosts:
+        gw = max(gw, measure(st, "+ " + g) + 90)
+    var w = max(tw + 16 + 72 + 16, gw + 32)
+    var gh = Float64(len(ghosts)) * 36
+    var h = 52 + gh
+    var x = cx - w / 2
+    var y = bottom - h
+    draw_lifted(p, x, y, w, h, 18, sk.shadow2, sk.panel)
+    bx.add("jam", x, y, w, h)
+    for q in range(len(ghosts)):
+        var gy = y + 8 + Float64(q) * 36
+        text_at(p, st, "+ " + ghosts[q], x + 16, gy, 32, sk.muted)
+        p.rect(x + w - 16 - 70, gy + 3, 32, 26, with_alpha(sk.ink, 0.07), 13)
+        draw_icon(p, "check", x + w - 16 - 70 + 8, gy + 8, 16, k, sk.ink)
+        bx.add("jam.yes:" + String(q), x + w - 16 - 70, gy + 3, 32, 26)
+        p.rect(x + w - 16 - 34, gy + 3, 32, 26, with_alpha(sk.ink, 0.07), 13)
+        draw_icon(p, "x", x + w - 16 - 34 + 8, gy + 8, 16, k, sk.ink)
+        bx.add("jam.no:" + String(q), x + w - 16 - 34, gy + 3, 32, 26)
+    var ly = y + gh + 8
+    text_at(p, st, cut, x + 16, ly, 36, sk.ink if line != "" else sk.muted)
+    var jw = measure(bst, "Jam") + 32
+    p.rect(x + w - 8 - jw, ly + 2, jw, 32, sk.ink, 16)
+    text_at(p, bst, "Jam", x + w - 8 - jw + 16, ly + 2, 32, sk.panel)
+    bx.add("#jam-go", x + w - 8 - jw, ly + 2, jw, 32)

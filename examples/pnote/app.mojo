@@ -56,6 +56,7 @@ comptime DELETE_NOTE = 9
 comptime WARM_TICK = 11  # (D-8002: glyphs readied while nothing happens)
 comptime FEED_TICK = 12  # the notes file looked at for what another app did
 comptime FEED_TICK_MS = 2000
+comptime VOICE_TICK = 82  # (goal 82 M5) every 30 ms while dictating: samples over, words back
 comptime SAVE_TICK = 10  # the web look's save debounce (mojoui.docstore.SaveTimer)
 
 comptime PAGE = 0
@@ -547,6 +548,8 @@ struct Main(App):
         self.version += 1
 
     def every(self) -> List[Every]:
+        if len(self.web) > 0 and (self.web[0].voice_busy() or self.web[0].ai_busy()):  # (a save still goes: text_in queues it, the voice tick lands it below)
+            return [Every(30, VOICE_TICK)]
         if len(self.web) > 0 and self.web[0].waiting():
             return [Every(self.web[0].saver.tick_ms() if self.web[0].saver.pending() or self.web[0].saving() else 500, SAVE_TICK)]
         if len(self.web) > 0 and self.web[0].readying():
@@ -811,6 +814,13 @@ struct Main(App):
         if len(self.web) > 0:
             if m == SAVE_TICK:
                 if self.web[0].tick():
+                    self.version += 1
+                return
+            if m == VOICE_TICK:
+                var c = self.web[0].ai_tick()
+                var a = self.web[0].voice_tick() or c
+                var b = self.web[0].tick()  # (the saves the words queued)
+                if a or b:
                     self.version += 1
                 return
             if m == FEED_TICK:  # (another app on the same notes file)

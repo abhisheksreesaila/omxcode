@@ -2075,3 +2075,10 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 34) — D-8101
 - lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).
+
+## goal 82 C: voice (M5) and AI (M6) for pnote (2026-11-26, worker C)
+- Read the web's voice (press-to-talk.js, transcript-session.js, voice-plugin.js) and AI (ai_settings.py, jam_brain.py, jam.js, agent_edit.py, the CLI) first. Found a ported speech model already here: mojoui.speech (whisper, Parakeet) from goals 43/72; the `voice` pixi environment has Parakeet cached, so no download was needed.
+- Framework first: mojoui.dictation (PressToTalk, DictationText, Dictation), mojoui.applespeech (Mac), Microphone on the Mac (AVAudioEngine tap), mojoui.secrets, process.exchange / Process.start_fed, mojoui.aisettings (settings + brain calls through curl), mojoui.jam, mojoui.agentedit, the settings form (SettingsForm), draw_mic_button / draw_listening_ring / draw_toast2 / draw_jam_island. pnote only composes them.
+- Linux dictation: WER 2/86 (2.3 %) over four LibriSpeech clips played as the microphone; first words 0.53–0.59 s after the voice starts once the speech stream's partials came every 400 ms (1.35–1.75 s at the backend's 1000 ms, D-8707). In pnote the words land at the page's caret and are saved; a canvas gets a new text under what is there.
+- Mac: test_secrets first failed: `cat` never saw EOF because fcntl is variadic and Apple arm64 passes variadic arguments on the stack (D-8702, a lessons line). The login keychain refuses SSH sessions; a throwaway keychain file proves the same calls (D-8703). The recogniser's rules run on the M4; recognition stops at macOS's Speech Recognition permission: BLOCKED for the owner's click.
+- The main session's merge race held the quiet lock for 25+ minutes mid-afternoon; builds waited (as the rules say) and the M6 code was written meanwhile.

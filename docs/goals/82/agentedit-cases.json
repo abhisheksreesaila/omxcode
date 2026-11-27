@@ -1,0 +1,44 @@
+[
+ {
+  "name": "untouched since",
+  "before": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "after": "# Plan\n\nWe leave on Saturday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "now": "# Plan\n\nWe leave on Saturday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n"
+ },
+ {
+  "name": "person typed elsewhere",
+  "before": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "after": "# Plan\n\nWe leave on Saturday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "now": "# Plan\n\nWe leave on Saturday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n\n## Notes\n\nCall Sam.\n"
+ },
+ {
+  "name": "person changed the same words",
+  "before": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "after": "# Plan\n\nWe leave on Saturday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "now": "# Plan\n\nWe leave on Sunday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n"
+ },
+ {
+  "name": "agent added a paragraph",
+  "before": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "after": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n\nBring a map.\n",
+  "now": "# Plan (v2)\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n\nBring a map.\n"
+ },
+ {
+  "name": "agent removed a line",
+  "before": "# Plan\n\nWe leave on Friday.\nPack the tent and the stove.\n\n## Food\n\nBread, cheese, apples.\n",
+  "after": "# Plan\n\nWe leave on Friday.\n\n## Food\n\nBread, cheese, apples.\n",
+  "now": "# Plan\n\nWe leave on Friday.\n\n## Food\n\nBread, cheese, pears.\n"
+ },
+ {
+  "name": "words not unique",
+  "before": "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",
+  "after": "a a a a a a a a a a a a a b a a a a a a a a a a a a a a a a",
+  "now": "a a a a a a a a a a a a a b a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a b a a a a a a a a a a a a a a a a"
+ },
+ {
+  "name": "accents",
+  "before": "Café au lait, s'il vous plaît.\nDeux croissants.",
+  "after": "Café crème, s'il vous plaît.\nDeux croissants.",
+  "now": "Café crème, s'il vous plaît.\nDeux croissants. Merci."
+ }
+]

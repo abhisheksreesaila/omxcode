@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Build and run one Mojo test program on the owner's Mac over SSH (goal 82 C): scripts/mac-test tests/test_x.mojo [args…]
+# The sources (mojoui, themes, vendor, the test, plus any EXTRA files named in $MAC_TEST_FILES) go to ~/$MAC_SSH_DIR/t-<stamp>/
+# and are built with that folder's pixi environment (the one scripts/mac-ssh keeps); the program's output comes back on
+# stdout and its exit code is this script's. MAC_TEST_ENV="A=1 B=2": variables for the program; MAC_TEST_PRE: a shell command run
+# first in the same SSH session (a keychain unlocked in one session stays locked to the next). Holds ~/.cache/omx-mac.lock.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [ "${OMX_MAC_LOCKED:-0}" != 1 ]; then
+    mkdir -p "$HOME/.cache"
+    exec env OMX_MAC_LOCKED=1 flock -w 5400 "$HOME/.cache/omx-mac.lock" "$0" "$@"
+fi
+test_file=$1; shift
+host=${MAC_SSH:-bhoomijaprasad@100.76.9.101}
+key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}
+remote=${MAC_SSH_DIR:-omxcode-g54}
+ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 "$host")
+stamp=t-$(date +%s)
+tmp=$(mktemp -d)
+tar -czf "$tmp/src.tar.gz" --exclude=__pycache__ mojoui themes vendor "$test_file" ${MAC_TEST_FILES:-}
+scp -q -i "$key" "$tmp/src.tar.gz" "$host:$remote/$stamp.tar.gz"
+rm -rf "$tmp"
+name=$(basename "$test_file" .mojo)
+args=$(printf '%q ' "$@")
+"${ssh_[@]}" "export PATH=\$HOME/.pixi/bin:\$PATH; cd ~/$remote && mkdir -p $stamp && tar -xzf $stamp.tar.gz -C $stamp && rm $stamp.tar.gz && \
+  (pixi run mojo build -I $stamp -I $stamp/vendor $stamp/$test_file -o $stamp/$name -Xlinker -lobjc -Xlinker -framework -Xlinker Foundation 2>&1 | grep -v -i 'telemetry\|deprecated\|~~\|declared here\|Imported from\|Included from\|__add__' | grep -v '^\s*$' | head -40) && \
+  cd $stamp && { ${MAC_TEST_PRE:-true; } } && env ${MAC_TEST_ENV:-} ./$name $args; rc=\$?; cd .. && rm -rf $stamp; exit \$rc"

@@ -3,9 +3,10 @@
 # Two goals' checkers live here by name since the merge of goals 79 and 81 (docs/goals/79-merge.md):
 #   scripts/check [M0 M1 …]        goal 79's (docs/goals/79-check.py)
 #   scripts/check 81 [M1 M2 …]     goal 81's (docs/goals/81-check.py; it carries goal 80's held-out race in M9)
+#   scripts/check 82 [M5 M6 …]     goal 82's (docs/goals/82-check.py)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 scripts/gpu-free || exit 75  # (never beside another project's GPU job: three power-offs; no waiting, no "anyway")
 goal=79
-case "${1:-}" in 79|81) goal=$1; shift ;; esac
+case "${1:-}" in 79|81|82) goal=$1; shift ;; esac
 exec pixi run python "docs/goals/$goal-check.py" "$@"

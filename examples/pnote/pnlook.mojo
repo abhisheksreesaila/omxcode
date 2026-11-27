@@ -162,6 +162,7 @@ def pn_actions() -> List[PnAction]:
     a.append(PnAction("quick-note", "Quick note", "zap", "inbox capture", True))
     a.append(PnAction("new-page", "New page", "file-pen", "create words write", True))
     a.append(PnAction("new-map", "New mind map", "git-fork", "create brainstorm", True))
+    a.append(PnAction("new-jam", "New jam", "sparkles", "brainstorm talk mind map claude", True))  # (goal 82 M6: the jam plugin's entry)
     a.append(PnAction("link-note", "Link to a note…", "link", "drop card reference", False))
     a.append(PnAction("settings", "Open settings", "sliders-horizontal", "preferences", False))
     for k in range(3):

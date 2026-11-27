@@ -13,5 +13,7 @@
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key><string>The microphone is used only while you hold the mic button to dictate; no audio is kept.</string>
+	<key>NSSpeechRecognitionUsageDescription</key><string>Your words are recognised on this Mac (on-device) while you dictate; only the text is kept.</string>
 </dict>
 </plist>
