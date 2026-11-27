@@ -193,7 +193,7 @@ def m5_pnote_linux():
         return "FAIL", f"page: WER {e}/{n} on {said!r}"
     first = re.findall(r"^PNOTE VOICE: words ms=(\d+)", log, re.M)
     # the canvas: the dock's mic (its box from the first frame's boxes), one clip
-    log2, _ = pnote_dictate(db, cfg, canvas, ["wait:1500", "quit:"], [], "canvas-boxes")
+    log2, _ = pnote_dictate(db, cfg, canvas, ["wait:3000", f"render:desk={OUT / 'm5-canvas-before.png'}", "wait:500", "quit:"], [], "canvas-boxes")
     bx = json.loads((OUT / "m5-canvas-boxes.boxes.json").read_text())
     if "#voice-button" not in bx:
         return "FAIL", "no #voice-button on the canvas dock"
@@ -408,7 +408,7 @@ def pnote_run(db, cfg, first, steps, tag, extra=None, popen=False):
     return log, (json.loads(boxes.read_text()) if boxes.exists() else {})
 
 
-OPEN_SETTINGS = ["wait:1500", "key:desk=ctrl+k", "wait:400", "typekeys:desk=Open settings", "wait:300", "typekeys:desk=⏎", "wait:800"]
+OPEN_SETTINGS = ["wait:1500", f"render:desk={OUT / 'm6-first.png'}", "key:desk=ctrl+k", "wait:400", "typekeys:desk=Open settings", "wait:300", "typekeys:desk=⏎", "wait:800"]
 
 
 def m6_pnote_linux():
@@ -441,7 +441,7 @@ def m6_pnote_linux():
         (cfg / "ai-settings.json").write_text(json.dumps({"provider": "openai", "claudeModel": "sonnet", "endpoint": "", "deployment": "", "apiVersion": "2024-10-21",
                                                           "baseUrl": f"http://127.0.0.1:{port}/v1", "model": "test-model"}, indent=2))
         log, bx = pnote_run(db, cfg, page, OPEN_SETTINGS + ["wait:300", "quit:"], "settings-a")
-        ai_item = center(bx, "settings.item:AI")
+        ai_item = center(bx, ".sw-item:AI")  # (pnlook's name for settings.item:)
         log, bx = pnote_run(db, cfg, page, OPEN_SETTINGS + [f"tapat:desk={ai_item}", "wait:600", "quit:"], "settings-b")
         steps = OPEN_SETTINGS + [f"tapat:desk={ai_item}", "wait:600",
                                  f"tapat:desk={center(bx, 'settings.field:key')}", "wait:300", f"typekeys:desk={key}", "wait:200", "key:desk=Return", "wait:300",
@@ -471,11 +471,11 @@ def m6_pnote_linux():
         return "BLOCKED", "the GPU is busy (scripts/gpu-free: " + why + ")"
     reply = OUT / "m6-jam-reply.txt"
     reply.write_text(case0["reply"])
-    log, bx = pnote_run(db, cfg, jam, ["wait:1500", "quit:"], "jam-a")
+    log, bx = pnote_run(db, cfg, jam, ["wait:1500", f"render:desk={OUT / 'm6-jam-before.png'}", "wait:500", "quit:"], "jam-a")
     clip = M5_CLIPS[3]
     t = clip_seconds(clip) + 1.5
     mic, go = center(bx, "#map-voice"), center(bx, "#jam-go")
-    log, _ = pnote_run(db, cfg, jam, ["wait:1500", f"tapat:desk={mic}", f"wait:{int(t * 1000) + 1500}", f"tapat:desk={mic}", "wait:2500", f"tapat:desk={go}", "wait:2000",
+    log, _ = pnote_run(db, cfg, jam, ["wait:3500", f"tapat:desk={mic}", f"wait:{int(t * 1000) + 1500}", f"tapat:desk={mic}", "wait:2500", f"tapat:desk={go}", "wait:2000",
                                       f"render:desk={OUT / 'm6-jam.png'}", "quit:"], "jam-b",
                        {"MOJOUI_BRAIN_REPLAY": str(reply), "PNOTE_VOICE_SOURCE": f"file:{CLIPS / (clip + '.wav')}@0.3"})
     asked = re.search(r"^PNOTE JAM: asked words=(.+)$", log, re.M)
@@ -501,7 +501,7 @@ def m6_pnote_linux():
         return subprocess.run([str(PN_PY), "-B", str(PN / "personal_note_cli.py"), "--database", str(db), "--agent", "Claude Code", "notes", "write", str(page), "--text", text],
                               capture_output=True, text=True, timeout=60, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
     before = note_text(db, page)
-    proc, boxes = pnote_run(db, cfg, page, ["wait:4000", "wait:5000", "quit:"], "agent-a", popen=True)
+    proc, boxes = pnote_run(db, cfg, page, ["wait:1500", f"render:desk={OUT / 'm6-agent-a.png'}", "wait:7500", "quit:"], "agent-a", popen=True)
     time.sleep(3.5)
     agent_write(before + "\n\nPacked by Claude: tent, stove.")
     out_a = proc.communicate(timeout=300)[0]
@@ -511,7 +511,7 @@ def m6_pnote_linux():
     show, undo = center(bx, "toast.action2"), center(bx, "#toast-action")
     agent_write(before)  # (back as it was, for the second run: the same words, the same toast)
     before = note_text(db, page)
-    proc, _ = pnote_run(db, cfg, page, ["wait:4000", "wait:2500", f"tapat:desk={show}", "wait:500", f"tapat:desk={undo}", "wait:2500", "quit:"], "agent-b", popen=True)
+    proc, _ = pnote_run(db, cfg, page, ["wait:1500", f"render:desk={OUT / 'm6-agent-b0.png'}", "wait:5000", f"tapat:desk={show}", "wait:500", f"tapat:desk={undo}", "wait:2500", "quit:"], "agent-b", popen=True)
     time.sleep(3.5)
     agent_write(before + "\n\nPacked by Claude: tent, stove.")
     out_b = proc.communicate(timeout=300)[0]

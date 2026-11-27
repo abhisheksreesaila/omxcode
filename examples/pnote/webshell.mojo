@@ -3769,7 +3769,7 @@ struct WebShell(Movable):
         if self.settings_open:
             var item = self.boxes.hit_any(x, y, ["settings.item:"])
             if item != "":
-                self.settings_go(String(item[byte = 14:]))
+                self.settings_go(String(item[byte = item.find(":") + 1 :]))  # (the app's name for it: ".sw-item:AIClaude Code")
                 return True
             if self.settings_page == 2 or self.settings_page == 4:
                 ref form = self.ai_form if self.settings_page == 2 else self.voice_form
