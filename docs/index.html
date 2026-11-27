@@ -2,12 +2,13 @@
 <html lang="en" class="oq-root oq-night oq-family-dev no-js">
 <head>
 <meta charset="utf-8">
+<link rel="canonical" href="https://omxlabs.tech/omxcode/">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>omxcode · one framework for every app, starting with data apps</title>
 <meta name="description" content="omxcode is one Mojo framework for every app, starting with data apps: GPU tables, charts, video and documents, native on Linux and the Mac, the window never waits, and every app is an MCP tool server. Public alpha, MIT.">
 <meta property="og:title" content="omxcode: one framework for every app. Starting with data apps.">
 <meta property="og:description" content="Write it once in Mojo as view() and update(). Native screens, the GPU underneath, the window never waits, agent tools built in. Public alpha, MIT.">
-<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/clip-claims.jpg">
+<meta property="og:image" content="https://omxlabs.tech/omxcode/img/clip-claims.jpg">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
 <!-- omxqua v0.1.2 (docs/omxqua/VERSION): fonts, tokens, parts. site.css is the landing layer the site's pages share; the cover's own sizes are below. -->
@@ -265,7 +266,7 @@ section { padding: 96px 24px; }
 
 <nav class="lnav">
   <a class="brand" href="#top"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#vision">Vision</a><a href="#roadmap">Roadmap</a><a href="#agents">Agents</a><a href="#gallery">Gallery</a><a href="#how">How it works</a><a href="#components">Components</a><a href="#numbers">Numbers</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#vision">Overview</a><a href="#agents">Agents</a><a href="#components">Components</a><a href="#numbers">Benchmarks</a></div>
   <div class="right"><a class="cta" href="gallery/">Try the apps</a></div>
 </nav>
 
@@ -278,14 +279,14 @@ section { padding: 96px 24px; }
       <div class="eyebrow rise"><span>Public alpha · MIT · built in Mojo</span></div>
       <h1 class="rise"><span>One framework for every app.</span> <span class="two">Starting with data apps.</span></h1>
       <p class="lede rise"><span>Write an app once in Mojo, as two functions. <b>It runs natively, keeps the window live while the GPU does the heavy work, and every app is a set of tools agents can use.</b></span></p>
-      <div class="ctas rise"><span style="animation-delay:500ms"><a class="cta" href="gallery/">Try the apps</a></span><span style="animation-delay:580ms"><a class="more" href="start.html">Build your own</a></span></div>
-      <div class="plats rise" aria-label="Where it runs today"><span style="animation-delay:660ms"><i></i><b>Linux</b> runs</span><span style="animation-delay:700ms"><i></i><b>Mac</b> runs on CI Macs</span><span style="animation-delay:740ms"><i></i><b>Web</b> runs</span><span class="am" style="animation-delay:780ms"><i></i><b>Android</b> emulator</span><span class="bl" style="animation-delay:820ms"><i></i><b>iPhone</b> builds</span></div>
+      <div class="ctas rise"><span style="animation-delay:80ms"><a class="cta" href="gallery/">Try the apps</a></span><span style="animation-delay:140ms"><a class="more" href="start.html">Build your own</a></span></div>
+      <div class="plats rise" aria-label="Where it runs today"><span style="animation-delay:180ms"><i></i><b>Linux</b> runs</span><span style="animation-delay:210ms"><i></i><b>Mac</b> runs on CI Macs</span><span style="animation-delay:240ms"><i></i><b>Web</b> runs</span><span class="am" style="animation-delay:270ms"><i></i><b>Android</b> emulator</span><span class="bl" style="animation-delay:300ms"><i></i><b>iPhone</b> builds</span></div>
     </div>
     <!-- the framework's own claim, shown: the GPU works and the window stays live -->
     <div class="rv">
       <figure class="bframe"><div class="bar"><i></i><i></i><i></i><span>built with omxcode · Linux · 100 million rows</span></div>
         <video src="img/clip-island-100m.mp4" poster="img/clip-island-100m.jpg" muted loop playsinline preload="metadata" data-play aria-label="An app built with omxcode computes medians over 100 million rows on the GPU, its progress in the top island, while the window stays live"></video></figure>
-      <p class="hcap"><b>100 million rows, the window live.</b> In this recording a median by region took 1.9 s and a median by month 4.9 s, and the window answered throughout. (Goal 30 measured the median alone at 0.77 s, with nothing recording the screen.)<br>↳ Linux · RTX 3090 · recorded by scripts/clipshots.py · docs/goals/30-report.md</p>
+      <p class="hcap"><b>100 million rows, the window live.</b> In this recording a median by region took 1.9 s and a median by month 4.9 s, and the window answered throughout. (Without screen recording, the same median takes 0.77 s.)<br>↳ Linux · RTX 3090 · recorded live on omxcode</p>
     </div>
   </div>
   <div class="wrap">
@@ -373,42 +374,6 @@ SLOW: update msg=7 80.06 ms</pre>
   </div>
 </section>
 
-<!-- Why omxcode exists: the owner's four reasons (the README says the same) -->
-<section id="why">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">Why omxcode exists</div>
-      <h2 class="rv">Four reasons.</h2>
-    </div>
-    <div class="bento why4">
-      <div class="bt" id="t-w1">
-        <div class="kick">1 · No boundary tax</div>
-        <h3>No JSON, no HTTP, <span class="two">no second process.</span></h3>
-        <p>Nothing extra to start, keep alive and debug. <b>Apps that move a lot of data between the screen and the computing are faster and simpler.</b></p>
-      </div>
-      <div class="bt" id="t-w2">
-        <div class="kick">2 · One language</div>
-        <h3>From pixels <span class="two">to GPU kernels.</span></h3>
-        <p>Mojo writes the interface and the CUDA-class kernels. <b>In omxplorer, the group-by kernel sits in the same codebase as the sheet that shows its totals.</b></p>
-      </div>
-      <div class="bt" id="t-w3">
-        <div class="kick">3 · Agent-driven</div>
-        <h3>Every app can be <span class="two">driven by an agent.</span></h3>
-        <p>omxcode has an <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">agent host</a>, so each app can be operated by an agent <b>through the same code that draws its screens.</b> JS apps need that built in separately.</p>
-      </div>
-      <div class="bt" id="t-w4">
-        <div class="kick">4 · Every device</div>
-        <h3>Native on every device <span class="two">from one codebase.</span></h3>
-        <p>Phone included. <b>Linux and the Mac run today; Android runs on the emulator and iPhone builds</b>, with phones next on the <a href="#roadmap">roadmap</a>.</p>
-      </div>
-      <div class="bt w12 not" id="t-w5">
-        <div class="kick">Where to start, and where not yet</div>
-        <p>Start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. <b>For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone;</b> when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- Roadmap: direction, one platform at a time -->
 <section id="roadmap">
   <div class="wrap">
@@ -419,7 +384,7 @@ SLOW: update msg=7 80.06 ms</pre>
     </div>
     <div class="road rv">
       <div class="stop now"><span class="when">Now</span>
-        <a class="scard" href="omxplorer.html"><div class="shot"><img src="gallery/img/omxplorer-sheet-gtk.png" alt="omxplorer's sheet on Linux" loading="lazy"></div>
+        <a class="scard" href="https://omxlabs.tech/"><div class="shot"><img src="gallery/img/omxplorer-sheet-gtk.png" alt="omxplorer's sheet on Linux" loading="lazy"></div>
           <div class="tx"><h3>Data apps</h3><p>GPU tables, charts, video and documents, linked by key, time and place. Linux and Mac. The UI thread never blocks.</p><span class="badge ok"><i></i>runs today</span></div></a></div>
       <div class="stop"><span class="when">Next</span>
         <a class="scard" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/android.md"><div class="shot phone"><img src="img/android-gallery.png" alt="The gallery example on the Android emulator, drawn with Android's own views" loading="lazy"></div>
@@ -430,12 +395,6 @@ SLOW: update msg=7 80.06 ms</pre>
       <div class="stop"><span class="when">By year end</span>
         <a class="scard" href="components.html"><div class="shot chips row" aria-hidden="true"><span>Linux</span><span>Web</span><span>Mac</span><span>Android</span><span>iPhone</span><span>Agents</span></div>
           <div class="tx"><h3>The full collection</h3><p>Every component on every platform above, each one tested by a script.</p><span class="badge soon"><i></i>2026</span></div></a></div>
-    </div>
-    <div class="teasers">
-      <a class="teaser rv" href="gallery/#sketch"><img src="gallery/img/sketch-gtk.png" alt="Sketch: pressure ink drawn on omxcode's Canvas on Linux" loading="lazy">
-        <div><div class="q">Can it do a canvas app?</div><h3>The Canvas draws today. JS canvases are next.</h3><p>Sketch draws pressure ink on Linux and the Mac. Next, a JS component path, so a canvas library from npm drops in the way CodeMirror and ECharts already do.</p></div></a>
-      <a class="teaser rv" href="gallery/#js-widgets"><img src="gallery/img/widgets-gtk-dark.png" alt="The widgets app on Linux: a CodeMirror note, a counter and an ECharts chart inside a native app" loading="lazy">
-        <div><div class="q">Can I use my JS libraries?</div><h3>Yes, as widgets inside native apps.</h3><p>CodeMirror and ECharts from npm run inside native apps on Linux and the Mac, under a strict content policy, and agents can read and set them. Download the widgets app from the gallery.</p></div></a>
     </div>
   </div>
 </section>
@@ -489,7 +448,7 @@ SLOW: update msg=7 80.06 ms</pre>
       <figure class="gi w6 rv"><div class="m"><img src="gallery/img/lens-linux.jpg" alt="The Data Lens: 20 million points drawn on the GPU" loading="lazy"></div>
         <figcaption><b>The Data Lens.</b>20 million points a frame, drawn by a Mojo kernel in 1.5 ms.<small>Linux · RTX 3090</small></figcaption></figure>
     </div>
-    <div class="ctas rv" style="justify-content:flex-start"><a class="cta" href="gallery/">Open the full gallery</a><a class="more" href="omxplorer.html">Meet omxplorer</a></div>
+    <div class="ctas rv" style="justify-content:flex-start"><a class="cta" href="gallery/">Open the full gallery</a><a class="more" href="https://omxlabs.tech/">Meet omxplorer</a></div>
   </div>
 </section>
 
@@ -568,7 +527,7 @@ SLOW: update msg=7 80.06 ms</pre>
   <div class="wrap">
     <div class="eyebrow rv">Build your own</div>
     <h2 class="rv">Write your own app.</h2>
-    <p class="body rv">Free and open source, MIT. <b>Linux with an NVIDIA GPU for now.</b> Just want to play? <a href="omxplorer.html#run">Download omxplorer</a>.</p>
+    <p class="body rv">Free and open source, MIT. <b>Linux with an NVIDIA GPU for now.</b> Just want to play? <a href="https://github.com/abhisheksreesaila/omxcode/releases/tag/linux-app">Download omxplorer</a>.</p>
     <div class="dls one">
       <div class="dl rv"><h3>Start here <span class="badge ok"><i></i>Linux</span></h3>
         <p>Clone it, install Mojo and the rest with pixi, and build the smallest app: one file, <code>examples/hello/app.mojo</code>, two functions.</p>
@@ -588,12 +547,12 @@ build/hello/linux/hello</pre>
   <div class="wrap">
     <p class="note">Every number here comes from a script, on one Linux machine with an NVIDIA RTX 3090; Mac results from GitHub's macOS runners. "Runs" means a script drives the app on that platform today. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">How we measured</a>.</p>
     <div class="cols">
-      <div><h4>Start</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode#readme">README</a></li><li><a href="start.html">Get started</a></li></ul></div>
-      <div><h4>See it</h4><ul><li><a href="omxplorer.html">omxplorer</a></li><li><a href="components.html">Components</a></li><li><a href="gallery/">Gallery</a></li><li><a href="why.html">Scoreboard</a></li></ul></div>
+      <div><h4>omxlabs suite</h4><ul><li><a href="https://omxlabs.tech/">omxplorer</a></li><li><a href="https://omxlabs.tech/omxcore/">omxcore · Engine</a></li><li><a href="index.html">omxcode · Framework</a></li><li><a href="https://omxlabs.tech/omxqua/">omxqua · Design</a></li><li><a href="gallery/">Gallery</a></li></ul></div>
+      <div><h4>Start</h4><ul><li><a href="start.html">Get started</a></li><li><a href="components.html">Components</a></li><li><a href="why.html">Scoreboard</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></li></ul></div>
       <div><h4>Build</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/reference.md">Reference</a></li><li><a href="how.html">How it works</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ui-threads.md">The UI thread</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">Agent host</a></li><li><a href="llms.txt">For agents: llms.txt</a></li></ul></div>
       <div><h4>Follow along</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">Benchmarks</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/next.md">What's next</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/issues">Issues</a></li><li><a href="https://x.com/ablearn23">X: @ablearn23</a></li></ul></div>
     </div>
-    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a> · Mojo and MAX are trademarks of Modular Inc.; omxlabs is an independent project, not affiliated with or endorsed by Modular</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://omxlabs.tech/omxqua/">omxqua</a> · Mojo and MAX are trademarks of Modular Inc.; omxlabs is an independent project, not affiliated with or endorsed by Modular</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
   </div>
 </footer>
 <script>document.documentElement.classList.remove("no-js")</script>
