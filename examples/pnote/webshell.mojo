@@ -2784,6 +2784,26 @@ struct WebShell(Movable):
         except e:
             self.say("Couldn’t back up: " + String(e))
 
+    def export_database(mut self):
+        """(goal 79's Backup, kept: D-8611) The whole notes file as one database of its own (SQLite's VACUUM INTO: consistent,
+        nothing lost, the web's own format on disk). Told where."""
+        self.flush()
+        try:
+            makedirs(self.export_folder(), exist_ok=True)
+            var base = self.export_folder() + "/Personal Note backup " + stamp_now()
+            var path = base + ".db"
+            var again = 1
+            while file_exists(path):  # (two in one second)
+                again += 1
+                path = base + " " + String(again) + ".db"
+            var q = self.dbs[0].prepare("VACUUM INTO ?")
+            q.bind(1, path)
+            _ = q.step()
+            self.say("Backed up to " + path)
+            print("PNOTE EXPORT: " + path, flush=True)
+        except e:
+            self.say("Couldn’t back up: " + String(e))
+
     def export_vault(mut self):
         """(goal 82 M3) The workspace as an Obsidian vault (personal-note-obsidian-vault.zip: a folder a notebook, canvases as
         .canvas with their pictures under attachments/, pages and maps as Markdown), in the exports folder. Told where."""
