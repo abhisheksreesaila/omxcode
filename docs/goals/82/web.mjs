@@ -254,7 +254,7 @@ if (DO === 'pictures') {
   await p.setInputFiles('#image-file', files)
   for (let k = 0; k < 60; k++) { await p.waitForTimeout(250); if (mediaFacts().length >= Number(opt.expect ?? files.length)) break }
   await p.waitForTimeout(2500)  // (placed, then saved: the web's save debounce is 650 ms)
-  await p.mouse.move(700, 500); await shot('pictures-after')
+  await p.keyboard.press('Escape'); await p.waitForTimeout(400); await p.mouse.move(700, 500); await shot('pictures-after')  // (nothing selected: the comparison is of the pictures, not of the selection's chrome)
   facts.note = await call('GET', `/notes/${ids['Garden plan']}`)
   facts.media = mediaFacts()
   facts.toast = await p.evaluate(() => [...document.querySelectorAll('.toast, #toast, .save-state, #save-state')].map((e) => e.textContent.trim()).join(' | '))

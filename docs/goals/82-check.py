@@ -111,14 +111,18 @@ def open_steps(panel, title):
             f"tapat:desk={center(panel, '#toggle-sidebar')}", "wait:700"]
 
 
-def native(tag, db_from, steps, env=None):
-    """pnote on the hidden test screen with these steps; (log, folder) or (error, None)."""
+def native(tag, db_from, steps, env=None, media=False):
+    """pnote on the hidden test screen with these steps; (log, folder) or (error, None). The notes file is copied with the media/
+    folder beside it when `media` (a file another run wrote, with its pictures: never the web's seeded one, whose media/ holds the
+    web's own pictures and would hide whether pnote wrote its files)."""
     d = OUT / "native" / tag
     if d.exists():
         shutil.rmtree(d)
     d.mkdir(parents=True)
     db = d / "pn.db"
     shutil.copy(db_from, db)
+    if media and (Path(db_from).parent / "media").is_dir():
+        shutil.copytree(Path(db_from).parent / "media", d / "media")
     cfg = d / "cfg"
     cfg.mkdir()
     e = dict(os.environ, PNOTE_DB=str(db), PNOTE_SKIN="paper", PNOTE_BOXES=str(d / "boxes.json"), OMX_CONFIG=str(cfg), PNOTE_DIR=str(cfg),
@@ -127,7 +131,13 @@ def native(tag, db_from, steps, env=None):
     r = run(quiet(["scripts/testscreen", str(APP)]), 900, env=e)
     log = r.stdout + r.stderr
     (d / "log.txt").write_text(log)
+    if r.returncode == 75 or log.startswith("gpu-free: NO"):  # (the machine's rule: no GPU window beside another project's job)
+        raise NotFree(log.strip().splitlines()[0] if log.strip() else "gpu-free: NO")
     return log, d
+
+
+class NotFree(Exception):
+    pass
 
 
 def states(log):
@@ -341,7 +351,7 @@ def m2():
     except Exception as e:
         return "FAIL", f"the dock's Add image wasn't drawn ({e})"
     steps = (open_steps(panel, "Garden plan") + ["gpushot:desk={out}/before.png", "dropfile:desk-drop=" + ",".join(str(p) for p in drop), "wait:6000",
-             "gpushot:desk={out}/after-drop.png", f"clipboardimage:{pics / 'a2.png'}", "key:desk=Escape", "key:desk=ctrl+v", "wait:2500",
+             "key:desk=Escape", "wait:400", "gpushot:desk={out}/after-drop.png", f"clipboardimage:{pics / 'a2.png'}", "key:desk=ctrl+v", "wait:2500",
              f"tapat:desk={dock_more}", "wait:500", f"tapat:desk={add_image}", "wait:500", f"answer:{pics / 'b2.jpg'}", "wait:2500",
              f"dropfile:desk-drop={pics / 'e.svg'}", "wait:1500", "gpushot:desk={out}/after-all.png", "wait:1500"])
     log, d = native("m2", ref / "pn.db", steps, {"MOJOUI_ASK_DRY": "1"})
@@ -389,9 +399,15 @@ def m2():
         f = media / Path(nf).name
         if f.exists() and oct(f.stat().st_mode & 0o777) != "0o600":
             probs.append(f"{f.name}: mode {oct(f.stat().st_mode & 0o777)}, the web writes 0600")
-    for src, k in (("a2.png", 4), ("b2.jpg", 5)):
-        if k < len(nnodes) and nnodes[k][0] != "media/" + sha(pics / src) + "." + ("png" if src.endswith("png") else "jpg"):
-            probs.append(f"{src} (pasted/picked): stored as {nnodes[k][0]}")
+    # (D-8513) pasted: what the clipboard hands back is the picture, not the file's bytes: the same pixels and size as a PNG;
+    # picked: the file itself, byte for byte (the web's rule for a small picture)
+    if len(nnodes) > 4:
+        f = media / Path(nnodes[4][0]).name
+        same = f.exists() and np.array_equal(np.asarray(Image.open(f).convert("RGBA")), np.asarray(Image.open(pics / "a2.png").convert("RGBA")))
+        if not same or not nnodes[4][0].endswith(".png"):
+            probs.append(f"a2.png (pasted): stored as {nnodes[4][0]}, pixels equal {same}")
+    if len(nnodes) > 5 and nnodes[5][0] != "media/" + sha(pics / "b2.jpg") + ".jpg":
+        probs.append(f"b2.jpg (picked): stored as {nnodes[5][0]}, want its own bytes' name")
     # both apps' pictures of the note, over the pictures' region: the web's own drop vs native's; then the web opening native's file
     reg = region_of(d / "before.png", d / "after-drop.png") if (d / "before.png").exists() and (d / "after-drop.png").exists() else None
     if reg is None:
@@ -408,7 +424,12 @@ def m2():
             ofacts = json.loads((opened / "facts.json").read_text())
             if len(image_nodes(web_note_content(ofacts))) != 6:
                 probs.append(f"the web read {len(image_nodes(web_note_content(ofacts)))} pictures from native's file, want 6")
-            log3, d3 = native("m2-reopen", d / "pn.db", open_steps(panel, "Garden plan") + ["wait:2500", "gpushot:desk={out}/reopen.png"])
+            import sqlite3
+            con = sqlite3.connect(str(d / "pn.db"))
+            gid = con.execute("select id from notes where title = 'Garden plan'").fetchone()[0]
+            con.close()
+            # (the notes list is in edit order: Garden plan moved to its top; the note is opened by its id at start)
+            log3, d3 = native("m2-reopen", d / "pn.db", ["gpushot:desk={out}/first-frame.png", "wait:2500", "gpushot:desk={out}/reopen.png"], {"PNOTE_FIRST": str(gid)}, media=True)
             reg2 = region_of(d / "before.png", d / "after-all.png") or reg
             if (d3 / "reopen.png").exists():
                 sc = ssim_files(d3 / "reopen.png", opened / "open.png", reg2)
@@ -436,12 +457,12 @@ def m2_mac(ref, panel, pics, add_image, dock_more):
     if e:
         return "BLOCKED", e
     placed = re.findall(r"^PNOTE PICTURE: (media/\S+) (\d+)x(\d+)", out, re.M)
-    want = ["media/" + sha(pics / "a2.png") + ".png", "media/" + sha(pics / "b2.jpg") + ".jpg"]
-    if [p[0] for p in placed] != want:
-        return "FAIL", f"placed {placed}, want {want}: {tail(out, 400)}"
+    want_b2 = "media/" + sha(pics / "b2.jpg") + ".jpg"
+    if len(placed) != 2 or not placed[0][0].endswith(".png") or placed[0][1:] != ("240", "160") or placed[1][0] != want_b2:
+        return "FAIL", f"placed {placed}, want a 240x160 PNG (pasted) then {want_b2} (picked): {tail(out, 400)}"
     if "PASTE: picture" not in out or "ASK: pick" not in out or "refused" not in out:
         return "FAIL", f"paste/picker/refusal not seen: {tail(out, 400)}"
-    return "PASS", "a pasted and a picked picture stored under the same names as on Linux and the web, the SVG refused"
+    return "PASS", "a pasted picture (a 240x160 PNG of its pixels) and a picked one under its own bytes' name, the SVG refused"
 
 
 # ---------------------------------------------------------------- M4: print and export
@@ -629,6 +650,8 @@ if __name__ == "__main__":
     for k in want:
         try:
             verdict, why = CHECKS[k]()
+        except NotFree as e:
+            verdict, why = "BLOCKED", f"the machine wasn't free for a GPU window ({e}); run again when it is"
         except Exception as e:
             import traceback
             traceback.print_exc()

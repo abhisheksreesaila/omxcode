@@ -8921,6 +8921,8 @@ def run_step[A: App](host_addr: Int, step: String):
         var path = rest
         var err = List[Int](length=1, fill=0)
         var tex = external_call["gdk_texture_new_from_filename", Int](path.as_c_string_span(), Int(err.unsafe_ptr()))
+        if err[0] != 0:  # (read after the call: the buffer lives through it)
+            external_call["g_error_free", NoneType](err[0])
         if tex == 0:
             print("TEST: clipboardimage: can't read " + path, flush=True)
             return
