@@ -2075,3 +2075,11 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 
 ## 2026-11-26 goal 79 (continuation 34) — D-8101
 - lat_code on both hosts, judged for undo/redo; judge_test cases. Mac M6 57 ✓ 3 ✗. Linux M6 ran beside another session's M6 (merge worktree): void, stopped my run (my processes only).
+
+## 2026-11-26 goal 82 B — M3 import/export, M7 live updates (worker B, branch goal-82-b from ad48b5f3)
+- Read the web's portability.py, vault.py, json_canvas.py, services' snapshot/import, sync/changes.js; goal 79's SaveOutbox, DocBase, HeldDisk, refresh(), land_saves/save_note, rescue, bothopen.py.
+- mojoui.archive (zip + folder sets) passed first time on Linux and the M4; Python's zipfile and unzip -t read our zips.
+- mojoui.filewatch: Linux inotify IN_MODIFY 0.3–1.3 ms worst. The Mac's FSEvents version failed the test (an open file's writes unheard: content changes are reported at close); rewritten with kqueue: M4 0.8 ms (D-8602).
+- mojoui.merge3 + its model (2,000 seeds, 4/4 mutants). pnote: merge on a conflicting canvas/map save (D-8603/8604), file-event refresh (D-8601).
+- Regression: test_saveattack, test_pnnotes, test_review4, test_wordsafe pass with the merge in.
+- A judged race of another session (build/merge/race-locked.sh) held ~/.cache/omx-quiet.lock exclusively from 17:10: my pnote build queued behind it, as the rules say.

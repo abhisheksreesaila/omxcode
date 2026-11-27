@@ -49,7 +49,7 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console, jot |
+| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console, jot, pnote |
 | `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit, jot |
 | `WebComponent` | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | widgets |
@@ -108,6 +108,10 @@ iPhone builds are signed but haven't run on hardware yet; the Mac runs single ap
 | File drop from outside the app | `DropTarget(view, on_drop, on_file=)` | 🔨 | 🔨 | ❌ | ❌ | ❌ | ❌ |
 | Quit hook | `def closing(mut self)` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Folder watcher (mojoui.watch: inotify / FSEvents on its own thread) | `FolderWatcher(path, wake=True) · start() · take()` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread) | `FileWatch([paths], wake=True) · start() · changed() · count() · last_ns()` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits) | `read_zip(bytes) · zip_bytes(FileSet) · read_folder(path) · write_folder(set, path)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>) | `put_media(dir, bytes, ext) · read_media · data_url · decode_data_url · sniff_image` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged) | `merge_keyed(base, mine, theirs, ["nodes", "edges"]) -> Merged` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Background mode (keeps running with the window closed) | `def background(self) -> Bool · window_shown(shown)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | One instance (a second launch opens the running app) | `@staticmethod def one_instance() -> String` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Tray item (StatusNotifierItem; NSStatusItem) | `published by the host for a background() app; Activate opens the window` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -479,12 +483,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 235 | 16 | 0 |
-| Web | 181 | 53 | 17 |
-| Android | 19 | 100 | 132 |
-| Mac (AppKit) | 9 | 213 | 29 |
-| iPhone (UIKit) | 0 | 176 | 75 |
-| Agent (MCP) | 67 | 79 | 105 |
+| Linux (GTK) | 239 | 16 | 0 |
+| Web | 181 | 53 | 21 |
+| Android | 19 | 100 | 136 |
+| Mac (AppKit) | 13 | 213 | 29 |
+| iPhone (UIKit) | 0 | 176 | 79 |
+| Agent (MCP) | 67 | 79 | 109 |
 
 ## Inside one app, not components yet (the debt)
 

@@ -100,6 +100,10 @@ FEATURES = [
     ("File drop from outside the app", "DropTarget(view, on_drop, on_file=)", r"gdk_file_list_get_type|/dropfile/", "jot"),
     ("Quit hook", "def closing(mut self)", r"rt\[?\]?\.closing\(|close_all|on_will_terminate", "jot"),
     ("Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)", "FolderWatcher(path, wake=True) · start() · take()", r"(?!)", "keeper"),
+    ("File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)", "FileWatch([paths], wake=True) · start() · changed() · count() · last_ns()", r"(?!)", "pnote"),
+    ("ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)", "read_zip(bytes) · zip_bytes(FileSet) · read_folder(path) · write_folder(set, path)", r"(?!)", "pnote"),
+    ("Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)", "put_media(dir, bytes, ext) · read_media · data_url · decode_data_url · sniff_image", r"(?!)", "pnote"),
+    ("Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)", "merge_keyed(base, mine, theirs, [\"nodes\", \"edges\"]) -> Merged", r"(?!)", "pnote"),
     ("Background mode (keeps running with the window closed)", "def background(self) -> Bool · window_shown(shown)", r"app\.background\(\)", "keeper"),
     ("One instance (a second launch opens the running app)", "@staticmethod def one_instance() -> String", r"A\.one_instance\(\)", "keeper"),
     ("Tray item (StatusNotifierItem; NSStatusItem)", "published by the host for a background() app; Activate opens the window", r"TrayItem\(", "keeper"),
@@ -120,7 +124,26 @@ FEATURES = [
 # (reasons in NOTES). Hosts not listed: ❌.
 BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
            {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"},
-           "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           "File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)":
+             "goal 82 M7: a write to a file its writer keeps open (SQLite's WAL) is heard in under 2 ms (tests/test_filewatch: in place, "
+             "a rename onto the name, a second SQLite connection's commits; others in the folder not counted). Linux: inotify IN_MODIFY on "
+             "the files' folders; the Mac: kqueue EVFILT_VNODE on each file and its folder (FSEvents reports an open file's writes only "
+             "at its close: tried first, it missed them). pnote's live updates are built on it (no poll)",
+         "ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)":
+             "goal 82 M3: reads Python's deflated zips (the Mojo inflater of mojoui.pngread, bounded by each entry's declared size: a zip "
+             "bomb stops there), leaves out absolute, climbing and hidden names, raises past Personal Note's limits before inflating; "
+             "writes stored entries Python's zipfile and unzip -t accept; write_folder never overwrites (tests/test_archive)",
+         "Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)":
+             "goal 82 M3: Personal Note's media_store rules (names, types, 20 MB, base64 and percent-encoded data URLs); tests/test_mediafiles",
+         "Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)":
+             "goal 82 M7: a JSON document's arrays of items with ids (a JSON Canvas, a mind map) merged base/mine/theirs; 2,000 random "
+             "seeds against an oracle, 4 of 4 mutants caught (tests/test_merge3); pnote merges a save that met another writer's with it",
+         "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           # goal 82 B: tests/test_filewatch, test_archive, test_mediafiles, test_merge3 on Linux and on the M4 (scripts/mac82); pnote uses all four
+           "File watch (mojoui.filewatch: any write to a few files, a WAL kept open included; inotify / kqueue on a thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "ZIP and folder sets (mojoui.archive: read stored + deflated, write, safe paths, size limits)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Pictures as files and data URLs (mojoui.mediafiles: content-addressed media/<sha256>.<ext>)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Three-way merge by named items (mojoui.merge3: their deletions stay deleted; overlaps not merged)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
            "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
            # goal 50: run by tests/test_https, test_serve, test_process and consoled on Linux; Flare targets macOS too (not built here yet)
            "HTTPS requests (FlareTransport behind mojoui.http; https:// through Flare, -D MOJOUI_FLARE)": {"Linux (GTK)": "✅"},
